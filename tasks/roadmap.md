@@ -1,7 +1,7 @@
 # Sieve 12 周里程碑 Roadmap
 
 > Source of truth: [PRD v1.3 §10](../docs/prd/sieve-prd-v1.3.md#10-12-周里程碑8-周-dogfood--4-周闭测)
-> 状态：**Week 1 工程启动（2026-04-27）**。Week 1 核心工程任务已完成，等首次 tag push 验证 sigstore pipeline。
+> 状态：**Week 2 出站规则引擎完成，Week 3 入站 Crypto 钩子准备中**。每周开始前更新本文勾选项。
 >
 > 本文是 PRD §10 的执行视图，**任务粒度 / 验收标准** 跟随 PRD 同步更新；本文新增"依赖"列与"风险"列辅助调度。
 
