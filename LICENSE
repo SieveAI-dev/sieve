@@ -1,8 +1,8 @@
 Sieve License Status
 ====================
 
-> Project state: Pre-Code design phase (2026-04-27).
-> See PRD v1.3 §11.3 (Open Source Strategy) and §9 #10 (Day 1 README public + code GA-time open source).
+> Project state: Week 1 engineering phase (2026-04-27).
+> See PRD v1.3 §11.3 (Open Source Strategy) and ADR-011 (repo private until Week 12 GA).
 
 This repository contains TWO categories of content with DIFFERENT license terms.
 
@@ -30,8 +30,8 @@ Under the following terms:
   - ShareAlike — derivatives must use the same license
 
 Rationale: Sieve is a commercial product (single-developer SaaS, $49/month per
-PRD §7.1). Documentation is published Day 1 (PRD §9 #10) for transparency and
-trust narrative ("you can verify us, not just trust us" — PRD §1.2 #4), but
+PRD §7.1). Documentation is published at Week 12 GA (ADR-011) for transparency
+and trust narrative ("you can verify us, not just trust us" — PRD §1.2 #4), but
 should not be repackaged as competitor material without permission.
 
 ---
@@ -47,9 +47,9 @@ License (planned):
   - **Phase 2 advanced rule sets: Closed source** (PRD §11.3) — sold as part
     of paid subscription
 
-Until Week 12 GA, the source code repository is private. The license file in
-this directory will be replaced with the full MIT License text when source code
-becomes public.
+Until Week 12 GA, the repository is fully private (ADR-011). The license file
+in this directory will be replaced with the full MIT License text when source
+code becomes public at GA.
 
 ---
 
@@ -82,20 +82,23 @@ For sample submissions: open a GitHub Issue with the "suspicious_sample" templat
 
 ## 5. Why Two Licenses?
 
-Documentation and code serve different purposes:
+Documentation and code serve different purposes, and both are published
+together at Week 12 GA (see ADR-011):
 
-  - **Docs** publish the design intent, threat model, ADRs — these are the
-    "trust artifacts" that let users verify Sieve before running the binary.
-    CC BY-NC-SA prevents commercial repackaging while permitting study,
-    citation, and forking-for-research.
+  - **Docs** (CC BY-NC-SA): publish the design intent, threat model, ADRs —
+    these are the "trust artifacts" that let users verify Sieve before running
+    the binary. CC BY-NC-SA prevents commercial repackaging by competitors
+    while permitting study, citation, and forking-for-research.
 
-  - **Code** at GA becomes MIT to maximize adoption (security tooling has
-    network effects — wide adoption → more issue reports → faster bug fixes →
-    better detection rules → better product). Phase 2 advanced rules stay
+  - **Code** (MIT): at GA becomes MIT to maximize adoption (security tooling
+    has network effects — wide adoption → more issue reports → faster bug fixes
+    → better detection rules → better product). Phase 2 advanced rules stay
     closed because they ARE the commercial moat.
 
-This split is documented in PRD §11.3 and not subject to change without an
-ADR (see [docs/design/ADR-INDEX.md](./docs/design/ADR-INDEX.md)).
+Both categories are published simultaneously at Week 12 GA — there is no
+two-phase "docs first, code later" rollout. This decision is documented in
+ADR-011 and not subject to change without a new ADR
+(see [docs/design/ADR-INDEX.md](./docs/design/ADR-INDEX.md)).
 
 ---
 

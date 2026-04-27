@@ -1,0 +1,46 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/sieve-core",
+    "crates/sieve-rules",
+    "crates/sieve-cli",
+]
+
+[workspace.package]
+version = "0.1.0-alpha"
+edition = "2021"
+rust-version = "1.87"
+license = "MIT"
+repository = "https://github.com/<owner>/sieve"
+authors = ["doskey <doskey.lee@gmail.com>"]
+
+[workspace.dependencies]
+# 用于跨 crate 共享版本(各 crate Cargo.toml 用 .workspace = true 引用)
+tokio = { version = "1", default-features = false }
+hyper = { version = "1", default-features = false }
+hyper-util = { version = "0.1", default-features = false }
+hyper-rustls = { version = "0.27", default-features = false }
+rustls = { version = "0.23", default-features = false }
+webpki-roots = "0.26"
+http = "1"
+http-body = "1"
+http-body-util = "0.1"
+bytes = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+thiserror = "2"
+tracing = "0.1"
+
+[profile.release]
+codegen-units = 1
+lto = "fat"
+strip = "symbols"
+panic = "abort"
+debug = false
+opt-level = 3
+
+[profile.release-with-debug]
+inherits = "release"
+debug = true
+strip = "none"

@@ -1,0 +1,23 @@
+//! Sieve core library
+//!
+//! Phase 1: Anthropic Messages API only (PRD §6.1)。
+//! UnifiedMessage 接口预留 OpenAI / Gemini variant，但仅 Anthropic 实现解析。
+//!
+//! crate 边界：不允许 CLI / TUI / 配置加载 (.cursorrules §3.3)。
+
+#![forbid(unsafe_code)]
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
+#![warn(missing_docs)]
+
+pub mod error;
+pub mod forwarder;
+pub mod pipeline;
+pub mod protocol;
+pub mod sse;
+
+pub use error::{SieveCoreError, SieveCoreResult};
+pub use forwarder::Forwarder;
+pub use protocol::unified_message::{
+    ContentBlock, MessageMetadata, Role, ToolResultBlock, ToolUseBlock, UnifiedMessage,
+    UpstreamProvider,
+};

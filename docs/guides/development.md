@@ -1,7 +1,7 @@
 # Sieve 开发指南
 
-> **状态：设计阶段（Pre-Code）。**
-> 本文描述 Sieve 工程**预定**的本地开发流程、构建命令、测试要求与 PR 协作规范。代码尚未开始写，仓库结构、命令、CI 流水线均按 [PRD v1.3](../prd/sieve-prd-v1.3.md) 设计意图前置约定。
+> **状态：Week 1 工程启动（2026-04-27）。**
+> Cargo workspace 已就绪，透传 daemon 可运行，本文命令均为生效命令。
 
 ---
 
@@ -9,13 +9,27 @@
 
 | 工具 | 版本 | 用途 |
 |------|------|------|
-| Rust | **1.80+ stable**（推荐 [`rustup`](https://rustup.rs/) 管理） | 主语言 |
+| Rust | **1.87.0 stable**（已锁定在 `rust-toolchain.toml`,推荐 [`rustup`](https://rustup.rs/) 管理） | 主语言 |
 | `cargo` | 同 Rust 版本 | 构建 / 依赖管理 |
 | `clang` | 16+ | `vectorscan-rs` 编译需要（C/C++ 后端） |
 | `cmake` | 3.20+ | vectorscan 子构建 |
+| `ninja` | 1.10+ | vectorscan 子构建 |
+| `pkg-config` | 0.29+ | 系统库探测 |
+| `boost` | 1.74+（headers） | vectorscan 依赖 |
+| `ragel` | 6.10+ | vectorscan 解析器生成 |
 | `git` | 2.40+ | 版本控制 |
 | `cosign` | 2.x | 二进制签名验证（参见 [部署指南](deployment.md)） |
 | `pnpm` | 9.x（可选） | 若有 web landing page 子项目 |
+
+**一键安装系统依赖**：
+
+```bash
+# macOS
+brew install cmake ninja pkg-config boost ragel
+
+# Ubuntu / Debian
+sudo apt-get install -y cmake ninja-build pkg-config libboost-dev ragel
+```
 
 **操作系统支持矩阵（Phase 1）**：
 
@@ -29,7 +43,7 @@
 
 ---
 
-## 2. 仓库结构（预设，未实现）
+## 2. 仓库结构
 
 ```
 sieve/
@@ -75,7 +89,7 @@ sieve/
 ### 3.1 一次性环境校验
 
 ```bash
-rustup show                                    # 确认 toolchain == 1.80 stable
+rustup show                                    # 确认 toolchain == 1.87.0 stable（锁定在 rust-toolchain.toml）
 cargo --version
 clang --version
 ```
@@ -83,9 +97,16 @@ clang --version
 ### 3.2 日常构建
 
 ```bash
-cargo build                                    # debug 构建
-cargo build --release                          # release 构建（dogfood 用）
-cargo run -p sieve-cli -- --config dev.toml    # 起 sieve 主进程
+# 默认（开发用，debug build）
+cargo build --workspace --locked
+
+# Release（reproducible build，本地用）
+SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) cargo build --release --workspace --locked
+
+# 指定 target（macOS aarch64 / x86_64 / Linux musl）
+cargo build --release --locked --target aarch64-apple-darwin -p sieve-cli
+cargo build --release --locked --target x86_64-apple-darwin -p sieve-cli
+cargo build --release --locked --target x86_64-unknown-linux-musl -p sieve-cli
 ```
 
 ### 3.3 测试 / Lint / 审计
@@ -93,11 +114,37 @@ cargo run -p sieve-cli -- --config dev.toml    # 起 sieve 主进程
 **PR 必须全绿才能合并**（参见 §8）：
 
 ```bash
-cargo fmt --all -- --check                          # 格式
-cargo clippy --all-targets --all-features -- -D warnings   # 警告即错误
-cargo test --workspace                              # 全部单元 + 集成
-cargo audit                                          # RustSec 漏洞扫描
-cargo deny check                                     # 许可证 / 来源 / 重复依赖审计
+cargo fmt --all -- --check                                              # 格式
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings  # 警告即错误
+cargo test --workspace --locked                                         # 全部单元 + 集成
+cargo deny check                                                        # 许可证 / 来源 / 重复依赖审计
+```
+
+### 3.4 启动 daemon（Week 1 透传）
+
+```bash
+# 1. 写最小 config
+cat > /tmp/sieve.toml <<EOF
+upstream_url = "https://api.anthropic.com"
+port = 11453
+bind_addr = "127.0.0.1"
+EOF
+
+# 2. 启动
+RUST_LOG=info cargo run -p sieve-cli -- start --config /tmp/sieve.toml
+
+# 3. 用 Claude Code 接入（另一个终端）
+ANTHROPIC_BASE_URL=http://127.0.0.1:11453 claude -p "hello"
+```
+
+### 3.5 系统依赖（macOS）
+
+```bash
+# Rust toolchain
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# vectorscan-rs 编译依赖（Week 2 起实际使用）
+brew install cmake ninja pkg-config boost ragel
 ```
 
 ---
@@ -314,7 +361,7 @@ PR 描述中**强制**附上：
 
 ### 9.4 CI Gate 清单
 
-GitHub Actions（待写）将强制：
+GitHub Actions（`.github/workflows/ci.yml`）强制：
 
 - [ ] `cargo fmt --check` 通过
 - [ ] `cargo clippy -D warnings` 通过

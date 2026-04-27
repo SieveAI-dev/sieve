@@ -1,7 +1,7 @@
 # Sieve 12 周里程碑 Roadmap
 
 > Source of truth: [PRD v1.3 §10](../docs/prd/sieve-prd-v1.3.md#10-12-周里程碑8-周-dogfood--4-周闭测)
-> 状态：设计阶段（Pre-Code）。Week 1 启动后，每周开始前更新本文勾选项。
+> 状态：**Week 1 工程启动（2026-04-27）**。Week 1 核心工程任务已完成，等首次 tag push 验证 sigstore pipeline。
 >
 > 本文是 PRD §10 的执行视图，**任务粒度 / 验收标准** 跟随 PRD 同步更新；本文新增"依赖"列与"风险"列辅助调度。
 
@@ -13,20 +13,20 @@
 
 **完成定义**（PRD §10.1 Week 1）：
 
-- doskey 自己用 Claude Code，设 `ANTHROPIC_BASE_URL=http://127.0.0.1:11453`，所有日常操作正常
-- sigstore 签名 pipeline + GitHub Actions reproducible build pipeline 已跑通
+- [ ] doskey 自己用 Claude Code，设 `ANTHROPIC_BASE_URL=http://127.0.0.1:11453`，所有日常操作正常 ← 等装 cargo 后实测
+- [ ] sigstore 签名 pipeline + GitHub Actions reproducible build pipeline 已跑通 ← 等首次 tag push 后验证
 
 **任务清单**：
 
-- Rust workspace 骨架（sieve-core / sieve-rules / sieve-cli 三个 crate）
-- hyper + tokio + rustls 跑通透明转发 Anthropic Messages API
-- SSE 透传基础（不做规则匹配）
-- UnifiedMessage 内部 schema（Anthropic only，OpenAI/Gemini 接口预留）
-- GitHub repo 公开（README + 架构文档可见，代码仍私有）
-- sigstore 签名 pipeline（cosign + Rekor）
-- GitHub Actions reproducible build pipeline（双构建 SHA-256 比对）
-- 启动海外公司注册（香港首选，PRD §10.1 Week 7-8 Stripe 接入需要）
-- cargo fmt / clippy / 基础 CI 跑通
+- [x] Rust workspace 骨架（sieve-core / sieve-rules / sieve-cli 三个 crate）
+- [x] hyper + tokio + rustls 跑通透明转发 Anthropic Messages API
+- [x] SSE 透传基础（不做规则匹配）
+- [x] UnifiedMessage 内部 schema（Anthropic only，OpenAI/Gemini 接口预留）
+- [x] sigstore 签名 pipeline（cosign + Rekor）
+- [x] GitHub Actions reproducible build pipeline（双构建 SHA-256 比对）
+- [x] cargo fmt / clippy / 基础 CI 跑通
+- [~] ~~GitHub repo 公开~~ — 已被 [ADR-011](../docs/design/ADR-011-private-until-ga.md) 撤销；Week 12 GA 一次性公开
+- [ ] 启动海外公司注册（香港首选，PRD §10.1 Week 7-8 Stripe 接入需要）← 用户行动项
 
 **依赖**：无（这是起点）
 **关键风险**：sigstore + reproducible 双构建首次跑通预算 2-3 天，超期需立刻识别
@@ -253,6 +253,8 @@
 ---
 
 ### Week 12 · GA 发布
+
+> ⚠️ 关联 ADR-011：GA 之前 repo 完全私有，GA 当天首次公开；Week 9-11 闭测期间所有反馈走 Discord 私发，不暴露 repo。
 
 **完成定义**（PRD §10.2 Week 12）：
 

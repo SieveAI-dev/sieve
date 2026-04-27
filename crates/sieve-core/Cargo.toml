@@ -1,0 +1,28 @@
+[package]
+name = "sieve-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Sieve core: protocol, forwarder, SSE pipeline (Anthropic-only Phase 1)"
+
+[dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "net", "io-util", "macros", "sync", "time"] }
+hyper = { workspace = true, features = ["http1", "http2", "client", "server"] }
+hyper-util = { workspace = true, features = ["tokio", "client-legacy", "http1", "http2"] }
+hyper-rustls = { workspace = true, features = ["aws-lc-rs", "http1", "http2", "webpki-tokio", "tls12"] }
+rustls = { workspace = true, features = ["aws-lc-rs", "tls12"] }
+webpki-roots = { workspace = true }
+http = { workspace = true }
+http-body = { workspace = true }
+http-body-util = { workspace = true }
+bytes = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }

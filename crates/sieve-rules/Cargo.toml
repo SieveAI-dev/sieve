@@ -1,0 +1,36 @@
+[package]
+name = "sieve-rules"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Sieve rules: vectorscan engine, manifest, Ed25519 signature verification"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+# Week 1: 引入 vectorscan-rs 验证三平台编译，代码暂不调用。
+# Week 2 起在 engine/ 下用真实 API。
+#
+# 编译前置系统依赖（macOS）：
+#   brew install boost cmake pkg-config ragel
+# Linux：通过 CI 镜像提供（见 .github/workflows/ci.yml）。
+#
+# features 说明：
+#   cpu_native          — 启用本机 CPU 指令集优化（CI 交叉编译时禁用）
+#   simd_specialization — 启用 SIMD 加速路径
+#   fast_nonportable    — 使用更激进的非跨平台优化
+#   unit_hyperscan      — 单元测试兼容 Hyperscan API
+# Week 1 使用默认 features（空集），避免 CI 跨平台兼容性问题。
+vectorscan-rs = { version = "0.0.6", default-features = false }
+
+# Ed25519 验签（Week 1 占位，Week 5 起实际验签规则包）。
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+serde_json = { workspace = true }

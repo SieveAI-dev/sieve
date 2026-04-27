@@ -25,6 +25,7 @@
 | [ADR-005](./ADR-005-overseas-legal-entity.md)             | 海外公司主体作为收款与营销载体                                        | Accepted | 2026-04-26 | §1.4、§11.5            |
 | [ADR-006](./ADR-006-sigstore-reproducible-build.md)       | Sigstore 签名 + Reproducible Build + 透明日志                | Accepted | 2026-04-26 | §1.2、§9.6、§10.1、§11.3 |
 | [ADR-007](./ADR-007-fail-closed-critical-actions.md)      | Critical 等级 fail-closed 强制确认，YOLO mode 不可关闭            | Accepted | 2026-04-26 | §5.3、§9.3、§9.8、§11.2  |
+| [ADR-011](./ADR-011-private-until-ga.md)                  | Week 12 GA 前 repo 完全私有，不做任何 public 暴露                 | Accepted | 2026-04-27 | §9 #10、§10.1、§11.3     |
 
 
 ---

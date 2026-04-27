@@ -481,7 +481,7 @@ ARR 上限估计 $500K-1M。
 7. **Critical 拦截 FP 必须 < 0.5%**——公理 12,不可妥协
 8. **Critical 在所有版本(包括降级模式之前)不可关闭**——产品安全承诺
 9. **Phase 1 只做 Claude Code,UnifiedMessage 接口预留**——公理 7,不为想象用户写代码
-10. **Day 1 GitHub repo 公开 README + 架构文档,代码 GA 后开源**——平衡信任叙事和叙事控制力
+10. **Week 12 GA 时一次性公开 repo + 代码(MIT)+ 文档 + sigstore 验证流程,GA 前 repo 完全私有**——见 [ADR-011](../design/ADR-011-private-until-ga.md);sigstore CI pipeline GA 前照常跑通
 
 ---
 
@@ -494,7 +494,7 @@ ARR 上限估计 $500K-1M。
 - Rust 项目骨架,hyper + tokio + rustls 跑通
 - 透明转发 Anthropic Messages API + SSE
 - UnifiedMessage 内部 schema(Anthropic only,接口预留)
-- **GitHub repo 公开**(只 README + 架构文档,代码私有)
+- ~~GitHub repo 公开~~ — 已被 [ADR-011](../design/ADR-011-private-until-ga.md) 撤销,GA 前 repo 全私有
 - **🆕 sigstore 签名 pipeline + GitHub Actions reproducible build pipeline 必须 Week 1 跑通**——这是 §1.2 第 4 句的物质基础
 
 **完成定义**:doskey 自己用 Claude Code,设 base_url,所有日常操作正常
