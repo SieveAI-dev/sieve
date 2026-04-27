@@ -648,6 +648,48 @@ async fn address_substitution_from_prompt_seed_blocks() {
     );
 }
 
+// ─── P0-4: 未闭合尾部 event（缺末尾 \n\n）仍应阻断 Critical ─────────────────────
+
+/// SSE 流末尾故意省略 `\n\n`（即提前断流），event 内容触发 IN-CR-05-EVM（签名工具）。
+///
+/// 修复前：flush() 残留 event 的 detection 被 `let _ = ...` 丢弃，不阻断。
+/// 修复后：flush 分支走同一套 blocking 决策，必须注入 sieve_blocked。
+///
+/// 关联 P0-4 / PRD §9 #5 "提前断流"。
+#[tokio::test]
+async fn unterminated_final_event_still_blocks_critical() {
+    // 构造 SSE 流：最后一个 content_block_stop 缺末尾 \n\n（未闭合）
+    // 前几个 event 正常结束，触发 IN-CR-05-EVM 的 tool_use content_block_start 也正常
+    // 关键：content_block_stop 不以 \n\n 结束 → SseParser.flush() 才能解析出它
+    let mut raw = String::new();
+    raw.push_str("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"m\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"x\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n");
+    raw.push_str("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"t3\",\"name\":\"eth_signTransaction\",\"input\":{}}}\n\n");
+    raw.push_str("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"to\\\":\\\"0xdeadbeef\\\",\\\"value\\\":\\\"500\\\"}\"}}\n\n");
+    // content_block_stop 故意不加末尾 \n\n → 触发 flush 场景
+    raw.push_str("event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}");
+
+    let attack_payload = Bytes::from(raw);
+
+    let (upstream, _up) = spawn_mock_sse_upstream(move |_req| {
+        let body = attack_payload.clone();
+        async move { (hyper::StatusCode::OK, body) }
+    })
+    .await;
+
+    let (port, _g) = spawn_sieve_daemon(&format!("http://{upstream}"));
+    let (_status, body) = fetch_response_body(port).await;
+
+    let body_str = String::from_utf8_lossy(&body);
+    assert!(
+        body_str.contains("sieve_blocked"),
+        "未闭合尾部 event（缺 \\n\\n）仍需触发 sieve_blocked，但未检测到:\n{body_str}"
+    );
+    assert!(
+        body_str.contains("IN-CR-05"),
+        "expected IN-CR-05* rule in detection:\n{body_str}"
+    );
+}
+
 // ─── 反向测试：benign 响应不被截流（防止误报）──────────────────────────────────
 
 /// benign SSE 响应（无任何攻击 payload）→ 正常透传，无 sieve_blocked 注入。
