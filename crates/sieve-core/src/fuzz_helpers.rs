@@ -11,6 +11,7 @@ use crate::tool_use_aggregator::Aggregator;
 /// SSE Parser fuzz target。
 ///
 /// 覆盖：半行 chunk / 跨 chunk 分隔符 / C0 控制字符 / 多 event 粘包 / 提前断流。
+/// 容量超限时返回 Err，忽略即可（fuzz 目标是不 panic）。
 pub fn fuzz_one_sse(data: &[u8]) {
     let mut parser = SseParser::new();
     let _ = parser.push_chunk(data);
@@ -20,22 +21,28 @@ pub fn fuzz_one_sse(data: &[u8]) {
 /// Tool Use Aggregator fuzz target（先 parse 再 aggregate）。
 ///
 /// 覆盖：partial_json 跨 chunk 累积 / malformed JSON 不 panic。
+/// 容量超限时返回 Err，忽略即可（fuzz 目标是不 panic）。
 pub fn fuzz_one_tool_use(data: &[u8]) {
     let mut parser = SseParser::new();
     let mut agg = Aggregator::new();
-    for event in parser.push_chunk(data) {
-        let _ = agg.process(&event);
+    if let Ok(events) = parser.push_chunk(data) {
+        for event in events {
+            let _ = agg.process(&event);
+        }
     }
 }
 
 /// 端到端 fuzz target（parser → aggregator，含 flush）。
 ///
 /// 覆盖：完整流式管道，含提前断流场景。
+/// 容量超限时返回 Err，忽略即可（fuzz 目标是不 panic）。
 pub fn fuzz_one_pipeline(data: &[u8]) {
     let mut parser = SseParser::new();
     let mut agg = Aggregator::new();
-    for event in parser.push_chunk(data) {
-        let _ = agg.process(&event);
+    if let Ok(events) = parser.push_chunk(data) {
+        for event in events {
+            let _ = agg.process(&event);
+        }
     }
     for event in parser.flush() {
         let _ = agg.process(&event);
