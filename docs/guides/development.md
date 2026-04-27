@@ -288,7 +288,59 @@ sieve sieveignore remove OUT-09:7a3b9c1d
 
 ---
 
-## 8. 本地 dogfood 流程
+## 8. 配置 / 调试
+
+### Sieve 配置（`sieve.toml`）
+
+Week 2 起支持的完整字段：
+
+```toml
+upstream_url = "https://api.anthropic.com"      # 上游 LLM API
+port = 11453                                     # 本地代理端口
+bind_addr = "127.0.0.1"                         # 强制 loopback（ADR-003）
+log_path = "/path/to/audit.db"                  # 审计 SQLite，可选（默认 ~/.sieve/audit.db）
+tls_verify_upstream = true                      # 上游 TLS 校验（测试场景可关）
+rules_path = "/path/to/outbound.toml"           # 出站规则集，可选（默认 crates/sieve-rules/rules/outbound.toml）
+sieveignore_path = "/path/to/.sieveignore"      # fingerprint 白名单，可选（默认 ~/.sieve/sieveignore）
+dry_run = false                                 # true=仅记录命中不拦截，false=Critical 命中返 426
+```
+
+### `.sieveignore`（fingerprint 白名单）
+
+每行一个 16 字符 hex fingerprint，`#` 开头注释，空行忽略。指纹算法：
+
+```
+fingerprint = SHA-256("{rule_id}:{normalized_content}")[..8].hex()
+normalized_content = content.trim()  // 长串截断到前 32 字节
+```
+
+触发规则后，从 `sieve` 日志中复制 `fingerprint` 字段添加到此文件即可豁免。Phase 1 不热加载，变更需重启 daemon。
+
+### `--dry-run`（临时关闭实际拦截）
+
+```bash
+sieve start --config sieve.toml --dry-run
+# 命中只 tracing::warn! 记录，不返 426，继续转发上游
+# CLI 出现 --dry-run 即覆盖 config.dry_run=true（无法从 CLI 显式关闭）
+```
+
+或在开发调试时直接加 flag：
+
+```bash
+RUST_LOG=info cargo run -p sieve-cli -- start --config sieve.toml --dry-run
+```
+
+### Benchmark（性能预算 PRD §6.4）
+
+```bash
+cargo bench -p sieve-rules
+```
+
+当前覆盖 vectorscan block mode 不同 buffer size（1KB / 100KB / 1MB）；Week 4 加完整 secret benchmark 数据集（200-500 条攻击样本，50-100 条 benign 会话）。
+
+---
+
+## 10. 本地 dogfood 流程
 
 每个开发者（Phase 1 = doskey）**必须** 100% 时间用 Sieve 工作：
 
@@ -310,9 +362,9 @@ Dogfood 守则：
 
 ---
 
-## 9. 提交 PR 流程
+## 11. 提交 PR 流程
 
-### 9.1 沟通节奏
+### 11.1 沟通节奏
 
 ```
 1. 先开 issue：描述问题 / 方案 / 代码改动范围
@@ -328,7 +380,7 @@ Dogfood 守则：
 6. CI 全绿 → reviewer 走查 → 合并
 ```
 
-### 9.2 PR 自检清单（提交前必跑）
+### 11.2 PR 自检清单（提交前必跑）
 
 ```bash
 cargo fmt --all -- --check
@@ -344,10 +396,10 @@ PR 描述中**强制**附上：
 
 - 关联 issue
 - 改动摘要（**为什么** > 什么）
-- §9.3 文档同步清单
+- §11.3 文档同步清单
 - 是否触及 [PRD §9 硬约束](../prd/sieve-prd-v1.3.md#9-工程上必须做对的硬约束)（默认不允许绕过）
 
-### 9.3 文档同步要求
+### 11.3 文档同步要求
 
 参考 [`.cursorrules` §1.5 文档化触发条件](../../.cursorrules) 和用户级文档规则中的"修改功能 Checklist"：
 
@@ -359,7 +411,7 @@ PR 描述中**强制**附上：
 - [ ] 修改 API 时必须同步 [`docs/api/api-reference.md`](../api/api-reference.md)
 - [ ] 架构变更必须有 `docs/design/ADR-*.md`
 
-### 9.4 CI Gate 清单
+### 11.4 CI Gate 清单
 
 GitHub Actions（`.github/workflows/ci.yml`）强制：
 
@@ -373,11 +425,11 @@ GitHub Actions（`.github/workflows/ci.yml`）强制：
 - [ ] `cosign verify-blob` 验证发布 artifact 签名（仅 release PR）
 - [ ] reproducible build 复算 SHA-256 与 GitHub Actions 产物一致
 
-### 9.5 Reviewer
+### 11.5 Reviewer
 
 **Phase 1 唯一 reviewer：doskey。**单人 review 不是优势，是不得已。请在 PR 描述中详尽列出测试场景，降低 review cost。
 
-### 9.6 安全披露
+### 11.6 安全披露
 
 **不要在公开 issue 公布 0day**。流程：
 
@@ -388,7 +440,7 @@ GitHub Actions（`.github/workflows/ci.yml`）强制：
 
 ---
 
-## 10. 文档同步要求（再强调）
+## 12. 文档同步要求（再强调）
 
 > **改代码前必须先读 `@docs/` 中相关文档**（[`.cursorrules` §1.1](../../.cursorrules)）。
 

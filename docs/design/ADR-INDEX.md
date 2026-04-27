@@ -35,13 +35,13 @@
 
 | 候选编号    | 主题                                                     | 触发文档                      | 优先级 | 计划周次     |
 | ------- | ------------------------------------------------------ | ------------------------- | --- | -------- |
-| ADR-008 | Critical 出站状态码选择（426 vs 451 vs 自定义）                    | api-reference.md §7.2     | P1  | Week 2-3 |
+| ADR-008 | Critical 出站状态码选择（426 vs 451 vs 自定义）                    | api-reference.md §7.2     | P0  | Week 2 dogfood 期间 |
 | ADR-009 | Windows 服务部署形态（sc.exe NT Service 选择）                   | guides/deployment.md §5.4 | P2  | Week 6+  |
 | ADR-010 | [redacted]实现路径（Stripe Crypto vs Coinbase Commerce vs 自部署） | ADR-005 §3                | P2  | Week 7+  |
 
 ### 候选 ADR 倾向决策（doskey 已签确）
 
-- **ADR-008**：**维持 `426 Upgrade Required`**（确认日期 2026-04-27）。现有 [api-reference.md §7.2](../api/api-reference.md) 即此方案。Week 2 dogfood 阶段实测 Claude Code SDK 行为后正式落 ADR；如 SDK 表现异常（自动重试 / 错误信息丢失等）再切换备选方案。验证项已加入 [tasks/roadmap.md](../../tasks/roadmap.md) Week 2 任务清单。
+- **ADR-008**：**维持 `426 Upgrade Required`**（确认日期 2026-04-27）。Week 2 实现已用 426，本周 dogfood 期间（2026-04-27 起）实测 Claude Code SDK 行为；若一周内无异常，升 Accepted。如 SDK 表现异常（自动重试 / 错误信息丢失等）再切换备选方案。验证项已加入 [tasks/roadmap.md](../../tasks/roadmap.md) Week 2 任务清单。
 - **ADR-009**：待定。Week 6+ Windows 二进制 Tier 2 上线时评估。
 - **ADR-010**：初步方向 = Stripe + Coinbase Commerce 双通道（[ADR-005 §3](./ADR-005-overseas-legal-entity.md)）。Week 7+ 公司主体落地后正式立项。
 

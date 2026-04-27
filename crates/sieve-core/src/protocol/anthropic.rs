@@ -46,6 +46,54 @@ pub struct AnthropicMessage {
     pub content: serde_json::Value,
 }
 
+impl AnthropicRequest {
+    /// 提取所有 message content 中的文本（string content 或 type=text content block）。
+    ///
+    /// 返回 `(近似 body 字节偏移, text)` 列表。Phase 1 偏移仅供审计参考；精确 span 由
+    /// vectorscan 在单条文本内 scan 时给出（start/end 是相对该 text 的偏移）。
+    ///
+    /// 同时追加 `system` 字段中的文本（string 或 content blocks）。
+    pub fn extract_text_content(&self) -> Vec<(usize, String)> {
+        let mut result = Vec::new();
+        let mut cursor = 0usize;
+        for msg in &self.messages {
+            match &msg.content {
+                serde_json::Value::String(s) => {
+                    result.push((cursor, s.clone()));
+                    cursor += s.len();
+                }
+                serde_json::Value::Array(blocks) => {
+                    for block in blocks {
+                        if let Some(block_obj) = block.as_object() {
+                            if block_obj.get("type").and_then(|v| v.as_str()) == Some("text") {
+                                if let Some(text) = block_obj.get("text").and_then(|v| v.as_str()) {
+                                    result.push((cursor, text.to_string()));
+                                    cursor += text.len();
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        // 同时扫 system prompt（若有）
+        if let Some(system) = &self.system {
+            if let Some(s) = system.as_str() {
+                result.push((cursor, s.to_string()));
+            } else if let Some(blocks) = system.as_array() {
+                for block in blocks {
+                    if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
+                        result.push((cursor, text.to_string()));
+                        cursor += text.len();
+                    }
+                }
+            }
+        }
+        result
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -84,5 +132,39 @@ mod tests {
         let re_serialized = serde_json::to_string(&req).unwrap();
         assert!(re_serialized.contains("custom_key"));
         assert!(re_serialized.contains("custom_value"));
+    }
+}
+
+#[cfg(test)]
+mod tests_extract {
+    use super::*;
+
+    #[test]
+    fn extract_simple_string_content() {
+        let json = r#"{"model":"x","max_tokens":1,"messages":[{"role":"user","content":"hello"}]}"#;
+        let req: AnthropicRequest = serde_json::from_str(json).unwrap();
+        let texts = req.extract_text_content();
+        assert_eq!(texts.len(), 1);
+        assert_eq!(texts[0].1, "hello");
+    }
+
+    #[test]
+    fn extract_content_blocks() {
+        let json = r#"{"model":"x","max_tokens":1,"messages":[{"role":"user","content":[{"type":"text","text":"hi"},{"type":"text","text":"world"}]}]}"#;
+        let req: AnthropicRequest = serde_json::from_str(json).unwrap();
+        let texts = req.extract_text_content();
+        assert_eq!(texts.len(), 2);
+        assert_eq!(texts[0].1, "hi");
+        assert_eq!(texts[1].1, "world");
+    }
+
+    #[test]
+    fn extract_with_system_prompt() {
+        let json = r#"{"model":"x","max_tokens":1,"system":"You are helpful","messages":[{"role":"user","content":"q"}]}"#;
+        let req: AnthropicRequest = serde_json::from_str(json).unwrap();
+        let texts = req.extract_text_content();
+        assert_eq!(texts.len(), 2);
+        // system 在最后一项
+        assert!(texts.iter().any(|(_, t)| t == "You are helpful"));
     }
 }

@@ -13,6 +13,63 @@
 
 ## [Unreleased](https://github.com/doskey/sieve/compare/v0.1.0...HEAD)
 
+### Added — Week 2 (2026-04-27 完成)
+
+#### 出站规则引擎(sieve-rules)
+- `VectorscanEngine`：vectorscan-rs 0.0.6 多模式正则，Block mode + SOM_LEFTMOST 报告精确字节偏移
+- `MatchEngine` trait + `MatchHit` 数据结构（关联 ADR-001 / ADR-002）
+- `bip39 module`：SHA-256 checksum 验证（PRD §9 #4 差异化点），内嵌 BIP39 官方英文 2048 词 wordlist（MIT）
+- `placeholder module`：全局占位符黑名单（YOUR_API_KEY / xxx / 0x0...0 等）
+- `loader::load_outbound_rules(toml_path)`：从 toml 加载规则集
+- `RuleEntry` 扩展字段：`entropy_min` / `keywords` / `allowlist_regexes` / `allowlist_stopwords`（gitleaks 风格）
+- criterion micro benchmark 骨架（`benches/scan_bench.rs`，Week 4 接入完整 secret benchmark）
+
+#### 出站规则集(sieve-rules/rules/outbound.toml)
+- OUT-01~12 全部 P0 规则上线（gitleaks MIT 风格 pattern）：
+  - OUT-01 Anthropic API key / OUT-02 OpenAI API key（legacy + proj 新格式）
+  - OUT-03 AWS Access Key / OUT-04 GitHub PAT / OUT-05 GCP API key
+  - OUT-06 JWT / OUT-07 PEM Private Key / OUT-08 Stripe Live Key
+  - OUT-09 Slack Token / OUT-10 OpenSSH Private Key / OUT-11 Discord Bot Token
+  - OUT-12 BIP39 助记词（占位 pattern，运行时由 bip39 module 二次 checksum 验证）
+- 12 条规则 positive + negative case 集成测试全部通过（`tests/outbound_rules.rs`）
+
+#### Detection 数据模型(sieve-core)
+- `Detection { id: Uuid, rule_id, severity, action, source, span, evidence_truncated, fingerprint }`
+- `Severity { Low, Medium, High, Critical }`
+- `Action { Block, Redact, WarnConfirm, MarkOnly, SilentLog }`
+- `ContentSource { OutboundUserText, OutboundSystemText, InboundAssistantText, InboundToolUseInput }`
+- `fingerprint(rule_id, content) -> 16 hex`（SHA-256 前 8 bytes，关联 docs/design/data-model.md §155-161）
+- `PipelineNode::process()` 签名升级：返回 `Vec<Detection>`
+- `OutboundFilter`（impl PipelineNode，从 sieveignore 过滤）+ `OutboundEngine` trait（由 sieve-cli engine_adapter 桥接）
+- `AnthropicRequest::extract_text_content()`：从 messages + system 提取所有文本内容
+
+#### Daemon 集成(sieve-cli)
+- `Config` 加 `rules_path` / `sieveignore_path` / `dry_run` 字段
+- `Command::Start` 加 `--dry-run` flag（覆盖 config.dry_run）
+- `engine_adapter::OutboundAdapter`：把 sieve_rules::VectorscanEngine 适配到 sieve_core::OutboundEngine trait
+- daemon::proxy_inner：POST /v1/messages 走 collect → 解析 AnthropicRequest → extract_text → OutboundFilter::process → Critical 命中且非 dry_run 返 426 JSON；其他路径继续流式透传（保 Week 1 字节级一致）
+- 426 JSON schema：`{ type: "sieve_blocked", blocked_at, detections[], guidance: { zh, en } }`
+- fail-closed 启动：规则加载失败 / vectorscan 编译失败 → 直接退出，不 fallback 无规则模式（ADR-007）
+
+#### 测试与验证
+- 单元测试：sieve-core 25 / sieve-rules 26 / sieve-cli 15 = **66 单元测试**
+- 集成测试：`outbound_rules` 12 / `proxy_passthrough` 5 / `outbound_block` 3 = **20 集成测试**
+- e2e smoke（`scripts/smoke_test.py`）26 项断言通过（原 21 + 新 4 项 426 拦截 + 1 项 benign 透传）
+- `cargo deny check licenses bans sources` 全过
+- release 二进制 9.0 MB（< 22MB 预算）
+
+### Pending（Week 3 起）
+- 完整 SSE Parser + fuzz corpus（PRD §9 #5）
+- 入站规则 IN-CR-01~05（地址替换 / 危险工具调用 / 签名工具）
+- ADR-008 出站 Critical 状态码 dogfood 验证（Week 2 期间真实 dogfood 后正式落 ADR）
+
+### Known Issues（Week 2）
+- 426 时间戳 Phase 1 用 UNIX epoch 秒（简化），Week 4 引入 chrono 改完整 RFC3339
+- BIP39 OUT-12 vectorscan 预筛 pattern 占位符 `__BIP39_PREFILTER_PLACEHOLDER__`，运行时由 bip39 module 动态生成 alternation；集成测试中过滤掉（由 bip39 module 单测覆盖）
+- 完整标准 secret benchmark 自建样本数据集留 Week 4（PRD §10.1 原计划）
+
+---
+
 ### Verified — 2026-04-27 Week 1 完成定义实跑
 
 #### release.yml workflow_dispatch 首跑(run [24980079580](https://github.com/doskey/sieve/actions/runs/24980079580))
@@ -72,9 +129,7 @@
 - ADR-006 sigstore + reproducible build CI **不受影响**，GA 前照常跑通；只是不做 public Rekor 验证演示
 - 营销弹药 GA 当天集中释放（文章 1+2+3 同步）
 
-### Pending（Week 2 起）
-- vectorscan-rs 实际规则编译与 OUT-01~12 出站 P0 规则
-- BIP39 SHA-256 checksum 验证（差异化点，PRD §9 #4）
+### Pending（Week 3 起）
 - SSE Parser 完整实现 + fuzz corpus（PRD §9 #5）
 - 入站 Crypto 钩子（IN-CR-01~05）
 

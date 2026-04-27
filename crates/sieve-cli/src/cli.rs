@@ -19,11 +19,18 @@ pub struct Cli {
 /// 顶层子命令枚举。
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// 启动透传 daemon（Week 1：纯字节透传，无规则匹配）。
+    /// 启动 daemon（Week 2：出站规则拦截 + 透传）。
     Start {
         /// config.toml 路径；文件不存在时使用内置默认值。
         #[arg(short, long, default_value = "sieve.toml")]
         config: PathBuf,
+
+        /// 仅记录命中，不实际拦截（覆盖 config.dry_run 为 true）。
+        ///
+        /// flag 出现即为 true；不出现时沿用 config.toml 中的 dry_run 值。
+        /// 禁止添加 --no-dry-run 等关闭安全机制的 flag（ADR-007）。
+        #[arg(long)]
+        dry_run: bool,
     },
     /// 打印版本号并退出。
     Version,

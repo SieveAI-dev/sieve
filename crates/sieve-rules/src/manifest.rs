@@ -30,6 +30,18 @@ pub struct RuleEntry {
     pub pattern: String,
     /// 规则描述。
     pub description: String,
+    /// 最低 Shannon entropy 阈值（None 表示不检查，关联 FP 控制）。
+    #[serde(default)]
+    pub entropy_min: Option<f32>,
+    /// 快速预过滤关键词（命中后再走 vectorscan）。
+    #[serde(default)]
+    pub keywords: Vec<String>,
+    /// 允许放行的正则列表（命中后检查，任一匹配则不定级 Critical）。
+    #[serde(default)]
+    pub allowlist_regexes: Vec<String>,
+    /// 允许放行的停用词列表（命中后检查，任一出现则不定级 Critical）。
+    #[serde(default)]
+    pub allowlist_stopwords: Vec<String>,
 }
 
 /// 严重等级。
