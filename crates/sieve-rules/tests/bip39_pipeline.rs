@@ -105,9 +105,7 @@ fn candidate_windows_skips_non_wordlist_tokens() {
 /// 24 词 run 应产生多个窗口（24 词的滑窗 + 12 词的滑窗等）。
 #[test]
 fn candidate_windows_24_words_produces_multiple() {
-    let tokens: Vec<&str> = std::iter::repeat_n("abandon", 23)
-        .chain(["art"])
-        .collect();
+    let tokens: Vec<&str> = std::iter::repeat_n("abandon", 23).chain(["art"]).collect();
     let wl = wordlist_index();
     let windows = candidate_bip39_windows(&tokens, wl);
     // 24 词 run 应有 12/15/18/21/24 各对应的滑窗

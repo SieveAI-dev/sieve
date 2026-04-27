@@ -327,6 +327,61 @@ async fn fetch_response_body(port: u16) -> (hyper::StatusCode, Bytes) {
         .unwrap()
 }
 
+/// 原始 TCP 读取，但 prompt 中嵌入指定文本（用于 P0-3 seed 测试）。
+fn fetch_response_body_with_prompt_raw(port: u16, prompt: &str) -> (hyper::StatusCode, Bytes) {
+    use std::io::{Read, Write};
+    use std::net::TcpStream;
+
+    // 构造含 prompt 的 messages body
+    let escaped_prompt = prompt.replace('"', "\\\"");
+    let body_json = format!(
+        r#"{{"model":"claude-sonnet-4-5","max_tokens":16,"stream":true,"messages":[{{"role":"user","content":"{escaped_prompt}"}}]}}"#
+    );
+    let request = format!(
+        "POST /v1/messages HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nContent-Length: {len}\r\nConnection: close\r\n\r\n{body}",
+        port = port,
+        len = body_json.len(),
+        body = body_json,
+    );
+
+    let mut stream = TcpStream::connect(format!("127.0.0.1:{port}")).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    stream.write_all(request.as_bytes()).unwrap();
+    stream.flush().unwrap();
+
+    let mut raw = Vec::new();
+    stream.read_to_end(&mut raw).ok();
+
+    let raw_str = String::from_utf8_lossy(&raw);
+    let status_code = raw_str
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|code| code.parse::<u16>().ok())
+        .unwrap_or(0);
+    let status = hyper::StatusCode::from_u16(status_code).unwrap_or(hyper::StatusCode::OK);
+
+    let sep = b"\r\n\r\n";
+    let raw_body = if let Some(pos) = raw.windows(sep.len()).position(|w| w == sep) {
+        &raw[pos + sep.len()..]
+    } else {
+        &[]
+    };
+
+    let decoded = decode_chunked(raw_body);
+    (status, Bytes::from(decoded))
+}
+
+/// 异步包装：spawn_blocking 运行含 prompt 的原始 TCP 读取。
+async fn fetch_response_body_with_prompt(port: u16, prompt: &str) -> (hyper::StatusCode, Bytes) {
+    let prompt = prompt.to_string();
+    tokio::task::spawn_blocking(move || fetch_response_body_with_prompt_raw(port, &prompt))
+        .await
+        .unwrap()
+}
+
 // ─── UCSB Attack 1: Address Substitution（IN-CR-01）─────────────────────────
 
 /// 同一 SSE 流：第一个 event 植入原始地址，第二个 event 出现近似地址（末字符 2→3）→ 截流。
@@ -526,6 +581,70 @@ async fn ucsb_attack_4_markdown_exfil_warn_only_passes_through() {
     assert!(
         body_str.contains("message_stop"),
         "warn-level response should contain message_stop event:\n{body_str}"
+    );
+}
+
+// ─── P0-3: Prompt 地址 seed → 首轮地址替换检测（IN-CR-01）──────────────────────
+
+/// request body 中含 EVM 地址 A，上游 SSE 仅输出与 A Levenshtein 距离 1 的地址 B。
+///
+/// 真实 PRD §4.2 攻击场景：用户 prompt → 地址 A，模型/中转站响应 → 地址 B（偷换地址）。
+/// 修复前 IN-CR-01 只从 SSE text_delta 学地址，首轮漏报；修复后先 seed prompt 地址。
+///
+/// 关联 P0-3 / PRD §4.2 / IN-CR-01。
+#[tokio::test]
+async fn address_substitution_from_prompt_seed_blocks() {
+    // 原始地址（在 prompt 中）：0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb1
+    // 替换地址（仅在 SSE 响应中）：0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb2（末字符 1→2，Levenshtein=1）
+    let attack_payload = sse_response(&[
+        (
+            "message_start",
+            r#"{"type":"message_start","message":{"id":"m","type":"message","role":"assistant","content":[],"model":"x","usage":{"input_tokens":1,"output_tokens":1}}}"#,
+        ),
+        (
+            "content_block_start",
+            r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#,
+        ),
+        // SSE 响应里只出现替换后的地址 B，原始地址 A 只在 prompt 中
+        (
+            "content_block_delta",
+            r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"please send to 0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb2"}}"#,
+        ),
+        (
+            "content_block_stop",
+            r#"{"type":"content_block_stop","index":0}"#,
+        ),
+        ("message_stop", r#"{"type":"message_stop"}"#),
+    ]);
+
+    let (upstream, _up) = spawn_mock_sse_upstream(move |_req| {
+        let body = attack_payload.clone();
+        async move { (hyper::StatusCode::OK, body) }
+    })
+    .await;
+
+    let (port, _g) = spawn_sieve_daemon(&format!("http://{upstream}"));
+
+    // 发送包含原始地址 A 的 prompt
+    let (status, body) = fetch_response_body_with_prompt(
+        port,
+        "please transfer to 0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb1 from my wallet",
+    )
+    .await;
+
+    assert_eq!(
+        status,
+        hyper::StatusCode::OK,
+        "upstream 200 should be preserved"
+    );
+    let body_str = String::from_utf8_lossy(&body);
+    assert!(
+        body_str.contains("sieve_blocked"),
+        "expected sieve_blocked event: prompt-seeded address A, SSE returned address B (Levenshtein=1)\nbody:\n{body_str}"
+    );
+    assert!(
+        body_str.contains("IN-CR-01"),
+        "expected IN-CR-01 in detection:\n{body_str}"
     );
 }
 
