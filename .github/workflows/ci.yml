@@ -70,18 +70,15 @@ jobs:
   fuzz-quick:
     name: fuzz-quick (cargo fuzz, 60s/target)
     runs-on: ubuntu-latest
-    # 真根因（已本地 macOS 复现）：cargo-fuzz src/project.rs 在 Linux
-    # target 注入 `-Cllvm-args=-sanitizer-coverage-stack-depth`，
-    # 该 flag 让 ASan/SanCov instrumentation emit 对 `__sancov_lowest_stack`
-    # / `__sancov_gen_.*` 的 stack-depth 引用。但新版 LLVM 19/20 的新
-    # pass manager 不再识别同时注入的 `-Cpasses=sancov-module`（legacy
-    # pass plugin 写法），SanCov pass 不运行 → 引用的符号没人定义
-    # → 链接阶段悬空。macOS 不加 stack-depth flag 所以无症状（本地误导
-    # 多次试错），但 CI 是 x86_64-unknown-linux-gnu 必触发；本地手工
-    # 加 stack-depth 在 macOS 也能稳定复现 `__sancov_lowest_stack` undefined。
-    #
-    # 修法：clone cargo-fuzz master + sed 删 stack-depth 行 + cargo
-    # install --path。等上游迁移到新 pass manager 兼容 flag 切 release 后回切。
+    # 关 ASan 跑 fuzz：rust-fuzz/cargo-fuzz#404 已知问题。LLVM 20 的 ASan
+    # 与 cargo-fuzz 0.13.1 的 SanCov instrumentation 路径冲突，链接报
+    # 大量 `__sancov_gen_.*` / `__sancov_lowest_stack` undefined（同时
+    # 注入的 `-Cpasses=sancov-module` 是 legacy pass manager 写法，
+    # 新 LLVM pass manager 不识别 → SanCov pass 不运行 → 符号无定义）。
+    # 上游推荐 workaround：`cargo fuzz run -s none` 禁用 sanitizer。
+    # 项目代码 `#![forbid(unsafe_code)]`，ASan 价值有限；libfuzzer
+    # 仍能 detect panic / overflow / OOM。等 LLVM/cargo-fuzz 上游修后
+    # 删 `-s none` 恢复。
     steps:
       - uses: actions/checkout@v4
       - run: rustup show
@@ -90,20 +87,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build pkg-config libssl-dev libboost-dev ragel
-      - name: 装 cargo-fuzz（patched：删除 Linux 专属 stack-depth flag）
-        run: |
-          set -euo pipefail
-          git clone --depth 1 https://github.com/rust-fuzz/cargo-fuzz /tmp/cargo-fuzz
-          cd /tmp/cargo-fuzz
-          # 验证目标行存在；若上游已改名/移除则失败而非静默继续
-          grep -q 'sanitizer-coverage-stack-depth' src/project.rs
-          sed -i '/sanitizer-coverage-stack-depth/d' src/project.rs
-          ! grep -q 'sanitizer-coverage-stack-depth' src/project.rs
-          cargo install --path . --locked
+      - run: cargo install cargo-fuzz --locked
       - uses: Swatinem/rust-cache@v2
       - name: Fuzz sse_parser (60s)
-        run: cargo +nightly fuzz run sse_parser -- -max_total_time=60
+        run: cargo +nightly fuzz run -s none sse_parser -- -max_total_time=60
       - name: Fuzz tool_use_aggregator (60s)
-        run: cargo +nightly fuzz run tool_use_aggregator -- -max_total_time=60
+        run: cargo +nightly fuzz run -s none tool_use_aggregator -- -max_total_time=60
       - name: Fuzz inbound_filter (60s)
-        run: cargo +nightly fuzz run inbound_filter -- -max_total_time=60
+        run: cargo +nightly fuzz run -s none inbound_filter -- -max_total_time=60
