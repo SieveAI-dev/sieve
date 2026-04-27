@@ -391,12 +391,12 @@ fn build_sieve_blocked_sse(detections: &[sieve_core::Detection]) -> Bytes {
         "guidance": {
             "zh": format!(
                 "Sieve 检测到 {} 条入站 Critical 命中。流已截断，响应不完整。\
-                 请检查后用 .sieveignore 加入 fingerprint 白名单。",
+                 Critical 级别命中不可通过白名单绕过，请人工审查当前上下文后重试。",
                 detections.len()
             ),
             "en": format!(
                 "Sieve blocked {} inbound critical detection(s). Stream truncated. \
-                 Review and consider .sieveignore.",
+                 Critical detections cannot be bypassed via allowlist. Please review the context and retry.",
                 detections.len()
             ),
         }
