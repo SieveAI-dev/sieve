@@ -161,14 +161,17 @@ cargo test -p sieve-core --locked   # 跑单个测试
 # 启动透传 daemon
 RUST_LOG=info cargo run -p sieve-cli -- start --config sieve.toml
 
+# Dry-run 模式（仅记录命中，不拦截）
+RUST_LOG=info cargo run -p sieve-cli -- start --config sieve.toml --dry-run
+
 # Reproducible build（本地复现）
 SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) cargo build --release --locked
 
 # Fuzz（Week 3 起，SSE Parser 加入后）
 cargo +nightly fuzz run sse_parser
 
-# Benchmark（Week 6 起，验证 P99 < 20ms）
-cargo bench -p sieve-core
+# Benchmark（Week 4 起，验证 P99 < 20ms）
+cargo bench -p sieve-rules
 ```
 
 详细命令清单与系统依赖见 [docs/guides/development.md](docs/guides/development.md)。

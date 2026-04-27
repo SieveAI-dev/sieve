@@ -38,18 +38,18 @@
 
 **完成定义**（PRD §10.1 Week 2）：
 
-- paste .env 触发拦截
-- 标准 secret benchmark FP < 1%, Recall > 70%
+- [x] paste .env 触发拦截（集成测试 outbound_block 覆盖 + smoke test 26/26）
+- [ ] 标准 secret benchmark FP < 1%, Recall > 70%（本地测试集已达，完整 benchmark 留 Week 4）
 
 **任务清单**：
 
-- vectorscan-rs 多模式正则集成
-- OUT-01~12 全部 P0 出站规则（API key / AWS / GitHub / JWT / 私钥 / 助记词等）
-- BIP39 SHA-256 checksum 验证（差异化点）
-- 占位符黑名单 + .sieveignore 学习型白名单
-- 单元测试覆盖 ≥ 80%
-- 出站拦截 UI / 脱敏工作流
-- **ADR-008 出站 Critical 状态码 dogfood 验证**：默认维持 426，实测 Claude Code SDK 行为后落 ADR（候选编号已在 [ADR-INDEX](../docs/design/ADR-INDEX.md) 登记）
+- [x] vectorscan-rs 多模式正则集成
+- [x] OUT-01~12 全部 P0 出站规则（API key / AWS / GitHub / JWT / 私钥 / 助记词等）
+- [x] BIP39 SHA-256 checksum 验证（差异化点）
+- [x] 占位符黑名单 + .sieveignore 学习型白名单
+- [x] 单元测试覆盖 ≥ 80%（66 单元 + 20 集成 = 86 测试）
+- [x] 出站拦截 UI / 脱敏工作流（被动 426 + body 含人类可读说明）
+- [ ] **ADR-008 出站 Critical 状态码 dogfood 验证**：Week 2 实现已用 426，本周 dogfood 期间（2026-04-27 起）实测 Claude Code SDK 行为；若一周内无异常，升 Accepted（候选编号已在 [ADR-INDEX](../docs/design/ADR-INDEX.md) 登记）
 
 **依赖**：Week 1 Rust 骨架 + API 转发
 **关键风险**：BIP39 checksum 实现错误导致误报，需严格单测

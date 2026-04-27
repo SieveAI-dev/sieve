@@ -92,6 +92,7 @@ def find_free_port() -> int:
 
 
 def write_config(port: int, upstream: str = "https://api.anthropic.com") -> Path:
+    rules_path = REPO_ROOT / "crates" / "sieve-rules" / "rules" / "outbound.toml"
     f = tempfile.NamedTemporaryFile(
         mode="w", suffix=".toml", prefix="sieve-smoke-", delete=False
     )
@@ -99,6 +100,7 @@ def write_config(port: int, upstream: str = "https://api.anthropic.com") -> Path
         f'upstream_url = "{upstream}"\n'
         f"port = {port}\n"
         f'bind_addr = "127.0.0.1"\n'
+        f'rules_path = "{rules_path}"\n'
     )
     f.close()
     return Path(f.name)
@@ -427,6 +429,54 @@ def test_real_tool_use(base_url: str, stats: Stats, api_key: str) -> None:
     assert_contains("partial_json 流式增量", b"input_json_delta", body, stats)
 
 
+def test_outbound_block_fake_key(base_url: str, stats: Stats) -> None:
+    print(bold("\n[9] 出站拦截:fake Anthropic key → 426"))
+    # 构造符合 OUT-01 pattern 的 fake key：sk-ant-api03- + 93 chars + AA
+    suffix_93 = ("abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_-" * 2)[:93]
+    fake_key = f"sk-ant-api03-{suffix_93}AA"
+    body = json.dumps({
+        "model": "claude-sonnet-4-5",
+        "max_tokens": 16,
+        "messages": [{"role": "user", "content": f"leaked: {fake_key}"}],
+    }).encode()
+    status, _, body_resp = http_request(
+        base_url,
+        "POST",
+        "/v1/messages",
+        headers={
+            "content-type": "application/json",
+            "anthropic-version": "2023-06-01",
+            "x-api-key": FAKE_KEY,
+        },
+        body=body,
+    )
+    assert_eq("HTTP 426", 426, status, stats)
+    assert_contains("body 是 sieve_blocked", b'"type":"sieve_blocked"', body_resp, stats)
+    assert_contains("body 含 OUT-01", b"OUT-01", body_resp, stats)
+    assert_contains("body 含 guidance", b"guidance", body_resp, stats)
+
+
+def test_benign_passes_through(base_url: str, stats: Stats, api_key: str) -> None:
+    print(bold("\n[10] benign 消息透传(真 key)"))
+    body = json.dumps({
+        "model": "claude-haiku-4-5",
+        "max_tokens": 16,
+        "messages": [{"role": "user", "content": "say ok"}],
+    }).encode()
+    status, _, _ = http_request(
+        base_url,
+        "POST",
+        "/v1/messages",
+        headers={
+            "content-type": "application/json",
+            "anthropic-version": "2023-06-01",
+            "x-api-key": api_key,
+        },
+        body=body,
+    )
+    assert_eq("HTTP 200(benign 不被拦截)", 200, status, stats)
+
+
 # ──────────── main ────────────
 
 
@@ -467,6 +517,10 @@ def main() -> int:
             else:
                 print(bold("\n[6-8] 真 API key 测试"))
                 print(dim("  ⊘ 跳过(未设 ANTHROPIC_API_KEY 环境变量)"))
+            # Week 2 新增：出站拦截验证（不依赖真 key）
+            test_outbound_block_fake_key(base_url, stats)
+            if api_key:
+                test_benign_passes_through(base_url, stats, api_key)
     except FileNotFoundError as e:
         print(red(f"\n  ✗ {e}"))
         return 2

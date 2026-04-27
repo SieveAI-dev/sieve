@@ -2,6 +2,7 @@
 //!
 //! Phase 1 字段：`upstream_url` / `port` / `bind_addr` / `log_path` /
 //! `tls_verify_upstream`。
+//! Week 2 新增：`rules_path` / `sieveignore_path` / `dry_run`。
 //! `#[serde(deny_unknown_fields)]` 确保配置文件中的危险字段（如
 //! `disable_critical`）被强制拒绝，不会静默忽略。
 
@@ -36,6 +37,21 @@ pub struct Config {
     /// 是否校验上游 TLS 证书（默认 `true`；测试可关，会打印 WARN）。
     #[serde(default = "default_tls_verify")]
     pub tls_verify_upstream: bool,
+
+    /// 出站规则 toml 路径（Week 2，默认 `crates/sieve-rules/rules/outbound.toml`）。
+    #[serde(default)]
+    pub rules_path: Option<PathBuf>,
+
+    /// `.sieveignore` 路径（默认 `~/.sieve/sieveignore`）。
+    #[serde(default)]
+    pub sieveignore_path: Option<PathBuf>,
+
+    /// 仅记录命中，不实际拦截（dry-run 模式，默认 `false`）。
+    ///
+    /// `true` 时 [`Config::enforce_safety_invariants`] 会打印 WARN。
+    /// CLI `--dry-run` flag 出现时会覆盖此值为 `true`（见 cli.rs）。
+    #[serde(default)]
+    pub dry_run: bool,
 }
 
 fn default_upstream() -> String {
@@ -62,6 +78,9 @@ impl Default for Config {
             bind_addr: default_bind_addr(),
             log_path: None,
             tls_verify_upstream: default_tls_verify(),
+            rules_path: None,
+            sieveignore_path: None,
+            dry_run: false,
         }
     }
 }
@@ -104,6 +123,32 @@ impl Config {
                  Only use in controlled test environments."
             );
         }
+
+        if self.dry_run {
+            tracing::warn!("dry_run mode: detections logged but not blocked");
+        }
+    }
+
+    /// 解析出站规则路径。显式给定时直接用，否则回退到 `crates/sieve-rules/rules/outbound.toml`（相对 cwd）。
+    pub fn resolved_rules_path(&self) -> PathBuf {
+        if let Some(p) = &self.rules_path {
+            return p.clone();
+        }
+        PathBuf::from("crates/sieve-rules/rules/outbound.toml")
+    }
+
+    /// 解析 `.sieveignore` 路径。显式给定时直接用，否则回退到 `~/.sieve/sieveignore`。
+    ///
+    /// 若 `HOME` 不可读则 fallback 到 `.sieve/sieveignore`（相对 cwd）并打印 WARN。
+    pub fn resolved_sieveignore_path(&self) -> PathBuf {
+        if let Some(p) = &self.sieveignore_path {
+            return p.clone();
+        }
+        if let Some(home) = std::env::var_os("HOME") {
+            return PathBuf::from(home).join(".sieve").join("sieveignore");
+        }
+        tracing::warn!("HOME env var not set; using .sieve/sieveignore relative to cwd");
+        PathBuf::from(".sieve").join("sieveignore")
     }
 
     /// 拼接监听 SocketAddr。
@@ -188,6 +233,51 @@ mod tests {
         assert!(
             result.is_err(),
             "must reject unknown fields (deny_unknown_fields)"
+        );
+    }
+
+    #[test]
+    fn parse_dry_run_and_rules_path() {
+        let toml_str = r#"
+            upstream_url = "https://api.anthropic.com"
+            port = 11453
+            dry_run = true
+            rules_path = "/x.toml"
+        "#;
+        let c: Config = toml::from_str(toml_str).unwrap();
+        assert!(c.dry_run, "dry_run should be true");
+        assert_eq!(c.rules_path.as_ref().unwrap().to_str().unwrap(), "/x.toml");
+    }
+
+    #[test]
+    fn resolved_rules_path_explicit() {
+        let c = Config {
+            rules_path: Some(PathBuf::from("/custom/rules.toml")),
+            ..Config::default()
+        };
+        assert_eq!(c.resolved_rules_path(), PathBuf::from("/custom/rules.toml"));
+    }
+
+    #[test]
+    fn resolved_rules_path_fallback() {
+        let c = Config::default();
+        let p = c.resolved_rules_path();
+        assert!(
+            p.ends_with("outbound.toml"),
+            "fallback should end with outbound.toml, got {:?}",
+            p
+        );
+    }
+
+    #[test]
+    fn resolved_sieveignore_path_explicit() {
+        let c = Config {
+            sieveignore_path: Some(PathBuf::from("/my/.sieveignore")),
+            ..Config::default()
+        };
+        assert_eq!(
+            c.resolved_sieveignore_path(),
+            PathBuf::from("/my/.sieveignore")
         );
     }
 }

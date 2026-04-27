@@ -9,12 +9,14 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 #![warn(missing_docs)]
 
+pub mod detection;
 pub mod error;
 pub mod forwarder;
 pub mod pipeline;
 pub mod protocol;
 pub mod sse;
 
+pub use detection::{fingerprint, Action, ContentSource, Detection, Severity};
 pub use error::{SieveCoreError, SieveCoreResult};
 pub use forwarder::Forwarder;
 pub use protocol::unified_message::{

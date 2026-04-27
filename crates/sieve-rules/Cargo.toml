@@ -14,9 +14,11 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+toml = { workspace = true }
+sha2 = "0.10"
+regex = "1"
 
-# Week 1: 引入 vectorscan-rs 验证三平台编译，代码暂不调用。
-# Week 2 起在 engine/ 下用真实 API。
+# Vectorscan 多模式正则引擎（关联 ADR-001）。
 #
 # 编译前置系统依赖（macOS）：
 #   brew install boost cmake pkg-config ragel
@@ -27,11 +29,17 @@ tracing = { workspace = true }
 #   simd_specialization — 启用 SIMD 加速路径
 #   fast_nonportable    — 使用更激进的非跨平台优化
 #   unit_hyperscan      — 单元测试兼容 Hyperscan API
-# Week 1 使用默认 features（空集），避免 CI 跨平台兼容性问题。
+# 使用默认 features（空集），避免 CI 跨平台兼容性问题。
 vectorscan-rs = { version = "0.0.6", default-features = false }
 
-# Ed25519 验签（Week 1 占位，Week 5 起实际验签规则包）。
+# Ed25519 验签（Week 5 起实际验签规则包）。
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 serde_json = { workspace = true }
+tempfile = "3"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "scan_bench"
+harness = false

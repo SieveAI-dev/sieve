@@ -1,13 +1,9 @@
 //! 透传 daemon（架构图节点 ①③⑤⑧）。
 //!
-//! Week 1：不做规则匹配，纯字节透传。SSE 流式 body 通过 hyper `Incoming` 自动
-//! chunk-by-chunk 转发，不缓冲，不解析。
+//! Week 2：POST /v1/messages body 收集 → 出站规则扫描 → Critical 命中时返回 426；
+//! 非 messages 路径 / 解析失败 / 无命中 → 流式透传（Week 1 行为保持不变）。
 //!
-//! hyper-util `auto::Builder` 选型理由：
-//! - 自动协商客户端连接 h1/h2（ALPN），对 Claude Code 客户端透明；
-//! - 上游侧 sieve-core Forwarder 同样 ALPN h1+h2，端到端协议不损失；
-//! - 单一入口点，Week 2+ 在 `proxy_inner` 中插入 Pipeline 节点即可，
-//!   不需要改 server 结构（关联 pipeline::Pipeline trait）。
+//! 关联 PRD §5.1 / ADR-002 / ADR-007 / ADR-008（426 状态码候选）。
 
 use anyhow::{anyhow, Context, Result};
 use bytes::Bytes;
@@ -17,6 +13,7 @@ use hyper::service::service_fn;
 use hyper::{Request, Response};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto;
+use sieve_core::pipeline::outbound::OutboundFilter;
 use sieve_core::Forwarder;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -26,12 +23,15 @@ use crate::config::Config;
 /// 响应 body 的统一类型：错误为装箱 trait object，兼容 h1/h2 body 差异。
 type ResponseBody = BoxBody<Bytes, Box<dyn std::error::Error + Send + Sync>>;
 
-/// 启动透传 daemon，永久阻塞直到进程收到信号。
+/// 启动 daemon，永久阻塞直到进程收到信号。
+///
+/// `filter` 是出站规则引擎包装（Week 2 起接入），`cfg.dry_run` 决定是否实际拦截。
 ///
 /// # Errors
 /// bind 端口失败或 Forwarder 初始化失败时返回错误。
-pub async fn run(cfg: Config) -> Result<()> {
+pub async fn run(cfg: Config, filter: Arc<OutboundFilter>) -> Result<()> {
     let listen = cfg.listen_addr()?;
+    let dry_run = cfg.dry_run;
     let forwarder =
         Arc::new(Forwarder::new(&cfg.upstream_url).map_err(|e| anyhow!("init forwarder: {e}"))?);
 
@@ -42,6 +42,7 @@ pub async fn run(cfg: Config) -> Result<()> {
     tracing::info!(
         listen = %listen,
         upstream = %cfg.upstream_url,
+        dry_run = dry_run,
         "sieve daemon started"
     );
 
@@ -55,11 +56,13 @@ pub async fn run(cfg: Config) -> Result<()> {
         };
 
         let forwarder = forwarder.clone();
+        let filter = filter.clone();
         tokio::spawn(async move {
             let io = TokioIo::new(stream);
             let svc = service_fn(move |req| {
                 let f = forwarder.clone();
-                async move { proxy(f, req).await }
+                let flt = filter.clone();
+                async move { proxy(f, flt, dry_run, req).await }
             });
 
             if let Err(e) = auto::Builder::new(TokioExecutor::new())
@@ -78,15 +81,15 @@ pub async fn run(cfg: Config) -> Result<()> {
 /// 只会被转为 502 响应，确保请求路径不 unwrap。
 async fn proxy(
     forwarder: Arc<Forwarder>,
+    filter: Arc<OutboundFilter>,
+    dry_run: bool,
     req: Request<Incoming>,
 ) -> Result<Response<ResponseBody>, hyper::Error> {
-    match proxy_inner(forwarder, req).await {
+    match proxy_inner(forwarder, filter, dry_run, req).await {
         Ok(resp) => Ok(resp),
         Err(e) => {
             tracing::error!(error = %e, "proxy failed");
             let body = format!("sieve proxy error: {e}");
-            // builder().body() 只在 header 值非法时失败（此处不会），
-            // unwrap_or_else fallback 保证不 panic。
             let resp = Response::builder()
                 .status(http::StatusCode::BAD_GATEWAY)
                 .header(http::header::CONTENT_TYPE, "text/plain; charset=utf-8")
@@ -97,53 +100,234 @@ async fn proxy(
     }
 }
 
-/// 核心透传逻辑：重写 URI → 替换 Host header → 转发到上游 → 流式返回响应。
+/// 核心代理逻辑。
 ///
-/// Week 2+ 在此函数中插入 Pipeline 节点（InspectRequest / InspectResponse）。
+/// - POST /v1/messages → collect body → parse → scan → 426 或透传
+/// - 其他路径 → 流式透传（Week 1 行为）
 async fn proxy_inner(
     forwarder: Arc<Forwarder>,
+    filter: Arc<OutboundFilter>,
+    dry_run: bool,
     req: Request<Incoming>,
 ) -> Result<Response<ResponseBody>> {
-    let (mut parts, body) = req.into_parts();
+    let (parts, body) = req.into_parts();
+    let path = parts.uri.path().to_string();
+    let method = parts.method.clone();
 
-    // URI 重写：保留 path + query，替换 scheme + authority 为上游。
+    let is_messages_post = method == http::Method::POST && path == "/v1/messages";
+
+    if is_messages_post {
+        // 1. collect 完整 body（出站扫描需要全文）
+        let collected = body
+            .collect()
+            .await
+            .map_err(|e| anyhow!("collect body: {e}"))?;
+        let body_bytes = collected.to_bytes();
+
+        // 2. 解析 AnthropicRequest；解析失败则直接透传（上游会返回 400）
+        let anthropic_req: sieve_core::protocol::anthropic::AnthropicRequest =
+            match serde_json::from_slice(&body_bytes) {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::debug!("non-anthropic body, passing through: {e}");
+                    return forward_raw(forwarder, parts, body_bytes).await;
+                }
+            };
+
+        // 3. 提取文本段 → 逐段扫描（OutboundFilter 通过 OutboundEngine::scan_text 调用）
+        let texts = anthropic_req.extract_text_content();
+        let mut all_detections: Vec<sieve_core::Detection> = Vec::new();
+
+        for (offset, text) in &texts {
+            use sieve_core::pipeline::PipelineNode;
+            use sieve_core::protocol::unified_message::{
+                ContentBlock, ContentSpan, Direction, MessageMetadata, UpstreamProvider,
+            };
+            use std::time::SystemTime;
+
+            let mut msg = sieve_core::UnifiedMessage {
+                role: sieve_core::Role::User,
+                content_blocks: vec![ContentBlock::Text {
+                    text: text.clone(),
+                    span: Some(ContentSpan {
+                        start: *offset,
+                        end: *offset + text.len(),
+                    }),
+                }],
+                tool_uses: vec![],
+                tool_results: vec![],
+                metadata: MessageMetadata {
+                    session_id: "outbound-scan".into(),
+                    direction: Direction::Outbound,
+                    upstream_provider: UpstreamProvider::Anthropic,
+                    received_at: SystemTime::now(),
+                },
+            };
+
+            let hits = filter
+                .process(&mut msg)
+                .map_err(|e| anyhow!("outbound filter: {e}"))?;
+            all_detections.extend(hits);
+        }
+
+        // 4. 决策：Critical 命中 + 非 dry_run → 426
+        let has_critical = all_detections
+            .iter()
+            .any(|d| d.severity == sieve_core::Severity::Critical);
+
+        if has_critical {
+            if dry_run {
+                tracing::warn!(
+                    count = all_detections.len(),
+                    "OUTBOUND DRY-RUN: would block"
+                );
+                for d in &all_detections {
+                    tracing::warn!(rule = %d.rule_id, severity = ?d.severity, "detection (dry_run)");
+                }
+            } else {
+                tracing::warn!(count = all_detections.len(), "OUTBOUND BLOCKED");
+                for d in &all_detections {
+                    tracing::warn!(rule = %d.rule_id, severity = ?d.severity, "detection");
+                }
+                return Ok(build_426_response(&all_detections));
+            }
+        }
+
+        // 5. 透传（用原始 bytes，保字节级一致）
+        return forward_raw(forwarder, parts, body_bytes).await;
+    }
+
+    // 非 messages 路径：Week 1 流式透传
+    forward_streaming(forwarder, parts, body).await
+}
+
+/// 用已收集的 body bytes 重新构造请求并转发。
+async fn forward_raw(
+    forwarder: Arc<Forwarder>,
+    mut parts: http::request::Parts,
+    body_bytes: Bytes,
+) -> Result<Response<ResponseBody>> {
+    use http_body_util::Full;
+
     let new_uri = forwarder
         .rewrite_uri(&parts.uri)
         .map_err(|e| anyhow!("rewrite uri: {e}"))?;
     parts.uri = new_uri;
-
-    // Host header 必须与上游 authority 一致，否则上游可能拒绝请求。
     parts.headers.remove(http::header::HOST);
     let host_val = http::HeaderValue::from_str(forwarder.upstream_host())
         .map_err(|e| anyhow!("invalid host header: {e}"))?;
     parts.headers.insert(http::header::HOST, host_val);
 
-    // 将客户端 body（Incoming）的错误类型对齐为 hyper::Error，
-    // 再 boxed() 成 sieve-core Forwarder::forward 期望的 BoxBody 类型。
-    let upstream_body = body.map_err(|e| -> hyper::Error { e }).boxed();
+    let upstream_body = Full::new(body_bytes)
+        .map_err(|e| -> hyper::Error { match e {} })
+        .boxed();
     let upstream_req = Request::from_parts(parts, upstream_body);
 
-    // 透传到上游；body 是流式 Incoming，不缓冲。
     let upstream_resp = forwarder
         .forward(upstream_req)
         .await
         .map_err(|e| anyhow!("forward: {e}"))?;
 
-    // 将上游响应 body 的错误类型提升为 Box<dyn Error>，统一 ResponseBody 类型。
     let (resp_parts, resp_body) = upstream_resp.into_parts();
     let body: ResponseBody = resp_body
         .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })
         .boxed();
-
     Ok(Response::from_parts(resp_parts, body))
+}
+
+/// 流式透传（Week 1 路径），不缓冲 body。
+async fn forward_streaming(
+    forwarder: Arc<Forwarder>,
+    mut parts: http::request::Parts,
+    body: Incoming,
+) -> Result<Response<ResponseBody>> {
+    let new_uri = forwarder
+        .rewrite_uri(&parts.uri)
+        .map_err(|e| anyhow!("rewrite uri: {e}"))?;
+    parts.uri = new_uri;
+    parts.headers.remove(http::header::HOST);
+    let host_val = http::HeaderValue::from_str(forwarder.upstream_host())
+        .map_err(|e| anyhow!("invalid host header: {e}"))?;
+    parts.headers.insert(http::header::HOST, host_val);
+
+    let upstream_body = body.map_err(|e| -> hyper::Error { e }).boxed();
+    let upstream_req = Request::from_parts(parts, upstream_body);
+
+    let upstream_resp = forwarder
+        .forward(upstream_req)
+        .await
+        .map_err(|e| anyhow!("forward: {e}"))?;
+
+    let (resp_parts, resp_body) = upstream_resp.into_parts();
+    let body: ResponseBody = resp_body
+        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })
+        .boxed();
+    Ok(Response::from_parts(resp_parts, body))
+}
+
+/// 构造 426 Upgrade Required 拦截响应（ADR-008 候选）。
+///
+/// body 为 JSON，含命中规则 ID / fingerprint / 操作指引。
+/// 时间戳当前为 UNIX epoch 秒，Week 4 引入 chrono 后改为完整 RFC3339。
+fn build_426_response(detections: &[sieve_core::Detection]) -> Response<ResponseBody> {
+    let blocked_at = epoch_secs_string();
+    let detections_json: Vec<serde_json::Value> = detections
+        .iter()
+        .map(|d| {
+            serde_json::json!({
+                "rule_id": d.rule_id,
+                "severity": d.severity,
+                "fingerprint": d.fingerprint,
+            })
+        })
+        .collect();
+    let body_json = serde_json::json!({
+        "type": "sieve_blocked",
+        "blocked_at": blocked_at,
+        "detections": detections_json,
+        "guidance": {
+            "zh": format!(
+                "Sieve 检测到 {} 条出站 Critical 命中。请检查后用 .sieveignore 加入 fingerprint 白名单，或重新发送脱敏消息。",
+                detections.len()
+            ),
+            "en": format!(
+                "Sieve blocked {} outbound critical detection(s). Review your message, then either redact or add fingerprint(s) to .sieveignore.",
+                detections.len()
+            ),
+        }
+    });
+    let body_bytes = Bytes::from(body_json.to_string());
+    Response::builder()
+        .status(http::StatusCode::UPGRADE_REQUIRED) // 426
+        .header(
+            http::header::CONTENT_TYPE,
+            "application/json; charset=utf-8",
+        )
+        .body(bytes_body(body_bytes))
+        .unwrap_or_else(|_| Response::new(empty_body()))
+}
+
+/// 返回 UNIX epoch 秒字符串（Phase 1 简化，Week 4 改 RFC3339）。
+fn epoch_secs_string() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    secs.to_string()
+}
+
+/// 把字节包成 `ResponseBody`。
+fn bytes_body(b: Bytes) -> ResponseBody {
+    use http_body_util::Full;
+    Full::new(b)
+        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { match e {} })
+        .boxed()
 }
 
 /// 把字符串包成 `ResponseBody`（用于错误响应）。
 fn string_body(s: String) -> ResponseBody {
-    use http_body_util::Full;
-    Full::new(Bytes::from(s))
-        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { match e {} })
-        .boxed()
+    bytes_body(Bytes::from(s))
 }
 
 /// 空 body（fallback 错误响应）。

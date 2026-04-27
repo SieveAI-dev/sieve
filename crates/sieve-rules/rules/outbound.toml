@@ -1,0 +1,199 @@
+# OUT-01~12 出站 P0 规则集
+#
+# 关联 PRD §5.1 出站检测目标。
+# 来源: gitleaks/gitleaks config/gitleaks.toml (MIT License) + Sieve 自写
+#
+# 重要约束: 所有 pattern 必须为 vectorscan 兼容 PCRE 子集。
+# 禁止使用: lookahead(?=...) / lookbehind(?<=...) / 反向引用\1 / 原子组(?>...) / \C \R \K
+
+# ---------------------------------------------------------------------------
+# OUT-01: Anthropic API Key
+# 格式: sk-ant-api03- + 93 个 [a-zA-Z0-9_-] + "AA" 结尾
+# ---------------------------------------------------------------------------
+[[rules]]
+id = "OUT-01"
+description = "Anthropic API key (sk-ant-api03-...)"
+pattern = 'sk-ant-api03-[a-zA-Z0-9_\-]{93}AA'
+severity = "critical"
+action = "block"
+entropy_min = 4.5
+keywords = ["sk-ant-api03"]
+allowlist_regexes = ['sk-ant-api03-[xX]{5,}']
+allowlist_stopwords = []
+
+# ---------------------------------------------------------------------------
+# OUT-02: OpenAI API Key
+# 新格式: sk-proj-/sk-svcacct-/sk-admin- + 58~200 char + T3BlbkFJ + 58~200 char
+# 旧格式: sk- + 20 alnum + T3BlbkFJ + 20 alnum
+# 两种格式用 alternation 合并，无 lookahead
+# ---------------------------------------------------------------------------
+[[rules]]
+id = "OUT-02"
+description = "OpenAI API key (sk-... legacy + sk-proj-/sk-svcacct-/sk-admin-)"
+pattern = 'sk-(?:proj|svcacct|admin)-[A-Za-z0-9_\-]{58,65}T3BlbkFJ[A-Za-z0-9_\-]{58,65}|sk-[a-zA-Z0-9]{20}T3BlbkFJ[a-zA-Z0-9]{20}'
+severity = "critical"
+action = "block"
+entropy_min = 4.5
+keywords = ["T3BlbkFJ"]
+allowlist_regexes = []
+allowlist_stopwords = []
+
+# ---------------------------------------------------------------------------
+# OUT-03: AWS Access Key ID
+# 前缀: A3T[A-Z0-9] / AKIA / ASIA / ABIA / ACCA，后跟 16 个 base32 字符
+# ---------------------------------------------------------------------------
+[[rules]]
+id = "OUT-03"
+description = "AWS Access Key ID (AKIA / ASIA / ABIA / ACCA / A3T)"
+pattern = '(?:A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z2-7]{16}'
+severity = "critical"
+action = "block"
+entropy_min = 3.0
+keywords = ["AKIA", "ASIA", "ABIA", "ACCA"]
+allowlist_regexes = []
+allowlist_stopwords = ["AKIAIOSFODNN7EXAMPLE"]  # AWS 官方文档示例 key
+
+# ---------------------------------------------------------------------------
+# OUT-04: GitHub Personal Access Token
+# 格式: ghp_/gho_/ghu_/ghs_/ghr_ + 36 个 alnum 字符
+# ---------------------------------------------------------------------------
+[[rules]]
+id = "OUT-04"
+description = "GitHub PAT (ghp_/gho_/ghu_/ghs_/ghr_)"
+pattern = 'gh[pousr]_[0-9a-zA-Z]{36}'
+severity = "critical"
+action = "block"
+entropy_min = 4.0
+keywords = ["ghp_", "gho_", "ghu_", "ghs_", "ghr_"]
+allowlist_regexes = []
+allowlist_stopwords = []
+
+# ---------------------------------------------------------------------------
+# OUT-05: Google Cloud API Key
+# 格式: AIza + 35 个 alnum/_/-
+# ---------------------------------------------------------------------------
+[[rules]]
+id = "OUT-05"
+description = "Google Cloud API Key (AIza...)"
+pattern = 'AIza[0-9A-Za-z_\-]{35}'
+severity = "high"
+action = "block"
+entropy_min = 4.0
+keywords = ["AIza"]
+allowlist_regexes = []
+allowlist_stopwords = []
+
+# ---------------------------------------------------------------------------
+# OUT-06: JWT Token
+# 格式: eyJ... (header.payload.signature，三段均为 base64url)
+# 不用 lookahead，直接匹配三段结构
+# ---------------------------------------------------------------------------
+[[rules]]
+id = "OUT-06"
+description = "JWT Token (eyJ...)"
+pattern = 'ey[A-Za-z0-9_\-]{16,}\.ey[A-Za-z0-9_\/\-]{16,}\.[A-Za-z0-9_\/\-]{10,}'
+severity = "high"
+action = "block"
+entropy_min = 3.5
+keywords = ["eyJ"]
+allowlist_regexes = []
+allowlist_stopwords = []
+
+# ---------------------------------------------------------------------------
+# OUT-07: PEM Private Key Header
+# 覆盖: RSA / EC / DSA / PKCS#8 / generic PRIVATE KEY 头部
+# 注意: 不包含 OPENSSH（由 OUT-10 专项覆盖）
+# ---------------------------------------------------------------------------
+[[rules]]
+id = "OUT-07"
+description = "PEM Private Key (RSA / EC / DSA / generic)"
+pattern = '-----BEGIN[ A-Z0-9_\-]{0,60}PRIVATE KEY[ A-Z]{0,20}-----'
+severity = "critical"
+action = "block"
+entropy_min = 0.0
+keywords = ["-----BEGIN"]
+allowlist_regexes = []
+allowlist_stopwords = []
+
+# ---------------------------------------------------------------------------
+# OUT-08: Stripe Live Secret / Publishable / Restricted Key
+# 格式: sk_live_/pk_live_/rk_live_ + 10~99 alnum
+# ---------------------------------------------------------------------------
+[[rules]]
+id = "OUT-08"
+description = "Stripe Live Key (sk_live_/pk_live_/rk_live_)"
+pattern = '(?:sk|pk|rk)_live_[a-zA-Z0-9]{10,99}'
+severity = "critical"
+action = "block"
+entropy_min = 3.5
+keywords = ["_live_"]
+allowlist_regexes = ['(?i)test|example']
+allowlist_stopwords = []
+
+# ---------------------------------------------------------------------------
+# OUT-09: Slack Token
+# 格式: xoxb-/xoxp-/xoxa-/xoxs- + 10+ alnum/-
+# ---------------------------------------------------------------------------
+[[rules]]
+id = "OUT-09"
+description = "Slack Token (xoxb-/xoxp-/xoxa-/xoxs-)"
+pattern = 'xox[bpas]\-[0-9A-Za-z\-]{10,}'
+severity = "high"
+action = "block"
+entropy_min = 3.0
+keywords = ["xoxb", "xoxp", "xoxa", "xoxs"]
+allowlist_regexes = []
+allowlist_stopwords = []
+
+# ---------------------------------------------------------------------------
+# OUT-10: OpenSSH Private Key Header
+# 专项规则，不依赖 OUT-07 的通用 PEM 规则
+# ---------------------------------------------------------------------------
+[[rules]]
+id = "OUT-10"
+description = "OpenSSH Private Key (-----BEGIN OPENSSH PRIVATE KEY-----)"
+pattern = '-----BEGIN OPENSSH PRIVATE KEY-----'
+severity = "critical"
+action = "block"
+entropy_min = 0.0
+keywords = ["BEGIN OPENSSH"]
+allowlist_regexes = []
+allowlist_stopwords = []
+
+# ---------------------------------------------------------------------------
+# OUT-11: Discord Bot Token
+# 格式: 24~28 base64url . 6 base64url . 27~38 base64url
+# 三段由英文句号分隔
+# ---------------------------------------------------------------------------
+[[rules]]
+id = "OUT-11"
+description = "Discord Bot Token"
+pattern = '[A-Za-z0-9_\-]{24,28}\.[A-Za-z0-9_\-]{6}\.[A-Za-z0-9_\-]{27,38}'
+severity = "high"
+action = "block"
+entropy_min = 3.5
+keywords = ["."]
+allowlist_regexes = []
+allowlist_stopwords = []
+
+# ---------------------------------------------------------------------------
+# OUT-12: BIP39 助记词（12/15/18/21/24 英文词）
+#
+# 此 pattern 为运行时占位符。
+# rules-engine-agent 加载时检测到 __BIP39_PREFILTER_PLACEHOLDER__，
+# 改用 sieve_rules::bip39 模块从 wordlist 动态生成 vectorscan 预筛 pattern。
+# 实际验证（SHA-256 checksum + 词数）在 sieve_rules::bip39 二次 pass 完成。
+#
+# 关联 PRD §9 硬约束 #4: BIP39 必须做 SHA-256 checksum 验证，仅词表匹配不足以定级 Critical。
+# TODO(rules-engine-agent): 实现 bip39_pattern_from_wordlist() 在加载时替换占位符。
+# ---------------------------------------------------------------------------
+[[rules]]
+id = "OUT-12"
+description = "BIP39 mnemonic (12/15/18/21/24 English wordlist words) - vectorscan pre-filter only, BIP39 SHA-256 checksum verified in second pass"
+pattern = '__BIP39_PREFILTER_PLACEHOLDER__'
+severity = "critical"
+action = "block"
+entropy_min = 0.0
+keywords = []
+allowlist_regexes = []
+allowlist_stopwords = []
