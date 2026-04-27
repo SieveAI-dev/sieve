@@ -78,12 +78,14 @@ pub enum UpstreamProvider { Anthropic, Relay(String) }
 
 ```rust
 pub struct Detection {
-    pub id: DetectionId,
-    pub rule_id: RuleId,
+    pub id: Uuid,                      // Phase 1 用 uuid::Uuid v4（crates/sieve-core/src/detection.rs）
+    pub rule_id: String,
     pub severity: Severity,
+    pub action: Action,                // Week 2 新增：Block / Redact / WarnConfirm / MarkOnly / SilentLog
+    pub source: ContentSource,         // Week 2 新增：命中文本来源标识
     pub span: ContentSpan,
-    pub evidence: String,
-    pub fingerprint: String,
+    pub evidence_truncated: String,    // Week 2 改名（原 evidence）：脱敏后的证据片段，绝不含原始密钥
+    pub fingerprint: String,           // SHA-256("{rule_id}:{normalized_content}") 前 8 字节 = 16 hex 字符
 }
 
 pub enum Severity {
@@ -93,10 +95,17 @@ pub enum Severity {
     Low,
 }
 
+pub enum Action {
+    Block,
+    Redact { placeholder: String },
+    WarnConfirm { countdown_secs: u8 },
+    MarkOnly,
+    SilentLog,
+}
+
 pub struct ContentSpan {
     pub offset: usize,
     pub length: usize,
-    pub source: ContentSource,
 }
 
 pub enum ContentSource {
@@ -105,20 +114,12 @@ pub enum ContentSource {
     InboundAssistantText,
     InboundToolUseInput { tool_use_id: String },
 }
-
-pub enum Action {
-    Block,
-    Redact { placeholder: String },
-    WarnConfirm { countdown_secs: u8 },
-    MarkOnly,
-    SilentLog,
-}
 ```
 
 字段说明：
 
 - `rule_id`：稳定字符串 ID，例如 `OUT-09`、`IN-CR-05`、`IN-GEN-02`，与 PRD §5.1 / §5.2 表格一一对应；
-- `evidence`：**只存最小必要片段**（如脱敏后的密钥前缀 + 字符数），**绝不存完整 prompt**；详见 §6 审计日志；
+- `evidence_truncated`：**只存最小必要片段**（如脱敏后的密钥前缀 + 字符数），**绝不存完整 prompt**；详见 §6 审计日志；
 - `fingerprint`：用于 `.sieveignore` 白名单匹配（详见 §4），格式见 §4.1；
 - `Action::Redact` 的 `placeholder`：标准占位符（如 `[REDACTED-PRIVATE-KEY]`），不做差异化生成。
 
@@ -209,6 +210,7 @@ deadbeef00112233  # known dev fixture address 0x000...dead
 | `severity_overrides` | table | `{}` | 规则级 severity 覆盖（Critical 规则的覆盖会被忽略） |
 | `telemetry_enabled` | bool | `false` | **强制 false**，启动时如设 true 会被强制改回并打印警告 |
 | `tls_verify_upstream` | bool | `true` | 是否校验上游 TLS 证书；改 false 启动时打印 WARN |
+| `dry_run` | bool | `false` | 干跑模式：Critical 命中只 tracing::warn! 记录，不返 426，继续转发上游（用于规则调试）。CLI `--dry-run` flag 出现即覆盖为 true。 |
 
 ### 5.2 示例
 
@@ -321,6 +323,30 @@ rules-v{N}.manifest.json # 元信息
 5. 全部通过后原子替换；失败则保留旧规则并打印 `WARN`
 
 > Ed25519 公钥**必须**在编译期硬编码（`const SIGNER_PUBKEY: [u8; 32] = ...`），不读 disk / 不读 env，防止配置注入攻击。
+
+### 7.4 规则条目 schema（`outbound.toml` / `inbound.toml`）
+
+规则包解压后的 TOML 格式，每个规则文件包含 `[[rules]]` 数组：
+
+```toml
+# crates/sieve-rules/rules/outbound.toml schema
+[[rules]]
+id           = "OUT-01"            # 规则 ID，跨版本不复用
+description  = "Anthropic API key"
+pattern      = "sk-ant-api03-[a-zA-Z0-9_\\-]{93}AA"  # vectorscan PCRE 子集
+severity     = "critical"          # low / medium / high / critical
+action       = "block"             # allow / mark / warn / block
+entropy_min  = 3.5                 # Week 2 新增：最低 Shannon entropy（可选，缺省不校验）
+keywords     = ["sk-ant"]          # Week 2 新增：vectorscan 预筛选 hint
+allowlist_regexes   = ['''xxx+'''] # Week 2 新增：per-rule allowlist 正则
+allowlist_stopwords = ["EXAMPLE"]  # Week 2 新增：per-rule allowlist 停止词
+```
+
+对应 `RuleEntry` Rust 结构体（`crates/sieve-rules/src/lib.rs`）扩展字段：
+- `entropy_min: Option<f32>`：Shannon entropy 下限，低于此值不升 Critical
+- `keywords: Vec<String>`：vectorscan 预筛选 hint，全部命中才进正则校验
+- `allowlist_regexes: Vec<String>`：每条规则独立的白名单正则，命中则跳过此规则
+- `allowlist_stopwords: Vec<String>`：每条规则独立的停止词白名单
 
 ---
 

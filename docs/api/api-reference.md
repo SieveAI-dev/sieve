@@ -263,7 +263,7 @@ GET /_sieve/v1/sieveignore
 }
 ```
 
-> fingerprint 格式 = `<rule_id>:<sha256_prefix_8_hex>`，例如 `OUT-09:7a3b9c1d`。`sha256_prefix` 取规则匹配内容 SHA-256 的前 **8 hex 字符（4 bytes）**——足以在单用户审计库内唯一标识，且不暴露原文。详见 [data-model.md](../design/data-model.md)。
+> fingerprint 格式 = `<rule_id>:<sha256_prefix_16_hex>`，例如 `OUT-09:7a3b9c1d5e6f7890`。`sha256_prefix` 取规则匹配内容 SHA-256 的前 **8 字节，以 lowercase hex 编码为 16 个字符**——足以在单用户审计库内唯一标识，且不暴露原文。详见 [data-model.md](../design/data-model.md)。
 
 #### 2.2.5 规则刷新
 
@@ -322,6 +322,7 @@ HTTP/1.1 451 Unavailable For Legal Reasons
 | `[upstream]`     | `retry`               | u8      | `0`                                              | **默认不重试**，避免重复执行带副作用的工具调用                                       |
 | `[detection]`    | `rules_path`          | path    | `"~/.sieve/rules"`                               | 已签名规则目录                                                         |
 | `[detection]`    | `sieveignore_path`    | path    | `"~/.sieve/.sieveignore"`                        | 本地白名单文件（**不上传仓库**）                                              |
+| `[detection]`    | `dry_run`             | bool    | `false`                                          | 干跑模式：命中 Critical 只记录不返 426，用于调试规则。CLI `--dry-run` flag 覆盖为 true |
 | `[detection]`    | `severity_overrides`  | table   | `{}`                                             | 子表，按 `rule_id` 覆盖默认 severity（仅可降级；**Critical 不可关闭**）            |
 | `[storage]`      | `audit_db_path`       | path    | `"~/.sieve/audit.db"`                            | SQLite append-only 审计库                                          |
 | `[storage]`      | `log_path`            | path    | `"~/.sieve/logs/sieve.log"`                      | 文本日志，按天 rotate                                                  |

@@ -5,7 +5,7 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)。
 
-> 当前状态：**设计阶段（Pre-Code）**，尚未发布任何二进制版本。
+> 当前状态：**Phase A dogfood 进行中**（Week 2 出站规则引擎完成）。第一个公开版本（v0.1.0）将随 Week 12 GA 发布。
 > 第一个公开版本（v0.1.0）将随 Week 12 GA 发布；详见 [PRD §10 12 周里程碑](../prd/sieve-prd-v1.3.md#10-12-周里程碑8-周-dogfood--4-周闭测)。
 > v1 公开 API 在 Week 12 GA 后冻结，破坏性变更走 SemVer。冻结范围参见 [API 参考 - 接口冻结声明](../api/api-reference.md#接口冻结声明)。
 
