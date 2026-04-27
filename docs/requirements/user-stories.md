@@ -147,8 +147,9 @@
 - 二者命中时 Critical/High FP 分别 < 0.5% / < 3%（PRD §6.5）
 
 **实施状态**：
-- IN-CR-03（read = High warn）：Week 4 完成（10 条规则上线，176/176 测试通过）；5s 倒计时弹窗 UI 留 Week 5
-- IN-CR-04（write = Critical block）：Week 4 待开（下一项）
+- IN-CR-03（read = High warn）：Week 4 完成（10 条规则上线）；5s 倒计时弹窗 UI 留 Week 5
+- IN-CR-04（write = Critical block + fail-closed）：Week 4 完成（9 条规则上线 + 全部进
+  `FAIL_CLOSED_RULES`，YOLO mode 不可关）；192/192 测试通过
 
 ---
 

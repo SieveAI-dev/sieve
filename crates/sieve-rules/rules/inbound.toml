@@ -153,9 +153,91 @@ severity = "high"
 action = "warn"
 keywords = ["solana"]
 
-# IN-CR-04 markdown exfil（候选，Week 3 仅 warn）
+# ---------------------------------------------------------------------------
+# IN-CR-04 持久化机制（PRD §5.2 / US-07，Week 4）
+# 处置：Critical block + fail-closed（YOLO mode 不可关）。写持久化文件 = 后门埋点级别。
+# 关联 ADR-007 §"Week 4 落地范围"。
+# 设计原则：pattern 锚定"写意图"（>>，tee -a，cp/mv 到目标，crontab -e 等），
+# 不拦读路径——避免与 IN-CR-03 read=High 处置冲突。
+# 已知 gap：Edit/Write tool 直接写持久化文件无 Bash 重定向上下文，本期不补——
+# 配套 launchctl/systemctl/crontab 启用动作仍会被对应规则截获。
+# ---------------------------------------------------------------------------
 [[rules]]
-id = "IN-CR-04"
+id = "IN-CR-04-SHELL-RC-APPEND"
+description = "Write/append to shell rc files (.bashrc / .zshrc / .bash_profile etc.)"
+pattern = '''(?:>>?|tee\s+(?:-a\s+)?)[^\n;]*\.(?:bashrc|bash_profile|bash_login|bash_aliases|profile|zshrc|zprofile|zlogin|zsh_aliases|kshrc)\b'''
+severity = "critical"
+action = "block"
+keywords = ["bashrc", "zshrc", "bash_profile", "zprofile"]
+
+[[rules]]
+id = "IN-CR-04-CRONTAB"
+description = "crontab edit/install/remove (-e/-r/<)"
+pattern = '''\bcrontab\s+(?:-e\b|-r\b|<)'''
+severity = "critical"
+action = "block"
+keywords = ["crontab"]
+
+[[rules]]
+id = "IN-CR-04-CRON-D-WRITE"
+description = "Write to /etc/cron.{d,daily,hourly,monthly,weekly}/ directories"
+pattern = '''(?:>>?|tee\s+(?:-a\s+)?)[^\n;]*/etc/cron\.(?:d|daily|hourly|monthly|weekly|allow|deny)/[^/\s'"\n]+'''
+severity = "critical"
+action = "block"
+keywords = ["/etc/cron"]
+
+[[rules]]
+id = "IN-CR-04-LAUNCHCTL"
+description = "launchctl load/bootstrap/enable/kickstart (macOS persistence activation)"
+pattern = '''\blaunchctl\s+(?:load|bootstrap|enable|kickstart|asuser)\b'''
+severity = "critical"
+action = "block"
+keywords = ["launchctl"]
+
+[[rules]]
+id = "IN-CR-04-LAUNCH-AGENT-PLIST"
+description = "Write LaunchAgents/LaunchDaemons plist (macOS persistence file)"
+pattern = '''(?:>>?|tee\s+(?:-a\s+)?|cp\s+\S+\s+|mv\s+\S+\s+|cat\s+>\s*)[^\n;]*Library/(?:LaunchAgents|LaunchDaemons)/[^/\s'"\n]+\.plist\b'''
+severity = "critical"
+action = "block"
+keywords = ["LaunchAgents", "LaunchDaemons"]
+
+[[rules]]
+id = "IN-CR-04-SYSTEMCTL-ENABLE"
+description = "systemctl enable/start/daemon-reload (Linux persistence activation)"
+pattern = '''\bsystemctl\s+(?:--user\s+)?(?:enable|start|daemon-reload)\b'''
+severity = "critical"
+action = "block"
+keywords = ["systemctl"]
+
+[[rules]]
+id = "IN-CR-04-SYSTEMD-UNIT-WRITE"
+description = "Write systemd unit file (/etc/systemd/system/*.service or ~/.config/systemd/user/*.service)"
+pattern = '''(?:>>?|tee\s+(?:-a\s+)?|cat\s+>\s*)[^\n;]*(?:/etc/systemd/system|\.config/systemd/user)/[^/\s'"\n]+\.(?:service|timer|socket)\b'''
+severity = "critical"
+action = "block"
+keywords = ["systemd"]
+
+[[rules]]
+id = "IN-CR-04-FISH-CONFIG"
+description = "Append to fish shell config (~/.config/fish/config.fish or conf.d/*.fish)"
+pattern = '''(?:>>?|tee\s+(?:-a\s+)?)[^\n;]*\.config/fish/(?:config\.fish|conf\.d/[^/\s'"\n]+\.fish)\b'''
+severity = "critical"
+action = "block"
+keywords = ["fish"]
+
+[[rules]]
+id = "IN-CR-04-LOGIN-ITEMS"
+description = "macOS Login Items registration (defaults write LoginItems / osascript login items)"
+pattern = '''(?i)(?:\bdefaults\s+write\b[^\n;]*\bLoginItems\b|\bosascript\b[^\n;]*(?:System Events|login items))'''
+severity = "critical"
+action = "block"
+keywords = ["LoginItems", "osascript"]
+
+# IN-GEN-04 markdown exfil（warn 级别；Week 4 由旧 IN-CR-04 重命名归入 IN-GEN-* 命名空间，
+# 关联 PRD §5.2 / US-08，详见 CHANGELOG [BREAKING]）
+[[rules]]
+id = "IN-GEN-04"
 description = "Markdown image with URL query params (potential data exfil)"
 pattern = '''!\[[^\]]*\]\(https?://[^)]+[\?&][^)]*\)'''
 severity = "high"

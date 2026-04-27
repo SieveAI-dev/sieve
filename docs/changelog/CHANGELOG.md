@@ -13,6 +13,53 @@
 
 ## [Unreleased](https://github.com/doskey/sieve/compare/v0.1.0...HEAD)
 
+### [BREAKING] — Week 4 (2026-04-27)
+
+#### rule ID 重命名：旧 `IN-CR-04` markdown exfil → `IN-GEN-04`
+- 原 Week 3 落地的 markdown 图片 exfil 规则错置于 `IN-CR-*`（Crypto 钩子）命名空间。
+  按 PRD §5.2，`IN-CR-04` 应是持久化机制；markdown 通用 exfil 归 `IN-GEN-*`
+- 行为不变：仍是 high warn / 不入 fail-closed 名单 / 不阻断流量
+- **fingerprint 失效**：fingerprint = `sha256(rule_id || matched_text)`，rule_id 改名
+  → `~/.sieve/sieveignore` 中以旧 IN-CR-04:* 开头的条目自动失效。Week 1 末仅 doskey 一人
+  dogfood，无外部影响
+
+### Added — Week 4 持久化机制（IN-CR-04 全套）
+
+#### 入站持久化机制检测（IN-CR-04，PRD §5.2 / Roadmap Week 4 / US-07）
+- 9 条 IN-CR-04-* 子规则，全部 **Critical block + fail-closed**（YOLO mode 不可关，进
+  `FAIL_CLOSED_RULES` 名单），覆盖主流后门埋点路径：
+  - `IN-CR-04-SHELL-RC-APPEND`：`>>` / `tee -a` 写 `.bashrc` / `.zshrc` / `.bash_profile` /
+    `.zprofile` / `.profile` / `.bash_aliases` / `.kshrc` 等
+  - `IN-CR-04-CRONTAB`：`crontab -e` / `<` / `-r`（编辑 / install / 删除；`-l` 仅查看不命中）
+  - `IN-CR-04-CRON-D-WRITE`：写 `/etc/cron.{d,daily,hourly,monthly,weekly,allow,deny}/`
+  - `IN-CR-04-LAUNCHCTL`：`launchctl load` / `bootstrap` / `enable` / `kickstart` / `asuser`
+  - `IN-CR-04-LAUNCH-AGENT-PLIST`：写 `~/Library/LaunchAgents/*.plist` 或
+    `/Library/LaunchDaemons/*.plist`（要求 `>` / `cp` / `mv` / `tee` / `cat >` 写意图前缀）
+  - `IN-CR-04-SYSTEMCTL-ENABLE`：`systemctl enable` / `--user enable` / `start` /
+    `daemon-reload`（不拦 `disable` / `stop` / `status`）
+  - `IN-CR-04-SYSTEMD-UNIT-WRITE`：写 `/etc/systemd/system/*.{service,timer,socket}` 或
+    `~/.config/systemd/user/*.{service,timer,socket}`
+  - `IN-CR-04-FISH-CONFIG`：`>>` / `tee -a` 写 `~/.config/fish/config.fish` / `conf.d/*.fish`
+  - `IN-CR-04-LOGIN-ITEMS`：macOS `defaults write LoginItems` 或
+    `osascript ... login items`
+- 设计原则：pattern 锚定 Bash 命令的"写意图"（重定向 / tee / crontab 编辑 / launchctl
+  load / systemctl enable 等），不拦读路径——避免与 IN-CR-03 read=High 处置冲突
+- 已知 gap：Edit/Write 类工具直接写持久化文件（无 Bash 重定向）不被 IN-CR-04 直接命中；
+  但配套启用动作（launchctl load / systemctl enable）仍会触发，多步攻击链至少一处被截断
+- ADR-007 §"Week 4 落地范围"已记录 traceability，无需新 ADR
+
+#### critical_lock 扩展（sieve-rules）
+- `FAIL_CLOSED_RULES` 加 9 条 IN-CR-04-* 子规则
+- 新增单测 `in_cr_04_persistence_fail_closed` 验证 9 条全部 fail-closed
+- `enforce_action` 单测加 IN-CR-04-CRONTAB 验证 manifest action=Warn 仍强制 Block
+
+#### 测试
+- sieve-rules 新增 14 个单测（9 IN-CR-04 正例 + 4 关键 benign 反例 + 1 unrelated benign）
+  + 1 critical_lock 单测
+- sieve-cli 新增 1 个端到端集成测试（`in_cr_04_persistence_shell_rc_blocked`）：
+  tool_use Bash command `>> ~/.bashrc` → SSE 注入 sieve_blocked 含 IN-CR-04-SHELL-RC-APPEND
+- 全 workspace 192/192 测试通过（174 → 192，+18，零回归）
+
 ### Added — Week 4 进行中 (2026-04-27 起)
 
 #### 入站敏感路径检测（IN-CR-03，PRD §5.2 / Roadmap Week 4）

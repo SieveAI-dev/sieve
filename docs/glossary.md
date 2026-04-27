@@ -149,6 +149,10 @@ BIP39 规范中的校验机制：对助记词进行 SHA-256 hash，取前 N bit 
 
 攻击方式之一（IN-CR-03）：模型返回的 tool_use 试图读取本地敏感凭据文件，常见路径包括 SSH 私钥（`~/.ssh/id_rsa` 等）、AWS 凭据（`~/.aws/credentials`）、GCP ADC、Solana CLI keypair、geth keystore、`.netrc` / GPG / macOS Keychain / dotenv 等。Sieve 通过扫描 `tool_use.input` JSON 序列化结果，命中触发 **High 警告**（区别于持久化机制 IN-CR-04 的 Critical 拦截，因合法用例较多需用户判断）。10 条子规则均含 allowlist（如 `*.pub` 公钥 / `~/.ssh/known_hosts` / `.env.example`）防止误报。Week 4 落地，5s 倒计时弹窗 UI 待 Week 5 接入。
 
+### 持久化机制 / Persistence Mechanism
+
+攻击方式之一（IN-CR-04）：模型生成的 Bash / 工具调用试图把恶意代码写进系统启动配置，让其下次开机/开 terminal/cron 周期自动执行——典型的"清理一下机器"借口下偷偷埋的后门。Sieve 9 条 IN-CR-04-* 子规则覆盖：shell rc 文件（`>>` / `tee -a` 写 `.bashrc` / `.zshrc` 等）、crontab（`-e` / `<` / `-r` 不含 `-l`）、`/etc/cron.{d,daily,...}/`、macOS launchctl + LaunchAgents/LaunchDaemons plist、Linux systemd 单元 + `systemctl enable`、fish shell 配置、macOS Login Items（`defaults write LoginItems` / `osascript`）。处置 **Critical block + fail-closed**（YOLO mode 不可关），写持久化文件 = 后门埋点级别。pattern 锚定 Bash"写意图"（重定向 / tee / 启用命令）避免与 IN-CR-03 read=High 冲突。详见 [ADR-007 §"Week 4 落地范围"](./design/ADR-007-fail-closed-critical-actions.md)。
+
 ### 签名钓鱼 / Signature Phishing
 
 攻击方式之一（IN-CR-05）：诱导用户对恶意内容（如 drainer 合约的 Permit 调用）签名。Sieve 对 EVM / Solana / Bitcoin 的签名相关 RPC 方法（`eth_signTransaction` / `personal_sign` / `signTypedData_v4` / `signAndSendTransaction` 等）强制 fail-closed Critical 拦截，YOLO mode 不可关。检测维度还包括 verifyingContract 数字化绕过与已知 drainer 特征。

@@ -88,7 +88,7 @@
 **任务清单**：
 
 - [x] IN-CR-03 敏感路径访问（10 条规则：SSH / AWS / GCP / Solana / Ethereum keystore / GPG / netrc / macOS Keychain / dotenv，含 allowlist；high warn 级别。Week 5 接 5s 倒计时弹窗）
-- IN-CR-04 持久化机制（crontab / launchd / systemd / .bashrc）
+- [x] IN-CR-04 持久化机制（9 条规则：shell rc / crontab / launchctl + LaunchAgents plist / systemctl + systemd unit / fish config / macOS Login Items；Critical block + fail-closed，全部进 `FAIL_CLOSED_RULES`，YOLO mode 不可关。附带 [BREAKING] 重命名旧 IN-CR-04 markdown exfil → IN-GEN-04）
 - IN-GEN-01~05 全部 P0 通用规则（shell 危险模式 / 远程脚本 / 编码执行 / Markdown exfil）
 - 处置矩阵完整实现（Critical block / High warn 5s / Medium 标记）
 - CLI 弹窗 + 命令行确认交互

