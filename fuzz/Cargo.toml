@@ -10,7 +10,12 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-sieve-core = { path = "../crates/sieve-core" }
+# 关闭 forwarder feature 以剥离 hyper/rustls/aws-lc-rs C 依赖。
+# 原因：aws-lc-rs 含 C/汇编实现，与 cargo fuzz 注入的
+# `-Zsanitizer=address -Cllvm-args=-sanitizer-coverage-*` flags 在链接阶段冲突，
+# 触发 `undefined symbol: __sancov_gen_.*` 错误（PRD §9 #5 fuzz 全覆盖硬约束）。
+# fuzz_helpers 只依赖纯 Rust 的 sse/parser + tool_use_aggregator，无需 forwarder。
+sieve-core = { path = "../crates/sieve-core", default-features = false }
 
 [[bin]]
 name = "sse_parser"
