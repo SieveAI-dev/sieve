@@ -1,0 +1,98 @@
+# =============================================================================
+# Sieve .gitattributes
+# 跨平台统一 LF 行尾 + GitHub linguist 语言识别
+# =============================================================================
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 默认：所有文本文件用 LF 行尾，避免 Windows CRLF 污染 reproducible build
+# ──────────────────────────────────────────────────────────────────────────────
+* text=auto eol=lf
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Rust
+# ──────────────────────────────────────────────────────────────────────────────
+*.rs       text eol=lf diff=rust
+*.toml     text eol=lf
+# Cargo.lock 入库但不显示 diff（噪声大）
+Cargo.lock text eol=lf -diff
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 文档（中英混排，UTF-8）
+# ──────────────────────────────────────────────────────────────────────────────
+*.md       text eol=lf
+*.txt      text eol=lf
+*.json     text eol=lf
+*.yaml     text eol=lf
+*.yml      text eol=lf
+*.xml      text eol=lf
+*.html     text eol=lf
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Shell / 配置脚本
+# ──────────────────────────────────────────────────────────────────────────────
+*.sh           text eol=lf
+*.bash         text eol=lf
+*.zsh          text eol=lf
+*.fish         text eol=lf
+*.cursorrules  text eol=lf
+.gitignore     text eol=lf
+.gitattributes text eol=lf
+.editorconfig  text eol=lf
+Dockerfile     text eol=lf
+Makefile       text eol=lf
+
+# Windows 脚本（保留 CRLF，避免 PowerShell 解析问题）
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 二进制
+# ──────────────────────────────────────────────────────────────────────────────
+*.png      binary
+*.jpg      binary
+*.jpeg     binary
+*.gif      binary
+*.ico      binary
+# SVG 是 XML，按文本处理
+*.svg      text
+
+*.pdf      binary
+*.zst      binary
+*.tar.zst  binary
+*.gz       binary
+*.zip      binary
+*.tar      binary
+
+# Sigstore 签名 / Cosign bundle
+*.bundle   binary
+*.sigstore binary
+*.sig      binary
+
+# Rust 工具产物（如不慎被加）
+*.pdb binary
+*.dll binary
+*.so  binary
+*.dylib binary
+*.a   binary
+*.lib binary
+
+# ──────────────────────────────────────────────────────────────────────────────
+# GitHub Linguist 语言统计（让 docs/ 不淹没代码统计）
+# ──────────────────────────────────────────────────────────────────────────────
+docs/**           linguist-documentation
+# 历史归档与调研材料不参与 GitHub 语言统计
+docs/prd/**       linguist-vendored
+docs/research/**  linguist-vendored
+tasks/**          linguist-documentation
+*.md              linguist-detectable=true
+*.cursorrules     linguist-language=Markdown
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Export-ignore（git archive 时不包含）
+# ──────────────────────────────────────────────────────────────────────────────
+.gitattributes  export-ignore
+.gitignore      export-ignore
+.github/        export-ignore
+docs/_temp/     export-ignore
+tasks/          export-ignore

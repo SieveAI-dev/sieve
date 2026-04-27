@@ -1,0 +1,102 @@
+Sieve License Status
+====================
+
+> Project state: Pre-Code design phase (2026-04-27).
+> See PRD v1.3 §11.3 (Open Source Strategy) and §9 #10 (Day 1 README public + code GA-time open source).
+
+This repository contains TWO categories of content with DIFFERENT license terms.
+
+---
+
+## 1. Documentation (active in this repo)
+
+Scope: `docs/`, `README.md`, `CLAUDE.md`, `.cursorrules`, `tasks/`, `SECURITY.md`,
+       and any other Markdown / config files NOT inside a future Cargo crate.
+
+License: **Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International
+         (CC BY-NC-SA 4.0)**
+URL:     https://creativecommons.org/licenses/by-nc-sa/4.0/
+
+You are free to:
+
+  - Share — copy and redistribute in any medium or format
+  - Adapt — remix, transform, build upon
+
+Under the following terms:
+
+  - Attribution — credit to "doskey / Sieve project" with link to this repo
+  - NonCommercial — not for commercial purposes (commercial reuse requires
+    written permission: doskey.lee@gmail.com)
+  - ShareAlike — derivatives must use the same license
+
+Rationale: Sieve is a commercial product (single-developer SaaS, $49/month per
+PRD §7.1). Documentation is published Day 1 (PRD §9 #10) for transparency and
+trust narrative ("you can verify us, not just trust us" — PRD §1.2 #4), but
+should not be repackaged as competitor material without permission.
+
+---
+
+## 2. Source Code (NOT YET IN THIS REPO)
+
+Scope: All Rust source code (`*.rs`, `Cargo.toml`, `Cargo.lock`, `build.rs`,
+       `crates/`, `fuzz/`) — to be added starting Week 1 (PRD §10.1).
+
+License (planned):
+
+  - **Core engine: MIT License** — published at Week 12 GA (PRD §11.3, §9 #10)
+  - **Phase 2 advanced rule sets: Closed source** (PRD §11.3) — sold as part
+    of paid subscription
+
+Until Week 12 GA, the source code repository is private. The license file in
+this directory will be replaced with the full MIT License text when source code
+becomes public.
+
+---
+
+## 3. Trademarks
+
+"Sieve" is the project codename and may be replaced with a formal product name
+between Week 6-8 (PRD §11.4 / §14 Open Question #1). Known existing usages:
+
+  - sieve.ai (YC W22) — unrelated AI startup
+  - SIEVE caching algorithm — academic paper / Linux kernel
+  - Thunderbird Sieve — email filter language
+
+Use of the name "Sieve" by third parties to refer to this project is permitted
+under the documentation license terms above. Use as a product name for your
+own derivative product requires written permission.
+
+---
+
+## 4. Contact
+
+For commercial licensing, partnership, or trademark inquiries:
+
+  - Email: doskey.lee@gmail.com
+  - Subject prefix: [SIEVE-LICENSE]
+
+For security vulnerabilities: see [SECURITY.md](./SECURITY.md).
+For sample submissions: open a GitHub Issue with the "suspicious_sample" template.
+
+---
+
+## 5. Why Two Licenses?
+
+Documentation and code serve different purposes:
+
+  - **Docs** publish the design intent, threat model, ADRs — these are the
+    "trust artifacts" that let users verify Sieve before running the binary.
+    CC BY-NC-SA prevents commercial repackaging while permitting study,
+    citation, and forking-for-research.
+
+  - **Code** at GA becomes MIT to maximize adoption (security tooling has
+    network effects — wide adoption → more issue reports → faster bug fixes →
+    better detection rules → better product). Phase 2 advanced rules stay
+    closed because they ARE the commercial moat.
+
+This split is documented in PRD §11.3 and not subject to change without an
+ADR (see [docs/design/ADR-INDEX.md](./docs/design/ADR-INDEX.md)).
+
+---
+
+Last updated: 2026-04-27 (Pre-Code design phase)

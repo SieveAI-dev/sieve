@@ -1,0 +1,76 @@
+# Sieve Dependabot 配置
+# 文档：https://docs.github.com/en/code-security/dependabot/dependabot-version-updates
+#
+# 设计意图（PRD §9 #6 + ADR-006）：
+# - pinned dependencies 是供应链安全承诺的硬约束
+# - Dependabot 只动 patch / minor 升级；major 升级走人工评估
+# - reproducible build 要求 Cargo.lock 入库，Dependabot PR 会更新 lockfile
+# - 一人项目，open-pull-requests-limit 控制在 5 以内避免淹没
+version: 2
+
+updates:
+  # ─────────────────────────────────────────────────────────────────────────
+  # Cargo（Week 1 落地后生效；当前 Pre-Code，无 Cargo.toml）
+  # ─────────────────────────────────────────────────────────────────────────
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "10:00"
+      timezone: "Asia/Hong_Kong"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "rust"
+    commit-message:
+      prefix: "chore"
+      prefix-development: "chore"
+      include: "scope"
+    # PRD §9 #6 + ADR-006：major 升级必须人工评估（reproducible build 风险）
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
+    # 关键依赖列入"高风险升级"——任何 PR 都要 doskey 亲自 review
+    # （Dependabot 不能直接打这个标，提示由 PR 模板 self-check 触发）
+    groups:
+      tokio-stack:
+        patterns:
+          - "tokio*"
+          - "hyper*"
+          - "reqwest"
+          - "rustls*"
+      simd-stack:
+        patterns:
+          - "vectorscan-rs*"
+          - "sonic-rs*"
+      crypto-stack:
+        patterns:
+          - "sha2"
+          - "ed25519*"
+          - "bip39"
+          - "bs58"
+          - "hex"
+          - "crc32fast"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # GitHub Actions（Week 1 sigstore + reproducible build pipeline 落地后生效）
+  # ─────────────────────────────────────────────────────────────────────────
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "chore"
+    # GitHub Actions major 升级（如 actions/checkout@v3 → v4）需评估对
+    # reproducible build 的影响，Dependabot 不要自动开 PR
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
