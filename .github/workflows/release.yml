@@ -52,12 +52,12 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build pkg-config musl-tools ragel
+          sudo apt-get install -y cmake ninja-build pkg-config musl-tools libboost-dev ragel
 
       - name: 安装构建依赖（macOS）
         if: runner.os == 'macOS'
         run: |
-          brew install cmake ninja pkg-config ragel
+          brew install cmake ninja pkg-config boost ragel
 
       - name: 安装 toolchain + 目标平台
         run: |

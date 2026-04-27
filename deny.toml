@@ -20,12 +20,16 @@ allow = [
     "Unicode-DFS-2016",
     "Zlib",
     "CC0-1.0",
+    # webpki-roots 1.x / 0.26 用此 license(Mozilla 根证书元数据,合法)
+    "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.8
 
 [bans]
 multiple-versions = "warn"
+# path-only workspace 内部依赖也算 wildcard,允许它们(以 allow-wildcard-paths)
 wildcards = "deny"
+allow-wildcard-paths = true
 deny = []
 skip = []
 skip-tree = []

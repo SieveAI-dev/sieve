@@ -78,8 +78,8 @@ impl Config {
         }
         let s = std::fs::read_to_string(path)
             .with_context(|| format!("read config {}", path.display()))?;
-        let cfg: Self = toml::from_str(&s)
-            .with_context(|| format!("parse config {}", path.display()))?;
+        let cfg: Self =
+            toml::from_str(&s).with_context(|| format!("parse config {}", path.display()))?;
         Ok(cfg)
     }
 
@@ -185,6 +185,9 @@ mod tests {
             disable_critical = true
         "#;
         let result: Result<Config, _> = toml::from_str(toml_str);
-        assert!(result.is_err(), "must reject unknown fields (deny_unknown_fields)");
+        assert!(
+            result.is_err(),
+            "must reject unknown fields (deny_unknown_fields)"
+        );
     }
 }

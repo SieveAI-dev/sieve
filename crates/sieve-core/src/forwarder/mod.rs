@@ -107,10 +107,7 @@ impl Forwarder {
     /// # Errors
     /// URI 重组失败时返回 [`SieveCoreError::Forwarder`]。
     pub fn rewrite_uri(&self, original: &http::Uri) -> SieveCoreResult<http::Uri> {
-        let path_and_query = original
-            .path_and_query()
-            .map(|p| p.as_str())
-            .unwrap_or("/");
+        let path_and_query = original.path_and_query().map(|p| p.as_str()).unwrap_or("/");
         let new_uri = format!(
             "{}://{}{}",
             self.upstream_scheme, self.upstream_host, path_and_query

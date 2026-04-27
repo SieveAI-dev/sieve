@@ -31,7 +31,7 @@ jobs:
       - name: 安装构建依赖（vectorscan 需要 cmake/ninja/ragel）
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build pkg-config libssl-dev ragel
+          sudo apt-get install -y cmake ninja-build pkg-config libssl-dev libboost-dev ragel
       - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
   test:
@@ -49,11 +49,11 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build pkg-config libssl-dev ragel
+          sudo apt-get install -y cmake ninja-build pkg-config libssl-dev libboost-dev ragel
       - name: 安装构建依赖（macOS）
         if: runner.os == 'macOS'
         run: |
-          brew install cmake ninja pkg-config ragel
+          brew install cmake ninja pkg-config boost ragel
       - run: cargo test --workspace --locked
 
   deny:
