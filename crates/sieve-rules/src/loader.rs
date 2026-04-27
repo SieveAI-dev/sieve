@@ -19,6 +19,11 @@ pub fn load_outbound_rules(path: &Path) -> SieveRulesResult<Vec<RuleEntry>> {
     Ok(f.rules)
 }
 
+/// 加载入站规则集（toml schema 与出站一致）。
+pub fn load_inbound_rules(path: &Path) -> SieveRulesResult<Vec<RuleEntry>> {
+    load_outbound_rules(path) // schema 同，直接复用
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -2,6 +2,7 @@
 
 pub mod inbound;
 pub mod outbound;
+pub mod streaming;
 
 use crate::detection::Detection;
 use crate::error::SieveCoreResult;

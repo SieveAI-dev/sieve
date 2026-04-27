@@ -167,8 +167,10 @@ RUST_LOG=info cargo run -p sieve-cli -- start --config sieve.toml --dry-run
 # Reproducible build（本地复现）
 SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) cargo build --release --locked
 
-# Fuzz（Week 3 起，SSE Parser 加入后）
-cargo +nightly fuzz run sse_parser
+# Fuzz（PRD §9 #5，Week 3 起）
+cargo +nightly fuzz run sse_parser -- -max_total_time=60
+cargo +nightly fuzz run tool_use_aggregator -- -max_total_time=60
+cargo +nightly fuzz run inbound_filter -- -max_total_time=60
 
 # Benchmark（Week 4 起，验证 P99 < 20ms）
 cargo bench -p sieve-rules

@@ -54,6 +54,10 @@ fn outbound_rules_path() -> PathBuf {
     workspace_root().join("crates/sieve-rules/rules/outbound.toml")
 }
 
+fn inbound_rules_path() -> PathBuf {
+    workspace_root().join("crates/sieve-rules/rules/inbound.toml")
+}
+
 /// 在 :0 端口启动 plain-HTTP mock 上游，返回 (addr, shutdown sender)。
 async fn spawn_mock_upstream<F, Fut>(responder: F) -> (SocketAddr, oneshot::Sender<()>)
 where
@@ -124,6 +128,12 @@ fn spawn_sieve_daemon(upstream_url: &str, dry_run: bool) -> (u16, DaemonGuard) {
         "outbound rules not found at {}",
         rules.display()
     );
+    let inbound_rules = inbound_rules_path();
+    assert!(
+        inbound_rules.exists(),
+        "inbound rules not found at {}",
+        inbound_rules.display()
+    );
 
     let mut config_file = tempfile::NamedTempFile::new().unwrap();
     writeln!(
@@ -132,12 +142,14 @@ fn spawn_sieve_daemon(upstream_url: &str, dry_run: bool) -> (u16, DaemonGuard) {
 port = {}
 bind_addr = "127.0.0.1"
 rules_path = "{}"
+inbound_rules_path = "{}"
 tls_verify_upstream = false
 dry_run = {}
 "#,
         upstream_url,
         port,
         rules.display(),
+        inbound_rules.display(),
         dry_run,
     )
     .unwrap();
@@ -287,11 +299,12 @@ async fn fake_anthropic_key_blocked_with_426() {
     );
 }
 
-/// dry_run = true 时：命中 OUT-01 但仍透传到上游，返回上游的 200。
+/// dry_run = true 时：OUT-01 属于 fail-closed 规则，即使 dry_run 也返回 426。
 ///
-/// 关联 PRD §6.3 dry-run 模式。
+/// 关联 PRD §9 #3 / ADR-007：fail-closed 规则在任何模式（含 dry_run）下都强制 Block。
+/// dry_run 只豁免非 fail-closed 的 Critical；OUT-01~12 全部在 FAIL_CLOSED_RULES 名单。
 #[tokio::test]
-async fn dry_run_logs_but_forwards() {
+async fn dry_run_fail_closed_still_blocks() {
     let upstream_call_count = Arc::new(AtomicUsize::new(0));
     let counter_clone = upstream_call_count.clone();
 
@@ -327,16 +340,17 @@ async fn dry_run_logs_but_forwards() {
         .await
         .unwrap();
 
-    // dry_run 时返回上游的 200，不返回 426
+    // OUT-01 是 fail-closed：dry_run 不豁免，仍返回 426
     assert_eq!(
         resp.status(),
-        StatusCode::OK,
-        "dry_run should forward and return upstream 200"
+        StatusCode::UPGRADE_REQUIRED,
+        "dry_run must NOT bypass fail-closed OUT-01 (PRD §9 #3)"
     );
+    // 上游不应被调用
     assert_eq!(
         upstream_call_count.load(Ordering::SeqCst),
-        1,
-        "upstream should be called in dry_run mode"
+        0,
+        "upstream must NOT be called when fail-closed rule blocks"
     );
 }
 

@@ -22,6 +22,8 @@ allow = [
     "CC0-1.0",
     # webpki-roots 1.x / 0.26 用此 license(Mozilla 根证书元数据,合法)
     "CDLA-Permissive-2.0",
+    # libfuzzer-sys 含 LLVM/libFuzzer NCSA 子模块(University of Illinois,合法 OSS)
+    "NCSA",
 ]
 confidence-threshold = 0.8
 

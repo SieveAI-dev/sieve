@@ -340,6 +340,59 @@ cargo bench -p sieve-rules
 
 ---
 
+## 9. Fuzz 测试（PRD §9 #5 硬约束，Week 3 起双引擎就绪）
+
+### 9.1 cargo fuzz（libFuzzer）
+
+```bash
+# 安装 nightly toolchain（libFuzzer 需要 sanitizer）
+rustup install nightly
+cargo install cargo-fuzz --locked
+
+# 列出所有 target
+cargo +nightly fuzz list
+# 输出：sse_parser / tool_use_aggregator / inbound_filter
+
+# 跑 60 秒（CI 模式）
+cargo +nightly fuzz run sse_parser -- -max_total_time=60
+
+# 持续跑（本地深度测试）
+cargo +nightly fuzz run sse_parser
+
+# 最小化 crash 输入
+cargo +nightly fuzz tmin sse_parser fuzz/artifacts/sse_parser/crash-xxx
+
+# 覆盖率（LLVM 报告）
+cargo +nightly fuzz coverage sse_parser
+```
+
+### 9.2 AFL++（afl crate）
+
+仅在专用 fuzz worker / docker 镜像中跑：
+
+```bash
+cargo install cargo-afl --locked
+cd fuzz_afl
+cargo afl build --bin sse_parser_afl
+mkdir -p afl_out
+cargo afl fuzz -i ../fuzz/corpus/sse_parser -o afl_out target/debug/sse_parser_afl
+```
+
+### 9.3 Corpus 共享
+
+cargo fuzz 与 AFL++ 共享 `fuzz/corpus/<target>/` 目录（都是字节文件）。AFL++ `afl_out/queue/` 中发现的新输入定期 rsync 回 corpus 供 libFuzzer 复用。
+
+### 9.4 必须覆盖的 5 类边界
+
+参见 `crates/sieve-core/src/sse/parser.rs`：
+1. **半行 chunk**：event: 与 data: 跨多个 TCP read
+2. **跨 chunk 分隔符**：`\n\n` 切成两个 chunk
+3. **C0 控制字符**：0x00-0x1F 嵌入 data: body
+4. **多 event 粘包**：单 chunk 含 N 个完整 events
+5. **提前断流**：连接在 event 中途关闭
+
+---
+
 ## 10. 本地 dogfood 流程
 
 每个开发者（Phase 1 = doskey）**必须** 100% 时间用 Sieve 工作：

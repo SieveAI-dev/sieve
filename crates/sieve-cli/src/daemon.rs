@@ -3,20 +3,29 @@
 //! Week 2：POST /v1/messages body 收集 → 出站规则扫描 → Critical 命中时返回 426；
 //! 非 messages 路径 / 解析失败 / 无命中 → 流式透传（Week 1 行为保持不变）。
 //!
-//! 关联 PRD §5.1 / ADR-002 / ADR-007 / ADR-008（426 状态码候选）。
+//! Week 3：出站 dry_run+Critical fail-closed 修正 + 入站 SSE tee 截流检测。
+//!
+//! 关联 PRD §5.1 / §5.2 / ADR-002 / ADR-007 / ADR-008（426 状态码候选）。
 
 use anyhow::{anyhow, Context, Result};
 use bytes::Bytes;
-use http_body_util::{combinators::BoxBody, BodyExt};
+use futures_util::StreamExt as _;
+use http_body_util::{combinators::BoxBody, BodyExt, StreamBody};
 use hyper::body::Incoming;
 use hyper::service::service_fn;
 use hyper::{Request, Response};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto;
+use sieve_core::pipeline::inbound::{InboundEngine, InboundFilter};
 use sieve_core::pipeline::outbound::OutboundFilter;
+use sieve_core::pipeline::streaming::StreamingPipelineNode as _;
+use sieve_core::sse::parser::SseParser;
+use sieve_core::tool_use_aggregator::Aggregator;
 use sieve_core::Forwarder;
+use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::net::TcpListener;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::config::Config;
 
@@ -25,11 +34,18 @@ type ResponseBody = BoxBody<Bytes, Box<dyn std::error::Error + Send + Sync>>;
 
 /// 启动 daemon，永久阻塞直到进程收到信号。
 ///
-/// `filter` 是出站规则引擎包装（Week 2 起接入），`cfg.dry_run` 决定是否实际拦截。
+/// `filter` 是出站规则引擎包装；`inbound_engine` + `inbound_sieveignore` 用于每连接构造
+/// [`InboundFilter`]（每连接独立实例，共享 engine Arc）。
+/// `cfg.dry_run` 决定是否实际拦截。
 ///
 /// # Errors
 /// bind 端口失败或 Forwarder 初始化失败时返回错误。
-pub async fn run(cfg: Config, filter: Arc<OutboundFilter>) -> Result<()> {
+pub async fn run(
+    cfg: Config,
+    filter: Arc<OutboundFilter>,
+    inbound_engine: Arc<dyn InboundEngine>,
+    inbound_sieveignore: Arc<HashSet<String>>,
+) -> Result<()> {
     let listen = cfg.listen_addr()?;
     let dry_run = cfg.dry_run;
     let forwarder =
@@ -57,12 +73,18 @@ pub async fn run(cfg: Config, filter: Arc<OutboundFilter>) -> Result<()> {
 
         let forwarder = forwarder.clone();
         let filter = filter.clone();
+        let inbound_engine = inbound_engine.clone();
+        let inbound_sieveignore = inbound_sieveignore.clone();
+
         tokio::spawn(async move {
             let io = TokioIo::new(stream);
             let svc = service_fn(move |req| {
                 let f = forwarder.clone();
                 let flt = filter.clone();
-                async move { proxy(f, flt, dry_run, req).await }
+                // 每连接独立 InboundFilter（&mut self trait 要求）
+                let ib_filter =
+                    InboundFilter::new(inbound_engine.clone(), inbound_sieveignore.clone());
+                async move { proxy(f, flt, ib_filter, dry_run, req).await }
             });
 
             if let Err(e) = auto::Builder::new(TokioExecutor::new())
@@ -76,16 +98,14 @@ pub async fn run(cfg: Config, filter: Arc<OutboundFilter>) -> Result<()> {
 }
 
 /// 请求入口：捕获 `proxy_inner` 的所有错误，转换为 502 Bad Gateway 响应。
-///
-/// hyper service_fn 要求返回 `Result<_, hyper::Error>`；业务错误不会 panic，
-/// 只会被转为 502 响应，确保请求路径不 unwrap。
 async fn proxy(
     forwarder: Arc<Forwarder>,
     filter: Arc<OutboundFilter>,
+    inbound_filter: InboundFilter,
     dry_run: bool,
     req: Request<Incoming>,
 ) -> Result<Response<ResponseBody>, hyper::Error> {
-    match proxy_inner(forwarder, filter, dry_run, req).await {
+    match proxy_inner(forwarder, filter, inbound_filter, dry_run, req).await {
         Ok(resp) => Ok(resp),
         Err(e) => {
             tracing::error!(error = %e, "proxy failed");
@@ -102,11 +122,12 @@ async fn proxy(
 
 /// 核心代理逻辑。
 ///
-/// - POST /v1/messages → collect body → parse → scan → 426 或透传
+/// - POST /v1/messages → collect body → 出站扫描 → 426 或入站 SSE tee 检测
 /// - 其他路径 → 流式透传（Week 1 行为）
 async fn proxy_inner(
     forwarder: Arc<Forwarder>,
     filter: Arc<OutboundFilter>,
+    inbound_filter: InboundFilter,
     dry_run: bool,
     req: Request<Incoming>,
 ) -> Result<Response<ResponseBody>> {
@@ -170,35 +191,217 @@ async fn proxy_inner(
             all_detections.extend(hits);
         }
 
-        // 4. 决策：Critical 命中 + 非 dry_run → 426
-        let has_critical = all_detections
+        // 4. 决策：
+        //    - fail-closed Critical 规则：无视 dry_run，永远 block（PRD §9 #3）
+        //    - 非 fail-closed Critical：dry_run=true 时仅 warn，dry_run=false 时 block
+        let blocking: Vec<&sieve_core::Detection> = all_detections
             .iter()
-            .any(|d| d.severity == sieve_core::Severity::Critical);
+            .filter(|d| {
+                if d.severity != sieve_core::Severity::Critical {
+                    return false;
+                }
+                sieve_rules::critical_lock::is_fail_closed(&d.rule_id) || !dry_run
+            })
+            .collect();
 
-        if has_critical {
-            if dry_run {
-                tracing::warn!(
-                    count = all_detections.len(),
-                    "OUTBOUND DRY-RUN: would block"
-                );
-                for d in &all_detections {
-                    tracing::warn!(rule = %d.rule_id, severity = ?d.severity, "detection (dry_run)");
-                }
-            } else {
-                tracing::warn!(count = all_detections.len(), "OUTBOUND BLOCKED");
-                for d in &all_detections {
-                    tracing::warn!(rule = %d.rule_id, severity = ?d.severity, "detection");
-                }
-                return Ok(build_426_response(&all_detections));
+        if !blocking.is_empty() {
+            tracing::warn!(count = blocking.len(), "OUTBOUND BLOCKED");
+            for d in &blocking {
+                tracing::warn!(rule = %d.rule_id, severity = ?d.severity, "detection");
+            }
+            let cloned: Vec<sieve_core::Detection> =
+                blocking.iter().map(|d| (*d).clone()).collect();
+            return Ok(build_426_response(&cloned));
+        }
+
+        if dry_run && !all_detections.is_empty() {
+            tracing::warn!(
+                count = all_detections.len(),
+                "OUTBOUND DRY-RUN: would have flagged"
+            );
+            for d in &all_detections {
+                tracing::warn!(rule = %d.rule_id, severity = ?d.severity, "detection (dry_run)");
             }
         }
 
-        // 5. 透传（用原始 bytes，保字节级一致）
-        return forward_raw(forwarder, parts, body_bytes).await;
+        // 5. 出站通过 → 入站 SSE tee 截流检测
+        return forward_with_inbound_inspection(
+            forwarder,
+            inbound_filter,
+            dry_run,
+            parts,
+            body_bytes,
+        )
+        .await;
     }
 
     // 非 messages 路径：Week 1 流式透传
     forward_streaming(forwarder, parts, body).await
+}
+
+/// 透传并同步做入站 SSE 解析检测（tee 模式）。
+///
+/// 字节流同时被：
+/// 1. 原样 forward 给客户端（via unbounded_channel）
+/// 2. 异步喂给 SseParser → Aggregator → InboundFilter 检测
+///
+/// 如果检测到 fail-closed Critical（或非 dry_run Critical），向客户端注入
+/// `sieve_blocked` SSE event 后截断流（drop tx）。
+async fn forward_with_inbound_inspection(
+    forwarder: Arc<Forwarder>,
+    mut inbound_filter: InboundFilter,
+    dry_run: bool,
+    mut parts: http::request::Parts,
+    body_bytes: Bytes,
+) -> Result<Response<ResponseBody>> {
+    use http_body_util::Full;
+
+    let new_uri = forwarder
+        .rewrite_uri(&parts.uri)
+        .map_err(|e| anyhow!("rewrite uri: {e}"))?;
+    parts.uri = new_uri;
+    parts.headers.remove(http::header::HOST);
+    let host_val = http::HeaderValue::from_str(forwarder.upstream_host())
+        .map_err(|e| anyhow!("invalid host header: {e}"))?;
+    parts.headers.insert(http::header::HOST, host_val);
+
+    let upstream_body = Full::new(body_bytes)
+        .map_err(|e| -> hyper::Error { match e {} })
+        .boxed();
+    let upstream_req = Request::from_parts(parts, upstream_body);
+
+    let upstream_resp = forwarder
+        .forward(upstream_req)
+        .await
+        .map_err(|e| anyhow!("forward: {e}"))?;
+
+    let (mut resp_parts, resp_body) = upstream_resp.into_parts();
+
+    // 入站响应可能被 sieve 注入 sieve_blocked event 截流,实际 body 长度不一定等于上游
+    // content-length。**剥掉 content-length 强制 chunked transfer**,否则 hyper client 会按
+    // content-length 截断,导致截流时注入的 sieve_blocked event 无法到达客户端。
+    resp_parts.headers.remove(http::header::CONTENT_LENGTH);
+
+    // unbounded channel：spawn 的 tee 任务往里写 frame，客户端从 rx 读
+    let (tx, rx) =
+        tokio::sync::mpsc::unbounded_channel::<Result<hyper::body::Frame<Bytes>, std::io::Error>>();
+
+    tokio::spawn(async move {
+        let mut parser = SseParser::new();
+        let mut aggregator = Aggregator::new();
+
+        use http_body_util::BodyStream;
+        let mut stream = BodyStream::new(resp_body);
+
+        while let Some(frame_result) = stream.next().await {
+            match frame_result {
+                Ok(frame) => {
+                    // 只对 data frame 做解析；trailer / 其他 frame 直接透传
+                    let Some(frame_bytes) = frame.data_ref().cloned() else {
+                        let _ = tx.send(Ok(frame));
+                        continue;
+                    };
+
+                    // 边读边扫
+                    let events = parser.push_chunk(&frame_bytes);
+                    let mut critical_hits: Vec<sieve_core::Detection> = Vec::new();
+
+                    for evt in &events {
+                        match inbound_filter.observe_event(evt) {
+                            Ok(hits) => critical_hits.extend(
+                                hits.into_iter()
+                                    .filter(|d| d.severity == sieve_core::Severity::Critical),
+                            ),
+                            Err(e) => {
+                                tracing::warn!(error = %e, "inbound observe_event error")
+                            }
+                        }
+                        if let Some(tool) = aggregator.process(evt) {
+                            match inbound_filter.on_tool_use_complete(&tool) {
+                                Ok(hits) => critical_hits.extend(
+                                    hits.into_iter()
+                                        .filter(|d| d.severity == sieve_core::Severity::Critical),
+                                ),
+                                Err(e) => {
+                                    tracing::warn!(error = %e, "inbound on_tool_use_complete error")
+                                }
+                            }
+                        }
+                    }
+
+                    // 决策：fail-closed Critical 永远阻断；非 fail-closed 遵 dry_run
+                    let blocking: Vec<sieve_core::Detection> = critical_hits
+                        .into_iter()
+                        .filter(|d| {
+                            sieve_rules::critical_lock::is_fail_closed(&d.rule_id) || !dry_run
+                        })
+                        .collect();
+
+                    if !blocking.is_empty() {
+                        tracing::warn!(count = blocking.len(), "INBOUND BLOCKED");
+                        for d in &blocking {
+                            tracing::warn!(rule = %d.rule_id, "inbound detection");
+                        }
+                        let blocked_payload = build_sieve_blocked_sse(&blocking);
+                        let _ = tx.send(Ok(hyper::body::Frame::data(blocked_payload)));
+                        // drop tx → channel 关闭 → 客户端收到 EOF
+                        return;
+                    }
+
+                    // 透传原始 frame（字节级一致）
+                    let _ = tx.send(Ok(hyper::body::Frame::data(frame_bytes)));
+                }
+                Err(e) => {
+                    let _ = tx.send(Err(std::io::Error::other(format!(
+                        "upstream body error: {e}"
+                    ))));
+                    return;
+                }
+            }
+        }
+
+        // 流结束，flush parser
+        let flushed = parser.flush();
+        for evt in &flushed {
+            let _ = inbound_filter.observe_event(evt);
+            if let Some(tool) = aggregator.process(evt) {
+                let _ = inbound_filter.on_tool_use_complete(&tool);
+            }
+        }
+    });
+
+    let body_stream = UnboundedReceiverStream::new(rx);
+    let response_body: ResponseBody = StreamBody::new(body_stream)
+        .map_err(|e: std::io::Error| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })
+        .boxed();
+
+    Ok(Response::from_parts(resp_parts, response_body))
+}
+
+/// 构造注入给客户端的 `sieve_blocked` SSE event 字节块。
+fn build_sieve_blocked_sse(detections: &[sieve_core::Detection]) -> Bytes {
+    let payload = serde_json::json!({
+        "type": "sieve_blocked",
+        "blocked_at": epoch_secs_string(),
+        "detections": detections.iter().map(|d| serde_json::json!({
+            "rule_id": d.rule_id,
+            "severity": d.severity,
+            "fingerprint": d.fingerprint,
+        })).collect::<Vec<_>>(),
+        "guidance": {
+            "zh": format!(
+                "Sieve 检测到 {} 条入站 Critical 命中。流已截断，响应不完整。\
+                 请检查后用 .sieveignore 加入 fingerprint 白名单。",
+                detections.len()
+            ),
+            "en": format!(
+                "Sieve blocked {} inbound critical detection(s). Stream truncated. \
+                 Review and consider .sieveignore.",
+                detections.len()
+            ),
+        }
+    });
+    Bytes::from(format!("\nevent: sieve_blocked\ndata: {}\n\n", payload))
 }
 
 /// 用已收集的 body bytes 重新构造请求并转发。

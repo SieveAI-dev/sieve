@@ -9,12 +9,15 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 #![warn(missing_docs)]
 
+pub mod address_guard;
 pub mod detection;
 pub mod error;
 pub mod forwarder;
+pub mod fuzz_helpers;
 pub mod pipeline;
 pub mod protocol;
 pub mod sse;
+pub mod tool_use_aggregator;
 
 pub use detection::{fingerprint, Action, ContentSource, Detection, Severity};
 pub use error::{SieveCoreError, SieveCoreResult};
@@ -23,3 +26,4 @@ pub use protocol::unified_message::{
     ContentBlock, MessageMetadata, Role, ToolResultBlock, ToolUseBlock, UnifiedMessage,
     UpstreamProvider,
 };
+pub use tool_use_aggregator::{Aggregator, CompletedToolCall};

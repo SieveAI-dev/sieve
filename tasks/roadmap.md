@@ -1,7 +1,7 @@
 # Sieve 12 周里程碑 Roadmap
 
 > Source of truth: [PRD v1.3 §10](../docs/prd/sieve-prd-v1.3.md#10-12-周里程碑8-周-dogfood--4-周闭测)
-> 状态：**Week 2 出站规则引擎完成，Week 3 入站 Crypto 钩子准备中**。每周开始前更新本文勾选项。
+> 状态：**Week 3 完成，Week 4 入站通用 + benchmark 数据集准备中**。每周开始前更新本文勾选项。
 >
 > 本文是 PRD §10 的执行视图，**任务粒度 / 验收标准** 跟随 PRD 同步更新；本文新增"依赖"列与"风险"列辅助调度。
 
@@ -61,17 +61,17 @@
 
 **完成定义**（PRD §10.1 Week 3）：
 
-- 复现 UCSB 论文 4 类攻击 PoC，Sieve 全部捕获
+- [x] 复现 UCSB 论文 4 类攻击 PoC，Sieve 全部捕获（IN-CR-01/02/05 + IN-CR-04 warn）
 
 **任务清单**：
 
-- SSE Parser + 流式处理框架
-- Tool Use Aggregator（完整工具调用重组）
-- IN-CR-01 地址替换检测（对话历史对比 + Levenshtein）
-- IN-CR-02 危险工具调用拦截（bash rm -rf / curl|sh / eval）
-- IN-CR-05 签名工具 fail-closed（signTransaction / signTypedData 全拦）
-- YOLO mode 不可关闭机制
-- 大量 SSE 边界 fuzz test（跨 chunk / C0 控制字符 / 提前断流）
+- [x] SSE Parser + 流式处理框架
+- [x] Tool Use Aggregator（完整工具调用重组）
+- [x] IN-CR-01 地址替换检测（对话历史对比 + Levenshtein）
+- [x] IN-CR-02 危险工具调用拦截（bash rm -rf / curl|sh / eval）
+- [x] IN-CR-05 签名工具 fail-closed（signTransaction / signTypedData 全拦）
+- [x] YOLO mode 不可关闭机制（运行时检查）
+- [x] 大量 SSE 边界 fuzz test（cargo fuzz + AFL++ 双引擎，14 corpus seed）
 
 **依赖**：Week 2 出站规则引擎基础
 **关键风险**：SSE 流式边界处理复杂，半行 chunk 必须 fuzz 覆盖，否则规则绕过

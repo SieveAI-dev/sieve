@@ -10,6 +10,7 @@
 #![warn(missing_docs)]
 
 pub mod bip39;
+pub mod critical_lock;
 pub mod ed25519;
 pub mod engine;
 pub mod error;

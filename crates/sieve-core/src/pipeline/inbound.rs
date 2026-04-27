@@ -1,3 +1,274 @@
-//! 入站 Pipeline 节点（Week 3 起实现地址替换 / 危险工具调用拦截）。
+//! 入站规则匹配节点（Week 3 起实现）。
 //!
-//! Phase 1 占位；Week 3 实现时添加 InboundFilter 并实现 [`super::PipelineNode`]。
+//! 关联 PRD §5.2 入站检测 P0 表 + UCSB 论文 4 类攻击分类。
+
+use crate::address_guard::{check_substitution, extract_eth_addresses};
+use crate::detection::{fingerprint, Action, ContentSource, Detection, Severity};
+use crate::error::{SieveCoreError, SieveCoreResult};
+use crate::pipeline::streaming::StreamingPipelineNode;
+use crate::protocol::unified_message::ContentSpan;
+use crate::sse::parser::{SseDelta, SseEvent};
+use crate::tool_use_aggregator::CompletedToolCall;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
+use uuid::Uuid;
+
+/// 入站引擎抽象接口（由 sieve-cli 把 sieve_rules::VectorscanEngine 适配进来）。
+///
+/// crate 边界：sieve-core 不直接依赖 sieve-rules，通过本 trait 解耦（.cursorrules §3.3）。
+pub trait InboundEngine: Send + Sync {
+    /// 扫描文本，返回命中的 Detection 列表。
+    ///
+    /// # Errors
+    /// 扫描失败时返回 [`crate::error::SieveCoreError`]。
+    fn scan_text(
+        &self,
+        input: &str,
+        source: ContentSource,
+        body_offset: usize,
+    ) -> SieveCoreResult<Vec<Detection>>;
+
+    /// 检查工具调用，返回命中的 Detection 列表。
+    ///
+    /// # Errors
+    /// 检查失败时返回 [`crate::error::SieveCoreError`]。
+    fn check_tool_use(
+        &self,
+        tool: &CompletedToolCall,
+        source: ContentSource,
+    ) -> SieveCoreResult<Vec<Detection>>;
+}
+
+/// 会话级状态（跨 SSE event 保持）。
+#[derive(Default)]
+pub struct SessionState {
+    /// 当前会话中已见过的 ETH 地址集合（用于 IN-CR-01 地址替换检测）。
+    pub addresses_seen: HashSet<String>,
+}
+
+/// 入站流式过滤节点，实现 [`StreamingPipelineNode`] trait。
+pub struct InboundFilter {
+    engine: Arc<dyn InboundEngine>,
+    session: Mutex<SessionState>,
+    /// `.sieveignore` 加载的 fingerprint 集合（O(1) 查询）。
+    sieveignore: Arc<HashSet<String>>,
+}
+
+impl InboundFilter {
+    /// 新建 InboundFilter。
+    pub fn new(engine: Arc<dyn InboundEngine>, sieveignore: Arc<HashSet<String>>) -> Self {
+        Self {
+            engine,
+            session: Mutex::new(SessionState::default()),
+            sieveignore,
+        }
+    }
+
+    /// 过滤掉 sieveignore 中已知的 fingerprint。
+    fn filter_sieveignore(&self, dets: Vec<Detection>) -> Vec<Detection> {
+        dets.into_iter()
+            .filter(|d| !self.sieveignore.contains(&d.fingerprint))
+            .collect()
+    }
+}
+
+impl StreamingPipelineNode for InboundFilter {
+    fn name(&self) -> &str {
+        "inbound-filter"
+    }
+
+    fn observe_event(&mut self, event: &SseEvent) -> SieveCoreResult<Vec<Detection>> {
+        let mut hits = Vec::new();
+
+        if let SseEvent::ContentBlockDelta {
+            delta: SseDelta::TextDelta { text },
+            ..
+        } = event
+        {
+            // 1. 文本扫描（IN-GEN-* 通用规则 + 危险命令检测）
+            hits.extend(
+                self.engine
+                    .scan_text(text, ContentSource::InboundAssistantText, 0)?,
+            );
+
+            // 2. IN-CR-01 地址替换检测
+            let addrs = extract_eth_addresses(text);
+            let mut session = self
+                .session
+                .lock()
+                .map_err(|_| SieveCoreError::Forwarder("session mutex poisoned".into()))?;
+
+            for addr in addrs {
+                if let Some(orig) = check_substitution(&session.addresses_seen, &addr) {
+                    let fp = fingerprint("IN-CR-01", &format!("{orig}->{addr}"));
+                    hits.push(Detection {
+                        id: Uuid::new_v4(),
+                        rule_id: "IN-CR-01".into(),
+                        severity: Severity::Critical,
+                        action: Action::Block,
+                        source: ContentSource::InboundAssistantText,
+                        span: ContentSpan {
+                            start: 0,
+                            end: addr.len(),
+                        },
+                        evidence_truncated: format!("{orig}->{addr}"),
+                        fingerprint: fp,
+                    });
+                }
+                session.addresses_seen.insert(addr);
+            }
+        }
+
+        Ok(self.filter_sieveignore(hits))
+    }
+
+    fn on_tool_use_complete(
+        &mut self,
+        tool: &CompletedToolCall,
+    ) -> SieveCoreResult<Vec<Detection>> {
+        let hits = self
+            .engine
+            .check_tool_use(tool, ContentSource::InboundToolUseInput)?;
+        Ok(self.filter_sieveignore(hits))
+    }
+
+    fn on_message_stop(&mut self) -> SieveCoreResult<Vec<Detection>> {
+        Ok(Vec::new())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::detection::{fingerprint, Action, ContentSource, Detection, Severity};
+    use crate::protocol::unified_message::ContentSpan;
+    use uuid::Uuid;
+
+    /// Mock InboundEngine：
+    /// - 文本含 "rm -rf" → 返回 IN-CR-02 命中
+    /// - 工具名含 "signTransaction" → 返回 IN-CR-05 命中
+    struct MockEngine;
+
+    impl InboundEngine for MockEngine {
+        fn scan_text(
+            &self,
+            input: &str,
+            source: ContentSource,
+            _body_offset: usize,
+        ) -> SieveCoreResult<Vec<Detection>> {
+            if input.contains("rm -rf") {
+                Ok(vec![Detection {
+                    id: Uuid::new_v4(),
+                    rule_id: "IN-CR-02".into(),
+                    severity: Severity::Critical,
+                    action: Action::Block,
+                    source,
+                    span: ContentSpan { start: 0, end: 5 },
+                    evidence_truncated: "**".into(),
+                    fingerprint: fingerprint("IN-CR-02", "rm -rf"),
+                }])
+            } else {
+                Ok(vec![])
+            }
+        }
+
+        fn check_tool_use(
+            &self,
+            tool: &CompletedToolCall,
+            source: ContentSource,
+        ) -> SieveCoreResult<Vec<Detection>> {
+            if tool.name.contains("signTransaction") {
+                Ok(vec![Detection {
+                    id: Uuid::new_v4(),
+                    rule_id: "IN-CR-05".into(),
+                    severity: Severity::Critical,
+                    action: Action::Block,
+                    source,
+                    span: ContentSpan {
+                        start: 0,
+                        end: tool.name.len(),
+                    },
+                    evidence_truncated: tool.name.clone(),
+                    fingerprint: fingerprint("IN-CR-05", &tool.name),
+                }])
+            } else {
+                Ok(vec![])
+            }
+        }
+    }
+
+    #[test]
+    fn dangerous_shell_in_text_detected() {
+        let mut f = InboundFilter::new(Arc::new(MockEngine), Arc::new(HashSet::new()));
+        let evt = SseEvent::ContentBlockDelta {
+            index: 0,
+            delta: SseDelta::TextDelta {
+                text: "run rm -rf /".into(),
+            },
+        };
+        let hits = f.observe_event(&evt).unwrap();
+        assert!(!hits.is_empty());
+        assert_eq!(hits[0].rule_id, "IN-CR-02");
+    }
+
+    #[test]
+    fn signing_tool_call_detected() {
+        let mut f = InboundFilter::new(Arc::new(MockEngine), Arc::new(HashSet::new()));
+        let tool = CompletedToolCall {
+            id: "x".into(),
+            name: "eth_signTransaction".into(),
+            input: serde_json::json!({}),
+        };
+        let hits = f.on_tool_use_complete(&tool).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].rule_id, "IN-CR-05");
+    }
+
+    #[test]
+    fn address_substitution_detected_across_events() {
+        let mut f = InboundFilter::new(Arc::new(MockEngine), Arc::new(HashSet::new()));
+        // 第一个 event：植入原始地址
+        let _ = f
+            .observe_event(&SseEvent::ContentBlockDelta {
+                index: 0,
+                delta: SseDelta::TextDelta {
+                    text: "send 0xabcdef1234567890abcdef1234567890abcdef12 here".into(),
+                },
+            })
+            .unwrap();
+        // 第二个 event：出现近似（末位 2→3）地址
+        let hits = f
+            .observe_event(&SseEvent::ContentBlockDelta {
+                index: 0,
+                delta: SseDelta::TextDelta {
+                    text: "actually 0xabcdef1234567890abcdef1234567890abcdef13 here".into(),
+                },
+            })
+            .unwrap();
+        assert!(hits.iter().any(|d| d.rule_id == "IN-CR-01"));
+    }
+
+    #[test]
+    fn sieveignore_filters_known_fingerprint() {
+        let fp = fingerprint("IN-CR-02", "rm -rf");
+        let mut ignore = HashSet::new();
+        ignore.insert(fp);
+        let mut f = InboundFilter::new(Arc::new(MockEngine), Arc::new(ignore));
+        let evt = SseEvent::ContentBlockDelta {
+            index: 0,
+            delta: SseDelta::TextDelta {
+                text: "run rm -rf /".into(),
+            },
+        };
+        let hits = f.observe_event(&evt).unwrap();
+        assert!(hits.is_empty(), "sieveignore should suppress the detection");
+    }
+
+    #[test]
+    fn non_text_delta_event_returns_no_hits() {
+        let mut f = InboundFilter::new(Arc::new(MockEngine), Arc::new(HashSet::new()));
+        // MessageStop 不产生命中
+        let hits = f.observe_event(&SseEvent::MessageStop).unwrap();
+        assert!(hits.is_empty());
+    }
+}

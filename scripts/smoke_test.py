@@ -93,6 +93,7 @@ def find_free_port() -> int:
 
 def write_config(port: int, upstream: str = "https://api.anthropic.com") -> Path:
     rules_path = REPO_ROOT / "crates" / "sieve-rules" / "rules" / "outbound.toml"
+    inbound_rules_path = REPO_ROOT / "crates" / "sieve-rules" / "rules" / "inbound.toml"
     f = tempfile.NamedTemporaryFile(
         mode="w", suffix=".toml", prefix="sieve-smoke-", delete=False
     )
@@ -101,6 +102,7 @@ def write_config(port: int, upstream: str = "https://api.anthropic.com") -> Path
         f"port = {port}\n"
         f'bind_addr = "127.0.0.1"\n'
         f'rules_path = "{rules_path}"\n'
+        f'inbound_rules_path = "{inbound_rules_path}"\n'
     )
     f.close()
     return Path(f.name)
@@ -477,6 +479,30 @@ def test_benign_passes_through(base_url: str, stats: Stats, api_key: str) -> Non
     assert_eq("HTTP 200(benign 不被拦截)", 200, status, stats)
 
 
+def test_inbound_rules_loaded_benign_passes(base_url: str, stats: Stats, api_key: str) -> None:
+    print(bold("\n[11] 入站规则集成后 benign 流式仍正常透传"))
+    body = json.dumps({
+        "model": "claude-haiku-4-5",
+        "max_tokens": 32,
+        "stream": True,
+        "messages": [{"role": "user", "content": "say hello in one short sentence"}],
+    }).encode()
+    status, _, body_resp = http_stream_request(
+        base_url,
+        "/v1/messages",
+        headers={
+            "content-type": "application/json",
+            "anthropic-version": "2023-06-01",
+            "x-api-key": api_key,
+        },
+        body=body,
+    )
+    assert_eq("HTTP 200", 200, status, stats)
+    # 关键：body 不含 sieve_blocked event（benign 响应不被入站规则误判）
+    assert_eq("无 sieve_blocked event", False, b"sieve_blocked" in body_resp, stats)
+    assert_contains("含 message_stop event", b"event: message_stop", body_resp, stats)
+
+
 # ──────────── main ────────────
 
 
@@ -521,6 +547,8 @@ def main() -> int:
             test_outbound_block_fake_key(base_url, stats)
             if api_key:
                 test_benign_passes_through(base_url, stats, api_key)
+                # Week 3 新增：入站规则集成后 benign 流式仍正常透传
+                test_inbound_rules_loaded_benign_passes(base_url, stats, api_key)
     except FileNotFoundError as e:
         print(red(f"\n  ✗ {e}"))
         return 2

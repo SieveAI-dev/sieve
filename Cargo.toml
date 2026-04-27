@@ -4,6 +4,10 @@ members = [
     "crates/sieve-core",
     "crates/sieve-rules",
     "crates/sieve-cli",
+    "fuzz",
+]
+exclude = [
+    "fuzz_afl",  # AFL crate 与 cargo fuzz 编译器要求不同，workspace 隔离
 ]
 
 [workspace.package]

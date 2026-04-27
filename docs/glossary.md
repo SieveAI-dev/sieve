@@ -89,6 +89,26 @@ Sieve 的三个主要 crate：
 
 ## C. 检测概念层
 
+### AddressGuard
+
+IN-CR-01 的实现模块，使用 strsim crate 的 Levenshtein 距离检测一字符近邻地址替换攻击。触发条件：candidate 与会话历史中 addresses_seen 内某地址长度相等且 Levenshtein distance ∈[1,3]。Phase 1 仅覆盖 ETH 地址（0x 前缀 40 字符十六进制），BTC 地址 Week 4 加入。
+
+### Aggregator
+
+Tool Use partial_json 跨 SSE event 聚合器（`sieve_core::sse::aggregator`）。负责将流式 SSE 中分片的 tool_use JSON 输入拼接完整，在 content_block_stop event 后 deserialize 为 `ToolUseBlock`，供 `InboundFilter` 做规则检测。
+
+### critical_lock
+
+`sieve_rules::critical_lock` 模块，存放 `FAIL_CLOSED_RULES` 常量（出站 OUT-01~12 全部 + 入站 11 条 critical 规则）及 `enforce_action(rule_id, requested) -> Action` 函数。运行时在 OutboundAdapter / InboundAdapter scan 时调用，即使 manifest action 写 allow / mark 也强制返回 `Action::Block`，且不受 `dry_run` 配置影响。
+
+### sieve_blocked event
+
+入站截流时注入的 SSE event（Week 3 落地）。Sieve 检测到入站 Critical 命中后，在 SSE 流中注入此 event 然后关闭连接。数据格式含 `type: "sieve_blocked"` / `blocked_at`（unix epoch）/ `detections[]`（rule_id + severity + fingerprint）/ `guidance`（zh + en）。关联 [api-reference.md §7.3](./api/api-reference.md)。
+
+### SseParser
+
+增量 SSE 解析器（`sieve_core::sse::parser::SseParser`），提供 `push_chunk` + `flush` 接口，无缓冲整流。Week 3 实现，覆盖 5 类边界：半行 chunk / 跨 chunk 分隔符 / C0 控制字符 / 多 event 粘包 / 提前断流。所有 SSE 相关 PR 必须附 fuzz 覆盖（PRD §9 #5）。
+
 ### tool_use
 
 Anthropic Messages API 中代表模型工具调用的结构。包含 tool name（bash、write_file 等）、input（JSON 对象）、id。Sieve 的入站检测主要围绕 tool_use 的合法性和危险性判断。
