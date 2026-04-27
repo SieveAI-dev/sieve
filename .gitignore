@@ -1,0 +1,175 @@
+# =============================================================================
+# Sieve .gitignore
+# 项目状态：Pre-Code（无 Cargo workspace），但提前锁定 Rust + 文档约束
+# =============================================================================
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Rust / Cargo
+# ──────────────────────────────────────────────────────────────────────────────
+/target/
+**/*.rs.bk
+*.pdb
+
+# ⚠️ Cargo.lock 必须入库（reproducible build 要求，见 ADR-006）——不要 ignore
+
+# Fuzz（PRD §9 #5 SSE fuzz test 必须；语料 / artifacts 不入库，但 fuzz_targets/ 入库）
+/fuzz/target/
+/fuzz/corpus/
+/fuzz/artifacts/
+/fuzz/coverage/
+
+# 性能 benchmark 输出
+/criterion/
+/target/criterion/
+
+# Coverage
+/coverage/
+*.profraw
+*.profdata
+tarpaulin-report.html
+cobertura.xml
+lcov.info
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 项目特定
+# ──────────────────────────────────────────────────────────────────────────────
+
+# 临时文档（.cursorrules §1.1 第 3 条：用完即删）
+docs/_temp/
+*.draft.md
+*.draft.toml
+_temp-*.md
+_draft-*.md
+
+# 用户本地白名单与审计库（仅当被错放到 repo 时；正常运行时位于 ~/.sieve/）
+.sieveignore
+audit.db
+audit.db-shm
+audit.db-wal
+*.sieve.db
+
+# License key（绝不入库）
+.sieve-license
+sieve-license.json
+*.license
+
+# Sieve 运行时数据（防止误入库）
+.sieve/
+sieve-runtime/
+
+# 规则下发包（用户运行时下载）
+rules-v*.tar.zst
+rules-v*.sig
+rules-v*.changelog.md
+
+# Sigstore 签名产物（CI 在 release 时生成，本地构建时如有也不入库）
+*.sigstore
+*.bundle.json
+cosign.key
+cosign.pub
+!docs/**/*.bundle.json   # 文档示例可保留
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 日志
+# ──────────────────────────────────────────────────────────────────────────────
+*.log
+logs/
+sieve.log*
+launchd.*.log
+
+# ──────────────────────────────────────────────────────────────────────────────
+# IDE / 编辑器
+# ──────────────────────────────────────────────────────────────────────────────
+
+# JetBrains
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# VS Code（项目共享配置可保留）
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
+
+# Sublime / Vim / Emacs
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+*~
+.\#*
+\#*\#
+
+# Cursor
+.cursor/
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 操作系统
+# ──────────────────────────────────────────────────────────────────────────────
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.Spotlight-V100
+.Trashes
+.fseventsd
+
+# Linux
+.directory
+.Trash-*
+.nfs*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 杂项
+# ──────────────────────────────────────────────────────────────────────────────
+
+# 备份
+*.bak
+*.backup
+*.orig
+
+# 压缩
+*.zip
+*.tar.gz
+*.tgz
+!docs/**/*.zip
+!docs/**/*.tgz
+
+# 节点（如未来加 docs 工具链）
+node_modules/
+.npm/
+.pnpm-debug.log
+
+# Python（如未来加 benchmark / 数据处理脚本）
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# 环境变量（绝不入库）
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Claude Code 本地配置（仅 .local.* 不入库；项目共享 settings.json / agents/ 可入库）
+# ──────────────────────────────────────────────────────────────────────────────
+.claude/settings.local.json
+.claude/.session.json
+.claude/cache/
