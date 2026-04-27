@@ -70,32 +70,40 @@ jobs:
   fuzz-quick:
     name: fuzz-quick (cargo fuzz, 60s/target)
     runs-on: ubuntu-latest
-    # 修：cargo-fuzz 0.13.1（最新 release）在 RUSTFLAGS 注入
-    # `-Cpasses=sancov-module`，这是 LLVM legacy pass plugin 写法。
-    # 较新 nightly 升级到 LLVM 19/20 的新 pass manager 后已不识别此 flag，
-    # 导致 SanCov pass 不运行，PCGuard 全局变量从未生成；
-    # 而 `-Zsanitizer=address` 仍然 emit asan.module_dtor 对
-    # `__sancov_gen_.*` 的引用，链接阶段大量悬空（rust-lld 与 GNU bfd
-    # 都报错，证明问题在目标文件本身而非链接器）。
+    # 真根因（已本地 macOS 复现）：cargo-fuzz src/project.rs 在 Linux
+    # target 注入 `-Cllvm-args=-sanitizer-coverage-stack-depth`，
+    # 该 flag 让 ASan/SanCov instrumentation emit 对 `__sancov_lowest_stack`
+    # / `__sancov_gen_.*` 的 stack-depth 引用。但新版 LLVM 19/20 的新
+    # pass manager 不再识别同时注入的 `-Cpasses=sancov-module`（legacy
+    # pass plugin 写法），SanCov pass 不运行 → 引用的符号没人定义
+    # → 链接阶段悬空。macOS 不加 stack-depth flag 所以无症状（本地误导
+    # 多次试错），但 CI 是 x86_64-unknown-linux-gnu 必触发；本地手工
+    # 加 stack-depth 在 macOS 也能稳定复现 `__sancov_lowest_stack` undefined。
     #
-    # 修法：pin nightly 到 cargo-fuzz 0.13.1 release 当期已知能跑的版本
-    # （2024-09 与 cargo-fuzz 0.13.1 同期），等 cargo-fuzz 上游修复
-    # 此问题（rust-fuzz/cargo-fuzz#494 等 issue）后再升级 nightly。
-    env:
-      NIGHTLY: nightly-2025-06-01
+    # 修法：clone cargo-fuzz master + sed 删 stack-depth 行 + cargo
+    # install --path。等上游迁移到新 pass manager 兼容 flag 切 release 后回切。
     steps:
       - uses: actions/checkout@v4
       - run: rustup show
-      - run: rustup install ${{ env.NIGHTLY }} --profile minimal
+      - run: rustup install nightly --profile minimal
       - name: 安装构建依赖
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build pkg-config libssl-dev libboost-dev ragel
-      - run: cargo install cargo-fuzz --locked
+      - name: 装 cargo-fuzz（patched：删除 Linux 专属 stack-depth flag）
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/rust-fuzz/cargo-fuzz /tmp/cargo-fuzz
+          cd /tmp/cargo-fuzz
+          # 验证目标行存在；若上游已改名/移除则失败而非静默继续
+          grep -q 'sanitizer-coverage-stack-depth' src/project.rs
+          sed -i '/sanitizer-coverage-stack-depth/d' src/project.rs
+          ! grep -q 'sanitizer-coverage-stack-depth' src/project.rs
+          cargo install --path . --locked
       - uses: Swatinem/rust-cache@v2
       - name: Fuzz sse_parser (60s)
-        run: cargo +${{ env.NIGHTLY }} fuzz run sse_parser -- -max_total_time=60
+        run: cargo +nightly fuzz run sse_parser -- -max_total_time=60
       - name: Fuzz tool_use_aggregator (60s)
-        run: cargo +${{ env.NIGHTLY }} fuzz run tool_use_aggregator -- -max_total_time=60
+        run: cargo +nightly fuzz run tool_use_aggregator -- -max_total_time=60
       - name: Fuzz inbound_filter (60s)
-        run: cargo +${{ env.NIGHTLY }} fuzz run inbound_filter -- -max_total_time=60
+        run: cargo +nightly fuzz run inbound_filter -- -max_total_time=60
