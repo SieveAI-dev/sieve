@@ -13,6 +13,33 @@
 
 ## [Unreleased](https://github.com/doskey/sieve/compare/v0.1.0...HEAD)
 
+### Known Issues — Week 4 dogfood 实测发现
+
+#### 🔴 P0：入站检测仅覆盖流式 SSE，非流式 JSON 响应里的 tool_use 完全绕过
+- 当前 `daemon::forward_with_inbound_inspection` 把 response body 喂给 `SseParser` +
+  `Aggregator` + `InboundFilter`，假定响应是 `text/event-stream` 字节流
+- Anthropic Messages API 同样支持非流式调用：客户端不传 `stream:true`（或显式
+  `stream:false`）时，响应是单个 `application/json` body。Sieve 当前对这种响应
+  原样透传，**所有入站规则失效**——IN-CR-02 / IN-CR-03 / IN-CR-04 / IN-CR-05 /
+  IN-GEN-* 都被绕过
+- 攻击者只需让 SDK 发非流式请求，就能让模型在 tool_use 里写 `>> ~/.bashrc` /
+  `eth_signTransaction` / `rm -rf /` 而 Sieve 完全看不到。PRD §5.2「入站是 Sieve
+  真正的护城河」语境下属严重产品级缺陷
+- **修复进度**：roadmap Week 4 加入硬阻塞项，2026-05-04 前必须关闭。修复路径：
+  daemon 按 response content-type 路由，JSON 分支解析 `AnthropicResponse.content[]`
+  → 提取 tool_use → 走 `InboundFilter::on_tool_use_complete`；fail-closed Critical
+  时把 body 替换为 `sieve_blocked` 等价 JSON。集成测试加 mock 非流式 upstream
+  覆盖
+- 详见 [tasks/lessons.md「入站检测仅覆盖流式 SSE」](../../tasks/lessons.md) /
+  [tasks/roadmap.md Week 4](../../tasks/roadmap.md)
+
+#### claude `-p` headless 默认走 OAuth 直连（dogfood 操作记录）
+- Claude Max OAuth 优先级高于 `ANTHROPIC_BASE_URL`，非 `--bare` 模式 claude CLI
+  会忽略代理直连 claude.ai 后端
+- 必须用 `claude --bare -p` 强制走 `ANTHROPIC_API_KEY` auth 路径才会经过代理
+- 不影响 Sieve 代码，只影响 dogfood 流程；development.md 待补「dogfood / 调试」段
+- 详见 [tasks/lessons.md](../../tasks/lessons.md)
+
 ### [BREAKING] — Week 4 (2026-04-27)
 
 #### rule ID 重命名：旧 `IN-CR-04` markdown exfil → `IN-GEN-04`

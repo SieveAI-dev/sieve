@@ -131,11 +131,19 @@ bind_addr = "127.0.0.1"
 EOF
 
 # 2. 启动
-RUST_LOG=info cargo run -p sieve-cli -- start --config /tmp/sieve.toml
+SIEVE_LOG=info cargo run -p sieve-cli -- start --config /tmp/sieve.toml
 
 # 3. 用 Claude Code 接入（另一个终端）
-ANTHROPIC_BASE_URL=http://127.0.0.1:11453 claude -p "hello"
+#    重要：--bare 强制走 ANTHROPIC_API_KEY 路径，否则 Claude Max OAuth 会绕开
+#    ANTHROPIC_BASE_URL 直连 claude.ai 后端，daemon 收不到流量。
+ANTHROPIC_BASE_URL=http://127.0.0.1:11453 claude --bare -p "hello"
+
+# 4. 验证流量过代理：daemon 日志应显示 detection 或 INBOUND/OUTBOUND BLOCKED；
+#    若 daemon 日志为空但 claude 仍正常返回，说明请求绕过代理（典型：忘了 --bare）。
 ```
+
+> daemon 日志环境变量是 `SIEVE_LOG`（不是 `RUST_LOG`），格式 `<crate>=<level>,fallback`，
+> 例如 `SIEVE_LOG=sieve_cli=debug,info`。
 
 ### 3.5 系统依赖（macOS）
 
