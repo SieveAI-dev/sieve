@@ -9,6 +9,57 @@
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 
+/// 从文本中提取所有 **全部在 BIP39 词表中** 的连续 12/15/18/21/24 词窗口。
+///
+/// 算法：
+/// 1. 按空白分词；
+/// 2. 找出所有连续 token 中每个都在 wordlist 的最长前缀 runs；
+/// 3. 对每个 run，用滑窗按合法词数（12/15/18/21/24）提取候选。
+///
+/// 返回每个候选窗口的 token Vec；调用方再对每个 Vec 调 `verify_checksum`。
+///
+/// 关联 PRD §9 #4 差异化点：只有全部在词表 **且** checksum 通过的才定级 Critical。
+pub fn candidate_bip39_windows<'a>(
+    tokens: &'a [&'a str],
+    wordlist_index: &HashMap<&'static str, usize>,
+) -> Vec<Vec<&'a str>> {
+    const VALID_COUNTS: [usize; 5] = [12, 15, 18, 21, 24];
+
+    // 标记每个 token 是否在词表中
+    let in_wl: Vec<bool> = tokens
+        .iter()
+        .map(|t| wordlist_index.contains_key(t))
+        .collect();
+
+    let n = tokens.len();
+    let mut results = Vec::new();
+
+    // 对每个起始位置，找连续在词表的 run 长度
+    let mut i = 0;
+    while i < n {
+        if !in_wl[i] {
+            i += 1;
+            continue;
+        }
+        // 计算从 i 开始的连续词表词 run 长度
+        let mut run_len = 0;
+        while i + run_len < n && in_wl[i + run_len] {
+            run_len += 1;
+        }
+        // 在此 run 内滑窗提取所有合法词数窗口
+        for &count in &VALID_COUNTS {
+            if run_len >= count {
+                for start in 0..=(run_len - count) {
+                    results.push(tokens[i + start..i + start + count].to_vec());
+                }
+            }
+        }
+        i += run_len;
+    }
+
+    results
+}
+
 /// 验证 BIP39 助记词的 SHA-256 checksum 位是否正确。
 ///
 /// 仅验证 checksum，不验证词列表完整性——调用方应已用 wordlist 过滤过未知词。

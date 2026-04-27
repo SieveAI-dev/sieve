@@ -177,23 +177,8 @@ allowlist_regexes = []
 allowlist_stopwords = []
 
 # ---------------------------------------------------------------------------
-# OUT-12: BIP39 助记词（12/15/18/21/24 英文词）
-#
-# 此 pattern 为运行时占位符。
-# rules-engine-agent 加载时检测到 __BIP39_PREFILTER_PLACEHOLDER__，
-# 改用 sieve_rules::bip39 模块从 wordlist 动态生成 vectorscan 预筛 pattern。
-# 实际验证（SHA-256 checksum + 词数）在 sieve_rules::bip39 二次 pass 完成。
-#
-# 关联 PRD §9 硬约束 #4: BIP39 必须做 SHA-256 checksum 验证，仅词表匹配不足以定级 Critical。
-# TODO(rules-engine-agent): 实现 bip39_pattern_from_wordlist() 在加载时替换占位符。
+# OUT-09（BIP39 助记词）在 engine_adapter 中通过 second-pass 实现，
+# 不使用 vectorscan 占位规则。
+# 详见 crates/sieve-cli/src/engine_adapter.rs OutboundAdapter::scan_text。
+# 关联 PRD §9 #4 差异化点：SHA-256 checksum 验证在 second-pass 完成。
 # ---------------------------------------------------------------------------
-[[rules]]
-id = "OUT-12"
-description = "BIP39 mnemonic (12/15/18/21/24 English wordlist words) - vectorscan pre-filter only, BIP39 SHA-256 checksum verified in second pass"
-pattern = '__BIP39_PREFILTER_PLACEHOLDER__'
-severity = "critical"
-action = "block"
-entropy_min = 0.0
-keywords = []
-allowlist_regexes = []
-allowlist_stopwords = []

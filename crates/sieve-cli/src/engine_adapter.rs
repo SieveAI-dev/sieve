@@ -170,10 +170,15 @@ impl InboundEngine for InboundAdapter {
 }
 
 impl OutboundEngine for OutboundAdapter {
-    /// 扫描文本，返回已过滤（placeholder + per-rule allowlist）的命中列表。
+    /// 扫描文本，返回已过滤（per-rule allowlist）的命中列表，并执行 BIP39 second-pass。
     ///
     /// - `body_byte_offset`：该文本段在原始请求 body 中的绝对起始偏移，
     ///   用于生成 `Detection.span`（精确字节区间，half-open [start, end)）。
+    ///
+    /// BIP39 second-pass（PRD §9 #4）：vectorscan 之后独立扫描。
+    /// 先提取全部在词表的连续词窗口，再做 SHA-256 checksum 验证，
+    /// **仅 checksum 通过才生成 Critical Detection**。
+    /// 词表命中但 checksum 失败的窗口**不得**定级 Critical（差异化要求）。
     fn scan_text(
         &self,
         input: &str,
@@ -188,7 +193,7 @@ impl OutboundEngine for OutboundAdapter {
         for hit in hits {
             let rule = self.rule_lookup.get(&hit.rule_id);
 
-            // placeholder / per-rule allowlist 过滤
+            // per-rule allowlist 过滤
             let evidence_start = hit.start.min(input.len());
             let evidence_end = hit.end.min(input.len());
             let matched_text = &input[evidence_start..evidence_end];
@@ -220,6 +225,39 @@ impl OutboundEngine for OutboundAdapter {
                 fingerprint: fp,
             });
         }
+
+        // BIP39 second-pass（关联 PRD §9 #4 差异化点）
+        // vectorscan 不覆盖 BIP39，此处独立扫描：
+        // 1. 按空白分词，提取全在词表的连续窗口
+        // 2. 对每个窗口做 SHA-256 checksum 验证
+        // 3. 仅 checksum 通过的窗口定级 Critical（OUT-09）
+        let wl = sieve_rules::wordlist::wordlist_index();
+        let tokens: Vec<&str> = input.split_whitespace().collect();
+        let candidates = sieve_rules::bip39::candidate_bip39_windows(&tokens, wl);
+        for window in candidates {
+            if sieve_rules::bip39::verify_checksum(&window, wl) {
+                let window_text = window.join(" ");
+                let evidence_truncated = redact_evidence(&window_text);
+                let fp = fingerprint("OUT-09", &window_text);
+                detections.push(Detection {
+                    id: Uuid::new_v4(),
+                    rule_id: "OUT-09".to_string(),
+                    severity: Severity::Critical,
+                    action: Action::Block,
+                    source,
+                    // span 为整个输入范围的近似（无精确字节偏移）
+                    span: ContentSpan {
+                        start: body_byte_offset,
+                        end: body_byte_offset + input.len(),
+                    },
+                    evidence_truncated,
+                    fingerprint: fp,
+                });
+                // 同一文本只需报一次（找到一个有效助记词即触发拦截）
+                break;
+            }
+        }
+
         Ok(detections)
     }
 }
