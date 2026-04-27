@@ -63,6 +63,96 @@ severity = "critical"
 action = "block"
 keywords = ["dd"]
 
+# ---------------------------------------------------------------------------
+# IN-CR-03 敏感路径访问（PRD §5.2，Week 4）
+# 处置：High warn 5s（合法用例存在，需用户判断；Critical block 误报代价过高）
+# 复用 engine_adapter::check_tool_use → tool.input JSON 喂给 vectorscan 的通道。
+# ---------------------------------------------------------------------------
+[[rules]]
+id = "IN-CR-03-SSH-PRIVATE"
+description = "SSH private key file (id_rsa / id_ed25519 / id_ecdsa / id_dsa)"
+pattern = '''\b(?:id_rsa|id_ed25519|id_ecdsa|id_dsa)(?:\.pub)?\b'''
+severity = "high"
+action = "warn"
+keywords = ["id_rsa", "id_ed25519", "id_ecdsa", "id_dsa"]
+allowlist_regexes = ['''\.pub\b''']
+
+[[rules]]
+id = "IN-CR-03-SSH-DIR"
+description = "SSH directory access (~/.ssh/...)"
+pattern = '''~/\.ssh(?:/[a-zA-Z0-9_\-\.]+)?'''
+severity = "high"
+action = "warn"
+keywords = [".ssh"]
+allowlist_regexes = ['''~/\.ssh/(?:known_hosts|authorized_keys|config|environment)\b''']
+
+[[rules]]
+id = "IN-CR-03-AWS-CREDS"
+description = "AWS credentials file (~/.aws/credentials)"
+pattern = '''(?i)\.aws/credentials\b'''
+severity = "high"
+action = "warn"
+keywords = ["credentials"]
+
+[[rules]]
+id = "IN-CR-03-DOTENV"
+description = "dotenv file (.env / .env.local / .env.production)"
+pattern = '''\.env\b(?:\.[a-zA-Z0-9_\-]+)*'''
+severity = "high"
+action = "warn"
+keywords = [".env"]
+allowlist_regexes = ['''(?i)\.env\.(?:example|template|sample|dist|test|ci|cypress)\b''']
+
+[[rules]]
+id = "IN-CR-03-ETH-KEYSTORE"
+description = "Ethereum/geth keystore file (UTC--<timestamp>--<40hex>)"
+pattern = '''(?i)UTC--[0-9T\-Z\.]{19,32}--[a-fA-F0-9]{40}\b'''
+severity = "high"
+action = "warn"
+keywords = ["UTC--"]
+
+[[rules]]
+id = "IN-CR-03-GPG-DIR"
+description = "GPG private key directory (~/.gnupg)"
+pattern = '''~/\.gnupg(?:/[a-zA-Z0-9_\-\.]+)?'''
+severity = "high"
+action = "warn"
+keywords = [".gnupg"]
+
+[[rules]]
+id = "IN-CR-03-NETRC"
+description = "netrc credential file"
+# 注意：前置不能用 \b——常见路径 `~/.netrc` / `/Users/x/.netrc` 中 `.` 与
+# 周围非 word 字符（`/` `~`）之间无 word boundary。仅靠尾部 \b 锚定即可。
+pattern = '''\.netrc\b'''
+severity = "high"
+action = "warn"
+keywords = [".netrc"]
+
+[[rules]]
+id = "IN-CR-03-MACOS-KEYCHAIN"
+description = "macOS Keychain database (login.keychain-db / System.keychain)"
+pattern = '''\b(?:login|System)\.keychain(?:-db)?\b'''
+severity = "high"
+action = "warn"
+keywords = ["keychain"]
+
+[[rules]]
+id = "IN-CR-03-GCP-CREDS"
+description = "GCP application default credentials (~/.config/gcloud/...)"
+pattern = '''(?i)\.config/gcloud/(?:application_default_credentials\.json|legacy_credentials/[^\s"']*)'''
+severity = "high"
+action = "warn"
+keywords = ["gcloud"]
+
+[[rules]]
+id = "IN-CR-03-SOLANA-KEYPAIR"
+description = "Solana CLI default keypair (~/.config/solana/*.json)"
+pattern = '''(?i)\.config/solana/[a-zA-Z0-9_\-]+\.json\b'''
+severity = "high"
+action = "warn"
+keywords = ["solana"]
+
 # IN-CR-04 markdown exfil（候选，Week 3 仅 warn）
 [[rules]]
 id = "IN-CR-04"

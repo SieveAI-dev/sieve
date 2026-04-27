@@ -13,7 +13,35 @@
 
 ## [Unreleased](https://github.com/doskey/sieve/compare/v0.1.0...HEAD)
 
-### Added — Week 3 (2026-04-27 完成)
+### Added — Week 4 进行中 (2026-04-27 起)
+
+#### 入站敏感路径检测（IN-CR-03，PRD §5.2 / Roadmap Week 4）
+- 10 条 IN-CR-03-* 子规则，全部 high warn（非 fail-closed Critical，给用户判断空间），完整覆盖 US-07 验收清单（SSH / AWS / GCP / Solana / Ethereum keystore）：
+  - `IN-CR-03-SSH-PRIVATE`：SSH 私钥文件名（id_rsa / id_ed25519 / id_ecdsa / id_dsa），allowlist `*.pub`
+  - `IN-CR-03-SSH-DIR`：`~/.ssh/...`，allowlist `known_hosts` / `authorized_keys` / `config` / `environment`
+  - `IN-CR-03-AWS-CREDS`：`~/.aws/credentials`（不拦 `~/.aws/config`）
+  - `IN-CR-03-DOTENV`：`.env` / `.env.local` / `.env.production` 等，allowlist `.env.example` / `.template` / `.sample` / `.dist` / `.test` / `.ci`
+  - `IN-CR-03-ETH-KEYSTORE`：geth keystore 文件名 `UTC--<timestamp>--<40hex>`
+  - `IN-CR-03-GPG-DIR`：`~/.gnupg/...`
+  - `IN-CR-03-NETRC`：`.netrc` 凭据文件
+  - `IN-CR-03-MACOS-KEYCHAIN`：`login.keychain-db` / `System.keychain`
+  - `IN-CR-03-GCP-CREDS`：`~/.config/gcloud/application_default_credentials.json` / `legacy_credentials/`
+  - `IN-CR-03-SOLANA-KEYPAIR`：`~/.config/solana/*.json`（CLI 默认 keypair 位置）
+- 复用 IN-CR-02 已有 `engine_adapter::check_tool_use` 通道——`tool.input` JSON 序列化后喂给 vectorscan，无需新增扫描器
+- daemon 当前仅记录 detection 到日志（`tracing::warn!`），不阻塞流量；5s 倒计时弹窗 UI 留 Week 5
+
+#### Engine: longest-match-per-start dedup（sieve-rules::engine）
+- `VectorscanEngine::scan` 对带量词（`{m,n}` / `(?:..)*`）的 pattern 在多个 endpoint 触发的回调，按 `(rule_id, start)` 去重保留最长 end
+- 修复 IN-CR-03-DOTENV / SSH-DIR allowlist 失效问题（短 match `.env` 拿不到完整文件名上下文，绕过 `\.env\.example` 白名单）
+- 输出排序确定（`(start, rule_id)` 字典序），下游处理与测试可重现
+- 副作用：OUT-06 JWT / OUT-08 Stripe 等贪婪 pattern 现在每个起点仅返回最长 match，detection 数量减少但语义不变
+
+#### 测试
+- sieve-rules 新增 16 个单元测试（IN-CR-03 8 正例 + 6 allowlist 反例 + 2 通用 benign）+ 1 个引擎 dedup 测试
+- sieve-cli 新增 1 个端到端集成测试（`in_cr_03_sensitive_path_warn_passes_through`）
+- 全 workspace 174/174 测试通过（Week 3 → Week 4：158 → 174，+16 新增 0 回归）
+
+
 
 #### 入站 SSE 流式处理（sieve-core）
 - `SseParser`：增量解析器，push_chunk + flush 接口，**无缓冲整流**

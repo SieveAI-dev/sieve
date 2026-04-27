@@ -87,7 +87,7 @@
 
 **任务清单**：
 
-- IN-CR-03 敏感路径访问（~/.ssh / ~/.aws / .env / keystore）
+- [x] IN-CR-03 敏感路径访问（10 条规则：SSH / AWS / GCP / Solana / Ethereum keystore / GPG / netrc / macOS Keychain / dotenv，含 allowlist；high warn 级别。Week 5 接 5s 倒计时弹窗）
 - IN-CR-04 持久化机制（crontab / launchd / systemd / .bashrc）
 - IN-GEN-01~05 全部 P0 通用规则（shell 危险模式 / 远程脚本 / 编码执行 / Markdown exfil）
 - 处置矩阵完整实现（Critical block / High warn 5s / Medium 标记）

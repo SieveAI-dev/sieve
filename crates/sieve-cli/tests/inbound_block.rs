@@ -584,6 +584,69 @@ async fn ucsb_attack_4_markdown_exfil_warn_only_passes_through() {
     );
 }
 
+// ─── IN-CR-03: 敏感路径访问（warn-only，Week 4，PRD §5.2）─────────────────────
+
+/// tool_use input 含 `~/.ssh/id_rsa` → IN-CR-03-SSH-PRIVATE 触发 high warn detection。
+///
+/// IN-CR-03 是 warn 级别（非 fail-closed Critical），不应注入 sieve_blocked 截流——
+/// 用户可能合法请求读取 SSH 密钥（如配置 git）。daemon 仅记录 detection 到日志，
+/// 流量透传。Week 5 接 CLI 弹窗后会变成 5s 倒计时确认。
+///
+/// 关联 PRD §5.2 IN-CR-03 / Roadmap Week 4。
+#[tokio::test]
+async fn in_cr_03_sensitive_path_warn_passes_through() {
+    let attack_payload = sse_response(&[
+        (
+            "message_start",
+            r#"{"type":"message_start","message":{"id":"m","type":"message","role":"assistant","content":[],"model":"x","usage":{"input_tokens":1,"output_tokens":1}}}"#,
+        ),
+        (
+            "content_block_start",
+            r#"{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"t3","name":"Read","input":{}}}"#,
+        ),
+        // input 含敏感路径 ~/.ssh/id_rsa（IN-CR-03-SSH-PRIVATE pattern）
+        (
+            "content_block_delta",
+            r#"{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"file_path\": \"~/.ssh/id_rsa\"}"}}"#,
+        ),
+        (
+            "content_block_stop",
+            r#"{"type":"content_block_stop","index":1}"#,
+        ),
+        ("message_stop", r#"{"type":"message_stop"}"#),
+    ]);
+
+    let (upstream, _up) = spawn_mock_sse_upstream(move |_req| {
+        let body = attack_payload.clone();
+        async move { (hyper::StatusCode::OK, body) }
+    })
+    .await;
+
+    let (port, _g) = spawn_sieve_daemon(&format!("http://{upstream}"));
+    let (status, body) = fetch_response_body(port).await;
+
+    assert_eq!(
+        status,
+        hyper::StatusCode::OK,
+        "IN-CR-03 warn-level should not change status code"
+    );
+
+    let body_str = String::from_utf8_lossy(&body);
+    assert!(
+        !body_str.contains("sieve_blocked"),
+        "IN-CR-03 is warn-only, must not inject sieve_blocked:\n{body_str}"
+    );
+    // 透传：原始 SSE event 结构应在 body 中保留
+    assert!(
+        body_str.contains("tool_use"),
+        "warn-level response should retain original tool_use event:\n{body_str}"
+    );
+    assert!(
+        body_str.contains("message_stop"),
+        "warn-level response should contain message_stop event:\n{body_str}"
+    );
+}
+
 // ─── P0-3: Prompt 地址 seed → 首轮地址替换检测（IN-CR-01）──────────────────────
 
 /// request body 中含 EVM 地址 A，上游 SSE 仅输出与 A Levenshtein 距离 1 的地址 B。
