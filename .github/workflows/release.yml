@@ -1,0 +1,230 @@
+name: Release
+
+on:
+  # ADR-011: Tag-based release 在 Week 12 GA 时启用；GA 前仅用 workflow_dispatch 触发
+  # 以减少 Rekor 透明日志记录 release 节奏（防止对手推断项目进度）
+  # TODO(Week 12 GA): 取消注释以下三行，启用 tag-based release
+  # push:
+  #   tags:
+  #     - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要构建的 tag（例如 v0.1.0-alpha）"
+        required: true
+
+# ADR-006: id-token: write 用于 cosign keyless OIDC 签名
+# contents: write 用于上传 release assets
+permissions:
+  contents: write
+  id-token: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  # Tier 1 平台：reproducible build + cosign 签名
+  # ADR-006 §2: Tier 1 失败 → release 中止（hard gate）
+  # ─────────────────────────────────────────────────────────────
+  reproducible-build:
+    name: Reproducible build (${{ matrix.target }})
+    strategy:
+      fail-fast: true  # Tier 1 任意失败立即中止
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-14
+            artifact: sieve-aarch64-apple-darwin
+          - target: x86_64-apple-darwin
+            os: macos-14
+            artifact: sieve-x86_64-apple-darwin
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            artifact: sieve-x86_64-unknown-linux-musl
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 需要完整 git 历史以获取 commit timestamp
+
+      - name: 安装构建依赖（Linux）
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build pkg-config musl-tools ragel
+
+      - name: 安装构建依赖（macOS）
+        if: runner.os == 'macOS'
+        run: |
+          brew install cmake ninja pkg-config ragel
+
+      - name: 安装 toolchain + 目标平台
+        run: |
+          rustup show
+          rustup target add ${{ matrix.target }}
+
+      # ADR-006 §2: SOURCE_DATE_EPOCH = commit timestamp，消除构建时间污染
+      - name: 设置 SOURCE_DATE_EPOCH
+        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >> $GITHUB_ENV
+
+      # ADR-006 §2: --remap-path-prefix 去除开发者路径污染
+      - name: 第一次构建
+        env:
+          SOURCE_DATE_EPOCH: ${{ env.SOURCE_DATE_EPOCH }}
+          RUSTFLAGS: "-D warnings --remap-path-prefix=$HOME=/build --remap-path-prefix=$GITHUB_WORKSPACE=/src"
+        run: |
+          cargo build --release --locked --target ${{ matrix.target }} -p sieve-cli
+          cp target/${{ matrix.target }}/release/sieve sieve-build1
+          shasum -a 256 sieve-build1 | tee sha256-build1.txt
+
+      # ADR-006 §2: 清理后重建，SHA-256 必须一致才算 reproducible
+      - name: 清理并第二次构建
+        env:
+          SOURCE_DATE_EPOCH: ${{ env.SOURCE_DATE_EPOCH }}
+          RUSTFLAGS: "-D warnings --remap-path-prefix=$HOME=/build --remap-path-prefix=$GITHUB_WORKSPACE=/src"
+        run: |
+          cargo clean
+          cargo build --release --locked --target ${{ matrix.target }} -p sieve-cli
+          cp target/${{ matrix.target }}/release/sieve sieve-build2
+          shasum -a 256 sieve-build2 | tee sha256-build2.txt
+
+      # ADR-006 hard gate：哈希不一致则 release 中止
+      - name: SHA-256 比对（必须一致）
+        run: |
+          H1=$(awk '{print $1}' sha256-build1.txt)
+          H2=$(awk '{print $1}' sha256-build2.txt)
+          echo "Build 1 hash: $H1"
+          echo "Build 2 hash: $H2"
+          if [ "$H1" != "$H2" ]; then
+            echo "::error::Reproducible build FAILED for ${{ matrix.target }}. Hashes differ."
+            echo "::error::H1=$H1"
+            echo "::error::H2=$H2"
+            exit 1
+          fi
+          echo "::notice::Reproducible build PASS: ${{ matrix.target }} — $H1"
+
+      - name: 暂存最终二进制
+        run: |
+          mkdir -p dist
+          cp sieve-build1 dist/${{ matrix.artifact }}
+          chmod +x dist/${{ matrix.artifact }}
+
+      # ADR-006 §1: cosign keyless OIDC 签名，bundle 格式（含 Rekor 日志条目）
+      - name: 安装 cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: cosign sign-blob（keyless OIDC）
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          cosign sign-blob --yes \
+            --oidc-issuer=https://token.actions.githubusercontent.com \
+            --bundle dist/${{ matrix.artifact }}.sigstore.json \
+            dist/${{ matrix.artifact }}
+
+      # 自验证：确认签名立即可用，防止 bundle 格式异常
+      - name: cosign verify-blob（自验证）
+        run: |
+          REPO="${{ github.repository }}"
+          REF="${{ github.ref }}"
+          cosign verify-blob \
+            --bundle dist/${{ matrix.artifact }}.sigstore.json \
+            --certificate-identity-regexp "https://github.com/${REPO}/.github/workflows/release.yml@${REF}" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            dist/${{ matrix.artifact }}
+
+      - name: 上传 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            dist/${{ matrix.artifact }}
+            dist/${{ matrix.artifact }}.sigstore.json
+            sha256-build1.txt
+          retention-days: 30
+
+  # ─────────────────────────────────────────────────────────────
+  # macOS universal binary（lipo aarch64 + x86_64）
+  # ─────────────────────────────────────────────────────────────
+  macos-universal:
+    name: 构建 macOS universal binary
+    needs: reproducible-build
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: sieve-*-apple-darwin
+          path: artifacts
+          merge-multiple: false
+
+      - name: lipo 合并 universal
+        run: |
+          mkdir -p dist
+          lipo -create -output dist/sieve-macos-universal \
+            artifacts/sieve-aarch64-apple-darwin/sieve-aarch64-apple-darwin \
+            artifacts/sieve-x86_64-apple-darwin/sieve-x86_64-apple-darwin
+          chmod +x dist/sieve-macos-universal
+          shasum -a 256 dist/sieve-macos-universal | tee sha256-universal.txt
+          echo "::notice::macOS universal binary: $(awk '{print $1}' sha256-universal.txt)"
+
+      - name: 安装 cosign
+        uses: sigstore/cosign-installer@v3
+
+      # universal binary 单独签名（lipo 合并后哈希不同于各架构产物）
+      - name: cosign sign-blob（universal）
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          cosign sign-blob --yes \
+            --oidc-issuer=https://token.actions.githubusercontent.com \
+            --bundle dist/sieve-macos-universal.sigstore.json \
+            dist/sieve-macos-universal
+
+      - name: 上传 universal artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sieve-macos-universal
+          path: |
+            dist/sieve-macos-universal
+            dist/sieve-macos-universal.sigstore.json
+            sha256-universal.txt
+
+  # ─────────────────────────────────────────────────────────────
+  # 发布 GitHub Release
+  # 只在 tag push 时运行（workflow_dispatch 跳过发布）
+  # ─────────────────────────────────────────────────────────────
+  publish:
+    name: 发布 GitHub Release
+    needs: [reproducible-build, macos-universal]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: 整理 release 文件 + 生成 SHA256SUMS
+        run: |
+          mkdir -p release
+          # 收集所有二进制和签名文件
+          find artifacts -type f \( \
+            -name 'sieve-*' \
+            -o -name '*.sigstore.json' \
+            -o -name 'sha256-universal.txt' \
+          \) -exec cp {} release/ \;
+          # 生成聚合 SHA256SUMS（仅二进制，不含 .json / .txt）
+          cd release
+          shasum -a 256 sieve-* > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: 创建 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

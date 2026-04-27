@@ -13,7 +13,66 @@
 
 ## [Unreleased](https://github.com/doskey/sieve/compare/v0.1.0...HEAD)
 
-> 以下内容均为 **PRD v1.3 设计阶段计划**，**尚未实现**。任何条目在实际编码、测试、签名验证完成前不视为已交付。
+### Added — Week 1 (2026-04-27 启动)
+
+#### 工程骨架
+- Cargo workspace + 三 crate（`sieve-core` / `sieve-rules` / `sieve-cli`），关联 .cursorrules §3.3
+- `rust-toolchain.toml` 锁定 1.87.0，targets: aarch64-apple-darwin / x86_64-apple-darwin / x86_64-unknown-linux-musl
+- `.cargo/config.toml` reproducible build flags（`--remap-path-prefix` + musl 静态链接），关联 ADR-006
+- `deny.toml` cargo-deny 策略（出站 host 白名单 + 许可证白名单 + advisories yanked deny），关联 ADR-003
+
+#### sieve-core（透传层）
+- `UnifiedMessage` schema（Anthropic-only 实现，UpstreamProvider::Relay variant 预留），关联 PRD §6.1 / ADR-004
+- `AnthropicRequest` 解析（serde 子集，#[serde(flatten)] 兼容未识别字段）
+- `Forwarder`：hyper 1.x + hyper-rustls 0.27 + rustls 0.23 + aws-lc-rs provider + webpki-roots，ALPN h2+http/1.1
+- SSE passthrough（Week 1 字节透传，Week 3 切到 parser）
+- `PipelineNode` trait 占位（Week 2 起 OutboundFilter / InboundFilter 实现）
+- 错误类型：`thiserror`，**禁止 anyhow**（.cursorrules §3.2）
+
+#### sieve-rules（占位骨架）
+- `MatchEngine` trait + `MatchHit` 数据结构占位（Week 2 起 vectorscan 实现）
+- `RulesManifest` schema（rules-vN.manifest.json），关联 data-model.md
+- `Ed25519 Verifier`（规则包验签占位，Week 5 起做实际下发）
+- `vectorscan-rs 0.0.6` 依赖加入（用于三平台编译验证），关联 ADR-001
+- `ed25519-dalek 2.x` 依赖加入
+
+#### sieve-cli（daemon）
+- `sieve start --config <path>`：hyper 1.x server 监听 127.0.0.1:11453，反向代理到 api.anthropic.com
+- 配置加载：TOML，bind_addr **强制 127.0.0.1** 校验（非 loopback → exit(1)），关联 ADR-003 / PRD §9 #2
+- 透传逻辑：headers 剥 Host 重写，body 通过 hyper `Incoming` 流式 chunk-by-chunk（SSE 字节级零缓冲）
+- `serde(deny_unknown_fields)`：任何未知配置字段直接拒绝
+- `audit` 模块占位（Week 4 接入 SQLite append-only）
+- tracing-subscriber 日志（`SIEVE_LOG` 环境变量控制等级）
+- **未引入 --disable-critical / --yolo flag**，关联 ADR-007
+
+#### CI / CD（关键 - ADR-006 hard gate）
+- `.github/workflows/ci.yml`：fmt / clippy / test（ubuntu + macos-14 矩阵）/ cargo-deny
+- `.github/workflows/release.yml`：tag v* 触发，矩阵覆盖三 target，**双构建 SHA-256 比对**，**cosign keyless OIDC 签名**（`id-token: write`），Rekor 透明日志上链，sigstore bundle 上传到 GitHub Release
+- macOS universal binary（lipo 合 aarch64 + x86_64）
+
+### Changed — 2026-04-27 PRD §9 #10 修订
+
+- **撤销 "Day 1 GitHub repo 公开 README + 架构文档" 承诺**，见 [ADR-011](../design/ADR-011-private-until-ga.md)
+- 新策略：Week 12 GA 时一次性公开 repo + 代码（MIT）+ 文档 + sigstore 验证流程
+- 影响范围：repo 保持 private 至 Week 12；Week 1-11 release.yml 不绑定 tag（改为 workflow_dispatch），减少 Rekor 透明日志痕迹
+- ADR-006 sigstore + reproducible build CI **不受影响**，GA 前照常跑通；只是不做 public Rekor 验证演示
+- 营销弹药 GA 当天集中释放（文章 1+2+3 同步）
+
+### Pending（Week 2 起）
+- vectorscan-rs 实际规则编译与 OUT-01~12 出站 P0 规则
+- BIP39 SHA-256 checksum 验证（差异化点，PRD §9 #4）
+- SSE Parser 完整实现 + fuzz corpus（PRD §9 #5）
+- 入站 Crypto 钩子（IN-CR-01~05）
+
+### Known Issues
+- 本地需安装 Rust toolchain（`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`）
+- vectorscan-rs 编译需要系统包 `boost` + `ragel`（macOS：`brew install boost ragel`；Linux：`apt-get install libboost-dev ragel`）
+- ADR-008 出站 Critical 状态码（候选，Week 2 dogfood 实测后落 ADR）
+- ADR-005 [redacted] Week 1 启动（非工程任务，doskey 跟进）
+
+---
+
+> 以下为 PRD v1.3 设计阶段计划，**尚未实现**。任何条目在实际编码、测试、签名验证完成前不视为已交付。
 
 ### 计划中（Phase A dogfood, Week 1-8）
 
@@ -24,7 +83,7 @@
   - `hyper` + `tokio` + `rustls` HTTP 反向代理跑通
   - 透明转发 Anthropic Messages API（`POST /v1/messages` 含 SSE，`POST /v1/messages/count_tokens`，`GET /v1/models`）
   - `UnifiedMessage` 内部 schema（仅 Anthropic 实现，其他 provider 接口预留，[PRD §9 #9](../prd/sieve-prd-v1.3.md#9-工程上必须做对的硬约束)）
-  - **GitHub repo 公开**（仅 README + 架构文档，代码私有；[PRD §9 #10](../prd/sieve-prd-v1.3.md#9-工程上必须做对的硬约束)）
+  - ~~GitHub repo 公开~~ — 已被 [ADR-011](../design/ADR-011-private-until-ga.md) 撤销，repo 保持私有至 Week 12 GA
   - **🚨 sigstore 签名 pipeline + GitHub Actions reproducible build pipeline 必须 W1 跑通** —— [PRD §1.2 第 4 句](../prd/sieve-prd-v1.3.md#12-四句话核心叙事v13-加第-4-句) 自证清白叙事的物质基础
 - **W2 出站 P0 规则（OUT-01 ~ OUT-12）**
   - OUT-01 OpenAI / Anthropic API key（前缀 + entropy + 占位符黑名单，FP < 0.1%）
@@ -239,12 +298,12 @@
 
 #### Git 仓库脚手架（2026-04-27）
 
-为 Day 1 GitHub repo 公开（[PRD §9 #10](../prd/sieve-prd-v1.3.md#9-工程上必须做对的硬约束)）准备完整的 git 治理文件：
+为内部 GitHub repo 基础设施（GA 前私有；[ADR-011](../design/ADR-011-private-until-ga.md) 规定 Week 12 GA 时公开）准备完整的 git 治理文件：
 
 - **新增** `.gitignore` —— Rust + macOS / Linux / Windows + Sieve 特定（`.sieveignore` / `audit.db` / `*.sigstore` / 临时文档）。**Cargo.lock 不入忽略名单**（reproducible build 要求入库，[ADR-006](../design/ADR-006-sigstore-reproducible-build.md)）
 - **新增** `.gitattributes` —— 强制 LF 行尾（reproducible build 跨平台一致性）+ GitHub linguist 语言识别（docs / prd / research 标记 vendored / documentation）+ 二进制文件标记
 - **新增** `SECURITY.md` —— 安全漏洞报告流程（email doskey.lee@gmail.com 临时渠道，security@sieve.tools 待 Week 6-8 商标定后启用）+ 24h/7d/30d 响应 SLA + 自身供应链承诺 + 不在范围清单
-- **新增** `LICENSE` —— 双轨许可说明：文档 **CC BY-NC-SA 4.0**（Day 1 公开但禁商用重打包）/ 代码 **MIT**（Week 12 GA 时启用，目前占位说明）
+- **新增** `LICENSE` —— 双轨许可说明：文档 **CC BY-NC-SA 4.0** / 代码 **MIT**（均在 Week 12 GA 时同步公开；[ADR-011](../design/ADR-011-private-until-ga.md)）
 - **新增** `.github/ISSUE_TEMPLATE/` —— bug_report / feature_request / **suspicious_sample**（[PRD §8.1](../prd/sieve-prd-v1.3.md#81-简化版) 用户公开提交可疑样本走这里）+ config.yml（指引安全漏洞走 SECURITY.md，紧急资产损失走 email）
 - **新增** `.github/PULL_REQUEST_TEMPLATE.md` —— 对齐 [.cursorrules §五](../../.cursorrules) 自检清单 + PRD §9 硬约束验证 + 检测项变更模板 + Breaking Changes 流程
 - **新增** `.github/dependabot.yml` —— Cargo 周更（仅 patch / minor，major 走人工评估，对齐 [PRD §9 #6](../prd/sieve-prd-v1.3.md#9-工程上必须做对的硬约束) pinned dependencies）+ GitHub Actions 周更 + 关键依赖分组（tokio-stack / simd-stack / crypto-stack）

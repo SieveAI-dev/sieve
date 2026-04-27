@@ -82,7 +82,7 @@ docs/changelog/CHANGELOG.md
 7. **Critical 拦截 FP 必须 < 0.5%**——公理 12，不可妥协；超过即用户禁用产品
 8. **Critical 在所有版本（包括降级模式）不可关闭**——产品安全承诺，不是用户偏好
 9. **Phase 1 只做 Claude Code，UnifiedMessage 接口预留**——公理 7，**不为想象用户写代码**；OpenAI / Gemini / OpenRouter 接入等真有用户主动要再做
-10. **Day 1 GitHub repo 公开 README + 架构文档，代码 GA 后开源**——平衡信任叙事和叙事控制力，README 必须 Day 1 可见
+10. **Week 12 GA 时一次性公开 repo + 代码 + 文档，GA 前完全私有**——见 [ADR-011](./docs/design/ADR-011-private-until-ga.md)；sigstore + reproducible build pipeline GA 前照常跑通（关联 ADR-006）
 
 ---
 

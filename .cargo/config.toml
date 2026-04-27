@@ -1,0 +1,16 @@
+# Reproducible build flags(ADR-006)
+# SOURCE_DATE_EPOCH 由 CI 设置,本地开发不强制
+[build]
+rustflags = [
+    "--remap-path-prefix=/Users/doskey=/build",
+    "--remap-path-prefix=/home/runner=/build",
+    "--remap-path-prefix=/Users/runner=/build",
+]
+
+# Linux musl 静态链接
+[target.x86_64-unknown-linux-musl]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+# 网络访问限制(辅助 cargo deny,不强制)
+[net]
+git-fetch-with-cli = true

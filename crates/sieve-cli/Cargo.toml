@@ -1,0 +1,42 @@
+[package]
+name = "sieve-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Sieve CLI daemon: hyper proxy server, config, audit log"
+
+[[bin]]
+name = "sieve"
+path = "src/main.rs"
+
+[dependencies]
+sieve-core = { path = "../sieve-core" }
+sieve-rules = { path = "../sieve-rules" }
+
+tokio = { workspace = true, features = ["full"] }
+hyper = { workspace = true, features = ["http1", "http2", "server"] }
+hyper-util = { workspace = true, features = ["tokio", "server-auto", "server-graceful", "service"] }
+http = { workspace = true }
+http-body = { workspace = true }
+http-body-util = { workspace = true }
+bytes = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
+
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }
+hyper = { workspace = true, features = ["http1", "server", "client"] }
+hyper-util = { workspace = true, features = ["tokio", "client-legacy", "http1", "service", "server"] }
+http-body-util = { workspace = true }
+http = { workspace = true }
+bytes = { workspace = true }
+sieve-core = { path = "../sieve-core" }
+anyhow = "1"
