@@ -27,9 +27,10 @@ impl Verifier {
     pub fn verify(&self, message: &[u8], signature_bytes: &[u8; 64]) -> SieveRulesResult<()> {
         use ed25519_dalek::Verifier as _;
 
-        let key = self.public_key.as_ref().ok_or_else(|| {
-            SieveRulesError::Signature("no public key loaded".into())
-        })?;
+        let key = self
+            .public_key
+            .as_ref()
+            .ok_or_else(|| SieveRulesError::Signature("no public key loaded".into()))?;
         let sig = ed25519_dalek::Signature::from_bytes(signature_bytes);
         key.verify(message, &sig)
             .map_err(|e| SieveRulesError::Signature(e.to_string()))

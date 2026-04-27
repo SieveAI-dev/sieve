@@ -32,10 +32,8 @@ type ResponseBody = BoxBody<Bytes, Box<dyn std::error::Error + Send + Sync>>;
 /// bind 端口失败或 Forwarder 初始化失败时返回错误。
 pub async fn run(cfg: Config) -> Result<()> {
     let listen = cfg.listen_addr()?;
-    let forwarder = Arc::new(
-        Forwarder::new(&cfg.upstream_url)
-            .map_err(|e| anyhow!("init forwarder: {e}"))?,
-    );
+    let forwarder =
+        Arc::new(Forwarder::new(&cfg.upstream_url).map_err(|e| anyhow!("init forwarder: {e}"))?);
 
     let listener = TcpListener::bind(listen)
         .await
@@ -122,9 +120,7 @@ async fn proxy_inner(
 
     // 将客户端 body（Incoming）的错误类型对齐为 hyper::Error，
     // 再 boxed() 成 sieve-core Forwarder::forward 期望的 BoxBody 类型。
-    let upstream_body = body
-        .map_err(|e| -> hyper::Error { e })
-        .boxed();
+    let upstream_body = body.map_err(|e| -> hyper::Error { e }).boxed();
     let upstream_req = Request::from_parts(parts, upstream_body);
 
     // 透传到上游；body 是流式 Incoming，不缓冲。

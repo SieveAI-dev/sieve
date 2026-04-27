@@ -19,8 +19,8 @@ use hyper::body::Incoming;
 use hyper::server::conn::http1 as server_http1;
 use hyper::service::service_fn;
 use hyper::{Request, Response, StatusCode};
-use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
+use hyper_util::client::legacy::Client;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use std::convert::Infallible;
 use std::net::SocketAddr;
@@ -275,8 +275,7 @@ async fn passthrough_preserves_request_headers() {
     })
     .await;
 
-    let (sieve_addr, _sv) =
-        spawn_minimal_sieve_proxy(format!("http://{}", upstream_addr)).await;
+    let (sieve_addr, _sv) = spawn_minimal_sieve_proxy(format!("http://{}", upstream_addr)).await;
 
     let client = plain_http_client();
     let req = Request::builder()
@@ -291,7 +290,9 @@ async fn passthrough_preserves_request_headers() {
     let _ = client.request(req).await.unwrap();
 
     let guard = captured.lock().await;
-    let h = guard.as_ref().expect("upstream did not capture request headers");
+    let h = guard
+        .as_ref()
+        .expect("upstream did not capture request headers");
 
     assert_eq!(
         h.get("x-api-key").and_then(|v| v.to_str().ok()),
@@ -358,8 +359,7 @@ data: {\"type\":\"message_stop\"}\n\
     })
     .await;
 
-    let (sieve_addr, _sv) =
-        spawn_minimal_sieve_proxy(format!("http://{}", upstream_addr)).await;
+    let (sieve_addr, _sv) = spawn_minimal_sieve_proxy(format!("http://{}", upstream_addr)).await;
 
     let client = plain_http_client();
     let req = Request::builder()
@@ -390,8 +390,7 @@ async fn passthrough_preserves_request_body() {
     static BODY_BYTES: &[u8] = b"{\"model\":\"claude-sonnet-4-6\",\"max_tokens\":1024,\
 \"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}";
 
-    let captured: Arc<tokio::sync::Mutex<Option<Bytes>>> =
-        Arc::new(tokio::sync::Mutex::new(None));
+    let captured: Arc<tokio::sync::Mutex<Option<Bytes>>> = Arc::new(tokio::sync::Mutex::new(None));
     let cap_clone = captured.clone();
 
     let (upstream_addr, _up) = spawn_mock_upstream(move |req| {
@@ -408,8 +407,7 @@ async fn passthrough_preserves_request_body() {
     })
     .await;
 
-    let (sieve_addr, _sv) =
-        spawn_minimal_sieve_proxy(format!("http://{}", upstream_addr)).await;
+    let (sieve_addr, _sv) = spawn_minimal_sieve_proxy(format!("http://{}", upstream_addr)).await;
 
     let client = plain_http_client_with_body();
     let req = Request::builder()
@@ -424,7 +422,9 @@ async fn passthrough_preserves_request_body() {
     assert_eq!(resp.status(), StatusCode::OK);
 
     let guard = captured.lock().await;
-    let received = guard.as_ref().expect("upstream did not capture request body");
+    let received = guard
+        .as_ref()
+        .expect("upstream did not capture request body");
     assert_eq!(
         received.as_ref(),
         BODY_BYTES,

@@ -7,6 +7,7 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 description = "Sieve rules: vectorscan engine, manifest, Ed25519 signature verification"
+publish = false
 
 [dependencies]
 serde = { workspace = true }
