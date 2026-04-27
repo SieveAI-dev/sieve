@@ -690,6 +690,56 @@ async fn unterminated_final_event_still_blocks_critical() {
     );
 }
 
+// ─── P0-6: malformed tool_use partial_json 必须 fail-closed ──────────────────
+
+/// tool_use block 的 partial_json 为畸形 JSON（缺闭合引号与大括号）→ 应注入 sieve_blocked。
+///
+/// 攻击者可故意发畸形 JSON 绕过 IN-CR-05 签名工具检测（P0-6 / PRD §9 #3 fail-closed）。
+/// 修复前：aggregator 静默 Ok(None)，daemon 跳过 on_tool_use_complete，畸形 JSON 被透传。
+/// 修复后：aggregator 返回 Err(MalformedToolUse)，daemon fail-closed 注入 sieve_blocked。
+#[tokio::test]
+async fn malformed_tool_use_partial_json_blocks() {
+    let attack_payload = sse_response(&[
+        (
+            "message_start",
+            r#"{"type":"message_start","message":{"id":"m","type":"message","role":"assistant","content":[],"model":"x","usage":{"input_tokens":1,"output_tokens":1}}}"#,
+        ),
+        (
+            "content_block_start",
+            r#"{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"t_malformed","name":"Bash","input":{}}}"#,
+        ),
+        // partial_json 是畸形 JSON（缺闭合引号与大括号）
+        (
+            "content_block_delta",
+            r#"{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"command\": \"rm -r"}}"#,
+        ),
+        (
+            "content_block_stop",
+            r#"{"type":"content_block_stop","index":1}"#,
+        ),
+        ("message_stop", r#"{"type":"message_stop"}"#),
+    ]);
+
+    let (upstream, _up) = spawn_mock_sse_upstream(move |_req| {
+        let body = attack_payload.clone();
+        async move { (hyper::StatusCode::OK, body) }
+    })
+    .await;
+
+    let (port, _g) = spawn_sieve_daemon(&format!("http://{upstream}"));
+    let (_status, body) = fetch_response_body(port).await;
+
+    let body_str = String::from_utf8_lossy(&body);
+    assert!(
+        body_str.contains("sieve_blocked"),
+        "malformed tool_use partial_json 必须触发 sieve_blocked，不能静默透传:\n{body_str}"
+    );
+    assert!(
+        body_str.contains("IN-CR-05-MALFORMED"),
+        "expected IN-CR-05-MALFORMED rule in detection:\n{body_str}"
+    );
+}
+
 // ─── 反向测试：benign 响应不被截流（防止误报）──────────────────────────────────
 
 /// benign SSE 响应（无任何攻击 payload）→ 正常透传，无 sieve_blocked 注入。

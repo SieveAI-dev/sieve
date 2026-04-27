@@ -18,6 +18,7 @@ pub const FAIL_CLOSED_RULES: &[&str] = &[
     "IN-CR-05-EVM",
     "IN-CR-05-SOLANA",
     "IN-CR-05-BITCOIN",
+    "IN-CR-05-MALFORMED", // P0-6: malformed tool_use partial_json fail-closed（PRD §9 #3）
     "IN-GEN-01",
     "IN-GEN-03",
     // 出站（全部 OUT-01~12）
