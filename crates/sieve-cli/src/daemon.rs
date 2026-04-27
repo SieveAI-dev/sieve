@@ -311,40 +311,14 @@ async fn forward_with_inbound_inspection(
                         continue;
                     };
 
-                    // 边读边扫
+                    // 边读边扫：push_chunk 解析完整 event，先做 blocking 决策再转发 frame
                     let events = parser.push_chunk(&frame_bytes);
-                    let mut critical_hits: Vec<sieve_core::Detection> = Vec::new();
-
-                    for evt in &events {
-                        match inbound_filter.observe_event(evt) {
-                            Ok(hits) => critical_hits.extend(
-                                hits.into_iter()
-                                    .filter(|d| d.severity == sieve_core::Severity::Critical),
-                            ),
-                            Err(e) => {
-                                tracing::warn!(error = %e, "inbound observe_event error")
-                            }
-                        }
-                        if let Some(tool) = aggregator.process(evt) {
-                            match inbound_filter.on_tool_use_complete(&tool) {
-                                Ok(hits) => critical_hits.extend(
-                                    hits.into_iter()
-                                        .filter(|d| d.severity == sieve_core::Severity::Critical),
-                                ),
-                                Err(e) => {
-                                    tracing::warn!(error = %e, "inbound on_tool_use_complete error")
-                                }
-                            }
-                        }
-                    }
-
-                    // 决策：fail-closed Critical 永远阻断；非 fail-closed 遵 dry_run
-                    let blocking: Vec<sieve_core::Detection> = critical_hits
-                        .into_iter()
-                        .filter(|d| {
-                            sieve_rules::critical_lock::is_fail_closed(&d.rule_id) || !dry_run
-                        })
-                        .collect();
+                    let blocking = collect_blocking_detections(
+                        &events,
+                        &mut inbound_filter,
+                        &mut aggregator,
+                        dry_run,
+                    );
 
                     if !blocking.is_empty() {
                         tracing::warn!(count = blocking.len(), "INBOUND BLOCKED");
@@ -357,7 +331,7 @@ async fn forward_with_inbound_inspection(
                         return;
                     }
 
-                    // 透传原始 frame（字节级一致）
+                    // 无 blocking：透传原始 frame（字节级一致）
                     let _ = tx.send(Ok(hyper::body::Frame::data(frame_bytes)));
                 }
                 Err(e) => {
@@ -369,13 +343,19 @@ async fn forward_with_inbound_inspection(
             }
         }
 
-        // 流结束，flush parser
+        // 流结束（EOF / 提前断流），flush parser 解析残留未闭合 event，
+        // 同样走完整 blocking 决策——修复 P0-4 / PRD §9 #5 "提前断流"硬约束。
         let flushed = parser.flush();
-        for evt in &flushed {
-            let _ = inbound_filter.observe_event(evt);
-            if let Some(tool) = aggregator.process(evt) {
-                let _ = inbound_filter.on_tool_use_complete(&tool);
+        let blocking =
+            collect_blocking_detections(&flushed, &mut inbound_filter, &mut aggregator, dry_run);
+        if !blocking.is_empty() {
+            tracing::warn!(count = blocking.len(), "INBOUND BLOCKED (flush)");
+            for d in &blocking {
+                tracing::warn!(rule = %d.rule_id, "inbound detection (flush)");
             }
+            let blocked_payload = build_sieve_blocked_sse(&blocking);
+            let _ = tx.send(Ok(hyper::body::Frame::data(blocked_payload)));
+            // drop tx → 客户端收到 EOF
         }
     });
 
@@ -385,6 +365,44 @@ async fn forward_with_inbound_inspection(
         .boxed();
 
     Ok(Response::from_parts(resp_parts, response_body))
+}
+
+/// 对一批已解析的 [`SseEvent`] 运行 inbound 检测，返回应触发 blocking 的 [`Detection`] 列表。
+///
+/// 被 push_chunk 分支和 flush 分支共同调用，确保两条路径走完全相同的 blocking 决策逻辑，
+/// 修复 P0-4 / PRD §9 #5"提前断流"硬约束：flush 出来的残留 event 同样必须阻断 Critical。
+fn collect_blocking_detections(
+    events: &[sieve_core::sse::parser::SseEvent],
+    inbound_filter: &mut sieve_core::pipeline::inbound::InboundFilter,
+    aggregator: &mut sieve_core::tool_use_aggregator::Aggregator,
+    dry_run: bool,
+) -> Vec<sieve_core::Detection> {
+    let mut critical_hits: Vec<sieve_core::Detection> = Vec::new();
+
+    for evt in events {
+        match inbound_filter.observe_event(evt) {
+            Ok(hits) => critical_hits.extend(
+                hits.into_iter()
+                    .filter(|d| d.severity == sieve_core::Severity::Critical),
+            ),
+            Err(e) => tracing::warn!(error = %e, "inbound observe_event error"),
+        }
+        if let Some(tool) = aggregator.process(evt) {
+            match inbound_filter.on_tool_use_complete(&tool) {
+                Ok(hits) => critical_hits.extend(
+                    hits.into_iter()
+                        .filter(|d| d.severity == sieve_core::Severity::Critical),
+                ),
+                Err(e) => tracing::warn!(error = %e, "inbound on_tool_use_complete error"),
+            }
+        }
+    }
+
+    // 决策：fail-closed Critical 永远阻断；非 fail-closed 遵 dry_run
+    critical_hits
+        .into_iter()
+        .filter(|d| sieve_rules::critical_lock::is_fail_closed(&d.rule_id) || !dry_run)
+        .collect()
 }
 
 /// 构造注入给客户端的 `sieve_blocked` SSE event 字节块。
