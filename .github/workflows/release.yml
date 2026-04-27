@@ -39,9 +39,13 @@ jobs:
           - target: x86_64-apple-darwin
             os: macos-14
             artifact: sieve-x86_64-apple-darwin
-          - target: x86_64-unknown-linux-musl
+          # Week 1 Linux 用 gnu(glibc):Ubuntu musl-tools 不含 musl-g++,vectorscan(C++ 库)无法
+          # 编译。reproducibility 与 musl/gnu 选择无关(关键是 SOURCE_DATE_EPOCH + remap-prefix +
+          # 双构建 SHA-256)。Week 6 Tier 2 切回 musl 静态链接(用 cross-rs docker 镜像或预编译
+          # musl-cross)。见 docs/design/ADR-006-sigstore-reproducible-build.md。
+          - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            artifact: sieve-x86_64-unknown-linux-musl
+            artifact: sieve-x86_64-unknown-linux-gnu
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -52,7 +56,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build pkg-config musl-tools libboost-dev ragel
+          sudo apt-get install -y cmake ninja-build pkg-config libboost-dev ragel
 
       - name: 安装构建依赖（macOS）
         if: runner.os == 'macOS'
