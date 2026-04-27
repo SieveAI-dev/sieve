@@ -64,6 +64,26 @@ impl InboundFilter {
         }
     }
 
+    /// 把出站 prompt 文本中的 EVM 地址 seed 到会话地址集合。
+    ///
+    /// 须在入站 SSE 检测（[`StreamingPipelineNode::observe_event`]）开始前调用，
+    /// 否则首轮地址替换（prompt 地址 A → 响应地址 B）会漏报 IN-CR-01。
+    ///
+    /// 关联 PRD §4.2 真实攻击场景 / P0-3 修复。
+    ///
+    /// # Errors
+    /// session mutex 中毒时返回 [`SieveCoreError`]。
+    pub fn seed_known_addresses_from_text(&self, text: &str) -> SieveCoreResult<()> {
+        let mut session = self
+            .session
+            .lock()
+            .map_err(|_| SieveCoreError::Forwarder("session mutex poisoned".into()))?;
+        for addr in extract_eth_addresses(text) {
+            session.addresses_seen.insert(addr);
+        }
+        Ok(())
+    }
+
     /// 过滤掉 sieveignore 中已知的 fingerprint。
     ///
     /// PRD §9 #3 #8：Critical severity 永远不被过滤——
@@ -292,6 +312,32 @@ mod tests {
         // MessageStop 不产生命中
         let hits = f.observe_event(&SseEvent::MessageStop).unwrap();
         assert!(hits.is_empty());
+    }
+
+    /// seed_known_addresses_from_text 预注入 prompt 地址，首轮地址替换可被 IN-CR-01 检测。
+    ///
+    /// 关联 P0-3 / PRD §4.2：prompt 地址 A + SSE 仅出现地址 B → 命中。
+    #[test]
+    fn seed_from_prompt_enables_first_round_address_substitution_detection() {
+        let mut f = InboundFilter::new(Arc::new(MockEngine), Arc::new(HashSet::new()));
+        // 模拟 outbound prompt seed：提前把地址 A 注入 session
+        f.seed_known_addresses_from_text(
+            "please send to 0xabcdef1234567890abcdef1234567890abcdef12 from wallet",
+        )
+        .unwrap();
+        // SSE 响应只出现近似地址 B（末字符 2→3），未在 SSE 中出现原始地址 A
+        let hits = f
+            .observe_event(&SseEvent::ContentBlockDelta {
+                index: 0,
+                delta: SseDelta::TextDelta {
+                    text: "send to 0xabcdef1234567890abcdef1234567890abcdef13 now".into(),
+                },
+            })
+            .unwrap();
+        assert!(
+            hits.iter().any(|d| d.rule_id == "IN-CR-01"),
+            "should detect IN-CR-01 when address was seeded from prompt"
+        );
     }
 
     /// PRD §9 #3 #8：Critical detection 不得被 .sieveignore 压制。

@@ -224,7 +224,16 @@ async fn proxy_inner(
             }
         }
 
-        // 5. 出站通过 → 入站 SSE tee 截流检测
+        // 5. prompt 地址 seed：把出站 prompt 中的 EVM 地址预先注入 InboundFilter 会话，
+        //    使首轮地址替换（prompt 地址 A → 响应地址 B）可被 IN-CR-01 检测。
+        //    关联 PRD §4.2 / P0-3 修复。
+        for (_, text) in &texts {
+            if let Err(e) = inbound_filter.seed_known_addresses_from_text(text) {
+                tracing::warn!(error = %e, "seed_known_addresses_from_text failed");
+            }
+        }
+
+        // 6. 出站通过 → 入站 SSE tee 截流检测
         return forward_with_inbound_inspection(
             forwarder,
             inbound_filter,
