@@ -167,9 +167,18 @@ jobs:
       - name: lipo 合并 universal
         run: |
           mkdir -p dist
-          lipo -create -output dist/sieve-macos-universal \
-            artifacts/sieve-aarch64-apple-darwin/sieve-aarch64-apple-darwin \
-            artifacts/sieve-x86_64-apple-darwin/sieve-x86_64-apple-darwin
+          # upload-artifact@v4 保留源目录结构,二进制实际位于 artifacts/<name>/dist/<name>。
+          # 用 find 查找,不依赖路径前缀的具体形态。
+          AARCH64_BIN=$(find artifacts -type f -name 'sieve-aarch64-apple-darwin' ! -name '*.json' | head -1)
+          X86_64_BIN=$(find artifacts -type f -name 'sieve-x86_64-apple-darwin' ! -name '*.json' | head -1)
+          if [ -z "$AARCH64_BIN" ] || [ -z "$X86_64_BIN" ]; then
+            echo "::error::找不到 macOS 单架构产物"
+            ls -laR artifacts
+            exit 1
+          fi
+          echo "::notice::aarch64 binary: $AARCH64_BIN"
+          echo "::notice::x86_64 binary:  $X86_64_BIN"
+          lipo -create -output dist/sieve-macos-universal "$AARCH64_BIN" "$X86_64_BIN"
           chmod +x dist/sieve-macos-universal
           shasum -a 256 dist/sieve-macos-universal | tee sha256-universal.txt
           echo "::notice::macOS universal binary: $(awk '{print $1}' sha256-universal.txt)"

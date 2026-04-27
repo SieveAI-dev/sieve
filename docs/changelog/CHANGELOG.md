@@ -13,6 +13,20 @@
 
 ## [Unreleased](https://github.com/doskey/sieve/compare/v0.1.0...HEAD)
 
+### Verified — 2026-04-27 Week 1 完成定义实跑
+
+#### release.yml workflow_dispatch 首跑(run [24980079580](https://github.com/doskey/sieve/actions/runs/24980079580))
+- **三 target reproducible build 双 SHA-256 一致 + cosign keyless OIDC 签名 + Rekor 上链 + cosign verify-blob 自验证**:
+  - `aarch64-apple-darwin`: `af5c371f1a6531d2a8439425f9d90a5e339fca20a62825b8d895f29c6b883899`
+  - `x86_64-apple-darwin`:  `47b729ee298f9dc1d5a3bd0a04f5f30b19983b7c87454b7358442514762164ea`
+  - `x86_64-unknown-linux-gnu`: `bbe16fc2faf52a010dd3b3ae172599ec6b7ae9c8cd666c6046d06cfe265065fa`
+- 已知遗留:`macos-universal` lipo 合并步骤路径修复(本 commit 含)。**universal binary 不影响 reproducible build pipeline 主路径验证**(三个独立 target 都已成功签名 + 上链)。
+- ADR-006 §10 Week 1 hard gate **达成**。
+
+#### 端到端 dogfood 验证(PRD §10.1 Week 1 第 1 完成定义)
+- doskey 在真机用 `ANTHROPIC_BASE_URL=http://127.0.0.1:11453 claude` 启动 Claude Code v2.1.119(Opus 4.7),非流式聊天测试通过(2026-04-27 14:35 时点)。
+- e2e smoke test 脚本(`scripts/smoke_test.py`)真机自验 21/21 通过:401 字节级透传 / 4xx 错误码 / 8KB body / 20 路并发 / 真 key 200 / SSE 流式 / tool_use partial_json。
+
 ### Added — Week 1 (2026-04-27 启动)
 
 #### 工程骨架
