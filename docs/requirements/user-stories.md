@@ -135,16 +135,20 @@
 
 ### US-07: 入站 · 敏感路径访问 + 持久化机制
 
-**作为** P0 客群，**我希望** 当模型返回的 tool_use 试图读 `~/.ssh/id_rsa` / `~/.aws/credentials` / `/etc/shadow` / `*.keystore` / `~/.config/solana/`，或写 `crontab` / `launchd` / `systemd` / `.bashrc` / `.zshrc` 时，Sieve 触发 Critical 拦截，**以便** 即使我让模型"清理一下机器"也不会被偷走凭证或埋后门。
+**作为** P0 客群，**我希望** 当模型返回的 tool_use 试图读 `~/.ssh/id_rsa` / `~/.aws/credentials` / `/etc/shadow` / `*.keystore` / `~/.config/solana/`，或写 `crontab` / `launchd` / `systemd` / `.bashrc` / `.zshrc` 时，Sieve 区分严重度处置——读敏感路径 = **High 警告**（合法用例存在，需用户判断），写持久化机制 = **Critical 拦截**（埋后门级别），**以便** 即使我让模型"清理一下机器"也不会被偷走凭证或埋后门。
 
 **关联 PRD**：[§5.2 IN-CR-03 / IN-CR-04](../prd/sieve-prd-v1.3.md#phase-1-p0crypto-钩子mvp-第-3-4-周)
 **优先级**：P0
 **验收标准**：
 
-- IN-CR-03 路径黑名单覆盖 SSH / AWS / GCP / Solana / Ethereum keystore
+- IN-CR-03 路径黑名单覆盖 SSH / AWS / GCP / Solana / Ethereum keystore + GPG / netrc / macOS Keychain / dotenv（10 条子规则，allowlist 防 FP）
 - IN-CR-04 持久化机制覆盖 cron / launchd / systemd / shell rc 文件
 - 读 vs 写区分：读敏感路径 = High，写持久化机制 = Critical
 - 二者命中时 Critical/High FP 分别 < 0.5% / < 3%（PRD §6.5）
+
+**实施状态**：
+- IN-CR-03（read = High warn）：Week 4 完成（10 条规则上线，176/176 测试通过）；5s 倒计时弹窗 UI 留 Week 5
+- IN-CR-04（write = Critical block）：Week 4 待开（下一项）
 
 ---
 
