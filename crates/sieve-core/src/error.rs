@@ -30,6 +30,7 @@ pub enum SieveCoreError {
     TlsConfig(String),
 }
 
+#[cfg(feature = "forwarder")]
 impl From<hyper::Error> for SieveCoreError {
     fn from(e: hyper::Error) -> Self {
         Self::Hyper(e.to_string())

@@ -12,6 +12,7 @@
 pub mod address_guard;
 pub mod detection;
 pub mod error;
+#[cfg(feature = "forwarder")]
 pub mod forwarder;
 pub mod fuzz_helpers;
 pub mod pipeline;
@@ -21,6 +22,7 @@ pub mod tool_use_aggregator;
 
 pub use detection::{fingerprint, Action, ContentSource, Detection, Severity};
 pub use error::{SieveCoreError, SieveCoreResult};
+#[cfg(feature = "forwarder")]
 pub use forwarder::Forwarder;
 pub use protocol::unified_message::{
     ContentBlock, MessageMetadata, Role, ToolResultBlock, ToolUseBlock, UnifiedMessage,

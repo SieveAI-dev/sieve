@@ -9,17 +9,35 @@ authors.workspace = true
 description = "Sieve core: protocol, forwarder, SSE pipeline (Anthropic-only Phase 1)"
 publish = false
 
+[features]
+default = ["forwarder"]
+# forwarder：启用 hyper/rustls/tokio 网络栈与 aws-lc-rs C 依赖。
+# 关闭后 sieve-core 仅保留纯 Rust 模块（sse/aggregator/protocol/pipeline 等），
+# 用于 cargo fuzz 等需要 sanitizer instrumentation 的场景，避免 ASan 链接 sancov 符号失败。
+forwarder = [
+    "dep:tokio",
+    "dep:hyper",
+    "dep:hyper-util",
+    "dep:hyper-rustls",
+    "dep:rustls",
+    "dep:webpki-roots",
+    "dep:http",
+    "dep:http-body",
+    "dep:http-body-util",
+    "dep:bytes",
+]
+
 [dependencies]
-tokio = { workspace = true, features = ["rt-multi-thread", "net", "io-util", "macros", "sync", "time"] }
-hyper = { workspace = true, features = ["http1", "http2", "client", "server"] }
-hyper-util = { workspace = true, features = ["tokio", "client-legacy", "http1", "http2"] }
-hyper-rustls = { workspace = true, features = ["aws-lc-rs", "http1", "http2", "webpki-tokio", "tls12"] }
-rustls = { workspace = true, features = ["aws-lc-rs", "tls12"] }
-webpki-roots = { workspace = true }
-http = { workspace = true }
-http-body = { workspace = true }
-http-body-util = { workspace = true }
-bytes = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "net", "io-util", "macros", "sync", "time"], optional = true }
+hyper = { workspace = true, features = ["http1", "http2", "client", "server"], optional = true }
+hyper-util = { workspace = true, features = ["tokio", "client-legacy", "http1", "http2"], optional = true }
+hyper-rustls = { workspace = true, features = ["aws-lc-rs", "http1", "http2", "webpki-tokio", "tls12"], optional = true }
+rustls = { workspace = true, features = ["aws-lc-rs", "tls12"], optional = true }
+webpki-roots = { workspace = true, optional = true }
+http = { workspace = true, optional = true }
+http-body = { workspace = true, optional = true }
+http-body-util = { workspace = true, optional = true }
+bytes = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
