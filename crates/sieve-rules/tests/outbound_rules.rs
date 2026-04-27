@@ -1,4 +1,4 @@
-//! OUT-01~12 出站规则集成测试。
+//! OUT-01~11 出站规则集成测试。
 //!
 //! 关联 PRD §5.1 出站检测目标。
 //!
@@ -6,8 +6,8 @@
 //!   - `positive` case: 满足 pattern 结构的 fake key，引擎**应**命中。
 //!   - `negative` case: 明显不满足 pattern 的输入（过短 / 前缀错误 / 不含必要锚点），引擎**不应**命中。
 //!
-//! OUT-12 BIP39 占位 pattern 被过滤掉，不在本测试验证范围；
-//! BIP39 的 SHA-256 checksum + 词数验证由 `sieve_rules::bip39` 单独测试。
+//! OUT-09（BIP39 助记词）通过 engine_adapter second-pass 实现，不使用 vectorscan 占位规则。
+//! BIP39 pipeline 测试见 `crates/sieve-rules/tests/bip39_pipeline.rs`。
 //!
 //! **依赖**: `rules-engine-agent` 实现 `sieve_rules::engine::VectorscanEngine`
 //! 及 `sieve_rules::loader::load_outbound_rules`。
@@ -30,18 +30,12 @@ fn rules_path() -> PathBuf {
     p
 }
 
-/// 加载并编译规则集，过滤掉 OUT-12 BIP39 占位 pattern。
+/// 加载并编译出站规则集。
 ///
-/// OUT-12 的 pattern 为 `__BIP39_PREFILTER_PLACEHOLDER__`，运行时由
-/// `sieve_rules::bip39::bip39_pattern_from_wordlist()` 动态替换，
-/// 此处测试不验证该规则。
+/// BIP39（OUT-09）通过 engine_adapter second-pass 实现，不在 outbound.toml 中。
 fn build_engine() -> VectorscanEngine {
     let rules = load_outbound_rules(&rules_path()).expect("load outbound.toml failed");
-    let filtered: Vec<_> = rules
-        .into_iter()
-        .filter(|r| r.pattern != "__BIP39_PREFILTER_PLACEHOLDER__")
-        .collect();
-    VectorscanEngine::compile(filtered).expect("VectorscanEngine compile failed")
+    VectorscanEngine::compile(rules).expect("VectorscanEngine compile failed")
 }
 
 /// 断言 `rule_id` 在 `text` 中**应**命中。
