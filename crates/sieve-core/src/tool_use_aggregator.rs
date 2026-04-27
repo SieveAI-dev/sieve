@@ -46,9 +46,10 @@ pub enum AggregatorError {
         /// 配置的上限。
         max: usize,
     },
-    /// tool_use partial_json 解析失败（预留 P0-6 MalformedToolUse 路径，暂未实装）。
+    /// tool_use partial_json 解析失败（P0-6 fail-closed，PRD §9 #3）。
     ///
-    /// P0-6 任务激活后将切换到 fail-closed 行为。
+    /// 已进入 tool_use 状态后无法解析参数，等价于 Critical 威胁：
+    /// 攻击者可故意发畸形 JSON 绕过 IN-CR-05 等签名工具检测。
     MalformedToolUse {
         /// 工具调用 ID。
         tool_id: String,
@@ -141,10 +142,12 @@ impl Aggregator {
     /// 其余 event 返回 `Ok(None)`。
     ///
     /// # Errors
-    /// 容量上限触发时返回 [`AggregatorError`]。调用方应将容量错误视为 fail-closed Critical
-    ///（IN-CAP-02），注入 sieve_blocked 并截断流。
-    ///
-    /// 注：MalformedToolUse 变体已声明，P0-6 任务激活后切换为 fail-closed 路径。
+    /// - 容量上限触发时返回 [`AggregatorError::TooManyOpenBlocks`] /
+    ///   [`AggregatorError::PartialJsonTooLarge`] / [`AggregatorError::TextBufferTooLarge`]。
+    ///   调用方应将容量错误视为 fail-closed Critical（IN-CAP-02），注入 sieve_blocked 并截断流。
+    /// - 已识别的 `tool_use` block 在 content_block_stop 时 partial_json 解析失败，返回
+    ///   [`AggregatorError::MalformedToolUse`]。调用方应视为 Critical fail-closed（PRD §9 #3），
+    ///   注入 sieve_blocked。"看不懂 tool_use 参数"不等价于"无风险"（P0-6）。
     pub fn process(
         &mut self,
         event: &SseEvent,
@@ -240,14 +243,18 @@ impl Aggregator {
                     match serde_json::from_str::<serde_json::Value>(&partial_json) {
                         Ok(input) => Ok(Some(CompletedToolCall { id, name, input })),
                         Err(e) => {
-                            // P0-6 预留：MalformedToolUse 变体已声明，本次仍 warn+None
-                            // P0-6 任务激活后改为 Err(AggregatorError::MalformedToolUse)
+                            // P0-6 fail-closed：已识别为 tool_use block，partial_json 解析失败
+                            // 必须返回 Err 而非 Ok(None)，否则 daemon 静默跳过 on_tool_use_complete
+                            // 触发 Critical fail-closed 拦截（PRD §9 #3）。
                             tracing::warn!(
                                 tool_id = %id,
                                 error = %e,
-                                "tool_use partial_json parse failed"
+                                "tool_use partial_json parse failed, fail-closed"
                             );
-                            Ok(None)
+                            Err(AggregatorError::MalformedToolUse {
+                                tool_id: id,
+                                error: e.to_string(),
+                            })
                         }
                     }
                 } else {
@@ -318,22 +325,56 @@ mod tests {
     }
 
     #[test]
-    fn malformed_partial_json_returns_none() {
+    fn malformed_partial_json_returns_malformed_error() {
         let mut a = Aggregator::new();
         a.process(&SseEvent::ContentBlockStart {
             index: 0,
-            content_block: serde_json::json!({"type":"tool_use","id":"x","name":"y"}),
+            content_block: serde_json::json!({"type":"tool_use","id":"tool_xyz","name":"Bash"}),
         })
         .unwrap();
         a.process(&SseEvent::ContentBlockDelta {
             index: 0,
             delta: SseDelta::InputJsonDelta {
-                partial_json: "{not json".into(),
+                partial_json: "{not valid json".into(),
             },
         })
         .unwrap();
-        let result = a.process(&SseEvent::ContentBlockStop { index: 0 }).unwrap();
-        assert!(result.is_none());
+        let result = a.process(&SseEvent::ContentBlockStop { index: 0 });
+        match result {
+            Err(AggregatorError::MalformedToolUse { tool_id, error }) => {
+                assert_eq!(tool_id, "tool_xyz");
+                assert!(!error.is_empty(), "error message should not be empty");
+            }
+            other => panic!("expected MalformedToolUse, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tool_use_malformed_partial_json_returns_malformed_error() {
+        // P0-6 验证：ContentBlockStart(tool_use) → ContentBlockDelta(malformed json) → ContentBlockStop
+        // 期望：Err(AggregatorError::MalformedToolUse { tool_id: "tool_xyz", ... })
+        let mut a = Aggregator::new();
+        a.process(&SseEvent::ContentBlockStart {
+            index: 0,
+            content_block: serde_json::json!({"type":"tool_use","id":"tool_xyz","name":"Bash"}),
+        })
+        .unwrap();
+        a.process(&SseEvent::ContentBlockDelta {
+            index: 0,
+            delta: SseDelta::InputJsonDelta {
+                partial_json: "{not valid json".into(),
+            },
+        })
+        .unwrap();
+        let result = a.process(&SseEvent::ContentBlockStop { index: 0 });
+        assert!(
+            matches!(
+                &result,
+                Err(AggregatorError::MalformedToolUse { tool_id, .. })
+                    if tool_id == "tool_xyz"
+            ),
+            "expected MalformedToolUse for tool_xyz, got: {result:?}"
+        );
     }
 
     #[test]

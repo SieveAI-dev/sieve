@@ -411,7 +411,7 @@ fn collect_blocking_detections(
             ),
             Err(e) => tracing::warn!(error = %e, "inbound observe_event error"),
         }
-        // P0-5：aggregator.process 现在返回 Result；容量超限时 fail-closed（IN-CAP-02）
+        // P0-5/P0-6：aggregator.process 返回 Result；容量超限或 malformed tool_use 时 fail-closed
         match aggregator.process(evt) {
             Ok(Some(tool)) => match inbound_filter.on_tool_use_complete(&tool) {
                 Ok(hits) => critical_hits.extend(
@@ -421,8 +421,18 @@ fn collect_blocking_detections(
                 Err(e) => tracing::warn!(error = %e, "inbound on_tool_use_complete error"),
             },
             Ok(None) => {}
+            Err(sieve_core::tool_use_aggregator::AggregatorError::MalformedToolUse {
+                ref tool_id,
+                ref error,
+            }) => {
+                // P0-6 fail-closed：畸形 tool_use JSON 不等价于"无风险"（PRD §9 #3）
+                // 攻击者可故意发畸形 JSON 绕过 IN-CR-05 签名工具检测
+                tracing::warn!(tool_id = %tool_id, error = %error, "malformed tool_use partial_json，fail-closed Critical");
+                critical_hits.push(build_malformed_tool_use_detection(tool_id));
+            }
             Err(e) => {
-                // 容量超限：fail-closed，注入 IN-CAP-02 检测
+                // 容量超限（TooManyOpenBlocks / PartialJsonTooLarge / TextBufferTooLarge）：
+                // fail-closed，注入 IN-CAP-02 检测
                 tracing::warn!(error = %e, "aggregator 容量超限，fail-closed");
                 critical_hits.push(build_cap_detection("IN-CAP-02", "cap-aggregator-too-large"));
             }
@@ -597,6 +607,25 @@ fn empty_body() -> ResponseBody {
     Empty::<Bytes>::new()
         .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { match e {} })
         .boxed()
+}
+
+/// 构造 malformed tool_use Detection（P0-6，IN-CR-05-MALFORMED）。
+///
+/// 畸形 partial_json 不对应具体文本 span，evidence_truncated 存 tool_id。
+fn build_malformed_tool_use_detection(tool_id: &str) -> sieve_core::Detection {
+    use sieve_core::detection::{Action, ContentSource};
+    use sieve_core::protocol::unified_message::ContentSpan;
+    use uuid::Uuid;
+    sieve_core::Detection {
+        id: Uuid::new_v4(),
+        rule_id: "IN-CR-05-MALFORMED".into(),
+        severity: sieve_core::Severity::Critical,
+        action: Action::Block,
+        source: ContentSource::InboundAssistantText,
+        span: ContentSpan { start: 0, end: 0 },
+        evidence_truncated: format!("tool_id={tool_id}"),
+        fingerprint: "malformed-tool-use-partial-json".into(),
+    }
 }
 
 /// 构造容量上限 Detection（P0-5，IN-CAP-01 / IN-CAP-02）。
