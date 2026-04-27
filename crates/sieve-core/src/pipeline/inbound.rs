@@ -65,9 +65,14 @@ impl InboundFilter {
     }
 
     /// 过滤掉 sieveignore 中已知的 fingerprint。
+    ///
+    /// PRD §9 #3 #8：Critical severity 永远不被过滤——
+    /// `.sieveignore` 白名单仅对 High / Medium / Low 有效。
     fn filter_sieveignore(&self, dets: Vec<Detection>) -> Vec<Detection> {
         dets.into_iter()
-            .filter(|d| !self.sieveignore.contains(&d.fingerprint))
+            .filter(|d| {
+                d.severity == Severity::Critical || !self.sieveignore.contains(&d.fingerprint)
+            })
             .collect()
     }
 }
@@ -167,6 +172,18 @@ mod tests {
                     evidence_truncated: "**".into(),
                     fingerprint: fingerprint("IN-CR-02", "rm -rf"),
                 }])
+            } else if input.contains("suspicious_high") {
+                // High severity detection，用于验证 sieveignore 可以合法压制非 Critical
+                Ok(vec![Detection {
+                    id: Uuid::new_v4(),
+                    rule_id: "IN-GEN-01".into(),
+                    severity: Severity::High,
+                    action: Action::WarnConfirm { countdown_secs: 10 },
+                    source,
+                    span: ContentSpan { start: 0, end: 15 },
+                    evidence_truncated: "suspicious_high".into(),
+                    fingerprint: fingerprint("IN-GEN-01", "suspicious_high"),
+                }])
             } else {
                 Ok(vec![])
             }
@@ -248,20 +265,25 @@ mod tests {
         assert!(hits.iter().any(|d| d.rule_id == "IN-CR-01"));
     }
 
+    /// sieveignore 可以合法压制 High / Medium 等非 Critical detection。
+    /// Critical 不在此测试验证范围——见 sieveignore_does_not_suppress_critical。
     #[test]
-    fn sieveignore_filters_known_fingerprint() {
-        let fp = fingerprint("IN-CR-02", "rm -rf");
+    fn sieveignore_filters_non_critical_fingerprint() {
+        let fp = fingerprint("IN-GEN-01", "suspicious_high");
         let mut ignore = HashSet::new();
         ignore.insert(fp);
         let mut f = InboundFilter::new(Arc::new(MockEngine), Arc::new(ignore));
         let evt = SseEvent::ContentBlockDelta {
             index: 0,
             delta: SseDelta::TextDelta {
-                text: "run rm -rf /".into(),
+                text: "suspicious_high pattern here".into(),
             },
         };
         let hits = f.observe_event(&evt).unwrap();
-        assert!(hits.is_empty(), "sieveignore should suppress the detection");
+        assert!(
+            hits.is_empty(),
+            "sieveignore should suppress High/non-Critical detection"
+        );
     }
 
     #[test]
@@ -270,5 +292,48 @@ mod tests {
         // MessageStop 不产生命中
         let hits = f.observe_event(&SseEvent::MessageStop).unwrap();
         assert!(hits.is_empty());
+    }
+
+    /// PRD §9 #3 #8：Critical detection 不得被 .sieveignore 压制。
+    /// 验证 IN-CR-02（危险 shell）和 IN-CR-05（签名工具调用）在加入 sieveignore 后仍然命中。
+    #[test]
+    fn sieveignore_does_not_suppress_critical() {
+        // 构造同时包含 IN-CR-02 和 IN-CR-05 fingerprint 的 sieveignore
+        let fp_cr02 = fingerprint("IN-CR-02", "rm -rf");
+        let fp_cr05 = fingerprint("IN-CR-05", "eth_signTransaction");
+        let mut ignore = HashSet::new();
+        ignore.insert(fp_cr02);
+        ignore.insert(fp_cr05);
+
+        // 验证文本扫描 Critical（IN-CR-02）不被压制
+        let mut f = InboundFilter::new(Arc::new(MockEngine), Arc::new(ignore.clone()));
+        let evt = SseEvent::ContentBlockDelta {
+            index: 0,
+            delta: SseDelta::TextDelta {
+                text: "run rm -rf /".into(),
+            },
+        };
+        let hits = f.observe_event(&evt).unwrap();
+        assert!(
+            !hits.is_empty(),
+            "Critical IN-CR-02 must not be suppressed by sieveignore"
+        );
+        assert_eq!(hits[0].rule_id, "IN-CR-02");
+        assert_eq!(hits[0].severity, Severity::Critical);
+
+        // 验证工具调用 Critical（IN-CR-05）不被压制
+        let mut f2 = InboundFilter::new(Arc::new(MockEngine), Arc::new(ignore));
+        let tool = CompletedToolCall {
+            id: "x".into(),
+            name: "eth_signTransaction".into(),
+            input: serde_json::json!({}),
+        };
+        let hits2 = f2.on_tool_use_complete(&tool).unwrap();
+        assert!(
+            !hits2.is_empty(),
+            "Critical IN-CR-05 must not be suppressed by sieveignore"
+        );
+        assert_eq!(hits2[0].rule_id, "IN-CR-05");
+        assert_eq!(hits2[0].severity, Severity::Critical);
     }
 }
