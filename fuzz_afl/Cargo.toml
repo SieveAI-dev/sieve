@@ -1,0 +1,22 @@
+[package]
+name = "sieve-fuzz-afl"
+version = "0.0.0"
+publish = false
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+afl = "0.15"
+sieve-core = { path = "../crates/sieve-core" }
+
+[[bin]]
+name = "sse_parser_afl"
+path = "src/sse_parser.rs"
+
+[[bin]]
+name = "tool_use_aggregator_afl"
+path = "src/tool_use_aggregator.rs"
+
+[[bin]]
+name = "inbound_filter_afl"
+path = "src/inbound_filter.rs"

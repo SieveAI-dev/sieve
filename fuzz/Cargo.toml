@@ -1,0 +1,34 @@
+[package]
+name = "sieve-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+license = "MIT"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+sieve-core = { path = "../crates/sieve-core" }
+
+[[bin]]
+name = "sse_parser"
+path = "fuzz_targets/sse_parser.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tool_use_aggregator"
+path = "fuzz_targets/tool_use_aggregator.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "inbound_filter"
+path = "fuzz_targets/inbound_filter.rs"
+test = false
+doc = false
+bench = false

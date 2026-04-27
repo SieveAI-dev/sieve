@@ -66,3 +66,23 @@ jobs:
         with:
           command: check
           arguments: --all-features
+
+  fuzz-quick:
+    name: fuzz-quick (cargo fuzz, 60s/target)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - run: rustup install nightly
+      - name: 安装构建依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build pkg-config libssl-dev libboost-dev ragel
+      - run: cargo install cargo-fuzz --locked
+      - uses: Swatinem/rust-cache@v2
+      - name: Fuzz sse_parser (60s)
+        run: cargo +nightly fuzz run sse_parser -- -max_total_time=60
+      - name: Fuzz tool_use_aggregator (60s)
+        run: cargo +nightly fuzz run tool_use_aggregator -- -max_total_time=60
+      - name: Fuzz inbound_filter (60s)
+        run: cargo +nightly fuzz run inbound_filter -- -max_total_time=60

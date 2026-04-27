@@ -5,13 +5,82 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)。
 
-> 当前状态：**Phase A dogfood 进行中**（Week 2 出站规则引擎完成）。第一个公开版本（v0.1.0）将随 Week 12 GA 发布。
+> 当前状态：**Phase A dogfood 进行中**（Week 3 入站 Crypto 钩子完成）。第一个公开版本（v0.1.0）将随 Week 12 GA 发布。
 > 第一个公开版本（v0.1.0）将随 Week 12 GA 发布；详见 [PRD §10 12 周里程碑](../prd/sieve-prd-v1.3.md#10-12-周里程碑8-周-dogfood--4-周闭测)。
 > v1 公开 API 在 Week 12 GA 后冻结，破坏性变更走 SemVer。冻结范围参见 [API 参考 - 接口冻结声明](../api/api-reference.md#接口冻结声明)。
 
 ---
 
 ## [Unreleased](https://github.com/doskey/sieve/compare/v0.1.0...HEAD)
+
+### Added — Week 3 (2026-04-27 完成)
+
+#### 入站 SSE 流式处理（sieve-core）
+- `SseParser`：增量解析器，push_chunk + flush 接口，**无缓冲整流**
+- 5 类边界全覆盖：半行 chunk / 跨 chunk 分隔符 / C0 控制字符 / 多 event 粘包 / 提前断流
+- `Aggregator`：Tool Use partial_json 跨 SSE event 聚合，content_block_stop 后 deserialize
+- `StreamingPipelineNode` trait：observe_event / on_tool_use_complete / on_message_stop
+- `InboundFilter` impl：入站文本扫描 + tool_use 检查 + .sieveignore 过滤
+- `InboundEngine` trait（由 sieve-cli engine_adapter 桥接到 VectorscanEngine）
+- `AddressGuard`：IN-CR-01 地址替换检测，strsim Levenshtein，distance ∈[1,3] 且 len 相等触发
+- ToolUseBlock 加 `span: Option<ContentSpan>` 字段
+
+#### 入站规则集（sieve-rules/rules/inbound.toml）
+- IN-CR-01 地址替换（占位，实际由 AddressGuard strsim 实现）
+- IN-CR-02 危险 shell 命令（rm -rf / curl|sh / wget|sh / eval / nc 反弹 / dd 擦盘）
+- IN-CR-04 markdown exfil（候选，warn）
+- IN-CR-05 签名工具白名单（EVM eth_signTransaction 等 / Solana signTransaction 等 / Bitcoin signRawTransaction 等）
+- IN-GEN-01 markdown javascript: URI（critical block）
+- IN-GEN-02 inline HTML img（warn）
+- IN-GEN-03 bash -c 任意执行（critical block）
+- 共 13 条规则，vectorscan PCRE 子集兼容
+
+#### Critical fail-closed 强制（sieve-rules::critical_lock）
+- `FAIL_CLOSED_RULES` 常量（出站 OUT-01~12 全部 + 入站 11 条 critical 规则）
+- `is_fail_closed(rule_id)` + `enforce_action(rule_id, requested) -> Action`
+- 运行时检查：在 OutboundAdapter / InboundAdapter scan 时调用，即使 manifest action 写 allow / mark 也强制为 Block
+
+#### Daemon 入站集成（sieve-cli）
+- `daemon::run` 新签名：`(cfg, OutboundFilter, Arc<dyn InboundEngine>, Arc<HashSet<String>>)`
+- `forward_with_inbound_inspection`：SSE tee 透传 + 同步 SseParser/Aggregator/InboundFilter，Critical 命中**注入 sieve_blocked event 然后关 channel**（用户拍板：截流策略）
+- **剥掉响应 content-length 头**强制 chunked transfer（否则注入 sieve_blocked 时 body 长度对不上 content-length 会被客户端截断）
+- `engine_adapter::InboundAdapter` 实现 `sieve_core::InboundEngine`
+- main.rs 启动加载 inbound rules，partition __ADDRESS_GUARD_PLACEHOLDER__ 占位规则不传 vectorscan
+- `audit_yolo_disabled`：运行时检查 config 字段（deny_unknown_fields 已防御 + 此函数双保险 tracing）
+
+#### Fuzz 双引擎（关联 PRD §9 #5 硬约束）
+- `fuzz/`（libFuzzer + cargo fuzz）：3 个 fuzz_target（sse_parser / tool_use_aggregator / inbound_filter）
+- `fuzz_afl/`（AFL++ + afl crate）：3 个对应 target
+- `fuzz/corpus/sse_parser/` 14 个 seed：正常流 / partial_json 跨 chunk / ping 穿插 / error 中途 / 半行 chunk / C0 控制 / 多 event 粘包 / 提前 EOF / 未知 event / 8KB partial_json / UCSB 4 类攻击 PoC
+- `sieve_core::fuzz_helpers` 模块（双引擎共享函数体）
+- ci.yml 加 fuzz-quick job：每 push 跑 60s/target 总 3 分钟
+- fuzz-nightly.yml 骨架（workflow_dispatch only，Week 6+ 启用 schedule）
+
+#### Bug 修复（Week 2 遗留）
+- 出站 dry_run + Critical bug：Week 2 实现允许 dry_run + Critical 时仍 forward 到上游，违反 ADR-007 fail-closed。**Week 3 修复**：fail-closed 名单中的规则在 dry_run 下仍返 426
+- 入站截流时 sieve_blocked event 注入与 content-length 冲突：剥掉响应 content-length 强制 chunked
+
+#### 测试与验证
+- 单元 + 集成测试 138 个全过（增量：sieve-core 25→56 / sieve-rules 29→50+12 / sieve-cli 15+3+5→15+5+3+5）
+- Python smoke 29/29（原 26 + 入站 benign 透传 1 + 真 key 测试 2）
+- UCSB 4 类攻击 PoC 测试（`tests/inbound_block.rs` 5 项）全部 ✓
+- release 二进制 9.1 MB（Week 2 9.0 → +0.1 MB，strsim + 入站规则）
+- cargo bench 编译通过（Week 4 实测性能）
+- cargo deny licenses bans sources 全过（加 NCSA for libfuzzer-sys + MIT for fuzz crates）
+
+### Pending（Week 4 起）
+- 完整 secret benchmark 数据集（200-500 攻击样本 + 50-100 benign 真实会话回放）
+- IN-GEN-04~05 完整规则
+- 主动 macOS / TUI 弹窗（Action::WarnConfirm 实现）
+- BIP39 Phase 2 multi-language wordlist（目前仅英文）
+
+### Known Issues
+- 入站截流时 Claude Code SDK 收到不完整 SSE 序列（text 已发但 message_stop 未发），依赖 SDK 容错；真实 SDK 行为需 dogfood 验证
+- IN-CR-04 markdown exfil 当前 warn，Week 4 评估升级 critical 触发条件
+- IN-CR-01 阈值 `distance ∈[1,3] 且 len 相等`，Phase 1 仅覆盖 ETH 地址，BTC 地址 Week 4 加
+- AFL++ nightly 仅 sse_parser_afl，其他两个 target 待 Week 6+ 补
+
+---
 
 ### Added — Week 2 (2026-04-27 完成)
 

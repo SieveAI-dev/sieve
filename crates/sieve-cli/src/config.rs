@@ -3,6 +3,7 @@
 //! Phase 1 字段：`upstream_url` / `port` / `bind_addr` / `log_path` /
 //! `tls_verify_upstream`。
 //! Week 2 新增：`rules_path` / `sieveignore_path` / `dry_run`。
+//! Week 3 新增：`inbound_rules_path`（入站规则路径）。
 //! `#[serde(deny_unknown_fields)]` 确保配置文件中的危险字段（如
 //! `disable_critical`）被强制拒绝，不会静默忽略。
 
@@ -52,6 +53,10 @@ pub struct Config {
     /// CLI `--dry-run` flag 出现时会覆盖此值为 `true`（见 cli.rs）。
     #[serde(default)]
     pub dry_run: bool,
+
+    /// 入站规则 toml 路径（Week 3，默认 `crates/sieve-rules/rules/inbound.toml`）。
+    #[serde(default)]
+    pub inbound_rules_path: Option<PathBuf>,
 }
 
 fn default_upstream() -> String {
@@ -81,6 +86,7 @@ impl Default for Config {
             rules_path: None,
             sieveignore_path: None,
             dry_run: false,
+            inbound_rules_path: None,
         }
     }
 }
@@ -135,6 +141,14 @@ impl Config {
             return p.clone();
         }
         PathBuf::from("crates/sieve-rules/rules/outbound.toml")
+    }
+
+    /// 解析入站规则路径。显式给定时直接用，否则回退到 `crates/sieve-rules/rules/inbound.toml`（相对 cwd）。
+    pub fn resolved_inbound_rules_path(&self) -> PathBuf {
+        if let Some(p) = &self.inbound_rules_path {
+            return p.clone();
+        }
+        PathBuf::from("crates/sieve-rules/rules/inbound.toml")
     }
 
     /// 解析 `.sieveignore` 路径。显式给定时直接用，否则回退到 `~/.sieve/sieveignore`。

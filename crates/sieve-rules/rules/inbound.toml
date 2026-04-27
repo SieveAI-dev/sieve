@@ -1,0 +1,120 @@
+# 入站 P0 规则集（关联 PRD §5.2 + UCSB 论文 4 类攻击）
+# 来源：Semgrep command-injection（MIT/Apache-2.0）+ Sieve 自写
+#
+# Vectorscan PCRE 子集约束：
+#   - 禁用 lookahead / lookbehind / 反向引用 / 原子组
+#   - 所有 pattern 仅用 (?i) + 字符类 + 量词 + 分组
+
+# IN-CR-01 是地址替换，由 sieve-core::address_guard 实现（strsim Levenshtein），
+# 此处仅占位以保持 ID 注册；loader 看到 pattern == "__ADDRESS_GUARD_PLACEHOLDER__" 时跳过 vectorscan 编译。
+[[rules]]
+id = "IN-CR-01"
+description = "Address substitution attack (handled by sieve-core::address_guard with strsim Levenshtein)"
+pattern = "__ADDRESS_GUARD_PLACEHOLDER__"
+severity = "critical"
+action = "block"
+
+# IN-CR-02 危险 shell 命令（Semgrep command-injection 风格）
+[[rules]]
+id = "IN-CR-02"
+description = "Destructive rm command"
+pattern = '''(?i)rm\s+-rf?\s+[/~*]'''
+severity = "critical"
+action = "block"
+keywords = ["rm"]
+
+[[rules]]
+id = "IN-CR-02-CURL-PIPE"
+description = "Curl-pipe-shell pattern (curl ... | sh)"
+pattern = '''(?i)curl\s+\S+\s*\|\s*(ba)?sh'''
+severity = "critical"
+action = "block"
+keywords = ["curl"]
+
+[[rules]]
+id = "IN-CR-02-WGET-PIPE"
+description = "Wget-pipe-shell pattern"
+pattern = '''(?i)wget\s+\S+\s*\|\s*(ba)?sh'''
+severity = "critical"
+action = "block"
+keywords = ["wget"]
+
+[[rules]]
+id = "IN-CR-02-EVAL"
+description = "eval with dynamic input"
+pattern = '''(?i)eval\s*[\(\$"]'''
+severity = "critical"
+action = "block"
+keywords = ["eval"]
+
+[[rules]]
+id = "IN-CR-02-NC-REVERSE"
+description = "Netcat reverse shell"
+pattern = '''(?i)nc\s+(-e|--sh-exec)\s+/bin/(ba)?sh'''
+severity = "critical"
+action = "block"
+keywords = ["nc"]
+
+[[rules]]
+id = "IN-CR-02-DD-WIPE"
+description = "dd disk wipe"
+pattern = '''(?i)dd\s+if=/dev/zero\s+of=/dev/'''
+severity = "critical"
+action = "block"
+keywords = ["dd"]
+
+# IN-CR-04 markdown exfil（候选，Week 3 仅 warn）
+[[rules]]
+id = "IN-CR-04"
+description = "Markdown image with URL query params (potential data exfil)"
+pattern = '''!\[[^\]]*\]\(https?://[^)]+[\?&][^)]*\)'''
+severity = "high"
+action = "warn"
+
+# IN-CR-05 签名工具白名单（EVM + Solana + Bitcoin 全拦）
+[[rules]]
+id = "IN-CR-05-EVM"
+description = "EVM signing tool call (eth_signTransaction / personal_sign / signTypedData_v4 etc.)"
+pattern = '''(?i)\b(eth_sendTransaction|eth_signTransaction|eth_signTypedData(_v[34])?|personal_sign|wallet_signTypedData)\b'''
+severity = "critical"
+action = "block"
+keywords = ["sign"]
+
+[[rules]]
+id = "IN-CR-05-SOLANA"
+description = "Solana signing tool call"
+pattern = '''(?i)\b(signTransaction|signMessage|partialSign|signAllTransactions|signAndSendTransaction)\b'''
+severity = "critical"
+action = "block"
+keywords = ["sign"]
+
+[[rules]]
+id = "IN-CR-05-BITCOIN"
+description = "Bitcoin signing tool call"
+pattern = '''(?i)\b(signRawTransaction(With(Key|Wallet))?|signMessage)\b'''
+severity = "critical"
+action = "block"
+keywords = ["sign"]
+
+# IN-GEN-01~03 候选（Week 4 完整化）
+[[rules]]
+id = "IN-GEN-01"
+description = "Markdown javascript: URI"
+pattern = '''(?i)\[.*?\]\(javascript:'''
+severity = "critical"
+action = "block"
+
+[[rules]]
+id = "IN-GEN-02"
+description = "Inline HTML img with external URL"
+pattern = '''(?i)<img\s[^>]*src\s*=\s*["']https?://'''
+severity = "high"
+action = "warn"
+
+[[rules]]
+id = "IN-GEN-03"
+description = "Bash -c arbitrary execution"
+pattern = '''(?i)bash\s+-c\s+["']'''
+severity = "critical"
+action = "block"
+keywords = ["bash"]

@@ -1,14 +1,17 @@
-//! 把 `sieve_rules::VectorscanEngine` 适配到 `sieve_core::OutboundEngine` trait。
+//! 把 `sieve_rules::VectorscanEngine` 适配到 `sieve_core::OutboundEngine` /
+//! `sieve_core::InboundEngine` trait。
 //!
-//! 阶段 1 sieve-core 不依赖 sieve-rules，所以 `OutboundEngine` trait 定义在 sieve-core，
+//! 阶段 1 sieve-core 不依赖 sieve-rules，所以 trait 定义在 sieve-core，
 //! 由本 crate 在启动时桥接两边（`.cursorrules §3.3` crate 边界协调）。
 //!
-//! 关联 ADR-002 / PRD §5.1 / Week 2 出站拦截集成。
+//! 关联 ADR-002 / PRD §5.1 / Week 2 出站 / Week 3 入站拦截集成。
 
 use sieve_core::detection::{fingerprint, Action, ContentSource, Detection, Severity};
 use sieve_core::error::SieveCoreResult;
+use sieve_core::pipeline::inbound::InboundEngine;
 use sieve_core::pipeline::outbound::OutboundEngine;
 use sieve_core::protocol::unified_message::ContentSpan;
+use sieve_core::tool_use_aggregator::CompletedToolCall;
 use sieve_rules::engine::{MatchEngine, VectorscanEngine};
 use sieve_rules::manifest::{Action as RulesAction, RuleEntry, Severity as RulesSeverity};
 use std::collections::HashMap;
@@ -71,6 +74,98 @@ fn redact_evidence(matched: &str) -> String {
         let head: String = chars[..4].iter().collect();
         let tail: String = chars[len - 4..].iter().collect();
         format!("{head}***{tail}")
+    }
+}
+
+/// `VectorscanEngine` 包装，实现 `sieve_core::InboundEngine`。
+///
+/// 与 [`OutboundAdapter`] 共用辅助函数（`map_severity` / `map_action` / `redact_evidence`），
+/// 额外在工具调用检查中调用 `sieve_rules::critical_lock::enforce_action` 保证 fail-closed。
+pub struct InboundAdapter {
+    engine: Arc<VectorscanEngine>,
+    /// rule_id → RuleEntry 反查表。
+    rule_lookup: HashMap<String, RuleEntry>,
+}
+
+impl InboundAdapter {
+    /// 构造 adapter。
+    pub fn new(engine: Arc<VectorscanEngine>, rules: Vec<RuleEntry>) -> Self {
+        let rule_lookup = rules.into_iter().map(|r| (r.id.clone(), r)).collect();
+        Self {
+            engine,
+            rule_lookup,
+        }
+    }
+}
+
+impl InboundEngine for InboundAdapter {
+    fn scan_text(
+        &self,
+        input: &str,
+        source: ContentSource,
+        body_offset: usize,
+    ) -> SieveCoreResult<Vec<Detection>> {
+        let hits = self.engine.scan(input.as_bytes()).map_err(|e| {
+            sieve_core::error::SieveCoreError::Forwarder(format!("vectorscan scan: {e}"))
+        })?;
+
+        let mut detections = Vec::new();
+        for hit in hits {
+            let rule = self.rule_lookup.get(&hit.rule_id);
+
+            let evidence_start = hit.start.min(input.len());
+            let evidence_end = hit.end.min(input.len());
+            let matched_text = &input[evidence_start..evidence_end];
+
+            if let Some(r) = rule {
+                if self.engine.is_excluded(matched_text, r) {
+                    continue;
+                }
+            }
+
+            let severity = rule
+                .map(|r| map_severity(r.severity))
+                .unwrap_or(Severity::Critical);
+
+            // critical_lock 强制：fail-closed 规则 action 一律覆盖为 Block
+            let raw_action = rule.map(|r| r.action).unwrap_or(RulesAction::Block);
+            let enforced_action =
+                sieve_rules::critical_lock::enforce_action(&hit.rule_id, raw_action);
+            let action = map_action(enforced_action);
+
+            let evidence_truncated = redact_evidence(matched_text);
+            let fp = fingerprint(&hit.rule_id, matched_text);
+
+            detections.push(Detection {
+                id: Uuid::new_v4(),
+                rule_id: hit.rule_id.clone(),
+                severity,
+                action,
+                source,
+                span: ContentSpan {
+                    start: body_offset + hit.start,
+                    end: body_offset + hit.end,
+                },
+                evidence_truncated,
+                fingerprint: fp,
+            });
+        }
+        Ok(detections)
+    }
+
+    fn check_tool_use(
+        &self,
+        tool: &CompletedToolCall,
+        source: ContentSource,
+    ) -> SieveCoreResult<Vec<Detection>> {
+        let mut hits = Vec::new();
+        // 1. 工具名扫描（IN-CR-05 签名工具）
+        hits.extend(self.scan_text(&tool.name, source, 0)?);
+        // 2. 工具输入序列化扫描（IN-CR-02 危险 shell 等）
+        if let Ok(input_str) = serde_json::to_string(&tool.input) {
+            hits.extend(self.scan_text(&input_str, source, 0)?);
+        }
+        Ok(hits)
     }
 }
 

@@ -286,6 +286,24 @@ BEGIN SELECT RAISE(ABORT, 'events is append-only'); END;
 
 ---
 
+## 6. 入站 session 状态（Week 3 新增）
+
+### 6.1 InboundFilter SessionState（IN-CR-01）
+
+`InboundFilter` 内部 `SessionState`：
+
+```rust
+pub struct SessionState {
+    /// 当前会话内出现过的 ETH 地址（lowercase 归一化）
+    /// 用于 IN-CR-01 AddressGuard 对比：相同放行，Levenshtein distance ∈[1,3] 且 len 相等触发 Critical
+    pub addresses_seen: HashSet<String>,
+}
+```
+
+Phase 1 per-session 内存，**不跨进程持久化**。Week 5 配置完善后评估 address book 持久化方案。
+
+---
+
 ## 7. 规则签名文件格式
 
 ### 7.1 文件命名
