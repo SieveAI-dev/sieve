@@ -4,8 +4,40 @@
 //! - 增量 push_chunk 接口，支持半行 / 跨 chunk / 多 event 粘包 / C0 控制字符 / 提前断流
 //! - 内部维护 buffer + 状态机，**不缓冲整流**，每次 push_chunk 立即返回已 parse 完整的 events
 //! - malformed event 返回 SseEvent::Unknown，不 panic
+//! - 超过 MAX_SSE_EVENT_BYTES 时返回 SseParserError::EventTooLarge（P0-5 容量上限，防 OOM）
 
 use serde::{Deserialize, Serialize};
+
+/// 单个 SSE event 允许的最大字节数（含 event: / data: / 前缀，不含分隔符 \n\n）。
+///
+/// 1 MiB 足够正常 Anthropic SSE event；超过此限视为恶意或异常上游（P0-5 / IN-CAP-01）。
+pub const MAX_SSE_EVENT_BYTES: usize = 1 << 20; // 1 MiB
+
+/// SSE 解析器可能返回的结构化错误。
+#[derive(Debug, Clone, PartialEq)]
+pub enum SseParserError {
+    /// 累积 buffer 超过 [`MAX_SSE_EVENT_BYTES`]，恶意上游可借此触发 OOM。
+    ///
+    /// 检测 ID：IN-CAP-01（SSE event 超大）。
+    EventTooLarge {
+        /// 当前 buffer 字节数。
+        len: usize,
+        /// 配置的上限。
+        max: usize,
+    },
+}
+
+impl std::fmt::Display for SseParserError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SseParserError::EventTooLarge { len, max } => {
+                write!(f, "IN-CAP-01: SSE event buffer 超限 ({len} > {max} bytes)")
+            }
+        }
+    }
+}
+
+impl std::error::Error for SseParserError {}
 
 /// SSE event 类型（对应 Anthropic Messages streaming spec）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -127,8 +159,22 @@ impl SseParser {
     /// 喂入一个 chunk，返回所有当前已可解析的完整 events。
     ///
     /// 不完整的 event 留在内部 buffer，等待下一个 chunk 补全。
-    pub fn push_chunk(&mut self, bytes: &[u8]) -> Vec<SseEvent> {
+    ///
+    /// # Errors
+    /// 若 buffer 累积超过 [`MAX_SSE_EVENT_BYTES`]，返回 [`SseParserError::EventTooLarge`]。
+    /// 调用方应将此视为 fail-closed Critical（IN-CAP-01），注入 sieve_blocked 并截断流。
+    pub fn push_chunk(&mut self, bytes: &[u8]) -> Result<Vec<SseEvent>, SseParserError> {
         self.buf.extend_from_slice(bytes);
+
+        // P0-5 容量上限检查：单个 event buffer 不允许超过 MAX_SSE_EVENT_BYTES。
+        // 检查时机：extend 后、drain 前，保证任何时刻 buffer 不会无界增长。
+        if self.buf.len() > MAX_SSE_EVENT_BYTES {
+            return Err(SseParserError::EventTooLarge {
+                len: self.buf.len(),
+                max: MAX_SSE_EVENT_BYTES,
+            });
+        }
+
         let mut events = Vec::new();
         // SSE event 以 \n\n 分隔（也接受 \r\n\r\n）
         while let Some((event_end, sep_end)) = find_event_end(&self.buf) {
@@ -138,7 +184,7 @@ impl SseParser {
                 events.push(event);
             }
         }
-        events
+        Ok(events)
     }
 
     /// 强制冲刷 buffer 中残留（连接关闭时调用）。
@@ -235,7 +281,9 @@ mod tests {
     #[test]
     fn parse_single_event() {
         let mut p = SseParser::new();
-        let events = p.push_chunk(b"event: ping\ndata: {\"type\":\"ping\"}\n\n");
+        let events = p
+            .push_chunk(b"event: ping\ndata: {\"type\":\"ping\"}\n\n")
+            .unwrap();
         assert_eq!(events.len(), 1);
         assert!(matches!(events[0], SseEvent::Ping));
     }
@@ -243,8 +291,8 @@ mod tests {
     #[test]
     fn parse_half_line_chunk() {
         let mut p = SseParser::new();
-        let mut all = p.push_chunk(b"event: ping\nda");
-        all.extend(p.push_chunk(b"ta: {\"type\":\"ping\"}\n\n"));
+        let mut all = p.push_chunk(b"event: ping\nda").unwrap();
+        all.extend(p.push_chunk(b"ta: {\"type\":\"ping\"}\n\n").unwrap());
         assert_eq!(all.len(), 1);
         assert!(matches!(all[0], SseEvent::Ping));
     }
@@ -252,8 +300,10 @@ mod tests {
     #[test]
     fn parse_split_separator() {
         let mut p = SseParser::new();
-        let mut all = p.push_chunk(b"event: ping\ndata: {\"type\":\"ping\"}\n");
-        all.extend(p.push_chunk(b"\n"));
+        let mut all = p
+            .push_chunk(b"event: ping\ndata: {\"type\":\"ping\"}\n")
+            .unwrap();
+        all.extend(p.push_chunk(b"\n").unwrap());
         assert_eq!(all.len(), 1);
         assert!(matches!(all[0], SseEvent::Ping));
     }
@@ -262,7 +312,7 @@ mod tests {
     fn parse_multi_event_packed() {
         let mut p = SseParser::new();
         let bytes = b"event: ping\ndata: {\"type\":\"ping\"}\n\nevent: ping\ndata: {\"type\":\"ping\"}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
-        let events = p.push_chunk(bytes);
+        let events = p.push_chunk(bytes).unwrap();
         assert_eq!(events.len(), 3);
         assert!(matches!(events[2], SseEvent::MessageStop));
     }
@@ -274,7 +324,7 @@ mod tests {
 data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}}
 
 "#;
-        let events = p.push_chunk(bytes);
+        let events = p.push_chunk(bytes).unwrap();
         assert_eq!(events.len(), 1);
         if let SseEvent::ContentBlockDelta {
             index,
@@ -295,7 +345,7 @@ data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text
 data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"loc"}}
 
 "#;
-        let events = p.push_chunk(bytes);
+        let events = p.push_chunk(bytes).unwrap();
         assert_eq!(events.len(), 1);
         if let SseEvent::ContentBlockDelta {
             delta: SseDelta::InputJsonDelta { partial_json },
@@ -311,7 +361,9 @@ data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta"
     #[test]
     fn malformed_returns_unknown_not_panic() {
         let mut p = SseParser::new();
-        let events = p.push_chunk(b"event: ping\ndata: {bogus json}\n\n");
+        let events = p
+            .push_chunk(b"event: ping\ndata: {bogus json}\n\n")
+            .unwrap();
         assert_eq!(events.len(), 1);
         assert!(matches!(events[0], SseEvent::Unknown));
     }
@@ -321,7 +373,7 @@ data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta"
         let mut p = SseParser::new();
         // C0 以 \uXXXX 转义形式存在于 JSON 字符串内 → 合法 JSON
         let bytes = b"event: ping\ndata: {\"type\":\"ping\",\"x\":\"\\u0001\"}\n\n";
-        let events = p.push_chunk(bytes);
+        let events = p.push_chunk(bytes).unwrap();
         assert_eq!(events.len(), 1);
         assert!(matches!(events[0], SseEvent::Ping));
     }
@@ -329,7 +381,9 @@ data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta"
     #[test]
     fn flush_returns_buffer_remainder_at_eof() {
         let mut p = SseParser::new();
-        let _ = p.push_chunk(b"event: ping\ndata: {\"type\":\"ping\"}");
+        let _ = p
+            .push_chunk(b"event: ping\ndata: {\"type\":\"ping\"}")
+            .unwrap();
         // 没有 \n\n，event 还在 buffer 中
         let flushed = p.flush();
         assert_eq!(flushed.len(), 1);
@@ -339,7 +393,25 @@ data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta"
     #[test]
     fn empty_chunk_no_events() {
         let mut p = SseParser::new();
-        assert!(p.push_chunk(b"").is_empty());
+        assert!(p.push_chunk(b"").unwrap().is_empty());
+    }
+
+    // P0-5: SSE event buffer 容量上限测试
+    #[test]
+    fn push_chunk_over_limit_returns_event_too_large() {
+        let mut p = SseParser::new();
+        // 构造 MAX_SSE_EVENT_BYTES + 1 字节的无 \n\n 数据（触发容量上限）
+        let oversized = vec![b'x'; MAX_SSE_EVENT_BYTES + 1];
+        let result = p.push_chunk(&oversized);
+        assert!(
+            matches!(
+                result,
+                Err(SseParserError::EventTooLarge { len, max })
+                    if len > MAX_SSE_EVENT_BYTES && max == MAX_SSE_EVENT_BYTES
+            ),
+            "expected EventTooLarge, got: {:?}",
+            result
+        );
     }
 
     #[test]
@@ -349,7 +421,7 @@ data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta"
 data: {"type":"message_start","message":{"id":"msg_x","type":"message","role":"assistant","content":[],"model":"claude-x","usage":{"input_tokens":1,"output_tokens":1}}}
 
 "#;
-        let events = p.push_chunk(bytes);
+        let events = p.push_chunk(bytes).unwrap();
         assert_eq!(events.len(), 1);
         assert!(matches!(events[0], SseEvent::MessageStart { .. }));
     }
@@ -359,7 +431,7 @@ data: {"type":"message_start","message":{"id":"msg_x","type":"message","role":"a
         let mut p = SseParser::new();
         // \r\n\r\n 分隔符
         let bytes = b"event: ping\r\ndata: {\"type\":\"ping\"}\r\n\r\n";
-        let events = p.push_chunk(bytes);
+        let events = p.push_chunk(bytes).unwrap();
         assert_eq!(events.len(), 1);
         assert!(matches!(events[0], SseEvent::Ping));
     }
@@ -371,7 +443,7 @@ data: {"type":"message_start","message":{"id":"msg_x","type":"message","role":"a
         // 注意：这里两行 data 拼接后必须是合法 JSON
         // 实际 Anthropic 不会多行 data，但解析器应支持
         let bytes = b"data: {\"type\":\n\ndata: \"ping\"}\n\n";
-        let events = p.push_chunk(bytes);
+        let events = p.push_chunk(bytes).unwrap();
         // 第一个 event 只有一行 data（第二个 \n\n 之前），无法解析 → Unknown
         assert!(!events.is_empty());
     }

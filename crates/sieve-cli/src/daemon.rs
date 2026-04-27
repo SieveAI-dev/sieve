@@ -25,7 +25,7 @@ use sieve_core::Forwarder;
 use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio_stream::wrappers::ReceiverStream;
 
 use crate::config::Config;
 
@@ -291,9 +291,12 @@ async fn forward_with_inbound_inspection(
     // content-length 截断,导致截流时注入的 sieve_blocked event 无法到达客户端。
     resp_parts.headers.remove(http::header::CONTENT_LENGTH);
 
-    // unbounded channel：spawn 的 tee 任务往里写 frame，客户端从 rx 读
-    let (tx, rx) =
-        tokio::sync::mpsc::unbounded_channel::<Result<hyper::body::Frame<Bytes>, std::io::Error>>();
+    // P0-5：bounded channel，深度 64，上游读取自然受背压限制（替代 unbounded_channel）。
+    // 发送端 .send().await → 接收端消费慢时阻塞 spawn 任务，避免内存无界增长。
+    const INBOUND_CHANNEL_DEPTH: usize = 64;
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<hyper::body::Frame<Bytes>, std::io::Error>>(
+        INBOUND_CHANNEL_DEPTH,
+    );
 
     tokio::spawn(async move {
         let mut parser = SseParser::new();
@@ -307,12 +310,25 @@ async fn forward_with_inbound_inspection(
                 Ok(frame) => {
                     // 只对 data frame 做解析；trailer / 其他 frame 直接透传
                     let Some(frame_bytes) = frame.data_ref().cloned() else {
-                        let _ = tx.send(Ok(frame));
+                        if tx.send(Ok(frame)).await.is_err() {
+                            return; // 接收端已 drop，停止读取
+                        }
                         continue;
                     };
 
-                    // 边读边扫：push_chunk 解析完整 event，先做 blocking 决策再转发 frame
-                    let events = parser.push_chunk(&frame_bytes);
+                    // P0-5：push_chunk 超限时 fail-closed（IN-CAP-01）
+                    let events = match parser.push_chunk(&frame_bytes) {
+                        Ok(evts) => evts,
+                        Err(e) => {
+                            tracing::warn!(error = %e, "SSE parser 容量超限，fail-closed 注入 sieve_blocked");
+                            let cap_detection =
+                                build_cap_detection("IN-CAP-01", "cap-sse-event-too-large");
+                            let blocked_payload = build_sieve_blocked_sse(&[cap_detection]);
+                            let _ = tx.send(Ok(hyper::body::Frame::data(blocked_payload))).await;
+                            return;
+                        }
+                    };
+
                     let blocking = collect_blocking_detections(
                         &events,
                         &mut inbound_filter,
@@ -326,18 +342,26 @@ async fn forward_with_inbound_inspection(
                             tracing::warn!(rule = %d.rule_id, "inbound detection");
                         }
                         let blocked_payload = build_sieve_blocked_sse(&blocking);
-                        let _ = tx.send(Ok(hyper::body::Frame::data(blocked_payload)));
+                        let _ = tx.send(Ok(hyper::body::Frame::data(blocked_payload))).await;
                         // drop tx → channel 关闭 → 客户端收到 EOF
                         return;
                     }
 
                     // 无 blocking：透传原始 frame（字节级一致）
-                    let _ = tx.send(Ok(hyper::body::Frame::data(frame_bytes)));
+                    if tx
+                        .send(Ok(hyper::body::Frame::data(frame_bytes)))
+                        .await
+                        .is_err()
+                    {
+                        return; // 接收端已 drop
+                    }
                 }
                 Err(e) => {
-                    let _ = tx.send(Err(std::io::Error::other(format!(
-                        "upstream body error: {e}"
-                    ))));
+                    let _ = tx
+                        .send(Err(std::io::Error::other(format!(
+                            "upstream body error: {e}"
+                        ))))
+                        .await;
                     return;
                 }
             }
@@ -354,12 +378,12 @@ async fn forward_with_inbound_inspection(
                 tracing::warn!(rule = %d.rule_id, "inbound detection (flush)");
             }
             let blocked_payload = build_sieve_blocked_sse(&blocking);
-            let _ = tx.send(Ok(hyper::body::Frame::data(blocked_payload)));
+            let _ = tx.send(Ok(hyper::body::Frame::data(blocked_payload))).await;
             // drop tx → 客户端收到 EOF
         }
     });
 
-    let body_stream = UnboundedReceiverStream::new(rx);
+    let body_stream = ReceiverStream::new(rx);
     let response_body: ResponseBody = StreamBody::new(body_stream)
         .map_err(|e: std::io::Error| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })
         .boxed();
@@ -387,13 +411,20 @@ fn collect_blocking_detections(
             ),
             Err(e) => tracing::warn!(error = %e, "inbound observe_event error"),
         }
-        if let Some(tool) = aggregator.process(evt) {
-            match inbound_filter.on_tool_use_complete(&tool) {
+        // P0-5：aggregator.process 现在返回 Result；容量超限时 fail-closed（IN-CAP-02）
+        match aggregator.process(evt) {
+            Ok(Some(tool)) => match inbound_filter.on_tool_use_complete(&tool) {
                 Ok(hits) => critical_hits.extend(
                     hits.into_iter()
                         .filter(|d| d.severity == sieve_core::Severity::Critical),
                 ),
                 Err(e) => tracing::warn!(error = %e, "inbound on_tool_use_complete error"),
+            },
+            Ok(None) => {}
+            Err(e) => {
+                // 容量超限：fail-closed，注入 IN-CAP-02 检测
+                tracing::warn!(error = %e, "aggregator 容量超限，fail-closed");
+                critical_hits.push(build_cap_detection("IN-CAP-02", "cap-aggregator-too-large"));
             }
         }
     }
@@ -566,4 +597,23 @@ fn empty_body() -> ResponseBody {
     Empty::<Bytes>::new()
         .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { match e {} })
         .boxed()
+}
+
+/// 构造容量上限 Detection（P0-5，IN-CAP-01 / IN-CAP-02）。
+///
+/// 容量超限不对应具体文本 span，因此 span 设 [0, 0)，evidence_truncated 为空。
+fn build_cap_detection(rule_id: &str, fingerprint_key: &str) -> sieve_core::Detection {
+    use sieve_core::detection::{Action, ContentSource};
+    use sieve_core::protocol::unified_message::ContentSpan;
+    use uuid::Uuid;
+    sieve_core::Detection {
+        id: Uuid::new_v4(),
+        rule_id: rule_id.into(),
+        severity: sieve_core::Severity::Critical,
+        action: Action::Block,
+        source: ContentSource::InboundAssistantText,
+        span: ContentSpan { start: 0, end: 0 },
+        evidence_truncated: String::new(),
+        fingerprint: fingerprint_key.into(),
+    }
 }
