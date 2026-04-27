@@ -70,25 +70,32 @@ jobs:
   fuzz-quick:
     name: fuzz-quick (cargo fuzz, 60s/target)
     runs-on: ubuntu-latest
-    # 修：新版 nightly Linux x86_64 默认切到 rust-lld，rust-lld 对 SanCov
-    # PCGuard tables 做激进 GC 把 __sancov_gen_.* 定义丢失，asan.module_dtor.*
-    # 大量符号悬空（macOS aarch64 默认 ld64 不受影响，本地实测通过）。
-    # 强制 cc 改用 GNU bfd 链接器规避；同时确保 binutils 已装。
+    # 修：cargo-fuzz 0.13.1（最新 release）在 RUSTFLAGS 注入
+    # `-Cpasses=sancov-module`，这是 LLVM legacy pass plugin 写法。
+    # 较新 nightly 升级到 LLVM 19/20 的新 pass manager 后已不识别此 flag，
+    # 导致 SanCov pass 不运行，PCGuard 全局变量从未生成；
+    # 而 `-Zsanitizer=address` 仍然 emit asan.module_dtor 对
+    # `__sancov_gen_.*` 的引用，链接阶段大量悬空（rust-lld 与 GNU bfd
+    # 都报错，证明问题在目标文件本身而非链接器）。
+    #
+    # 修法：pin nightly 到 cargo-fuzz 0.13.1 release 当期已知能跑的版本
+    # （2024-09 与 cargo-fuzz 0.13.1 同期），等 cargo-fuzz 上游修复
+    # 此问题（rust-fuzz/cargo-fuzz#494 等 issue）后再升级 nightly。
     env:
-      RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=bfd"
+      NIGHTLY: nightly-2025-06-01
     steps:
       - uses: actions/checkout@v4
       - run: rustup show
-      - run: rustup install nightly
+      - run: rustup install ${{ env.NIGHTLY }} --profile minimal
       - name: 安装构建依赖
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build pkg-config libssl-dev libboost-dev ragel binutils
+          sudo apt-get install -y cmake ninja-build pkg-config libssl-dev libboost-dev ragel
       - run: cargo install cargo-fuzz --locked
       - uses: Swatinem/rust-cache@v2
       - name: Fuzz sse_parser (60s)
-        run: cargo +nightly fuzz run sse_parser -- -max_total_time=60
+        run: cargo +${{ env.NIGHTLY }} fuzz run sse_parser -- -max_total_time=60
       - name: Fuzz tool_use_aggregator (60s)
-        run: cargo +nightly fuzz run tool_use_aggregator -- -max_total_time=60
+        run: cargo +${{ env.NIGHTLY }} fuzz run tool_use_aggregator -- -max_total_time=60
       - name: Fuzz inbound_filter (60s)
-        run: cargo +nightly fuzz run inbound_filter -- -max_total_time=60
+        run: cargo +${{ env.NIGHTLY }} fuzz run inbound_filter -- -max_total_time=60
