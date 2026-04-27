@@ -109,7 +109,14 @@ impl MatchEngine for VectorscanEngine {
         let mut scanner = BlockScanner::new(&self.db)
             .map_err(|e| SieveRulesError::Engine(format!("create scanner: {e}")))?;
 
-        let mut hits: Vec<MatchHit> = Vec::new();
+        // vectorscan 对带量词的 pattern（`{m,n}` / `(?:..)*` 等）会在每个合法 end
+        // 位置都触发回调。例如 `\.env\b(?:\.[a-z]+)*` 在 `.env.example` 上会从
+        // start=0 emit end=4,6,7,...,12 多次。下游 allowlist 只能看到 matched_text，
+        // 短 match（仅 `.env`）拿不到完整文件名上下文，会绕过 `\.env\.example` 白名单。
+        //
+        // 此处按 (rule_id, start) 保留**最长** end，给上层 longest-match 语义。
+        // 关联：IN-CR-03-DOTENV / IN-CR-03-SSH-DIR allowlist 正确性。
+        let mut by_key: HashMap<(String, usize), MatchHit> = HashMap::new();
         scanner
             .scan(input, |id, from, to, _flags| {
                 let rule_id = self
@@ -117,15 +124,30 @@ impl MatchEngine for VectorscanEngine {
                     .get(&id)
                     .map(|r| r.id.clone())
                     .unwrap_or_default();
-                hits.push(MatchHit {
-                    rule_id,
-                    start: from as usize,
-                    end: to as usize,
-                });
+                let key = (rule_id.clone(), from as usize);
+                by_key
+                    .entry(key)
+                    .and_modify(|existing| {
+                        if (to as usize) > existing.end {
+                            existing.end = to as usize;
+                        }
+                    })
+                    .or_insert(MatchHit {
+                        rule_id,
+                        start: from as usize,
+                        end: to as usize,
+                    });
                 Scan::Continue
             })
             .map_err(|e| SieveRulesError::Engine(format!("scan failed: {e}")))?;
 
+        // 输出排序保证测试与下游处理的确定性
+        let mut hits: Vec<MatchHit> = by_key.into_values().collect();
+        hits.sort_by(|a, b| {
+            a.start
+                .cmp(&b.start)
+                .then_with(|| a.rule_id.cmp(&b.rule_id))
+        });
         Ok(hits)
     }
 }
@@ -208,5 +230,26 @@ mod tests {
         let rule_entry = engine.rule_meta(0).unwrap();
         assert!(engine.is_excluded("test_private_key", rule_entry));
         assert!(!engine.is_excluded("prod_private_key", rule_entry));
+    }
+
+    /// vectorscan 对带量词的 pattern 会触发多个 endpoint 回调；引擎必须保留最长 end，
+    /// 否则 allowlist 看不到完整 matched_text 会漏过短 match。关联 IN-CR-03-DOTENV。
+    #[test]
+    fn longest_match_per_start_dedup() {
+        let rules = vec![rule("TEST-DOTENV", r"\.env\b(?:\.[a-z]+)*", Severity::High)];
+        let engine = VectorscanEngine::compile(rules).unwrap();
+        let hits = engine.scan(b"read .env.example").unwrap();
+        // 期望：仅 1 个 hit，匹配整段 `.env.example`（end=17），而非短 `.env`（end=9）
+        let dotenv_hits: Vec<_> = hits.iter().filter(|h| h.rule_id == "TEST-DOTENV").collect();
+        assert_eq!(
+            dotenv_hits.len(),
+            1,
+            "expected single longest-match per start, got: {hits:?}"
+        );
+        assert_eq!(dotenv_hits[0].start, 5);
+        assert_eq!(
+            dotenv_hits[0].end, 17,
+            "should keep longest end (.env.example = 12 chars), got {hits:?}"
+        );
     }
 }
