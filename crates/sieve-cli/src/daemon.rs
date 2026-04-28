@@ -517,7 +517,7 @@ async fn proxy_inner(
         // 累计文本字符偏移，不是 raw JSON body 的字节范围。
         // 正确做法：用 redact_segments() 在文本段字符串内替换，然后重新序列化 JSON。
         // 原 redact_body_bytes(&body_bytes, ...) 路径只保留给 fuzz/单测，不在这里使用。
-        let redact_hits: Vec<RedactHit> = all_detections
+        let mut redact_hits: Vec<RedactHit> = all_detections
             .iter()
             .filter(|d| matches!(d.action, Action::Redact { .. }))
             .map(|d| RedactHit {
@@ -628,8 +628,22 @@ async fn proxy_inner(
                         }
                         sieve_ipc::DecisionAction::RedactAndAllow => {
                             tracing::info!("OUTBOUND GUI: RedactAndAllow → 脱敏后转发");
-                            // 若有 redact_hits 则脱敏，否则原 body 转发（与 Allow 同逻辑）
-                            // 直接 fall-through 到下方 redact_hits 处理
+                            // 修 R3-#3：把 held detection 的 span 升级到 redact_hits，
+                            // 保证仅命中 GUI 类（无 AutoRedact 类）时也能正确脱敏。
+                            // 去重：跳过已在 redact_hits 中存在的 span。
+                            for d in &hold_detections_outbound {
+                                let already = redact_hits
+                                    .iter()
+                                    .any(|h| h.start == d.span.start && h.end == d.span.end);
+                                if !already {
+                                    redact_hits.push(RedactHit {
+                                        rule_id: d.rule_id.clone(),
+                                        start: d.span.start,
+                                        end: d.span.end,
+                                    });
+                                }
+                            }
+                            // fall-through 到下方 redact_hits 处理（现在含 GUI 类 span）
                         }
                         sieve_ipc::DecisionAction::Deny => {
                             tracing::warn!("OUTBOUND GUI: Deny → 426");
@@ -881,7 +895,7 @@ async fn proxy_openai(
     }
 
     // 5a. 收集需要脱敏的 hit（与 Anthropic 路径对称，修 A2-#1）
-    let redact_hits_openai: Vec<RedactHit> = all_detections
+    let mut redact_hits_openai: Vec<RedactHit> = all_detections
         .iter()
         .filter(|d| matches!(d.action, Action::Redact { .. }))
         .map(|d| RedactHit {
@@ -977,10 +991,28 @@ async fn proxy_openai(
 
             match outcome {
                 Ok(resp) => match resp.decision {
-                    sieve_ipc::DecisionAction::Allow
-                    | sieve_ipc::DecisionAction::RedactAndAllow => {
+                    sieve_ipc::DecisionAction::Allow => {
                         tracing::info!("OUTBOUND GUI (openai): Allow → 转发原 body");
-                        // fall-through 到透传
+                        // fall-through 到透传（不脱敏，用户明确选择原样允许）
+                    }
+                    sieve_ipc::DecisionAction::RedactAndAllow => {
+                        tracing::info!("OUTBOUND GUI (openai): RedactAndAllow → 脱敏后转发");
+                        // 修 R3-#3：把 held detection 的 span 升级到 redact_hits_openai，
+                        // 保证仅命中 GUI 类（无 AutoRedact 类）时也能正确脱敏。
+                        // 去重：跳过已在 redact_hits_openai 中存在的 span。
+                        for d in &hold_detections {
+                            let already = redact_hits_openai
+                                .iter()
+                                .any(|h| h.start == d.span.start && h.end == d.span.end);
+                            if !already {
+                                redact_hits_openai.push(RedactHit {
+                                    rule_id: d.rule_id.clone(),
+                                    start: d.span.start,
+                                    end: d.span.end,
+                                });
+                            }
+                        }
+                        // fall-through 到下方 redact_hits_openai 处理（现在含 GUI 类 span）
                     }
                     sieve_ipc::DecisionAction::Deny => {
                         tracing::warn!("OUTBOUND GUI (openai): Deny → 426");

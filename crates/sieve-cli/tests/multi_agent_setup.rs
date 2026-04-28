@@ -737,3 +737,326 @@ fn hermes_apply_injects_delegation_base_url_fallback() {
         "model.base_url 应为 Sieve URL，updated: {updated}"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F-1：OpenAI 路由保留——upstream-routes.json 含原始 baseUrl
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// F-1 修复验证：setup --agent openclaw 写出 upstream-routes.json，
+/// 包含各 provider 的原始 baseUrl（非 127.0.0.1:11453）。
+///
+/// 场景：mock OpenClaw config 含 3 个 provider（openai / openrouter / deepseek），
+/// setup 后验证 upstream-routes.json 有 3 条原始 URL 记录。
+///
+/// 关联：known-issues-v1.4.md F-1。
+#[test]
+fn f1_upstream_routes_json_contains_original_provider_urls() {
+    let Some(bin) = sieve_bin() else {
+        return;
+    };
+    let dir = fake_home();
+    let fake = dir.path();
+    let sieve_home = fake.join(".sieve");
+
+    // 创建 mock OpenClaw config，含 3 个 provider
+    let openclaw_dir = fake.join(".openclaw");
+    fs::create_dir_all(&openclaw_dir).unwrap();
+    let config_path = openclaw_dir.join("openclaw.json");
+    fs::write(
+        &config_path,
+        r#"{
+  "models": {
+    "providers": {
+      "openai": {"baseUrl": "https://api.openai.com/v1"},
+      "openrouter": {"baseUrl": "https://openrouter.ai/api/v1"},
+      "deepseek": {"baseUrl": "https://api.deepseek.com/v1"}
+    }
+  }
+}"#,
+    )
+    .unwrap();
+
+    let out = Command::new(&bin)
+        .args(["setup", "--agent", "openclaw", "--yes"])
+        .env("HOME", fake)
+        .env("SIEVE_HOME", &sieve_home)
+        .output()
+        .expect("执行 sieve 失败");
+
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        out.status.success(),
+        "setup --agent openclaw 应 exit 0，combined: {combined}"
+    );
+
+    // 验证 upstream-routes.json 存在且含 3 条记录
+    let routes_path = sieve_home.join("upstream-routes.json");
+    assert!(
+        routes_path.exists(),
+        "F-1: upstream-routes.json 应写入 {}, combined: {combined}",
+        routes_path.display()
+    );
+
+    let routes_raw = fs::read_to_string(&routes_path).unwrap();
+    let routes: serde_json::Value =
+        serde_json::from_str(&routes_raw).expect("upstream-routes.json 应为合法 JSON");
+
+    // 3 个 provider 的原始 URL 都应存在（不是 Sieve 代理地址）
+    let obj = routes
+        .as_object()
+        .expect("upstream-routes.json 根应为 object");
+    assert_eq!(
+        obj.len(),
+        3,
+        "F-1: upstream-routes.json 应含 3 条路由，实际: {routes_raw}"
+    );
+    assert_eq!(
+        obj.get("openai").and_then(|v| v.as_str()),
+        Some("https://api.openai.com/v1"),
+        "F-1: openai 原始 URL 未保留，routes: {routes_raw}"
+    );
+    assert_eq!(
+        obj.get("openrouter").and_then(|v| v.as_str()),
+        Some("https://openrouter.ai/api/v1"),
+        "F-1: openrouter 原始 URL 未保留，routes: {routes_raw}"
+    );
+    assert_eq!(
+        obj.get("deepseek").and_then(|v| v.as_str()),
+        Some("https://api.deepseek.com/v1"),
+        "F-1: deepseek 原始 URL 未保留，routes: {routes_raw}"
+    );
+
+    // daemon config 含 upstream_routes_path（通过 sieve.toml 的路由文件存在验证）
+    let sieve_toml = sieve_home.join("sieve.toml");
+    assert!(
+        sieve_toml.exists(),
+        "F-1: sieve.toml 应在 setup 时写入，sieve_home: {}",
+        sieve_home.display()
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F-2：规则文件部署——rules/outbound.toml + inbound.toml 存在且内容一致
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// F-2 修复验证：setup --agent claude（非 dry-run）后，
+/// $SIEVE_HOME/rules/outbound.toml 和 inbound.toml 存在，
+/// 内容与内嵌规则一致（二进制打包版本）。
+///
+/// 场景：tempdir 模拟 SIEVE_HOME，setup 后直接检查文件系统。
+///
+/// 关联：known-issues-v1.4.md P1-R3-#1（现已修复）。
+#[test]
+fn f2_rules_deployed_to_sieve_home_on_setup() {
+    let Some(bin) = sieve_bin() else {
+        return;
+    };
+    let dir = fake_home();
+    let fake = dir.path();
+    let sieve_home = fake.join(".sieve");
+
+    let out = Command::new(&bin)
+        .args(["setup", "--agent", "claude", "--yes"])
+        .env("HOME", fake)
+        .env("SIEVE_HOME", &sieve_home)
+        // SIEVE_RULES_PATH 设为不存在路径，让 doctor canary 失败，触发回滚后 setup 以非零退出。
+        // 但规则文件已在 install_shared_daemon 阶段写出，回滚时只删 sentinel + sieve.toml + plist。
+        // 为了让测试不依赖 doctor 结果，这里改为不覆盖 SIEVE_RULES_PATH（使用部署的规则）。
+        .output()
+        .expect("执行 sieve 失败");
+
+    // setup 可能成功（doctor 通过）或失败（doctor 失败，回滚），
+    // 但规则文件在 install_shared_daemon 阶段早于 ClaudeAdapter 写出。
+    // 即使 doctor 失败导致回滚，规则文件也应已写出（daemon_ctx 在单独块中，不属于 claude ctx 回滚）。
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let outbound = sieve_home.join("rules").join("outbound.toml");
+    let inbound = sieve_home.join("rules").join("inbound.toml");
+
+    assert!(
+        outbound.exists(),
+        "F-2: rules/outbound.toml 应在 setup 时部署，sieve_home: {}, combined: {combined}",
+        sieve_home.display()
+    );
+    assert!(
+        inbound.exists(),
+        "F-2: rules/inbound.toml 应在 setup 时部署，sieve_home: {}, combined: {combined}",
+        sieve_home.display()
+    );
+
+    // 内容不应为空
+    let outbound_content = fs::read_to_string(&outbound).unwrap();
+    let inbound_content = fs::read_to_string(&inbound).unwrap();
+    assert!(
+        outbound_content.contains("OUT-01") || outbound_content.contains("[[rules]]"),
+        "F-2: outbound.toml 内容应含规则，实际长度: {}",
+        outbound_content.len()
+    );
+    assert!(
+        inbound_content.contains("IN-CR-01") || inbound_content.contains("[[rules]]"),
+        "F-2: inbound.toml 内容应含规则，实际长度: {}",
+        inbound_content.len()
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F-3：非 Claude agent 也安装 daemon
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// F-3 修复验证：setup --agent openclaw 也会安装 daemon。
+///
+/// 场景：tempdir 模拟 SIEVE_HOME，只装 openclaw，
+/// 验证 sieve.toml 和 launchd plist 都存在（daemon 共享安装）。
+///
+/// 关联：known-issues-v1.4.md F-3。
+#[test]
+fn f3_openclaw_setup_also_installs_daemon() {
+    let Some(bin) = sieve_bin() else {
+        return;
+    };
+    let dir = fake_home();
+    let fake = dir.path();
+    let sieve_home = fake.join(".sieve");
+
+    // 创建 mock OpenClaw config
+    let openclaw_dir = fake.join(".openclaw");
+    fs::create_dir_all(&openclaw_dir).unwrap();
+    fs::write(
+        openclaw_dir.join("openclaw.json"),
+        r#"{"models":{"providers":{"openai":{"baseUrl":"https://api.openai.com"}}}}"#,
+    )
+    .unwrap();
+
+    let out = Command::new(&bin)
+        .args(["setup", "--agent", "openclaw", "--yes"])
+        .env("HOME", fake)
+        .env("SIEVE_HOME", &sieve_home)
+        .output()
+        .expect("执行 sieve 失败");
+
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        out.status.success(),
+        "F-3: setup --agent openclaw 应 exit 0，combined: {combined}"
+    );
+
+    // sieve.toml 应存在（daemon 共享安装完成）
+    let sieve_toml = sieve_home.join("sieve.toml");
+    assert!(
+        sieve_toml.exists(),
+        "F-3: sieve.toml 应在 setup --agent openclaw 时写入（daemon 共享安装），combined: {combined}"
+    );
+
+    // launchd plist 应存在（即使只装 openclaw，也要安装 daemon）
+    let plist = fake
+        .join("Library")
+        .join("LaunchAgents")
+        .join("com.sieve.daemon.plist");
+    assert!(
+        plist.exists(),
+        "F-3: launchd plist 应在 setup --agent openclaw 时写入，combined: {combined}"
+    );
+
+    // sentinel 文件应存在（防止重复安装）
+    let sentinel = sieve_home.join(".daemon-installed");
+    assert!(
+        sentinel.exists(),
+        "F-3: sentinel .daemon-installed 应在首次安装后写入，combined: {combined}"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F-3：sentinel 防重复安装
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// F-3 sentinel 验证：setup --agent openclaw 后再 setup --agent claude，
+/// daemon 不应重复安装（sentinel 保护）。
+///
+/// 验证：两次 setup 后 sieve.toml 内容相同（未被覆盖），
+/// 且 sentinel 文件仍存在。
+///
+/// 关联：known-issues-v1.4.md F-3。
+#[test]
+fn f3_sentinel_prevents_daemon_reinstall() {
+    let Some(bin) = sieve_bin() else {
+        return;
+    };
+    let dir = fake_home();
+    let fake = dir.path();
+    let sieve_home = fake.join(".sieve");
+
+    // 第 1 次：setup --agent openclaw
+    let openclaw_dir = fake.join(".openclaw");
+    fs::create_dir_all(&openclaw_dir).unwrap();
+    fs::write(
+        openclaw_dir.join("openclaw.json"),
+        r#"{"models":{"providers":{"openai":{"baseUrl":"https://api.openai.com"}}}}"#,
+    )
+    .unwrap();
+
+    let out1 = Command::new(&bin)
+        .args(["setup", "--agent", "openclaw", "--yes"])
+        .env("HOME", fake)
+        .env("SIEVE_HOME", &sieve_home)
+        .output()
+        .expect("执行 sieve 失败（第 1 次）");
+
+    let combined1 = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out1.stdout),
+        String::from_utf8_lossy(&out1.stderr)
+    );
+    assert!(
+        out1.status.success(),
+        "F-3: 第 1 次 setup 应 exit 0，combined: {combined1}"
+    );
+
+    // 记录第 1 次写入的 sieve.toml 内容
+    let sieve_toml_path = sieve_home.join("sieve.toml");
+    assert!(
+        sieve_toml_path.exists(),
+        "第 1 次 setup 后 sieve.toml 应存在"
+    );
+    let toml_after_first = fs::read_to_string(&sieve_toml_path).unwrap();
+    let sentinel = sieve_home.join(".daemon-installed");
+    assert!(sentinel.exists(), "第 1 次 setup 后 sentinel 应存在");
+
+    // 第 2 次：setup --agent claude（同一 fake home）
+    let out2 = Command::new(&bin)
+        .args(["setup", "--agent", "claude", "--yes"])
+        .env("HOME", fake)
+        .env("SIEVE_HOME", &sieve_home)
+        .output()
+        .expect("执行 sieve 失败（第 2 次）");
+
+    let combined2 = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out2.stdout),
+        String::from_utf8_lossy(&out2.stderr)
+    );
+    // 第 2 次 setup 也可能成功（doctor 通过）或失败（doctor 失败），重点是 daemon 不重复安装
+    // 验证：sieve.toml 内容未被覆盖（sentinel 生效，install_shared_daemon 跳过）
+    let toml_after_second = fs::read_to_string(&sieve_toml_path).unwrap();
+    assert_eq!(
+        toml_after_first, toml_after_second,
+        "F-3: 第 2 次 setup 有 sentinel，sieve.toml 不应被重写，combined2: {combined2}"
+    );
+
+    // sentinel 仍存在
+    assert!(
+        sentinel.exists(),
+        "F-3: sentinel 在第 2 次 setup 后应仍存在，combined2: {combined2}"
+    );
+}

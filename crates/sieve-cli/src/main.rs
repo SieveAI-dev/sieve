@@ -22,7 +22,9 @@ mod cli;
 mod commands;
 mod config;
 mod daemon;
+mod embedded_rules;
 mod engine_adapter;
+mod upstream_routes;
 
 use audit::AuditStore;
 use cli::{Cli, Command};

@@ -598,6 +598,358 @@ async fn outbound_gui_popup_deny_returns_426() {
     );
 }
 
+// ─── R3-#3 修复验证：RedactAndAllow 脱敏路径 ─────────────────────────────────
+
+/// R3-#3（Anthropic 路径）：只命中 OUT-07 PEM 私钥（gui_popup disposition），
+/// mock GUI 返回 `RedactAndAllow`，验证上游收到的 body 不含原 PEM 内容。
+///
+/// 修复前：redact_hits 为空（仅含 AutoRedact 类），fall-through 原样转发上游 → 泄漏。
+/// 修复后：RedactAndAllow 分支把 hold_detections_outbound span 加入 redact_hits，
+///        上游收到 [REDACTED:OUT-07] 占位符而非原始 PEM 内容。
+#[tokio::test]
+async fn r3_fix_gui_redact_and_allow_anthropic_redacts_pem() {
+    let upstream_body = Arc::new(tokio::sync::Mutex::new(Bytes::new()));
+    let body_clone = upstream_body.clone();
+
+    let (upstream_addr, _up_shutdown) = spawn_mock_upstream(move |req| {
+        let b = body_clone.clone();
+        async move {
+            let mut guard = b.lock().await;
+            *guard = req.body().clone();
+            drop(guard);
+            Response::builder()
+                .status(200)
+                .body(Full::new(Bytes::from_static(b"upstream-ok")))
+                .unwrap()
+        }
+    })
+    .await;
+
+    let sieve_home_dir = tempfile::tempdir().unwrap();
+    let sieve_home = sieve_home_dir.path().to_owned();
+    let socket_path = sieve_home.join("ipc.sock");
+
+    let (sieve_port, _guard) =
+        spawn_sieve_daemon_with_home(&format!("http://{upstream_addr}"), false, Some(&sieve_home));
+
+    // mock GUI 回复 RedactAndAllow
+    let socket_path_clone = socket_path.clone();
+    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<()>();
+    let ipc_task = tokio::spawn(async move {
+        let _ = mock_gui_respond_with_ready(
+            &socket_path_clone,
+            sieve_ipc::DecisionAction::RedactAndAllow,
+            ready_tx,
+        )
+        .await;
+    });
+
+    let _ = tokio::time::timeout(Duration::from_secs(15), ready_rx).await;
+
+    let body = pem_key_body();
+    let client = plain_http_client();
+    let resp = client
+        .request(
+            Request::builder()
+                .method(http::Method::POST)
+                .uri(format!("http://127.0.0.1:{sieve_port}/v1/messages"))
+                .header(http::header::CONTENT_TYPE, "application/json")
+                .header(http::header::HOST, format!("127.0.0.1:{sieve_port}"))
+                .body(Full::new(Bytes::from(body)))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let _ = ipc_task.await;
+
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "RedactAndAllow 后应返回 200（脱敏转发）"
+    );
+
+    let received = upstream_body.lock().await.clone();
+    let received_str = String::from_utf8_lossy(&received);
+
+    assert!(
+        !received_str.contains("BEGIN EC PRIVATE KEY"),
+        "R3-#3 修复：上游不应收到原始 PEM key header：\n{received_str}"
+    );
+    assert!(
+        received_str.contains("REDACTED"),
+        "R3-#3 修复：上游 body 应含 REDACTED 占位符：\n{received_str}"
+    );
+}
+
+/// R3-#3（Anthropic 路径）：GUI Allow（不脱敏）路径回归——上游收到原始 body。
+///
+/// Allow 路径不应受 R3-#3 修复影响（用户明确选择原样允许）。
+#[tokio::test]
+async fn r3_fix_gui_allow_forwards_original_body_regression() {
+    let upstream_body = Arc::new(tokio::sync::Mutex::new(Bytes::new()));
+    let body_clone = upstream_body.clone();
+
+    let (upstream_addr, _up_shutdown) = spawn_mock_upstream(move |req| {
+        let b = body_clone.clone();
+        async move {
+            let mut guard = b.lock().await;
+            *guard = req.body().clone();
+            drop(guard);
+            Response::builder()
+                .status(200)
+                .body(Full::new(Bytes::from_static(b"upstream-ok")))
+                .unwrap()
+        }
+    })
+    .await;
+
+    let sieve_home_dir = tempfile::tempdir().unwrap();
+    let sieve_home = sieve_home_dir.path().to_owned();
+    let socket_path = sieve_home.join("ipc.sock");
+
+    let (sieve_port, _guard) =
+        spawn_sieve_daemon_with_home(&format!("http://{upstream_addr}"), false, Some(&sieve_home));
+
+    // mock GUI 回复 Allow（不脱敏）
+    let socket_path_clone = socket_path.clone();
+    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<()>();
+    let ipc_task = tokio::spawn(async move {
+        let _ = mock_gui_respond_with_ready(
+            &socket_path_clone,
+            sieve_ipc::DecisionAction::Allow,
+            ready_tx,
+        )
+        .await;
+    });
+
+    let _ = tokio::time::timeout(Duration::from_secs(15), ready_rx).await;
+
+    let body = pem_key_body();
+    let client = plain_http_client();
+    let resp = client
+        .request(
+            Request::builder()
+                .method(http::Method::POST)
+                .uri(format!("http://127.0.0.1:{sieve_port}/v1/messages"))
+                .header(http::header::CONTENT_TYPE, "application/json")
+                .header(http::header::HOST, format!("127.0.0.1:{sieve_port}"))
+                .body(Full::new(Bytes::from(body)))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let _ = ipc_task.await;
+
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "Allow 后应返回 200（原样转发）"
+    );
+
+    let received = upstream_body.lock().await.clone();
+    let received_str = String::from_utf8_lossy(&received);
+
+    // Allow 路径：上游应收到原始 PEM key（用户明确允许）
+    assert!(
+        received_str.contains("BEGIN EC PRIVATE KEY"),
+        "Allow 路径（不脱敏）：上游应收到原始 PEM key header：\n{received_str}"
+    );
+}
+
+/// R3-#3（OpenAI 路径）：只命中 OUT-08 Stripe live key（gui_popup disposition），
+/// mock GUI 返回 `RedactAndAllow`，验证上游收到的 body 不含原 Stripe key。
+///
+/// OpenAI 路径（/v1/chat/completions）与 Anthropic 路径对称修复。
+#[tokio::test]
+async fn r3_fix_gui_redact_and_allow_openai_redacts_stripe_key() {
+    let upstream_body = Arc::new(tokio::sync::Mutex::new(Bytes::new()));
+    let body_clone = upstream_body.clone();
+
+    let (upstream_addr, _up_shutdown) = spawn_mock_upstream(move |req| {
+        let b = body_clone.clone();
+        async move {
+            let mut guard = b.lock().await;
+            *guard = req.body().clone();
+            drop(guard);
+            Response::builder()
+                .status(200)
+                .body(Full::new(Bytes::from_static(b"upstream-ok")))
+                .unwrap()
+        }
+    })
+    .await;
+
+    let sieve_home_dir = tempfile::tempdir().unwrap();
+    let sieve_home = sieve_home_dir.path().to_owned();
+    let socket_path = sieve_home.join("ipc.sock");
+
+    let (sieve_port, _guard) =
+        spawn_sieve_daemon_with_home(&format!("http://{upstream_addr}"), false, Some(&sieve_home));
+
+    let socket_path_clone = socket_path.clone();
+    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<()>();
+    let ipc_task = tokio::spawn(async move {
+        let _ = mock_gui_respond_with_ready(
+            &socket_path_clone,
+            sieve_ipc::DecisionAction::RedactAndAllow,
+            ready_tx,
+        )
+        .await;
+    });
+
+    let _ = tokio::time::timeout(Duration::from_secs(15), ready_rx).await;
+
+    // Stripe live key 触发 OUT-08（disposition=gui_popup）
+    let stripe_key = "sk_live_abcdefghij1234567890";
+    let body = serde_json::json!({
+        "model": "gpt-4o",
+        "stream": false,
+        "messages": [{
+            "role": "user",
+            "content": format!("my stripe key: {stripe_key}"),
+        }],
+    })
+    .to_string();
+
+    let client = plain_http_client();
+    let resp = client
+        .request(
+            Request::builder()
+                .method(http::Method::POST)
+                .uri(format!("http://127.0.0.1:{sieve_port}/v1/chat/completions"))
+                .header(http::header::CONTENT_TYPE, "application/json")
+                .header(http::header::HOST, format!("127.0.0.1:{sieve_port}"))
+                .body(Full::new(Bytes::from(body)))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let _ = ipc_task.await;
+
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "OpenAI RedactAndAllow 后应返回 200（脱敏转发）"
+    );
+
+    let received = upstream_body.lock().await.clone();
+    let received_str = String::from_utf8_lossy(&received);
+
+    assert!(
+        !received_str.contains("sk_live_"),
+        "R3-#3 OpenAI 修复：上游不应收到原始 Stripe live key：\n{received_str}"
+    );
+    assert!(
+        received_str.contains("REDACTED"),
+        "R3-#3 OpenAI 修复：上游 body 应含 REDACTED 占位符：\n{received_str}"
+    );
+}
+
+/// R3-#3（混合命中）：同时命中 OUT-01（AutoRedact）+ OUT-07（GUI），
+/// mock GUI 返回 `RedactAndAllow`，验证两个 span 都被脱敏（去重验证）。
+///
+/// 混合场景：AutoRedact span 已在 redact_hits 中，GUI span 通过 R3-#3 修复追加。
+/// 最终 redact_segments 应同时处理两个 span，上游 body 不含任何原始 secret。
+#[tokio::test]
+async fn r3_fix_gui_redact_and_allow_mixed_both_spans_redacted() {
+    let upstream_body = Arc::new(tokio::sync::Mutex::new(Bytes::new()));
+    let body_clone = upstream_body.clone();
+
+    let (upstream_addr, _up_shutdown) = spawn_mock_upstream(move |req| {
+        let b = body_clone.clone();
+        async move {
+            let mut guard = b.lock().await;
+            *guard = req.body().clone();
+            drop(guard);
+            Response::builder()
+                .status(200)
+                .body(Full::new(Bytes::from_static(b"upstream-ok")))
+                .unwrap()
+        }
+    })
+    .await;
+
+    let sieve_home_dir = tempfile::tempdir().unwrap();
+    let sieve_home = sieve_home_dir.path().to_owned();
+    let socket_path = sieve_home.join("ipc.sock");
+
+    let (sieve_port, _guard) =
+        spawn_sieve_daemon_with_home(&format!("http://{upstream_addr}"), false, Some(&sieve_home));
+
+    let socket_path_clone = socket_path.clone();
+    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<()>();
+    let ipc_task = tokio::spawn(async move {
+        let _ = mock_gui_respond_with_ready(
+            &socket_path_clone,
+            sieve_ipc::DecisionAction::RedactAndAllow,
+            ready_tx,
+        )
+        .await;
+    });
+
+    let _ = tokio::time::timeout(Duration::from_secs(15), ready_rx).await;
+
+    // 同一 body 同时含 OUT-01（Anthropic key，AutoRedact）+ OUT-07（PEM key，GUI）
+    let suffix_93: String = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_-"
+        .chars()
+        .cycle()
+        .take(93)
+        .collect();
+    let anthropic_key = format!("sk-ant-api03-{}AA", suffix_93);
+    let body = serde_json::json!({
+        "model": "claude-sonnet-4-5",
+        "max_tokens": 16,
+        "messages": [{
+            "role": "user",
+            "content": format!(
+                "leaked key: {anthropic_key} and pem: -----BEGIN EC PRIVATE KEY-----\nMHQCAQEEINsample\n-----END EC PRIVATE KEY-----"
+            ),
+        }],
+    })
+    .to_string();
+
+    let client = plain_http_client();
+    let resp = client
+        .request(
+            Request::builder()
+                .method(http::Method::POST)
+                .uri(format!("http://127.0.0.1:{sieve_port}/v1/messages"))
+                .header(http::header::CONTENT_TYPE, "application/json")
+                .header(http::header::HOST, format!("127.0.0.1:{sieve_port}"))
+                .body(Full::new(Bytes::from(body)))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let _ = ipc_task.await;
+
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "混合命中 RedactAndAllow 后应返回 200"
+    );
+
+    let received = upstream_body.lock().await.clone();
+    let received_str = String::from_utf8_lossy(&received);
+
+    assert!(
+        !received_str.contains("sk-ant-api03-"),
+        "混合命中：上游不应含 OUT-01 Anthropic key：\n{received_str}"
+    );
+    assert!(
+        !received_str.contains("BEGIN EC PRIVATE KEY"),
+        "混合命中：上游不应含 OUT-07 PEM key header：\n{received_str}"
+    );
+    assert!(
+        received_str.contains("REDACTED"),
+        "混合命中：上游 body 应含至少一个 REDACTED 占位符：\n{received_str}"
+    );
+}
+
 /// OUT-07 GuiPopup hold：GUI Allow → 请求转发上游，上游返回 200。
 ///
 /// 验证 R2-#1 修复：Allow 决策后原 body 转发给上游。

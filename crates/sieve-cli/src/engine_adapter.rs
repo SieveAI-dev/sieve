@@ -555,4 +555,62 @@ mod tests {
             hits[0].action
         );
     }
+
+    /// OUT-07 PEM 私钥扫描：用真实规则文件验证 vectorscan 命中 span 及 Action 类型。
+    ///
+    /// R3-#3 修复前置验证：确认 OUT-07 对 PEM header 的命中 span 是正确的字节偏移，
+    /// 以保证 `redact_segments` 能正确处理 GUI hold span。
+    #[test]
+    fn out07_pem_key_scan_span_and_action() {
+        use sieve_rules::loader::load_outbound_rules;
+        use std::path::PathBuf;
+
+        let rules_path = {
+            let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+            p.pop(); // sieve-cli
+            p.pop(); // crates
+            p.push("crates/sieve-rules/rules/outbound.toml");
+            p
+        };
+
+        let rules = load_outbound_rules(&rules_path).expect("load outbound rules");
+        let engine = VectorscanEngine::compile(rules.clone()).expect("compile vectorscan");
+        let adapter = OutboundAdapter::new(Arc::new(engine), rules);
+
+        // 模拟 pem_key_body() 里的 content 字段（extract_text_content 解析后的文本）
+        let text = "这是我的密钥：-----BEGIN EC PRIVATE KEY-----\nMHQCAQEEINsamplekey\n-----END EC PRIVATE KEY-----";
+        let expected_pem_start = text.find("-----BEGIN").expect("PEM header in text");
+
+        let hits = adapter
+            .scan_text(text, ContentSource::OutboundUserText, 0)
+            .expect("scan_text");
+
+        // 应该有命中（OUT-07 或其他 PEM 相关规则）
+        let pem_hits: Vec<_> = hits
+            .iter()
+            .filter(|d| d.rule_id.starts_with("OUT-07"))
+            .collect();
+
+        assert!(
+            !pem_hits.is_empty(),
+            "OUT-07 应命中 PEM header，hits={hits:?}"
+        );
+
+        let pem_hit = &pem_hits[0];
+        // span.start 应等于 PEM header 在文本中的字节偏移
+        assert_eq!(
+            pem_hit.span.start, expected_pem_start,
+            "OUT-07 span.start 应等于 PEM header 的字节偏移"
+        );
+        assert!(
+            pem_hit.span.end > pem_hit.span.start,
+            "OUT-07 span.end 应大于 span.start"
+        );
+        // action 应是 HoldForDecision（disposition=gui_popup）
+        assert!(
+            matches!(pem_hit.action, Action::HoldForDecision { .. }),
+            "OUT-07 应走 HoldForDecision 路径（disposition=gui_popup），实际: {:?}",
+            pem_hit.action
+        );
+    }
 }

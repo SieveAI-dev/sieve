@@ -218,13 +218,28 @@ fn default_label(dot: protocol::DefaultOnTimeout) -> &'static str {
 
 /// 启发式路径：无 request_id 时扫目录。
 ///
+/// - corrupt 文件非空 → fail-closed（exit 1）：无法确认 Sieve 判定，保守拒绝
 /// - 零 fresh pending → fail-open（exit 0）
 /// - stale 文件 → 删除 + warn + fail-open（exit 0）
 /// - 有 fresh pending → 合并显示所有 detection，TTY 弹窗确认，广播决策
 ///
-/// 关联：SPEC-001 §4.3（启发式查 pending 目录最新文件）。
+/// 关联：SPEC-001 §4.3（启发式查 pending 目录最新文件）；known-issues-v1.4.md §P1-R3-#6。
 fn run_heuristic(base: &std::path::Path) -> i32 {
     let scan = scan_pending_dir(base, STALE_THRESHOLD_SECS);
+
+    // 损坏文件优先检查：只要有损坏文件，立即 fail-closed，不管 fresh 有没有。
+    // 因为损坏文件可能对应本次工具调用的 Sieve 拦截标记，无法安全放行。
+    // 关联：P1-R3-#6（corrupt → fail-open 漏洞修复，与 lib::run_check_heuristic 行为对齐）。
+    if !scan.corrupt_paths.is_empty() {
+        eprintln!(
+            "sieve-hook: pending file corrupt ({} files), refusing tool call to be safe",
+            scan.corrupt_paths.len()
+        );
+        for p in &scan.corrupt_paths {
+            eprintln!("  - {}", p.display());
+        }
+        return 1;
+    }
 
     // 删除 stale 文件 + 打 warning。
     for stale_path in &scan.stale_paths {
@@ -236,7 +251,7 @@ fn run_heuristic(base: &std::path::Path) -> i32 {
     }
 
     if scan.fresh.is_empty() {
-        // 零 pending：Sieve 代理未标记任何请求，fail-open。
+        // 零 pending（corrupt=[]，stale 已清理）：Sieve 代理未标记任何请求，fail-open。
         return 0;
     }
 

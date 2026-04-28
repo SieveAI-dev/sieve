@@ -104,13 +104,17 @@ fn setup_rolls_back_when_doctor_fails() {
     let original = r#"{"env": {"ORIGINAL_KEY": "original_value"}}"#;
     fs::write(&settings_path, original).unwrap();
 
-    // --yes 跳过确认，直接执行；daemon 未在线 → doctor 必然失败
+    // --yes 跳过确认，直接执行。
+    // F-2 修复后 setup 会把规则文件部署到 $SIEVE_HOME/rules/，使 doctor canary 可以运行。
+    // 为了让 doctor 仍然失败（测试回滚路径），把 SIEVE_RULES_PATH 指向不存在的文件，
+    // 强制优先级 1 返回不存在路径 → canary 规则引擎初始化失败 → doctor 返回 Err。
     let output = std::process::Command::new(&sieve_bin)
         .args(["setup", "--yes"])
         .env("HOME", fake_home.to_str().unwrap())
         .env("SIEVE_HOME", sieve_dir.to_str().unwrap())
-        // 清空 SIEVE_RULES_PATH，确保 canary 检查也失败（加速 doctor 失败路径）
-        .env("SIEVE_RULES_PATH", "")
+        // 指向不存在文件：doctor resolve_rules_path 优先级 1 命中，
+        // 但文件不存在 → VectorscanEngine::compile 失败 → canary 检查失败 → doctor Err
+        .env("SIEVE_RULES_PATH", "/nonexistent/sieve/rules/outbound.toml")
         .env_remove("SIEVE_LOG")
         .output()
         .expect("运行 sieve setup --yes 失败");
