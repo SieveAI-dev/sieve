@@ -32,6 +32,8 @@ pub use stub::run;
 mod macos {
     use super::*;
     use crate::commands::doctor;
+    use crate::embedded_rules;
+    use crate::upstream_routes::UpstreamRoutes;
     use anyhow::{anyhow, bail, Context};
     use chrono::Utc;
     use serde_json::Value;
@@ -349,20 +351,18 @@ mod macos {
                 "matcher": ".*",
                 "hooks": [{"type": "command", "command": "sieve-hook check"}]
             });
-            let plist_content = build_plist_content(&self.sieve_toml_path)?;
+            // F-3：daemon 共享安装（sieve.toml + 规则 + plist + launchd）已在 run() 主流程
+            // 的 install_shared_daemon() 中完成，此处只做 Claude 特有：settings.json + hook 注入。
             do_claude_setup(
                 ctx,
                 &self.home_path,
                 &self.settings_path,
-                &self.plist_path,
-                &self.sieve_toml_path,
                 &self.setup_log_path,
                 &self.backup_dir,
                 existing_settings,
                 settings_existed_before,
                 self.sieve_url,
                 hook_entry,
-                plist_content,
             )
         }
 
@@ -447,14 +447,17 @@ mod macos {
                 .with_context(|| format!("解析 {} 失败（须为有效 JSON）", path.display()))
         }
 
-        /// 修改所有 models.providers 条目的 baseUrl 和 headers.X-Sieve-Source-Channel。
+        /// 修改所有 models.providers 条目的 baseUrl、注入 X-Sieve-Source-Channel
+        /// 和 X-Sieve-Provider header，同时记录每个 provider 原始 baseUrl（F-1）。
         ///
-        /// 返回 (修改后的 JSON Value, 被修改的 provider id 列表)。
+        /// 返回 (修改后的 JSON Value, 被修改的 provider id 列表,
+        ///        provider_id → 原始 baseUrl 映射表)。
         fn patch_config(
             &self,
             mut config: serde_json::Value,
-        ) -> Result<(serde_json::Value, Vec<String>)> {
+        ) -> Result<(serde_json::Value, Vec<String>, UpstreamRoutes)> {
             let mut patched_ids: Vec<String> = Vec::new();
+            let mut original_routes = UpstreamRoutes::default();
 
             // models.providers 可能不存在（新安装 openclaw 未配置任何 provider）
             if let Some(providers) = config
@@ -467,12 +470,18 @@ mod macos {
                         None => continue,
                     };
 
-                    // 幂等：已是目标 URL 则跳过
-                    let already_patched = obj
+                    // 记录原始 baseUrl（F-1：在改写前捕获）
+                    let original_base_url = obj
                         .get("baseUrl")
                         .and_then(|v| v.as_str())
-                        .map(|u| u == self.sieve_url)
-                        .unwrap_or(false);
+                        .unwrap_or("")
+                        .to_string();
+
+                    // 幂等：已是目标 URL 则跳过（但仍记录路由）
+                    let already_patched = original_base_url == self.sieve_url;
+                    if !original_base_url.is_empty() && original_base_url != self.sieve_url {
+                        original_routes.insert(id.clone(), original_base_url.clone());
+                    }
                     if already_patched {
                         continue;
                     }
@@ -484,6 +493,9 @@ mod macos {
                     // 静态 channel 值让 IN-GEN-06 知道请求来源是 openclaw，
                     // 但无法区分具体 WhatsApp/Slack channel（需 OpenClaw 侧 PR）。
                     // Week 8 dogfood 时验证 headers 是否随请求转发。
+                    //
+                    // F-1：同时注入 X-Sieve-Provider: <id>，daemon 据此查路由表
+                    // 选择原始上游，避免 404（OpenAI/DeepSeek/OpenRouter 等全部坏掉）。
                     let headers = obj
                         .entry("headers")
                         .or_insert_with(|| serde_json::json!({}));
@@ -491,6 +503,11 @@ mod macos {
                         h.insert(
                             "X-Sieve-Source-Channel".to_string(),
                             serde_json::json!("openclaw"),
+                        );
+                        // F-1：注入 provider id，daemon 据此路由到正确上游
+                        h.insert(
+                            "X-Sieve-Provider".to_string(),
+                            serde_json::json!(id.as_str()),
                         );
                     }
 
@@ -509,7 +526,8 @@ mod macos {
                     "sieve-proxy": {
                         "baseUrl": self.sieve_url,
                         "headers": {
-                            "X-Sieve-Source-Channel": "openclaw"
+                            "X-Sieve-Source-Channel": "openclaw",
+                            "X-Sieve-Provider": "sieve-proxy"
                         }
                     }
                 });
@@ -527,7 +545,10 @@ mod macos {
                             serde_json::json!({"providers": {
                                 "sieve-proxy": {
                                     "baseUrl": self.sieve_url,
-                                    "headers": {"X-Sieve-Source-Channel": "openclaw"}
+                                    "headers": {
+                                        "X-Sieve-Source-Channel": "openclaw",
+                                        "X-Sieve-Provider": "sieve-proxy"
+                                    }
                                 }
                             }}),
                         );
@@ -536,7 +557,7 @@ mod macos {
                 }
             }
 
-            Ok((config, patched_ids))
+            Ok((config, patched_ids, original_routes))
         }
     }
 
@@ -670,8 +691,8 @@ mod macos {
             fs::copy(&config_path, &backup_dest)
                 .with_context(|| format!("备份 {} 失败", config_path.display()))?;
 
-            // patch config
-            let (patched_config, patched_ids) = self.patch_config(config)?;
+            // patch config（F-1：同时捕获原始 baseUrl 映射表）
+            let (patched_config, patched_ids, original_routes) = self.patch_config(config)?;
 
             if patched_ids.is_empty() {
                 println!(
@@ -681,7 +702,7 @@ mod macos {
                 return Ok(());
             }
 
-            // 写回
+            // 写回 openclaw.json
             let new_raw = serde_json::to_string_pretty(&patched_config)?;
             fs::write(&config_path, new_raw.as_bytes())
                 .with_context(|| format!("写入 {} 失败", config_path.display()))?;
@@ -694,6 +715,28 @@ mod macos {
                 self.sieve_url,
             );
             println!("[setup] ✅ 已注入 headers.X-Sieve-Source-Channel = \"openclaw\"（静态）");
+            println!(
+                "[setup] ✅ 已注入 headers.X-Sieve-Provider = <provider-id>（F-1：daemon 路由用）"
+            );
+
+            // F-1：写 upstream-routes.json，daemon 据此把 OpenAI/DeepSeek/OpenRouter 请求
+            // 路由到正确上游，避免全部打到 Anthropic → 404
+            let sieve_home = sieve_ipc::paths::sieve_home()
+                .map_err(|e| anyhow::anyhow!("获取 sieve home 失败: {e}"))?;
+            let routes_path = sieve_home.join("upstream-routes.json");
+            if !original_routes.is_empty() {
+                original_routes.save(&routes_path).with_context(|| {
+                    format!(
+                        "写入 upstream-routes.json 到 {} 失败",
+                        routes_path.display()
+                    )
+                })?;
+                println!(
+                    "[setup] ✅ upstream-routes.json 写入 {}（{} 条路由）",
+                    routes_path.display(),
+                    original_routes.len()
+                );
+            }
 
             Ok(())
         }
@@ -1196,6 +1239,145 @@ mod macos {
         Ok(detected)
     }
 
+    // ──────────────────────────────── install_shared_daemon ────────────────
+
+    /// sentinel 文件路径：`~/.sieve/.daemon-installed`。
+    ///
+    /// setup 首次安装 daemon 后写入，防止多次 `sieve setup --agent <x>` 重复安装。
+    fn daemon_sentinel_path(sieve_home: &Path) -> PathBuf {
+        sieve_home.join(".daemon-installed")
+    }
+
+    /// 共享 daemon 安装（F-3）：写 sieve.toml + 规则文件 + launchd plist + launchctl load。
+    ///
+    /// 任何 agent 的首次 setup 都会调此函数。第二次调用（sentinel 存在）直接返回 Ok。
+    ///
+    /// ## 幂等设计
+    ///
+    /// 用 `~/.sieve/.daemon-installed` 作 sentinel：
+    /// - 首次调用：安装并写 sentinel
+    /// - 后续调用（sentinel 存在）：打印跳过日志，不重复安装
+    ///
+    /// ## 关联
+    ///
+    /// - known-issues-v1.4.md F-3（现已修复）
+    /// - SPEC-004 §2.1
+    fn install_shared_daemon(
+        ctx: &mut SetupContext,
+        home_path: &Path,
+        sieve_home: &Path,
+        backup_dir: &Path,
+    ) -> Result<()> {
+        let sentinel = daemon_sentinel_path(sieve_home);
+        if sentinel.exists() {
+            println!("[setup] daemon 已安装（sentinel 存在），跳过重复安装");
+            return Ok(());
+        }
+
+        // F-2：部署内嵌规则文件到 ~/.sieve/rules/
+        let rules_dir = sieve_home.join("rules");
+        embedded_rules::install_to(&rules_dir)?;
+        ctx.written_files.push(rules_dir.join("outbound.toml"));
+        ctx.written_files.push(rules_dir.join("inbound.toml"));
+        println!(
+            "[setup] ✅ 规则文件写入 {}（outbound.toml + inbound.toml）",
+            rules_dir.display()
+        );
+
+        let sieve_toml_path = sieve_home.join("sieve.toml");
+        let plist_path = home_path
+            .join("Library")
+            .join("LaunchAgents")
+            .join("com.sieve.daemon.plist");
+        let setup_log_path = sieve_home.join("setup.log");
+
+        let sieve_toml_existed_before = sieve_toml_path.exists();
+
+        // 备份已有 sieve.toml
+        if sieve_toml_existed_before {
+            let rel = sieve_toml_path
+                .strip_prefix(home_path)
+                .unwrap_or(&sieve_toml_path);
+            let backup_dest = backup_dir.join(rel);
+            if let Some(parent) = backup_dest.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::copy(&sieve_toml_path, &backup_dest).context("备份 sieve.toml 失败")?;
+        }
+
+        if let Some(parent) = sieve_toml_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let toml_content = build_default_sieve_toml(&sieve_toml_path)?;
+        fs::write(&sieve_toml_path, toml_content.as_bytes()).context("写入 sieve.toml 失败")?;
+        ctx.written_files.push(sieve_toml_path.clone());
+        println!("[setup] ✅ sieve.toml 写入 {}", sieve_toml_path.display());
+
+        // 写 launchd plist
+        let plist_content = build_plist_content(&sieve_toml_path)?;
+        if let Some(parent) = plist_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        if plist_path.exists() {
+            let rel = plist_path.strip_prefix(home_path).unwrap_or(&plist_path);
+            let backup_dest = backup_dir.join(rel);
+            if let Some(parent) = backup_dest.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::copy(&plist_path, &backup_dest).context("备份 plist 失败")?;
+        }
+        fs::write(&plist_path, plist_content.as_bytes()).context("写入 launchd plist 失败")?;
+        ctx.written_files.push(plist_path.clone());
+        println!("[setup] ✅ launchd plist 写入 {}", plist_path.display());
+
+        // launchctl load
+        let status = Command::new("launchctl")
+            .args(["load", "-w", &plist_path.to_string_lossy()])
+            .status()
+            .context("执行 launchctl load 失败")?;
+        if !status.success() {
+            bail!("launchctl load 返回非零: {:?}", status.code());
+        }
+        ctx.launchd_loaded = Some(plist_path.clone());
+        println!("[setup] ✅ launchd 服务已加载");
+
+        // 写 setup.log
+        {
+            let entries: Vec<SetupLogEntry> = vec![
+                SetupLogEntry::new("setup_complete")
+                    .with_detail(format!("backup_dir={}", backup_dir.display()))
+                    .with_agent(AgentKind::Claude),
+                SetupLogEntry::new("rules_deployed")
+                    .with_path(rules_dir.to_string_lossy().to_string())
+                    .with_created_new(true)
+                    .with_agent(AgentKind::Claude),
+                SetupLogEntry::new("sieve_toml_written")
+                    .with_path(sieve_toml_path.to_string_lossy().to_string())
+                    .with_created_new(!sieve_toml_existed_before)
+                    .with_agent(AgentKind::Claude),
+                SetupLogEntry::new("launchd_loaded")
+                    .with_path(plist_path.to_string_lossy().to_string())
+                    .with_agent(AgentKind::Claude),
+            ];
+            let mut file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&setup_log_path)
+                .context("打开 setup.log 失败")?;
+            for entry in &entries {
+                let line = serde_json::to_string(entry)? + "\n";
+                file.write_all(line.as_bytes())?;
+            }
+            println!("[setup] ✅ setup.log 写入 {}", setup_log_path.display());
+        }
+
+        // 写 sentinel，标记 daemon 已安装，防止重复安装
+        fs::write(&sentinel, b"").context("写入 daemon sentinel 失败")?;
+        ctx.written_files.push(sentinel);
+
+        Ok(())
+    }
+
     // ──────────────────────────────── confirm_or_abort ─────────────────────
 
     fn confirm_or_abort() -> Result<()> {
@@ -1276,6 +1458,22 @@ mod macos {
         fs::create_dir_all(&backup_dir)
             .with_context(|| format!("创建备份目录 {} 失败", backup_dir.display()))?;
 
+        // ── 4.5 F-3：安装共享 daemon（sieve.toml + 规则 + plist + launchctl）
+        //
+        // 任何 agent 的 setup 都需要 daemon 监听；以前只在 ClaudeAdapter::apply 里做，
+        // 导致 --agent openclaw / hermes 时 daemon 根本没起。
+        // install_shared_daemon 用 sentinel 文件防重复安装。
+        {
+            let mut daemon_ctx = SetupContext::new(backup_dir.clone());
+            if let Err(e) =
+                install_shared_daemon(&mut daemon_ctx, &home_path, &sieve_home, &backup_dir)
+            {
+                eprintln!("[setup] daemon 安装失败：{e}");
+                daemon_ctx.rollback();
+                return Err(anyhow!("daemon 安装失败，setup 已回滚：{}", e));
+            }
+        }
+
         // ── 5. 顺序 apply（SPEC-004 §7.1：单个失败只回滚该 agent，不影响其他已成功的）
         // 同时保留成功 apply 的 ctx，供后续 doctor 失败时回滚使用。
         let mut any_failed = false;
@@ -1327,20 +1525,24 @@ mod macos {
 
     // ──────────────────────────────── Claude setup 内部实现 ─────────────────
 
+    /// Claude 特有配置注入：settings.json（ANTHROPIC_BASE_URL + PreToolUse hook）。
+    ///
+    /// F-3 重构后，daemon 共享安装（sieve.toml / 规则 / plist / launchd）由
+    /// `install_shared_daemon()` 在主流程 run() 中统一完成；本函数只负责 Claude 特有部分。
+    ///
+    /// 9 个参数超过 clippy 默认阈值 7；已拆分共享 daemon 参数到 `install_shared_daemon`，
+    /// 剩余参数均为调用方直接拥有的非结构化值，组成 struct 收益低于代价。
     #[allow(clippy::too_many_arguments)]
     fn do_claude_setup(
         ctx: &mut SetupContext,
         home_path: &Path,
         settings_path: &Path,
-        plist_path: &Path,
-        sieve_toml_path: &Path,
         setup_log_path: &Path,
         backup_dir: &Path,
         mut existing_settings: Value,
         settings_existed_before: bool,
         sieve_url: &str,
         hook_entry: Value,
-        plist_content: String,
     ) -> Result<()> {
         // 备份 settings.json（仅在文件已存在时）
         if settings_existed_before {
@@ -1415,80 +1617,13 @@ mod macos {
             println!("[setup] ✅ settings.json 已更新");
         }
 
-        // 写 ~/.sieve/sieve.toml（绝对路径配置，供 launchd plist 引用）
-        let sieve_toml_existed_before = sieve_toml_path.exists();
+        // 写 setup.log（Claude 特有条目）
         {
-            if sieve_toml_existed_before {
-                // 备份已有 sieve.toml
-                let rel = sieve_toml_path
-                    .strip_prefix(home_path)
-                    .unwrap_or(sieve_toml_path);
-                let backup_dest = backup_dir.join(rel);
-                if let Some(parent) = backup_dest.parent() {
-                    fs::create_dir_all(parent)?;
-                }
-                fs::copy(sieve_toml_path, &backup_dest).context("备份 sieve.toml 失败")?;
-            }
-            if let Some(parent) = sieve_toml_path.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            let toml_content = build_default_sieve_toml(sieve_toml_path)?;
-            fs::write(sieve_toml_path, toml_content.as_bytes()).context("写入 sieve.toml 失败")?;
-            ctx.written_files.push(sieve_toml_path.to_path_buf());
-            println!("[setup] ✅ sieve.toml 写入 {}", sieve_toml_path.display());
-        }
-
-        // 写 launchd plist
-        {
-            if let Some(parent) = plist_path.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            // 备份已有 plist
-            if plist_path.exists() {
-                let rel = plist_path.strip_prefix(home_path).unwrap_or(plist_path);
-                let backup_dest = backup_dir.join(rel);
-                if let Some(parent) = backup_dest.parent() {
-                    fs::create_dir_all(parent)?;
-                }
-                fs::copy(plist_path, &backup_dest).context("备份 plist 失败")?;
-            }
-            fs::write(plist_path, plist_content.as_bytes()).context("写入 launchd plist 失败")?;
-            ctx.written_files.push(plist_path.to_path_buf());
-            println!("[setup] ✅ launchd plist 写入 {}", plist_path.display());
-        }
-
-        // launchctl load
-        {
-            let status = Command::new("launchctl")
-                .args(["load", "-w", &plist_path.to_string_lossy()])
-                .status()
-                .context("执行 launchctl load 失败")?;
-            if !status.success() {
-                bail!("launchctl load 返回非零: {:?}", status.code());
-            }
-            ctx.launchd_loaded = Some(plist_path.to_path_buf());
-            println!("[setup] ✅ launchd 服务已加载");
-        }
-
-        // 写 setup.log（含 agent + created_new 字段，供 uninstall 精确还原）
-        {
-            let entries: Vec<SetupLogEntry> = vec![
-                SetupLogEntry::new("setup_complete")
-                    .with_detail(format!("backup_dir={}", backup_dir.display()))
-                    .with_agent(AgentKind::Claude),
-                SetupLogEntry::new("settings_updated")
-                    .with_path(settings_path.to_string_lossy().to_string())
-                    .with_detail("env.ANTHROPIC_BASE_URL + hooks.PreToolUse")
-                    .with_created_new(!settings_existed_before)
-                    .with_agent(AgentKind::Claude),
-                SetupLogEntry::new("sieve_toml_written")
-                    .with_path(sieve_toml_path.to_string_lossy().to_string())
-                    .with_created_new(!sieve_toml_existed_before)
-                    .with_agent(AgentKind::Claude),
-                SetupLogEntry::new("launchd_loaded")
-                    .with_path(plist_path.to_string_lossy().to_string())
-                    .with_agent(AgentKind::Claude),
-            ];
+            let entries: Vec<SetupLogEntry> = vec![SetupLogEntry::new("settings_updated")
+                .with_path(settings_path.to_string_lossy().to_string())
+                .with_detail("env.ANTHROPIC_BASE_URL + hooks.PreToolUse")
+                .with_created_new(!settings_existed_before)
+                .with_agent(AgentKind::Claude)];
             let mut file = std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
@@ -1498,7 +1633,6 @@ mod macos {
                 let line = serde_json::to_string(entry)? + "\n";
                 file.write_all(line.as_bytes())?;
             }
-            println!("[setup] ✅ setup.log 写入 {}", setup_log_path.display());
         }
 
         Ok(())
