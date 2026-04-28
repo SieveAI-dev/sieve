@@ -308,6 +308,83 @@ fn out_10_openssh_key() {
 }
 
 // ---------------------------------------------------------------------------
+// PRD v1.4 §5.4 新字段解析验证
+// ---------------------------------------------------------------------------
+
+/// 验证出站规则 TOML 中 disposition / timeout_seconds / default_on_timeout 正确解析。
+#[test]
+fn outbound_rules_disposition_fields_parsed() {
+    use sieve_rules::loader::load_outbound_rules;
+    use sieve_rules::manifest::{DefaultOnTimeout, Disposition};
+    use std::path::PathBuf;
+
+    let path = {
+        let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        p.push("rules");
+        p.push("outbound.toml");
+        p
+    };
+    let rules = load_outbound_rules(&path).expect("load outbound.toml failed");
+
+    // OUT-01~05/12: auto_redact，无超时，default_on_timeout=redact
+    for id in ["OUT-01", "OUT-02", "OUT-03", "OUT-04", "OUT-05"] {
+        let r = rules
+            .iter()
+            .find(|r| r.id == id)
+            .unwrap_or_else(|| panic!("{id} not found"));
+        assert_eq!(
+            r.effective_disposition(),
+            Disposition::AutoRedact,
+            "{id}: expected AutoRedact"
+        );
+        assert!(
+            r.timeout_seconds.is_none(),
+            "{id}: timeout_seconds should be None"
+        );
+        assert_eq!(
+            r.default_on_timeout,
+            DefaultOnTimeout::Redact,
+            "{id}: expected Redact on timeout"
+        );
+    }
+
+    // OUT-06: gui_popup, 15s, redact
+    let out06 = rules.iter().find(|r| r.id == "OUT-06").expect("OUT-06");
+    assert_eq!(out06.effective_disposition(), Disposition::GuiPopup);
+    assert_eq!(out06.timeout_seconds, Some(15));
+    assert_eq!(out06.default_on_timeout, DefaultOnTimeout::Redact);
+
+    // OUT-07: gui_popup, 60s, block
+    let out07 = rules.iter().find(|r| r.id == "OUT-07").expect("OUT-07");
+    assert_eq!(out07.effective_disposition(), Disposition::GuiPopup);
+    assert_eq!(out07.timeout_seconds, Some(60));
+    assert_eq!(out07.default_on_timeout, DefaultOnTimeout::Block);
+
+    // OUT-08: gui_popup, 15s, redact
+    let out08 = rules.iter().find(|r| r.id == "OUT-08").expect("OUT-08");
+    assert_eq!(out08.effective_disposition(), Disposition::GuiPopup);
+    assert_eq!(out08.timeout_seconds, Some(15));
+    assert_eq!(out08.default_on_timeout, DefaultOnTimeout::Redact);
+
+    // OUT-09: gui_popup, 60s, block
+    let out09 = rules.iter().find(|r| r.id == "OUT-09").expect("OUT-09");
+    assert_eq!(out09.effective_disposition(), Disposition::GuiPopup);
+    assert_eq!(out09.timeout_seconds, Some(60));
+    assert_eq!(out09.default_on_timeout, DefaultOnTimeout::Block);
+
+    // OUT-10: gui_popup, 60s, block
+    let out10 = rules.iter().find(|r| r.id == "OUT-10").expect("OUT-10");
+    assert_eq!(out10.effective_disposition(), Disposition::GuiPopup);
+    assert_eq!(out10.timeout_seconds, Some(60));
+    assert_eq!(out10.default_on_timeout, DefaultOnTimeout::Block);
+
+    // OUT-11: status_bar，无超时
+    let out11 = rules.iter().find(|r| r.id == "OUT-11").expect("OUT-11");
+    assert_eq!(out11.effective_disposition(), Disposition::StatusBar);
+    assert!(out11.timeout_seconds.is_none());
+}
+
+// ---------------------------------------------------------------------------
 // OUT-11: Discord Bot Token
 // ---------------------------------------------------------------------------
 #[test]

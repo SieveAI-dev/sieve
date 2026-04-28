@@ -11,6 +11,91 @@
 
 ---
 
+## [v1.5-multi-agent] - 2026-04-28
+
+### Architecture（multi-agent 扩展）
+
+- **Phase 1 范围扩展**：Claude Code → Claude Code + OpenClaw + Hermes 三家适配（PRD §9 第 9 条重写）
+- **UnifiedMessage 真实运行时支持双协议**：Anthropic Messages API + OpenAI Chat Completions 均解析为同一中间表示，不再仅预留接口（关联 ADR-018）
+- **X-Sieve-Origin HTTP header 协议**：sub-agent 嵌套调用追踪，Ed25519 签名防伪造，关联 ADR-019
+- **Hook 类规则在 OpenClaw / Hermes 上降级为 GUI hold**：三家 hook 机制不同，最低公分母统一走 GUI hold；Critical fail-closed 规则在三家全保留
+
+### Added
+
+- 2 个新 ADR：ADR-018（OpenAI 协议适配 / OpenAI Chat Completions SSE delta 格式解析）、ADR-019（X-Sieve-Origin header / sub-agent 嵌套调用追踪协议）
+- 1 个新 SPEC：SPEC-004（multi-agent setup 配置注入 / `sieve setup --agent` 多 agent 参数）
+- **IN-GEN-06**：外部 channel prompt injection 检测（命令式短语 + 来源不可信 channel → Critical GUI hold 60 秒默认拒绝）
+- **IN-CR-06**：OpenClaw 动态 skill 加载 fail-closed（Critical block，YOLO mode 不可关）
+- `sieve setup --agent claude|openclaw|hermes` 多 agent 参数 + `--all-detected` 自动扫描
+- `sieve doctor --all` 验证三家 agent 配置全绿
+- `sieve uninstall --all` 一键清理所有 agent 适配（按 `setup.log` 逆序回滚）
+- IPC schema 新增字段：`source_agent` / `origin_chain` / `source_channel`（`#[serde(default)]` 向后兼容）
+- glossary 新增 8 条 multi-agent 术语：OpenClaw / Hermes / X-Sieve-Origin / chain_depth / origin_chain / source_channel / multi-agent 调用链 / sub-agent 决策传递
+- 用户故事新增 US-18（OpenClaw 跨通道 injection 防御）/ US-19（Hermes sub-agent 嵌套决策传递）/ US-20（multi-agent 一键安装）
+
+### Changed [BREAKING]
+
+- **PRD §9 第 9 条重写**（v1.4 → v1.5）：从"Phase 1 仅适配 Claude Code，UnifiedMessage 接口预留"扩展为"Phase 1 GA 适配三家：Claude Code / OpenClaw / Hermes，UnifiedMessage 真实运行时支持 Anthropic + OpenAI 双协议；其他协议（Gemini / Mistral 等）推 Phase 2"
+- roadmap Week 6-8 重写：Week 6 = OpenAI 协议适配 + multi-agent setup（8 条任务）；Week 7 = OpenClaw/Hermes 集成测试（5 条任务）；Week 8 = 高强度 dogfood 扩到三家 + Stripe 接入
+
+### Hardened
+
+- `chain_depth ≥ 2` 强制 fail-closed GUI hold，不传递上游决策
+- `chain_depth ≥ 5` 直接返回 426，不弹窗（防无限递归调用链）
+- X-Sieve-Origin header Ed25519 签名，防伪造注入
+
+### Migration（v1.4 → v1.5）
+
+- v1.4 引擎完全复用：sieve-rules / dispatch / IPC 基础结构 / GUI 弹窗逻辑不变
+- v1.4 用户升级 v1.5 不需要重新跑 `sieve setup`（除非要加 OpenClaw / Hermes 适配）
+- 老 `sieve.toml` 加新 agent 字段后向后兼容（`#[serde(default)]` 处理缺失字段）
+- IPC schema 新增字段向后兼容：旧 sieve-hook 读新 schema 时新字段用默认值，不报错
+
+---
+
+## [v1.4-architecture] - 2026-04-28
+
+### Architecture [BREAKING]
+
+- **处置矩阵二维化**：从一维四级（Critical / High / Medium / Low）→ 二维（出站/入站 × 严重度），规则 manifest 新增 `disposition` / `default_on_timeout` 字段（关联 ADR-016）
+- **出站自动脱敏路径**：OUT-01~05/12 高频脱敏类不再弹窗，命中后自动改写请求 body + 状态栏 5s 通知，不打断工作流（关联 PRD §9 第 13 条）
+- **HIPS 弹窗架构 + 25s keep-alive comment hold 流**：GUI 弹窗类（IN-CR-01/05）hold SSE 流期间每 25 秒发 `: keep-alive\n\n`，避免 Claude Code HTTP 超时；用户中止时截流注入优雅 error event（关联 SPEC-002）
+- **Native GUI App 提到 Phase 1 必做**：macOS SwiftUI 独立进程，独立 git 仓库 `sieve-gui-macos`（不在本 workspace）（关联 ADR-012）
+- **双层防御**：Sieve 代理（出站脱敏 + GUI hold 流）+ Claude Code PreToolUse hook（Hook 类阻断）；`sieve-hook` 作为独立 crate 加入 workspace（关联 ADR-014）
+
+### Added
+
+- 新 crate `sieve-ipc`：JSON-RPC over Unix socket + 文件锁 IPC 库（pending / decisions 文件协议，关联 ADR-013）
+- 新 crate `sieve-hook`：极简 PreToolUse hook 二进制，依赖仅 `serde_json` + `fd-lock` + `uuid` + `chrono` + `clap`，启动时延 4~5ms（关联 SPEC-001）
+- 5 个新 ADR：ADR-012（Native GUI App）、ADR-013（IPC 协议）、ADR-014（双层防御）、ADR-015（sieve setup 工具）、ADR-016（处置矩阵二维化）
+- 3 个新 SPEC：SPEC-001（sieve-hook 协议）、SPEC-002（HIPS 弹窗行为）、SPEC-003（sieve setup 工具）
+- `sieve-rules` manifest 新字段：`disposition`（AutoRedact / GuiPopup / HookTerminal / StatusBar）、`timeout_seconds`、`default_on_timeout`
+- `critical_lock` 新常量：`HOOK_RULES`（25 条 Hook 类规则）、`GUI_RULES`（11 条 GUI 弹窗类规则）；`FAIL_CLOSED_RULES` 扩展为 24 条 Critical 全集
+
+### Changed [BREAKING]
+
+- ADR-007 Week 3 落地的"SSE 流 `sieve_blocked` 截流"对 Hook 类（IN-CR-02~04 / IN-GEN-01~03）的实现改由 `sieve-hook` 在 PreToolUse 阶段完成；fail-closed 原则不变，实现路径变（ADR-014 supersede ADR-007 中 Hook 类相关部分）
+- Phase 1 仅 macOS：Linux / Windows 推 Phase 2；sigstore CI 保留多平台编译，`sieve setup` 命令在非 macOS 报友好错误
+
+### Hardened — 新增 PRD §9 硬约束第 11-13 条
+
+- **第 11 条（不在 Anthropic API 协议层撒谎）**：不伪造 tool_use / stop_reason / id / usage / type；拦截发生时允许截 SSE 流注入 `sieve_blocked` event（Sieve 自报事件，不是冒充模型）；keep-alive comment 行 `: keep-alive\n\n` 不属于伪造
+- **第 12 条（不装本地 CA 做 MITM）**：Network Extension / 本地 CA 注入 / 系统 proxy 修改均推 Phase 3 选购，Phase 1/2 不做
+- **第 13 条（出站脱敏不打断工作流）**：OUT-01~05/12 高频类必须自动脱敏 + 状态栏 5s 通知，不弹窗；每天弹几十次的产品没人用
+
+### Removed / Deprecated
+
+- 撤销 `architecture.md §6` 中的"❌ 桌面 GUI App（Electron / Tauri）"决策（被 ADR-012 翻转）
+- 撤销 `deployment.md §2.2 §2.3` Linux/Windows 安装详细步骤（推 Phase 2，保留占位段）
+
+### Migration
+
+- Critical 规则永远 fail-closed，不允许通过任何 preset 关闭
+- 旧 `sieve.toml` 加新字段后向后兼容（`#[serde(default)]` 处理缺失字段），但旧 sieve binary 读新 toml 会因 `unknown_fields` 失败
+- `pre-v1.4-refactor` git tag 标记重构基线，回滚：`git checkout pre-v1.4-refactor`
+
+---
+
 ## [Unreleased](https://github.com/doskey/sieve/compare/v0.1.0...HEAD)
 
 ### Known Issues — Week 4 dogfood 实测发现

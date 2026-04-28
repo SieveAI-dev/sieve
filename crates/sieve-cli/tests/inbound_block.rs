@@ -445,11 +445,16 @@ async fn ucsb_attack_1_address_substitution_blocked() {
 
 // ─── UCSB Attack 2: Dangerous Shell in tool_use input（IN-CR-02）──────────────
 
-/// tool_use input_json_delta 含 `rm -rf /tmp` → 聚合完成后 IN-CR-02 触发截流。
+/// tool_use input_json_delta 含 `rm -rf /tmp` → IN-CR-02 触发 HookMark（hook_terminal）。
 ///
-/// 关联 PRD §5.2 IN-CR-02 / UCSB 论文 attack 2。
+/// IN-CR-02 disposition=hook_terminal：SSE 流原样转发（不截流），写 IPC pending 文件，
+/// 由 sieve-hook 在 PreToolUse 阶段拦截。sieve daemon 本身不注入 sieve_blocked。
+///
+/// 修 #2（disposition 优先）后：IN-CR-02 走 HookMark 路径，而非旧的 Block 路径。
+///
+/// 关联 PRD §5.2 IN-CR-02 / UCSB 论文 attack 2 / ADR-014（双层防御）。
 #[tokio::test]
-async fn ucsb_attack_2_dangerous_shell_in_tool_use_blocked() {
+async fn ucsb_attack_2_dangerous_shell_hookmark_passthrough() {
     let attack_payload = sse_response(&[
         (
             "message_start",
@@ -481,13 +486,15 @@ async fn ucsb_attack_2_dangerous_shell_in_tool_use_blocked() {
     let (_status, body) = fetch_response_body(port).await;
 
     let body_str = String::from_utf8_lossy(&body);
+    // HookMark 路径：SSE 流原样转发（不截流），不注入 sieve_blocked
+    // sieve-hook 在 PreToolUse 阶段处理拦截，daemon 仅写 pending 文件
     assert!(
-        body_str.contains("sieve_blocked"),
-        "expected sieve_blocked event in body:\n{body_str}"
+        !body_str.contains("sieve_blocked"),
+        "IN-CR-02 hook_terminal 路径不应截流，SSE 应原样转发:\n{body_str}"
     );
     assert!(
-        body_str.contains("IN-CR-02"),
-        "expected IN-CR-02 rule in detection:\n{body_str}"
+        body_str.contains("message_stop"),
+        "SSE 流应包含 message_stop（完整透传）:\n{body_str}"
     );
 }
 
@@ -543,10 +550,18 @@ async fn ucsb_attack_3_signing_tool_blocked() {
 
 /// IN-GEN-04 是 high/warn，不在 fail-closed 名单，不截流，响应内容包含原始 event。
 ///
-/// 关联 PRD §5.2 / US-08 / UCSB 论文 attack 4。Week 4 由旧 IN-CR-04 重命名归入
-/// IN-GEN-* 命名空间（[BREAKING]，fingerprint 变化）。
+/// IN-GEN-04 markdown exfil → disposition=gui_popup → HoldForDecision → fail-closed（无 GUI）。
+///
+/// IN-GEN-04 disposition=gui_popup：无 GUI 连接时 fail-closed，注入 sieve_blocked 截流。
+/// 修 #2（disposition 优先）后行为变化：旧版 action=warn（StatusBar/pass-through），
+/// 新版 disposition=gui_popup 优先，无 GUI → Block。
+///
+/// 注：IN-GEN-04 设为 gui_popup 是设计决策（exfil 需要用户确认），但生产中应有 GUI 连接。
+/// 集成测试中无 GUI，因此 fail-closed → sieve_blocked 被注入。
+///
+/// 关联 PRD §5.2 / US-08 / UCSB 论文 attack 4 / ADR-014（双层防御）。
 #[tokio::test]
-async fn ucsb_attack_4_markdown_exfil_warn_only_passes_through() {
+async fn ucsb_attack_4_markdown_exfil_failclosed_without_gui() {
     let attack_payload = sse_response(&[
         (
             "content_block_delta",
@@ -567,36 +582,34 @@ async fn ucsb_attack_4_markdown_exfil_warn_only_passes_through() {
     assert_eq!(
         status,
         hyper::StatusCode::OK,
-        "warn-level rule should not affect status"
+        "SSE response status should be 200 (sieve_blocked is injected into body)"
     );
 
     let body_str = String::from_utf8_lossy(&body);
+    // IN-GEN-04 gui_popup + 无 GUI → fail-closed → sieve_blocked 注入
     assert!(
-        !body_str.contains("sieve_blocked"),
-        "IN-GEN-04 is warn-only, must not inject sieve_blocked:\n{body_str}"
-    );
-    // body 应该包含原始 event（透传，不被截断）
-    assert!(
-        body_str.contains("content_block_delta"),
-        "warn-level response should contain original SSE events:\n{body_str}"
+        body_str.contains("sieve_blocked"),
+        "IN-GEN-04 gui_popup 无 GUI 时应 fail-closed 注入 sieve_blocked:\n{body_str}"
     );
     assert!(
-        body_str.contains("message_stop"),
-        "warn-level response should contain message_stop event:\n{body_str}"
+        body_str.contains("IN-GEN-04"),
+        "sieve_blocked 应包含 IN-GEN-04 rule_id:\n{body_str}"
     );
 }
 
 // ─── IN-CR-04: 持久化机制（Critical block，Week 4，PRD §5.2 / US-07）──────────
 
-/// tool_use Bash command 含 `>> ~/.bashrc` → IN-CR-04-SHELL-RC-APPEND 触发
-/// Critical fail-closed 截流。
+/// tool_use Bash command 含 `>> ~/.bashrc` → IN-CR-04-SHELL-RC-APPEND 触发 HookMark。
 ///
-/// 模型试图把 alias 写进 shell rc 文件 = 后门埋点（每次开 terminal 自动执行）。
-/// IN-CR-04-* 全部进 fail-closed 名单（ADR-007 §"Week 4 落地范围"），YOLO mode 不可关。
+/// IN-CR-04-SHELL-RC-APPEND disposition=hook_terminal：SSE 流原样转发（不截流），
+/// 写 IPC pending 文件，由 sieve-hook 在 PreToolUse 阶段拦截（双层防御）。
+/// daemon 本身不注入 sieve_blocked——截流由 sieve-hook 的 exit code 机制完成。
 ///
-/// 关联 PRD §5.2 IN-CR-04 / Roadmap Week 4 / US-07。
+/// 修 #2（disposition 优先）后：IN-CR-04 走 HookMark 路径，旧的直接 Block 路径已更新。
+///
+/// 关联 PRD §5.2 IN-CR-04 / Roadmap Week 4 / US-07 / ADR-014（双层防御）。
 #[tokio::test]
-async fn in_cr_04_persistence_shell_rc_blocked() {
+async fn in_cr_04_persistence_shell_rc_hookmark_passthrough() {
     let attack_payload = sse_response(&[
         (
             "message_start",
@@ -628,13 +641,15 @@ async fn in_cr_04_persistence_shell_rc_blocked() {
     let (_status, body) = fetch_response_body(port).await;
 
     let body_str = String::from_utf8_lossy(&body);
+    // HookMark 路径：SSE 流原样转发（不截流），不注入 sieve_blocked
+    // 截流由 sieve-hook PreToolUse exit code 机制完成（双层防御设计）
     assert!(
-        body_str.contains("sieve_blocked"),
-        "expected sieve_blocked event for IN-CR-04 persistence:\n{body_str}"
+        !body_str.contains("sieve_blocked"),
+        "IN-CR-04 hook_terminal 路径不应截流，SSE 应原样转发:\n{body_str}"
     );
     assert!(
-        body_str.contains("IN-CR-04-SHELL-RC-APPEND"),
-        "expected IN-CR-04-SHELL-RC-APPEND rule in detection:\n{body_str}"
+        body_str.contains("message_stop"),
+        "SSE 流应包含 message_stop（完整透传）:\n{body_str}"
     );
 }
 

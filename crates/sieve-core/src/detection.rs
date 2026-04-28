@@ -19,23 +19,35 @@ pub enum Severity {
     Critical,
 }
 
-/// 命中处置动作（关联 PRD §5.1 P0 表的"处置"）。
+/// 命中处置动作（关联 PRD v1.4 §5.4 / ADR-016 二维处置矩阵）。
+///
+/// v1.4 重构：按 `Disposition` 路由，废弃 `WarnConfirm`。
+/// - `HookMark`：Hook 类命中，写 IPC pending 文件，SSE 流原样转发（ADR-014 §Hook 路径）。
+/// - `HoldForDecision`：GUI 类命中，hold 住 SSE 流等待用户决策（ADR-014 §GUI 路径）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Action {
-    /// 直接拦截（出站 Critical 默认动作）。
+    /// 直接拦截（极端场景 / 出站 Critical fail-closed）。
     Block,
-    /// 脱敏（替换为 placeholder），Week 4 起实现。
+    /// 自动脱敏：替换为 `[REDACTED:<rule_id>]` 占位符（AutoRedact disposition，OUT-01~05/12）。
     Redact {
         /// 替换用占位符文本。
         placeholder: String,
     },
-    /// 弹窗倒计时人工确认，Week 4 起实现。
-    WarnConfirm {
-        /// 倒计时秒数。
-        countdown_secs: u32,
+    /// Hook 类：写 IPC pending 文件，SSE 流原样转发（IN-CR-02~04、IN-GEN-01~03）。
+    ///
+    /// 关联 ADR-014 §Hook 路径、SPEC-001。
+    HookMark,
+    /// GUI 类：hold 住 SSE 流，通过 IpcServer 等待用户决策（IN-CR-01/05、IN-GEN-04）。
+    ///
+    /// 关联 ADR-014 §GUI 路径、SPEC-002。
+    HoldForDecision {
+        /// 请求唯一标识（UUIDv4），用于 IPC 匹配。
+        request_id: uuid::Uuid,
+        /// 等待超时秒数（来自 `RuleEntry.timeout_seconds`）。
+        timeout_seconds: u32,
     },
-    /// 仅审计，不影响流量。
+    /// 仅审计，不影响流量（StatusBar disposition）。
     MarkOnly,
     /// 静默记录（用于 dry_run / canary）。
     SilentLog,

@@ -1,9 +1,15 @@
 //! Sieve CLI 入口（关联 PRD §6.1 / ADR-001）。
 //!
-//! 唯一子命令：`sieve start [--config <path>] [--dry-run]` 启动 daemon；
-//! `sieve version` 打印版本号。
+//! 子命令：
+//! - `sieve start [--config <path>] [--dry-run]`：启动 daemon
+//! - `sieve version`：打印版本号
+//! - `sieve setup [--dry-run] [--yes]`：自动配置 Claude Code（仅 macOS，ADR-015）
+//! - `sieve doctor`：诊断 Sieve 安装状态（仅 macOS）
+//! - `sieve uninstall [--dry-run] [--yes]`：回滚 setup 改动（仅 macOS）
 
-#![forbid(unsafe_code)]
+// unsafe_code 在生产代码中禁止（等效 forbid），测试代码通过 #[allow(unsafe_code)] 豁免
+// 以支持 Rust 1.80+ 的 std::env::set_var 必须用 unsafe {} 的要求。
+#![deny(unsafe_code)]
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -13,6 +19,7 @@ use std::sync::Arc;
 
 mod audit;
 mod cli;
+mod commands;
 mod config;
 mod daemon;
 mod engine_adapter;
@@ -124,6 +131,15 @@ async fn main() -> Result<()> {
         }
         Command::Version => {
             println!("sieve {}", env!("CARGO_PKG_VERSION"));
+        }
+        Command::Setup(args) => {
+            commands::setup::run(args)?;
+        }
+        Command::Doctor => {
+            commands::doctor::run()?;
+        }
+        Command::Uninstall(args) => {
+            commands::uninstall::run(args)?;
         }
     }
 

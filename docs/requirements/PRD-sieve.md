@@ -2,28 +2,35 @@
 
 ## 基本信息
 
-- **版本**：v1.3
-- **创建日期**：2026-04-26（v1.3 锁定执行）
+- **版本**：v1.5
+- **创建日期**：2026-04-28（v1.5 锁定执行）
 - **最早起源**：v1.0（详见 [版本演进表](#版本演进表)）
 - **负责人**：doskey
-- **状态**：✅ **已确认锁定执行**（第一性原理 + 合规边界修订版）
+- **状态**：✅ **已确认锁定执行**（Multi-Agent 扩展版（Claude Code + OpenClaw + Hermes 三家适配），锁定执行）
 
 ---
 
 ## 📌 当前活动版本指针
 
-> **当前活动 PRD 全文 → [../prd/sieve-prd-v1.3.md](../prd/sieve-prd-v1.3.md)**
+> **当前活动 PRD 全文 → [../prd/sieve-prd-v1.5.md](../prd/sieve-prd-v1.5.md)**
 
-v1.3 在 v1.2 基础上做了 8 条改动，核心调整为：
+v1.5 在 v1.4 基础上做了 15 条改动，核心主题为 Multi-Agent 扩展（Claude Code + OpenClaw + Hermes），引擎 100% 复用，差异仅在协议适配 + 配置注入 + 2 条新检测项：
 
-1. **新增中国大陆合规边界**——v1.2 漏掉的硬约束，新增整章 §11.5（海外公司主体 + 渠道分级 + 数据本地化 + doskey 个人红线）
-2. **"自证清白"从工程细节提到产品定位**——核心叙事从 3 句加到 4 句（PRD §1.2），sigstore + reproducible build + 透明日志成为营销 talking point
-3. **MCP 拦截放进 Phase 2**（IN-MCP-01~03，PRD §5.2）
-4. **数据标注稀缺性**作为"先规则后模型"的核心论证（PRD §6.2）
-5. **闭测画像精确化** + benchmark 数据集大小具体化（PRD §10.1 Week 4 / §10.2 Week 9）
-6. **数据侧伙伴接洽清单**（PRD §13.2，慢雾 / ScamSniffer / GoPlus / Chainabuse 等）
-7. **用户教育成本 + 海外公司注册周期** 进风险登记册（PRD §12）
-8. **法律实体明确**：海外注册首选香港，次选新加坡，第三美国 Stripe Atlas
+1. **§0 修订说明**：触发原因 + 改动汇总 + 没改的明确说明
+2. **§1.1 一句话改写**为"三家 agent + 三类用户"
+3. **§1.3 不是什么**：加"不是 multi-agent gateway / 不是 OpenClaw 审计公司"
+4. **§3.1 / §3.2 用户画像**新增子细分（OpenClaw 信使型 + Hermes multi-LLM）
+5. **§4.5 场景 E**（OpenClaw 跨通道 injection）
+6. **§4.6 场景 F**（Hermes sub-agent 嵌套决策传递）
+7. **§5.2 入站检测**加 IN-GEN-06 + IN-CR-06
+8. **§5.3 处置矩阵**新规则映射
+9. **§6.1 整体架构图**重画（三入口 + 嵌套箭头）
+10. **§6.5 IPC schema** 加 source_agent / origin_chain / source_channel + X-Sieve-Origin HTTP header 协议
+11. **§6.6 部署形态**新增 `sieve setup --agent` 多 agent 参数 + 三家配置注入路径表
+12. **§6.7 双层防御**关键澄清：OpenClaw / Hermes 上 Hook 类降级为 GUI hold
+13. **§9 第 9 条重写**：从"仅 Claude Code"扩到"三家 + UnifiedMessage 双协议"
+14. **§10 Week 6-7 重写**为 OpenAI 协议适配 + multi-agent 集成测试
+15. **§12 风险登记新增 5 条** multi-agent 风险；§13 数据合作新增 OpenClaw / Nous Research；§14 Open Questions 第 9-13 条；§15.5 Multi-Agent 扩展参考
 
 ---
 
@@ -31,7 +38,7 @@ v1.3 在 v1.2 基础上做了 8 条改动，核心调整为：
 
 > Sieve 是一个完全本地运行的 LLM 流量代理，在 AI 编码 agent 和上游模型之间做双向安全检测，服务于 crypto 开发者和 DeFi 重度用户，在不可逆动作（签名/转账/部署）前强制插入认知摩擦，防止私钥泄漏、地址替换、危险工具调用导致的资产损失。
 >
-> — 引自 [PRD v1.3 §1.1](../prd/sieve-prd-v1.3.md#11-一句话)
+> — 引自 [PRD v1.5 §1.1](../prd/sieve-prd-v1.5.md#11-一句话)
 
 ---
 
@@ -42,7 +49,7 @@ v1.3 在 v1.2 基础上做了 8 条改动，核心调整为：
 3. **Sieve 在客户端最后一道闸**：完全本地运行，字节流双向扫描，从不上传你的数据
 4. **你不只是相信我们，你能验证我们**：开源核心引擎、sigstore 签名、可复现构建、透明规则更新日志——Sieve 自己被同一套标准审视，绝不成为新的供应链风险
 
-> — 引自 [PRD v1.3 §1.2](../prd/sieve-prd-v1.3.md#12-四句话核心叙事v13-加第-4-句)
+> — 引自 [PRD v1.5 §1.2](../prd/sieve-prd-v1.5.md#12-四句话核心叙事v13-加第-4-句)
 
 ---
 
@@ -54,10 +61,12 @@ v1.3 在 v1.2 基础上做了 8 条改动，核心调整为：
 | v1.0     | 初版                       | 第一性原理推导 + 单 agent 架构 + 12 周里程碑骨架                                                      | [../prd/sieve-prd-v1.0.md](../prd/sieve-prd-v1.0.md)            |
 | v1.1     | 中间版                      | 检测项 ID 化（OUT-01~12 / IN-CR-* / IN-GEN-*）+ 处置矩阵 + 误报率预算                                | [../prd/sieve-prd-v1.1.md](../prd/sieve-prd-v1.1.md)            |
 | v1.2     | 第一性原理 + 性能预算定稿版          | 性能预算具体化（P99 < 20ms）+ Rust 技术栈定稿 + 数据飞轮简化版 + 公理 12（FP < 0.5%）                          | [../prd/sieve-prd-v1.2.md](../prd/sieve-prd-v1.2.md)            |
-| **v1.3** | **2026-04-26**（**当前活动**） | **8 条 GPT-5.5 review 改动**：合规边界 + 自证清白叙事 + MCP Phase 2 + 数据合作清单 + benchmark 具体化 + 闭测画像 | [../prd/sieve-prd-v1.3.md](../prd/sieve-prd-v1.3.md) ← **当前活动** |
+| v1.3     | 2026-04-26                 | 8 条 GPT-5.5 review 改动：合规边界 + 自证清白叙事 + MCP Phase 2 + 数据合作清单 + benchmark 具体化 + 闭测画像 | [../prd/sieve-prd-v1.3.md](../prd/sieve-prd-v1.3.md) |
+| v1.4 | 2026-04-27 | HIPS 弹窗架构 + Native GUI App + setup 自动配置 + Claude Code hooks 双层防御：14 条改动，§9 新增第 11-13 条硬约束 | [../prd/sieve-prd-v1.4.md](../prd/sieve-prd-v1.4.md) |
+| **v1.5** | **2026-04-28**（**当前活动**） | **Multi-Agent 扩展（Claude Code + OpenClaw + Hermes 三家适配）**：15 条改动，§9 第 9 条重写，新增 IN-GEN-06 / IN-CR-06 检测项 | [../prd/sieve-prd-v1.5.md](../prd/sieve-prd-v1.5.md) ← **当前活动** |
 
 
-> **历史版本归档原则**：`docs/prd/` 下文件**不修改**，只新增。所有讨论 / 引用一律以 v1.3 为准，旧版本仅供追溯演进逻辑。
+> **历史版本归档原则**：`docs/prd/` 下文件**不修改**，只新增。所有讨论 / 引用一律以 v1.5 为准，旧版本仅供追溯演进逻辑。
 
 ---
 
@@ -135,9 +144,9 @@ v1.3 在 v1.2 基础上做了 8 条改动，核心调整为：
 | 闭测画像 / benchmark 数据集大小变化 | `user-stories.md`（验收标准的 FP 阈值）+ `CHANGELOG.md` |
 
 
-### E. 工程硬约束变更（PRD §9 十条）
+### E. 工程硬约束变更（PRD §9 十三条）
 
-> ⚠️ §9 十条硬约束**默认不允许放宽**，任何修改必须：
+> ⚠️ §9 十三条硬约束**默认不允许放宽**，任何修改必须：
 >
 > 1. 在本文件版本演进表新增一行
 > 2. 在 `docs/design/` 下写一份 ADR
@@ -148,6 +157,6 @@ v1.3 在 v1.2 基础上做了 8 条改动，核心调整为：
 
 ## 备注
 
-- 本文件随 PRD 主版本升级（如 v1.3 → v1.4）必须更新"📌 当前活动版本指针"段落与"版本演进表"
-- 历史版本（v1.0~v1.2）的 `docs/prd/sieve-prd-vX.X.md` **不修改**，仅供追溯
+- 本文件随 PRD 主版本升级（如 v1.5 → v1.6）必须更新"📌 当前活动版本指针"段落与"版本演进表"
+- 历史版本（v1.0~v1.4）的 `docs/prd/sieve-prd-vX.X.md` **不修改**，仅供追溯
 - 临时调研 / 草稿放 `docs/research/` 或 `docs/_temp/`，不要污染本文件

@@ -1,6 +1,6 @@
 # Sieve 12 周里程碑 Roadmap
 
-> Source of truth: [PRD v1.3 §10](../docs/prd/sieve-prd-v1.3.md#10-12-周里程碑8-周-dogfood--4-周闭测)
+> Source of truth: [PRD v1.5 §10](../docs/prd/sieve-prd-v1.5.md#10-12-周里程碑8-周-dogfood--4-周闭测)（Week 6-8 已按 v1.5 multi-agent 扩展重写）
 > 状态：**Week 3 完成，Week 4 入站通用 + benchmark 数据集准备中**。每周开始前更新本文勾选项。
 >
 > 本文是 PRD §10 的执行视图，**任务粒度 / 验收标准** 跟随 PRD 同步更新；本文新增"依赖"列与"风险"列辅助调度。
@@ -89,10 +89,14 @@
 
 - [x] IN-CR-03 敏感路径访问（10 条规则：SSH / AWS / GCP / Solana / Ethereum keystore / GPG / netrc / macOS Keychain / dotenv，含 allowlist；high warn 级别。Week 5 接 5s 倒计时弹窗）
 - [x] IN-CR-04 持久化机制（9 条规则：shell rc / crontab / launchctl + LaunchAgents plist / systemctl + systemd unit / fish config / macOS Login Items；Critical block + fail-closed，全部进 `FAIL_CLOSED_RULES`，YOLO mode 不可关。附带 [BREAKING] 重命名旧 IN-CR-04 markdown exfil → IN-GEN-04）
+- [x] sieve-rules manifest 字段扩展：`disposition` / `timeout_seconds` / `default_on_timeout`（处置矩阵二维字段已落地，详见 [ADR-012](../docs/design/ADR-012-disposition-matrix.md)）
+- [x] sieve-ipc crate 骨架（IPC server Unix socket + GUI 通知协议，本周末完成）
+- [x] sieve-hook crate 骨架（Claude Code PreToolUse hook 二进制，本周末完成）
 - [ ] **【P0 必须 Week 4 关闭】非流式 JSON 响应里的 tool_use 入站检测**：当前 daemon 仅扫 `text/event-stream` SSE 流，非流式 `application/json` 响应里的 tool_use 整体绕过所有入站规则（IN-CR-02/03/04/05 / IN-GEN-* 全失效）。dogfood 实测发现，详见 [lessons.md](./lessons.md)。修复：daemon 按 response content-type 路由，JSON 路径解析 `AnthropicResponse.content[]` → 提取 tool_use → 走 `InboundFilter::on_tool_use_complete`，命中 fail-closed Critical 时把 body 替换为 `sieve_blocked` 等价 JSON。集成测试加非流式响应路径覆盖。
 - IN-GEN-01~05 全部 P0 通用规则（shell 危险模式 / 远程脚本 / 编码执行 / Markdown exfil）
-- 处置矩阵完整实现（Critical block / High warn 5s / Medium 标记）
-- CLI 弹窗 + 命令行确认交互
+- ~~出站 OUT-01~05/12 自动脱敏路径~~（推到 Week 5）
+- ~~入站 Hook 类不修改 SSE 流~~（推到 Week 5）
+- CLI 弹窗 + 命令行确认交互（最简 stdout 版，Week 5 接 IPC + GUI）
 - **benchmark 数据集构建**
   - 200-500 条合成攻击样本（UCSB 4 类 + drainer + Pink Drainer 数字化 + npm typosquat + curl|sh + eval base64）
   - 50-100 条真实 benign 会话回放（doskey 自己 Claude Code 日常工作录制）
@@ -105,73 +109,110 @@
 
 ---
 
-### Week 5 · 打磨 + 配置 + 文档
+### Week 5 🆕 · Native GUI App（独立仓库）+ sieve setup + IPC server + sieve-hook + 二维处置矩阵落地
 
 **完成定义**（PRD §10.1 Week 5）：
 
-- doskey 朋友 30 分钟内能 brew install + 配好
+- doskey 朋友 30 分钟内能 .dmg 安装 + 跑 setup + 看到拦截工作
 
 **任务清单**：
 
-- 完整配置系统（config.toml + 环境变量覆盖）
-- 日志和审计输出（本地 SQLite append-only）
-- 完整用户文档（Claude Code 接入教程 + FAQ）
-- License 验证机制 + 14 天试用机制
-- 规则库脱敏配置 + 空规则集容错
-- brew tap 仓库初始化
-- GitHub Releases 自动化构建上传
+- [x] **sieve-ipc crate**（Week 4 末骨架已完成）
+- [x] **sieve-hook crate**（Week 4 末骨架已完成）
+- [x] **sieve-rules manifest 字段扩展**：`disposition` / `timeout_seconds` / `default_on_timeout`（Week 4 末已完成）
+- [ ] **sieve-core pipeline 重构**：
+  - `outbound_redact`：命中出站规则时改写 body bytes（替换 secret 为 `[REDACTED]`），而非仅返 426
+  - `inbound_hook`：Hook 类规则（IN-CR-02/03/04/05）不修改 SSE 流，通过 IPC 通知 GUI
+  - `inbound_hold`：25s keep-alive comment 注入 + IPC 通知 GUI 等待审批（详见 [SPEC-002](../docs/specs/SPEC-002-inbound-hold.md)）
+- [ ] **sieve-cli 新子命令**：
+  - `sieve setup`：改写 Claude Code `settings.json` 注册 `PreToolUse` hook + 写 `ANTHROPIC_BASE_URL` + 写 launchd plist（详见 [SPEC-003](../docs/specs/SPEC-003-setup-doctor-uninstall.md)）
+  - `sieve doctor`：canary 拦截测试，验证 hook + daemon + IPC 全链路就位
+  - `sieve uninstall`：按 `setup.log` 逐步回滚，dry-run / 确认 / 执行三阶段
+  - `audit.rs`：接入 SQLite append-only 审计，schema 见 [data-model.md](../docs/design/data-model.md)
+  - `daemon.rs`：删除对 Hook 类规则的 `sieve_blocked` SSE 注入（改由 IPC + GUI 处理）
+- [ ] **集成测试一次性按 v1.4 重写**：覆盖 IPC hold 流程 / setup 幂等性 / uninstall 回滚 / outbound_redact / 非流式 JSON 入站检测
+- [ ] **GitHub Releases 自动化构建上传**（macOS only，`aarch64-apple-darwin` + `x86_64-apple-darwin`）
+- [ ] **三件套 .dmg 打包**：GUI App + 后台代理 + sieve-hook 合并成单 .dmg
+- **GUI App（独立仓库 `sieve-gui-macos`，由 doskey 平行开发）**：
+  - 状态栏常驻图标 + 审批弹窗
+  - IPC 通道连接 sieve-ipc（[SPEC-001](../docs/specs/SPEC-001-ipc-protocol.md)）
+  - 倒计时视觉（25s hold 剩余时间）
+  - approve / reject / snooze 三个动作
 
-**依赖**：Week 4 核心引擎稳定
-**关键风险**：配置系统过度设计，需把握简洁度
-**关联文档**：PRD §11.3 开源策略
+**依赖**：Week 4 核心引擎稳定 + sieve-ipc / sieve-hook 骨架
+**关键风险**：GUI App 独立仓库与 Rust 端 IPC 协议需严格对齐；集成测试重写工程量大，需优先排期
+**关联文档**：PRD §10.1 Week 5 / SPEC-001~003 / ADR-013~016
 
 ---
 
-### Week 6 · doskey 自用 + 修 bug（Windows / Linux 二进制 Tier 2）
+### Week 6 🆕 · OpenAI 协议适配 + multi-agent setup（v1.5）
 
-**完成定义**（PRD §10.1 Week 6）：
+**完成定义**（PRD v1.5 §10.1 Week 6）：
 
-- doskey 自己一周无 P0 bug，FP 触发次数 < 5 次
-- Windows / Linux 二进制编译完成
+- UnifiedMessage 双协议跑通（Anthropic + OpenAI 解析为同一中间表示）
+- `sieve setup --agent claude|openclaw|hermes` 可执行，至少 Claude Code 路径全绿
 
 **任务清单**：
 
-- doskey 100% 工作时间用 Sieve
-- 收集所有 false positive，加 .sieveignore 默认条目
-- 性能 benchmark 验证 P99 < 20ms
-- Windows 二进制编译 + 本地测试
-- Linux 二进制编译 + 虚拟机测试
-- 跨平台路径处理规则（windows 盘符 / UNC 路径）
-- 二进制签名（cosign sigstore）
+1. 新模块 `crates/sieve-core/src/protocol/openai.rs`：OpenAI Chat Completions 解析（参考 ADR-018）
+2. SSE Parser 适配 OpenAI delta 格式（无 event 头 + `[DONE]` 终止符）
+3. UnifiedMessage 双协议跑通（Anthropic + OpenAI 都能解析为同一中间表示）
+4. `sieve setup --agent claude|openclaw|hermes` 多 agent 参数 + `--all-detected` 自动扫描（参考 SPEC-004）
+5. IN-GEN-06 外部 channel prompt injection 规则定义 + vectorscan 编译
+6. IN-CR-06 OpenClaw 动态 skill 加载 fail-closed 规则定义
+7. IPC schema 加 `source_agent` / `origin_chain` / `source_channel` 字段（向后兼容，`#[serde(default)]`）
+8. X-Sieve-Origin HTTP header 协议落地（签名生成 + 验证，参考 ADR-019）
 
-**依赖**：Week 5 配置 + 文档完整
-**关键风险**：Windows Defender SmartScreen 新二进制阻挡，需提前规划
-**关联文档**：PRD §6.4 性能预算
+**依赖**：Week 5 三件套 .dmg + IPC + sieve-hook 完整
+**关键风险**：OpenAI SSE 格式差异（尤其 delta 累积 + `[DONE]` 处理）需严格 fuzz 覆盖；IPC schema 向后兼容需测试旧格式能正常 deserialize
+**关联文档**：PRD v1.5 §5.2 / ADR-018 / ADR-019 / SPEC-004
 
 ---
 
-### Week 7-8 · 高强度 dogfood + Stripe 接入
+### Week 7 · OpenClaw / Hermes 集成测试（v1.5）
 
-**完成定义**（PRD §10.1 Week 7-8）：
+**完成定义**（PRD v1.5 §10.1 Week 7）：
 
-- doskey 用 Sieve 跑 2 周，无 P0 / P1 bug
+- 场景 E（OpenClaw 跨通道 injection）端到端跑通
+- 场景 F（Hermes sub-agent 嵌套）端到端跑通
+
+**任务清单**：
+
+1. 装 OpenClaw daemon + 让它走 Sieve 代理（手动改 config，验证 PRD v1.5 Open Question #9）
+2. 装 Hermes CLI + 让它走 Sieve（手动改 config，验证 PRD v1.5 Open Question #10）
+3. 跑场景 E：OpenClaw 接 WhatsApp/Slack → 攻击 prompt → IN-GEN-06 触发 → GUI 弹窗 + 拒绝 → OpenClaw 收到 sieve_blocked 停止
+4. 跑场景 F：Hermes delegate Claude Code → X-Sieve-Origin header → 下游识别 chain_depth=1 → 不二次弹窗
+5. X-Sieve-Origin header 在 Hermes delegate Claude Code 时正确注入（验证 PRD v1.5 Open Question #11）
+
+**依赖**：Week 6 OpenAI 协议适配 + IN-GEN-06/IN-CR-06 规则上线
+**关键风险**：OpenClaw / Hermes 实际 config 格式未知（Open Question），需要 dogfood 期间人工调试
+**关联文档**：PRD v1.5 §4.5 / §4.6 / US-18 / US-19
+
+---
+
+### Week 8 · 高强度 dogfood + Stripe 接入 + 三家扩展验证
+
+**完成定义**（PRD v1.5 §10.1 Week 8）：
+
+- doskey 用 Sieve 跑 1 周三家 agent，无 P0 / P1 bug
 - Stripe 账号 + license key 系统上线
 
 **任务清单**：
 
+- doskey 自己用 OpenClaw 接 Telegram + Slack，实测 IN-GEN-06 触发与 false positive 率
+- 用 Hermes delegate 给 Claude Code 测场景 F，收集调用链渲染反馈
 - 刻意尝试 edge case（多终端 / 跨语言 / 网络延迟模拟）
-- 每次 FP 都进 issue 列表 + 修复
-- 规则库更新机制完整测试
-- 第一次签名规则库下发测试
+- 每次 FP 都进 issue 列表 + 修复，调整 IN-GEN-06 命令式短语 pattern
+- 规则库更新机制完整测试 + 第一次签名规则库下发测试
 - 海外公司（香港/新加坡）注册完成
 - Stripe 账号关联公司主体
-- license key 生成 + 验证系统
-- 14 天试用激活机制
+- license key 生成 + 验证系统 + 14 天试用激活机制
 - 降级模式（试用期后只读警告）实现
+- **GUI App**（独立仓库）：倒计时视觉完善、合并多 issue 弹窗、设置界面 preset 切换（crypto / general / strict）
 
-**依赖**：Week 6 二进制稳定，公司注册已启动（Week 1）
-**关键风险**：公司注册周期延误（4-6 周），必须 Week 1 启动以赶上 Week 7-8 Stripe
-**关联文档**：PRD §7.1 定价 / §11.5.1 法律实体
+**依赖**：Week 7 集成测试跑通，公司注册已启动（Week 1）
+**关键风险**：公司注册周期延误（4-6 周），必须 Week 1 启动以赶上 Week 8 Stripe；IN-GEN-06 FP 率需 dogfood 数据驱动调整
+**关联文档**：PRD v1.5 §7.1 定价 / §11.5.1 法律实体
 
 ---
 
@@ -193,7 +234,7 @@
 
 **任务清单**：
 
-- Week 9 邀请 5 人（具体名单 TBD，见 PRD §14 Open Questions）
+- Week 9 邀请 5 人（具体名单 TBD，见 PRD v1.5 §14 Open Questions）；邀请 1-2 个 OpenClaw / Hermes 重度用户
 - Discord 闭测频道建立 + 权限配置
 - 闭测 license key 分配（5 个独立 key）
 - 每日反馈处理 SLA（24 小时内回复）
@@ -245,6 +286,7 @@
   - Chaofan Shou (@Fried_rice) 主动接洽（UCSB 论文一作，顾问关系）
   - 慢雾 @evilcos 接洽（misttrack-skills 数据合作）
   - 数据合作洽谈（SlowMist / ScamSniffer / GoPlus）
+  - 主动接洽 Peter Steinberger（OpenClaw）/ Nous Research 团队（Hermes）
 - GitHub stars 和 issue 管理流程
 
 **依赖**：Week 10 内容初稿 + 闭测稳定反馈
@@ -316,9 +358,9 @@ Week 3 入站 Crypto 钩子
   ↓
 Week 4 入站通用 + benchmark
   ↓
-Week 5 配置 + 文档
+Week 5 三件套 .dmg + IPC + setup
   ↓
-Week 6 二进制 + Windows Tier 2
+Week 6 dogfood + 修 bug + GUI App 打磨
   ↓
 Week 7-8 dogfood + Stripe
   ↓
@@ -357,8 +399,8 @@ Week 13+ 慢节奏维护 + Phase 2
 
 ## 相关文档
 
-- [PRD v1.3 §10](../docs/prd/sieve-prd-v1.3.md#10-12-周里程碑8-周-dogfood--4-周闭测)
-- [PRD v1.3 完整版](../docs/prd/sieve-prd-v1.3.md)
+- [PRD v1.4 §10](../docs/prd/sieve-prd-v1.5.md#10-12-周里程碑8-周-dogfood--4-周闭测)
+- [PRD v1.4 完整版](../docs/prd/sieve-prd-v1.5.md)
 - [Lessons](./lessons.md)
 - [README](../README.md)
 - [ADR 索引](../docs/design/ADR-INDEX.md)（待创建）

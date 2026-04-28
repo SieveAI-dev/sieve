@@ -168,6 +168,9 @@ mod tests {
             keywords: vec![],
             allowlist_regexes: vec![],
             allowlist_stopwords: vec![],
+            disposition: None,
+            timeout_seconds: None,
+            default_on_timeout: crate::manifest::DefaultOnTimeout::Block,
         }
     }
 

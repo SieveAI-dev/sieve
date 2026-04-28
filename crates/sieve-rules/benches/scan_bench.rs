@@ -1,6 +1,6 @@
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use sieve_rules::engine::{MatchEngine, VectorscanEngine};
-use sieve_rules::manifest::{Action, RuleEntry, Severity};
+use sieve_rules::manifest::{Action, DefaultOnTimeout, RuleEntry, Severity};
 
 fn build_test_engine() -> VectorscanEngine {
     let rules = vec![RuleEntry {
@@ -13,6 +13,9 @@ fn build_test_engine() -> VectorscanEngine {
         keywords: vec!["sk-ant-api03".to_string()],
         allowlist_regexes: vec![],
         allowlist_stopwords: vec![],
+        disposition: None,
+        timeout_seconds: None,
+        default_on_timeout: DefaultOnTimeout::Block,
     }];
     VectorscanEngine::compile(rules).unwrap()
 }

@@ -1,0 +1,24 @@
+[package]
+name = "sieve-ipc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Sieve IPC: JSON-RPC 2.0 over Unix socket + pending/decision file protocol (ADR-013)"
+publish = false
+
+[dependencies]
+tokio = { workspace = true, features = ["net", "fs", "sync", "time", "rt-multi-thread", "macros", "io-util"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+fd-lock = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { workspace = true, features = ["full", "test-util"] }

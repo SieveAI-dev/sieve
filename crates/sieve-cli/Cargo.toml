@@ -16,6 +16,9 @@ path = "src/main.rs"
 [dependencies]
 sieve-core = { path = "../sieve-core" }
 sieve-rules = { path = "../sieve-rules" }
+sieve-ipc = { path = "../sieve-ipc" }
+rusqlite = { version = "0.31", features = ["bundled"] }
+chrono = { workspace = true }
 
 tokio = { workspace = true, features = ["full"] }
 hyper = { workspace = true, features = ["http1", "http2", "server"] }
@@ -44,6 +47,9 @@ http-body-util = { workspace = true }
 http = { workspace = true }
 bytes = { workspace = true }
 sieve-core = { path = "../sieve-core" }
+sieve-ipc = { path = "../sieve-ipc" }
 anyhow = "1"
 tempfile = "3"
 serde_json = { workspace = true }
+rusqlite = { version = "0.31", features = ["bundled"] }
+uuid = { version = "1", features = ["v4"] }

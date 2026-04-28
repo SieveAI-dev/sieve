@@ -26,6 +26,13 @@
 | [ADR-006](./ADR-006-sigstore-reproducible-build.md)       | Sigstore 签名 + Reproducible Build + 透明日志                | Accepted | 2026-04-26 | §1.2、§9.6、§10.1、§11.3 |
 | [ADR-007](./ADR-007-fail-closed-critical-actions.md)      | Critical 等级 fail-closed 强制确认，YOLO mode 不可关闭            | Accepted | 2026-04-26 | §5.3、§9.3、§9.8、§11.2  |
 | [ADR-011](./ADR-011-private-until-ga.md)                  | Week 12 GA 前 repo 完全私有，不做任何 public 暴露                 | Accepted | 2026-04-27 | §9 #10、§10.1、§11.3     |
+| [ADR-012](./ADR-012-native-gui-app-phase1.md)             | Phase 1 必做 Native GUI App（macOS SwiftUI 独立进程）           | Accepted | 2026-04-28 | §6.4、§6.6、§10.1 Week 5 |
+| [ADR-013](./ADR-013-ipc-protocol.md)                      | IPC 协议：JSON-RPC over Unix socket + 文件锁 JSON 文件          | Accepted | 2026-04-28 | §6.5、§10.1 Week 3+5    |
+| [ADR-014](./ADR-014-dual-layer-defense.md)                | 双层防御：Sieve 代理（SSE 层）+ Claude Code PreToolUse Hook     | Accepted | 2026-04-28 | §6.7、§9 第 11 条         |
+| [ADR-015](./ADR-015-sieve-setup-tool.md)                  | sieve setup / doctor / uninstall 自动配置三件套（macOS only）   | Accepted | 2026-04-28 | §6.6、§10.1 Week 5      |
+| [ADR-016](./ADR-016-disposition-matrix-2d.md)             | 处置矩阵从一维四级升级为二维（出站/入站 × 严重度）                        | Accepted | 2026-04-28 | §5.3、§5.4、§9 第 13 条   |
+| [ADR-018](./ADR-018-openai-protocol-adaptation.md)        | sieve-core 新增 OpenAI Chat Completions 协议适配层，UnifiedMessage 真实支持双协议 | Accepted | 2026-04-28 | §6.1、§6.3、§9 第 9 条    |
+| [ADR-019](./ADR-019-x-sieve-origin-header.md)             | X-Sieve-Origin HTTP header 协议——sub-agent 嵌套调用链元数据传递与双重弹窗去重 | Accepted | 2026-04-28 | §4.6、§6.5               |
 
 
 ---
@@ -67,7 +74,7 @@
 **Proposed | Accepted | Deprecated | Superseded by ADR-XXX**
 > 决策日期：YYYY-MM-DD
 > 范围：...
-> 关联 PRD：[v1.3 §X](../prd/sieve-prd-v1.3.md)
+> 关联 PRD：[v1.5 §X](../prd/sieve-prd-v1.5.md)
 
 ## 背景
 ...
@@ -93,7 +100,7 @@
 
 - [架构](./architecture.md)
 - [数据模型](./data-model.md)
-- [PRD v1.3](../prd/sieve-prd-v1.3.md)
+- [PRD v1.5](../prd/sieve-prd-v1.5.md)
 - [API 参考](../api/api-reference.md)
 - [部署指南](../guides/deployment.md)
 

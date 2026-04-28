@@ -198,7 +198,7 @@ mod tests {
                     id: Uuid::new_v4(),
                     rule_id: "IN-GEN-01".into(),
                     severity: Severity::High,
-                    action: Action::WarnConfirm { countdown_secs: 10 },
+                    action: Action::HookMark,
                     source,
                     span: ContentSpan { start: 0, end: 15 },
                     evidence_truncated: "suspicious_high".into(),

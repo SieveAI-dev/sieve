@@ -1,0 +1,665 @@
+// sieve-ipc: JSON-RPC 2.0 over Unix socket + pending/decision 文件协议库。
+//
+// 供 sieve-cli（主代理）调用，向 GUI（sieve-gui-macos）或 hook（sieve-hook）
+// 传递决策请求并等待响应。关联：ADR-013（IPC 协议）、ADR-014（双层防御）。
+
+pub mod decision_file;
+pub mod error;
+pub mod paths;
+pub mod pending_file;
+pub mod protocol;
+pub mod socket_client;
+pub mod socket_server;
+
+// 常用类型直接 re-export，调用方无需深层 import。
+pub use error::IpcError;
+pub use protocol::{
+    DecisionAction, DecisionRequest, DecisionResponse, DefaultOnTimeout, DetectionPayload,
+    Disposition, Severity,
+};
+pub use socket_server::IpcServer;
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+    use uuid::Uuid;
+
+    use super::protocol::*;
+
+    // ── 协议 round-trip ──────────────────────────────────────────────────────
+
+    #[test]
+    fn decision_request_round_trip() {
+        let req = DecisionRequest {
+            request_id: Uuid::now_v7(),
+            created_at: Utc::now(),
+            timeout_seconds: 60,
+            default_on_timeout: DefaultOnTimeout::Block,
+            detections: vec![DetectionPayload {
+                rule_id: "IN-CR-01".to_owned(),
+                severity: Severity::Critical,
+                disposition: Disposition::HookTerminal,
+                title: "私钥检测".to_owned(),
+                one_line_summary: "检测到 BIP39 助记词（12 词，checksum 通过）".to_owned(),
+                details: serde_json::json!({ "word_count": 12 }),
+            }],
+        };
+
+        let json = serde_json::to_string(&req).expect("serialize");
+        let decoded: DecisionRequest = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(decoded.request_id, req.request_id);
+        assert_eq!(decoded.detections[0].rule_id, "IN-CR-01");
+        assert_eq!(decoded.default_on_timeout, DefaultOnTimeout::Block);
+    }
+
+    #[test]
+    fn decision_response_round_trip() {
+        let resp = DecisionResponse {
+            request_id: Uuid::now_v7(),
+            decision: DecisionAction::Deny,
+            decided_at: Utc::now(),
+            by_user: true,
+            remember: false,
+        };
+
+        let json = serde_json::to_string(&resp).expect("serialize");
+        let decoded: DecisionResponse = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(decoded.request_id, resp.request_id);
+        assert_eq!(decoded.decision, DecisionAction::Deny);
+        assert!(decoded.by_user);
+        assert!(!decoded.remember);
+    }
+
+    #[test]
+    fn disposition_serde_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&Disposition::GuiPopup).unwrap(),
+            "\"gui_popup\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Disposition::HookTerminal).unwrap(),
+            "\"hook_terminal\""
+        );
+    }
+
+    #[test]
+    fn severity_serde_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&Severity::Critical).unwrap(),
+            "\"critical\""
+        );
+    }
+
+    #[test]
+    fn decision_action_serde_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&DecisionAction::RedactAndAllow).unwrap(),
+            "\"redact_and_allow\""
+        );
+    }
+
+    // ── jsonrpc envelope ────────────────────────────────────────────────────
+
+    #[test]
+    fn jsonrpc_request_omits_null_id() {
+        let req = jsonrpc::Request {
+            jsonrpc: "2.0".to_owned(),
+            method: "ping".to_owned(),
+            params: None,
+            id: None,
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        // 通知请求不携带 id 字段。
+        assert!(!json.contains("\"id\""));
+    }
+
+    #[test]
+    fn jsonrpc_call_includes_id() {
+        let req = jsonrpc::Request::call(
+            "request_decision",
+            serde_json::json!({}),
+            serde_json::Value::String("abc".to_owned()),
+        );
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains("\"id\""));
+        assert!(json.contains("\"request_decision\""));
+    }
+}
+
+#[cfg(test)]
+mod file_tests {
+    use chrono::Utc;
+    use std::time::Duration;
+    use uuid::Uuid;
+
+    use super::{
+        decision_file::{wait_for_decision, write_decision},
+        pending_file::{read_pending, write_pending},
+        protocol::*,
+    };
+
+    fn make_request(id: Uuid) -> DecisionRequest {
+        DecisionRequest {
+            request_id: id,
+            created_at: Utc::now(),
+            timeout_seconds: 60,
+            default_on_timeout: DefaultOnTimeout::Block,
+            detections: vec![],
+        }
+    }
+
+    // ── pending_file ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn pending_write_and_read() {
+        let tmp = tempfile::tempdir().unwrap();
+        let id = Uuid::now_v7();
+        let req = make_request(id);
+
+        let path = write_pending(&req, tmp.path()).unwrap();
+        assert!(path.exists());
+
+        let read_back = read_pending(id, tmp.path()).unwrap();
+        assert_eq!(read_back.request_id, id);
+    }
+
+    #[test]
+    fn pending_not_found_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let id = Uuid::now_v7();
+        let err = read_pending(id, tmp.path()).unwrap_err();
+        assert!(matches!(err, crate::IpcError::PendingNotFound { .. }));
+    }
+
+    #[test]
+    fn pending_file_lock_two_tasks() {
+        // 两个线程抢同一个 pending 文件——后者等前者释放锁后写入。
+        // 验证不出现数据损坏（最终文件可被正确解析）。
+        use std::sync::Arc;
+        use std::sync::Barrier;
+        use std::thread;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let base = Arc::new(tmp.path().to_owned());
+        let id = Uuid::now_v7();
+        let barrier = Arc::new(Barrier::new(2));
+
+        let base1 = Arc::clone(&base);
+        let barrier1 = Arc::clone(&barrier);
+        let t1 = thread::spawn(move || {
+            barrier1.wait();
+            let req = make_request(id);
+            write_pending(&req, &base1).unwrap();
+        });
+
+        let base2 = Arc::clone(&base);
+        let barrier2 = Arc::clone(&barrier);
+        let t2 = thread::spawn(move || {
+            barrier2.wait();
+            let req = make_request(id);
+            write_pending(&req, &base2).unwrap();
+        });
+
+        t1.join().unwrap();
+        t2.join().unwrap();
+
+        // 文件仍可被正确解析（两次写入串行化）。
+        let read_back = read_pending(id, &base).unwrap();
+        assert_eq!(read_back.request_id, id);
+    }
+
+    // ── decision_file ────────────────────────────────────────────────────────
+
+    #[test]
+    fn decision_write_and_read() {
+        let tmp = tempfile::tempdir().unwrap();
+        let id = Uuid::now_v7();
+        let resp = DecisionResponse {
+            request_id: id,
+            decision: DecisionAction::Allow,
+            decided_at: Utc::now(),
+            by_user: true,
+            remember: false,
+        };
+
+        let path = write_decision(&resp, tmp.path()).unwrap();
+        assert!(path.exists());
+
+        let read_back = super::decision_file::read_decision(id, tmp.path()).unwrap();
+        assert_eq!(read_back.request_id, id);
+        assert_eq!(read_back.decision, DecisionAction::Allow);
+    }
+
+    #[tokio::test]
+    async fn wait_for_decision_timeout_fallback() {
+        let tmp = tempfile::tempdir().unwrap();
+        let id = Uuid::now_v7();
+        // 极短超时，不写决策文件，应返回 Block（default_on_timeout = Block）。
+        let resp = wait_for_decision(
+            id,
+            tmp.path(),
+            Duration::from_millis(100),
+            DefaultOnTimeout::Block,
+        )
+        .await
+        .unwrap();
+        assert_eq!(resp.decision, DecisionAction::Deny);
+        assert!(!resp.by_user);
+    }
+
+    #[tokio::test]
+    async fn wait_for_decision_found() {
+        let tmp = tempfile::tempdir().unwrap();
+        let id = Uuid::now_v7();
+        let base = tmp.path().to_owned();
+
+        // 50ms 后写决策文件，模拟用户操作。
+        let base_clone = base.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let resp = DecisionResponse {
+                request_id: id,
+                decision: DecisionAction::Allow,
+                decided_at: Utc::now(),
+                by_user: true,
+                remember: false,
+            };
+            write_decision(&resp, &base_clone).unwrap();
+        });
+
+        let result = wait_for_decision(id, &base, Duration::from_secs(2), DefaultOnTimeout::Block)
+            .await
+            .unwrap();
+        assert_eq!(result.decision, DecisionAction::Allow);
+        assert!(result.by_user);
+    }
+}
+
+#[cfg(test)]
+mod socket_tests {
+    //! 验证双向 JSON-RPC over Unix socket 通信模型（ADR-013 §3）。
+    //!
+    //! 测试用 IpcClient::auto_respond / 手动 socket 连接模拟真实 GUI 客户端行为，
+    //! 不再使用旧的 inject_decision 绕过 socket 层。
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use chrono::Utc;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::UnixStream;
+    use uuid::Uuid;
+
+    use super::{
+        protocol::{jsonrpc, *},
+        socket_client::IpcClient,
+        socket_server::IpcServer,
+    };
+
+    fn make_request(id: Uuid) -> DecisionRequest {
+        DecisionRequest {
+            request_id: id,
+            created_at: Utc::now(),
+            timeout_seconds: 30,
+            default_on_timeout: DefaultOnTimeout::Block,
+            detections: vec![],
+        }
+    }
+
+    /// 辅助：启动服务端并返回 Arc<IpcServer>。
+    async fn start_server(socket_path: &std::path::Path) -> Arc<IpcServer> {
+        let (server, listener) = IpcServer::bind(socket_path.to_owned()).unwrap();
+        let server = Arc::new(server);
+        let s = Arc::clone(&server);
+        tokio::spawn(async move { s.run(listener).await });
+        // 等服务端就绪。
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        server
+    }
+
+    // ── 测试 1：GUI 连接 → request_decision → GUI 收到 → 回 decision → 主代理拿到 ──
+
+    /// 核心 happy path：双向通信全链路。
+    ///
+    /// 1. 模拟 GUI 客户端连接并保持长连接。
+    /// 2. 主代理调 `request_decision`。
+    /// 3. GUI mock 读到 request 后写回 Allow。
+    /// 4. 主代理收到 Allow。
+    #[tokio::test]
+    async fn gui_connect_request_decision_round_trip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let socket_path = tmp.path().join("ipc.sock");
+        let server = start_server(&socket_path).await;
+
+        let id = Uuid::now_v7();
+
+        // 模拟 GUI：连接 socket，读一条 request，写回 Allow。
+        let path_clone = socket_path.clone();
+        tokio::spawn(async move {
+            IpcClient::auto_respond(path_clone, id, DecisionAction::Allow)
+                .await
+                .expect("auto_respond failed");
+        });
+
+        // 等 GUI mock 建立连接。
+        tokio::time::sleep(Duration::from_millis(30)).await;
+
+        let req = make_request(id);
+        let result = server
+            .request_decision(req, Duration::from_secs(3))
+            .await
+            .unwrap();
+
+        assert_eq!(result.decision, DecisionAction::Allow);
+        assert!(result.by_user, "GUI 回复的决策应标记 by_user=true");
+    }
+
+    // ── 测试 2：没有 GUI 客户端 → 立即 fallback ──
+
+    /// 没有任何 GUI 连接时，request_decision 必须立即返回 fallback，
+    /// 不应等待整个 timeout 时长（性能 + 体验要求）。
+    #[tokio::test]
+    async fn no_gui_connected_immediate_fallback() {
+        let tmp = tempfile::tempdir().unwrap();
+        let socket_path = tmp.path().join("ipc.sock");
+        let server = start_server(&socket_path).await;
+
+        let id = Uuid::now_v7();
+        let req = DecisionRequest {
+            request_id: id,
+            created_at: Utc::now(),
+            timeout_seconds: 30,
+            default_on_timeout: DefaultOnTimeout::Allow,
+            detections: vec![],
+        };
+
+        let start = std::time::Instant::now();
+        let result = server
+            .request_decision(req, Duration::from_secs(5))
+            .await
+            .unwrap();
+        let elapsed = start.elapsed();
+
+        // 没有 GUI，应立即返回（远小于 5s 超时）。
+        assert!(
+            elapsed < Duration::from_millis(500),
+            "no-GUI path should return immediately, got {elapsed:?}"
+        );
+        assert_eq!(result.decision, DecisionAction::Allow);
+        assert!(!result.by_user);
+    }
+
+    // ── 测试 3：GUI 连接后断线 → pending requests 立即 fallback ──
+
+    /// GUI 建立长连接后意外断线，主代理正在等待的 pending request 应立即 fallback，
+    /// 不应等满 timeout。
+    #[tokio::test]
+    async fn gui_disconnect_triggers_pending_fallback() {
+        let tmp = tempfile::tempdir().unwrap();
+        let socket_path = tmp.path().join("ipc.sock");
+        let server = start_server(&socket_path).await;
+
+        // 模拟 GUI：连接后保持一小段时间再断线（不回复任何决策）。
+        let path_clone = socket_path.clone();
+        tokio::spawn(async move {
+            let stream = UnixStream::connect(&path_clone).await.unwrap();
+            // 保持 50ms 后 drop（模拟 GUI 崩溃）。
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            drop(stream);
+        });
+
+        // 等 GUI mock 建立连接。
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        let id = Uuid::now_v7();
+        let req = DecisionRequest {
+            request_id: id,
+            created_at: Utc::now(),
+            timeout_seconds: 30,
+            default_on_timeout: DefaultOnTimeout::Block,
+            detections: vec![],
+        };
+
+        let start = std::time::Instant::now();
+        // 给很长的 timeout，期望断线后快速 fallback。
+        let result = server
+            .request_decision(req, Duration::from_secs(10))
+            .await
+            .unwrap();
+        let elapsed = start.elapsed();
+
+        // GUI 断线后 pending oneshot 被 drop，应远早于 10s 超时返回。
+        assert!(
+            elapsed < Duration::from_secs(3),
+            "should fallback quickly after GUI disconnect, got {elapsed:?}"
+        );
+        assert_eq!(result.decision, DecisionAction::Deny, "Block → Deny");
+        assert!(!result.by_user);
+    }
+
+    // ── 测试 4：多并发 request_decision，GUI 顺序回复，每个正确路由 ──
+
+    /// 同时发起 3 个 request_decision，GUI mock 逐一回复，验证 request_id 路由正确。
+    #[tokio::test]
+    async fn concurrent_requests_correctly_routed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let socket_path = tmp.path().join("ipc.sock");
+        let server = start_server(&socket_path).await;
+
+        let ids: Vec<Uuid> = (0..3).map(|_| Uuid::now_v7()).collect();
+
+        // 模拟 GUI：长连接，读 3 条 request，全部回复 Deny。
+        let path_clone = socket_path.clone();
+        let ids_clone = ids.clone();
+        tokio::spawn(async move {
+            // 重试连接直到服务端就绪。
+            let stream = {
+                let mut last_err = None;
+                let mut s = None;
+                for _ in 0..10 {
+                    match UnixStream::connect(&path_clone).await {
+                        Ok(st) => {
+                            s = Some(st);
+                            break;
+                        }
+                        Err(e) => {
+                            last_err = Some(e);
+                            tokio::time::sleep(Duration::from_millis(10)).await;
+                        }
+                    }
+                }
+                s.unwrap_or_else(|| panic!("connect failed: {:?}", last_err))
+            };
+            let (read_half, mut write_half) = stream.into_split();
+            let mut lines = BufReader::new(read_half).lines();
+
+            // 收到多少条就回多少条。
+            let mut replied = 0usize;
+            while replied < ids_clone.len() {
+                let Some(line) = lines.next_line().await.unwrap() else {
+                    break;
+                };
+                if line.trim().is_empty() {
+                    continue;
+                }
+                // 解析 request_id，原样回 Deny。
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line) {
+                    if let Some(rid_str) =
+                        val.pointer("/params/request_id").and_then(|v| v.as_str())
+                    {
+                        if let Ok(rid) = rid_str.parse::<Uuid>() {
+                            let resp = DecisionResponse {
+                                request_id: rid,
+                                decision: DecisionAction::Deny,
+                                decided_at: Utc::now(),
+                                by_user: true,
+                                remember: false,
+                            };
+                            let rpc_resp = jsonrpc::Response {
+                                jsonrpc: "2.0".to_owned(),
+                                result: Some(serde_json::to_value(&resp).unwrap()),
+                                error: None,
+                                id: serde_json::Value::String(rid.to_string()),
+                            };
+                            let mut payload = serde_json::to_string(&rpc_resp).unwrap();
+                            payload.push('\n');
+                            write_half.write_all(payload.as_bytes()).await.unwrap();
+                            replied += 1;
+                        }
+                    }
+                }
+            }
+        });
+
+        // 等 GUI mock 建立连接。
+        tokio::time::sleep(Duration::from_millis(30)).await;
+
+        // 并发发起 3 个 request_decision。
+        let server = Arc::clone(&server);
+        let mut handles = vec![];
+        for &id in &ids {
+            let s = Arc::clone(&server);
+            let req = make_request(id);
+            handles.push(tokio::spawn(async move {
+                s.request_decision(req, Duration::from_secs(5)).await
+            }));
+        }
+
+        // 收集结果，全部应为 Deny（by_user=true）。
+        for handle in handles {
+            let result = handle.await.unwrap().unwrap();
+            assert_eq!(result.decision, DecisionAction::Deny);
+            assert!(result.by_user);
+        }
+    }
+
+    // ── 测试 5：GUI 启动晚于主代理 → 连上后正常工作 ──
+
+    /// 主代理先启动，GUI 延迟后才连接；
+    /// 第一次调用（GUI 未连）立即 fallback；
+    /// GUI 连上后的第二次调用能正常路由到 GUI 并拿到 by_user=true 的响应。
+    ///
+    /// 这验证了"启动顺序无关"的核心契约：主代理不假设 GUI 先起，
+    /// GUI 不假设自己必须最后起。
+    #[tokio::test]
+    async fn gui_connects_late_still_works() {
+        let tmp = tempfile::tempdir().unwrap();
+        let socket_path = tmp.path().join("ipc.sock");
+        let server = start_server(&socket_path).await;
+
+        // ── 阶段一：GUI 未连，request_decision 立即 fallback ──
+        let id_before = Uuid::now_v7();
+        let req_before = make_request(id_before);
+        let before = server
+            .request_decision(req_before, Duration::from_secs(5))
+            .await
+            .unwrap();
+        // 没有 GUI，立即 fallback（by_user=false）。
+        assert!(!before.by_user, "GUI 未连时应立即 fallback");
+
+        // ── 阶段二：GUI 连上，request_decision 路由到真实 GUI ──
+        let id_after = Uuid::now_v7();
+        let path_clone = socket_path.clone();
+        tokio::spawn(async move {
+            // GUI 延迟 100ms 启动（模拟真实延迟）。
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            IpcClient::auto_respond(path_clone, id_after, DecisionAction::Deny)
+                .await
+                .expect("auto_respond failed");
+        });
+
+        // 等 GUI 建立连接。
+        tokio::time::sleep(Duration::from_millis(150)).await;
+
+        let req_after = make_request(id_after);
+        let after = server
+            .request_decision(req_after, Duration::from_secs(3))
+            .await
+            .unwrap();
+        // GUI 已连接，回复了 Deny，by_user=true。
+        assert_eq!(after.decision, DecisionAction::Deny);
+        assert!(after.by_user, "GUI 连接后的请求应由 GUI 响应");
+    }
+
+    // ── 保留：timeout fallback 验证 ──
+
+    /// 有 GUI 连接但 GUI 不回复——超时后应返回 default_on_timeout fallback。
+    #[tokio::test]
+    async fn socket_server_timeout_with_connected_gui() {
+        let tmp = tempfile::tempdir().unwrap();
+        let socket_path = tmp.path().join("ipc.sock");
+        let server = start_server(&socket_path).await;
+
+        // 模拟 GUI：连接但什么都不回复（只建立连接）。
+        let path_clone = socket_path.clone();
+        tokio::spawn(async move {
+            let _stream = UnixStream::connect(&path_clone).await.unwrap();
+            // 保持连接，不发任何数据，等测试结束。
+            tokio::time::sleep(Duration::from_secs(10)).await;
+        });
+
+        // 等 GUI mock 建立连接。
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        let id = Uuid::now_v7();
+        let req = DecisionRequest {
+            request_id: id,
+            created_at: Utc::now(),
+            timeout_seconds: 1,
+            default_on_timeout: DefaultOnTimeout::Allow,
+            detections: vec![],
+        };
+
+        // GUI 连着但不回复，100ms 超时后应返回 Allow（default_on_timeout）。
+        let result = server
+            .request_decision(req, Duration::from_millis(100))
+            .await
+            .unwrap();
+        assert_eq!(result.decision, DecisionAction::Allow);
+        assert!(!result.by_user);
+    }
+}
+
+#[cfg(test)]
+mod paths_tests {
+    use super::paths::*;
+    use std::sync::Mutex;
+
+    // 任何修改 SIEVE_HOME / HOME 的测试都必须先拿到这把锁。
+    // Rust test 默认多线程跑同一个 test binary，env var 是进程全局状态。
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn sieve_home_env_override() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let orig = std::env::var("SIEVE_HOME").ok();
+        std::env::set_var("SIEVE_HOME", "/tmp/test_sieve_override");
+        let home = sieve_home().unwrap();
+        match orig {
+            Some(v) => std::env::set_var("SIEVE_HOME", v),
+            None => std::env::remove_var("SIEVE_HOME"),
+        }
+        assert_eq!(home.to_str().unwrap(), "/tmp/test_sieve_override");
+    }
+
+    #[test]
+    fn sieve_home_default_uses_home() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let orig = std::env::var("SIEVE_HOME").ok();
+        std::env::remove_var("SIEVE_HOME");
+        let home = sieve_home().unwrap();
+        if let Some(v) = orig {
+            std::env::set_var("SIEVE_HOME", v);
+        }
+        assert!(home.to_str().unwrap().ends_with(".sieve"));
+    }
+
+    #[test]
+    fn ensure_dirs_idempotent() {
+        let tmp = tempfile::tempdir().unwrap();
+        ensure_dirs(tmp.path()).unwrap();
+        ensure_dirs(tmp.path()).unwrap(); // 第二次调用不应报错。
+        assert!(pending_dir(tmp.path()).exists());
+        assert!(decisions_dir(tmp.path()).exists());
+        assert!(locks_dir(tmp.path()).exists());
+    }
+}

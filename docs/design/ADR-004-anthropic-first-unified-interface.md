@@ -2,11 +2,11 @@
 
 ## 状态
 
-**已接受**（v1.3 锁定执行）
+**已接受**（v1.4 锁定执行）
 
 > 决策日期：2026-04-26
 > 范围：Phase 1（12 周 GA），仅 Claude Code 客户端 + Anthropic Messages API 协议
-> 关联 PRD：[v1.3 §6.1、§9.9](../prd/sieve-prd-v1.3.md)
+> 关联 PRD：[v1.4 §6.1、§9.9](../prd/sieve-prd-v1.5.md)
 
 ---
 
@@ -112,9 +112,9 @@ PRD §9.9 的硬约束给出了答案：**"Phase 1 只做 Claude Code，UnifiedM
 
 ### 需要更新的文档
 
-- [PRD-sieve v1.3 §6.1](../prd/sieve-prd-v1.3.md) —— Phase 1 单 agent 架构图已对齐"只 Claude Code"
-- [PRD-sieve v1.3 §9.9](../prd/sieve-prd-v1.3.md) —— 工程硬约束第 9 条已写明此决策
-- [PRD-sieve v1.3 §10.3 Phase C](../prd/sieve-prd-v1.3.md) —— "第二个用户主动要 OpenClaw / Hermes / MCP 适配时再做"
+- [PRD-sieve v1.4 §6.1](../prd/sieve-prd-v1.5.md) —— Phase 1 单 agent 架构图已对齐"只 Claude Code"
+- [PRD-sieve v1.4 §9.9](../prd/sieve-prd-v1.5.md) —— 工程硬约束第 9 条已写明此决策
+- [PRD-sieve v1.4 §10.3 Phase C](../prd/sieve-prd-v1.5.md) —— "第二个用户主动要 OpenClaw / Hermes / MCP 适配时再做"
 - [data-model.md](./data-model.md) §1 —— UnifiedMessage 接口形状已对齐
 - [architecture.md](./architecture.md) §2 —— Protocol Layer 模块职责已对齐
 - `docs/api/api-reference.md`（待编写）—— Phase 1 仅文档化 Anthropic Messages API 适配
@@ -123,9 +123,25 @@ PRD §9.9 的硬约束给出了答案：**"Phase 1 只做 Claude Code，UnifiedM
 
 ## 相关文档
 
-- [PRD-sieve v1.3 §6.1](../prd/sieve-prd-v1.3.md) —— Phase 1 单 agent 架构
-- [PRD-sieve v1.3 §9.9](../prd/sieve-prd-v1.3.md) —— "Phase 1 只做 Claude Code"
-- [PRD-sieve v1.3 §10.3](../prd/sieve-prd-v1.3.md) —— 慢节奏维护期的扩展触发条件
+- [PRD-sieve v1.4 §6.1](../prd/sieve-prd-v1.5.md) —— Phase 1 单 agent 架构
+- [PRD-sieve v1.4 §9.9](../prd/sieve-prd-v1.5.md) —— "Phase 1 只做 Claude Code"
+- [PRD-sieve v1.4 §10.3](../prd/sieve-prd-v1.5.md) —— 慢节奏维护期的扩展触发条件
 - [architecture.md](./architecture.md) —— Protocol Layer 与 Phase 2 演进路径
 - [data-model.md](./data-model.md) —— UnifiedMessage 设计与字段说明
 - [ADR-002](./ADR-002-rule-engine-only-phase1.md) —— 同样应用"触发条件而非路线图"原则
+
+---
+
+## 2026-04-28 补充（v1.4 双层防御对 Anthropic-first 的延伸含义）
+
+> 本段由 [ADR-014](./ADR-014-dual-layer-defense.md) 引入，不修改本 ADR 原有内容。
+
+**"Phase 1 只适配 Claude Code"的结论仍然成立**，且被 v1.4 进一步强化：
+
+v1.4 §6.7 新增**双层防御**依赖 Claude Code 特有的 `hooks.preToolUse` 机制（通过 `settings.json` 注册，`onError: block` 语义）。这是 Anthropic 私有的客户端扩展协议，不存在于 OpenAI Codex、Cursor、Aider 等其他客户端中。
+
+换言之，**sieve-hook 这一层的 fail-closed 实现是 Claude Code 专有的**——Phase 2 适配 OpenClaw / Hermes 等客户端时，Hook 类规则（IN-CR-02/03/04 / IN-GEN-01~03）的等效拦截机制需要各自重新实现（对等的 pre-execution hook，或者降级为 GUI 弹窗路径）。
+
+本条补充不改变 §3 的第二适配触发条件——Phase 2 适配仍须等到第二个真实付费用户主动要求。届时适配工作量还需额外包含"Hook 类规则的等效拦截机制"，比 v1.3 时代估算的 2-3 周更长。
+
+相关文档：[ADR-014 双层防御](./ADR-014-dual-layer-defense.md)

@@ -2,11 +2,11 @@
 
 ## 状态
 
-**已接受**（v1.3 锁定执行）
+**已接受**（v1.4 锁定执行）
 
 > 决策日期：2026-04-26
 > 范围：Sieve 商业化主体、收款渠道、营销载体
-> 关联 PRD：[v1.3 §1.4、§11.5](../prd/sieve-prd-v1.3.md)
+> 关联 PRD：[v1.4 §1.4、§11.5](../prd/sieve-prd-v1.5.md)
 
 ---
 
@@ -136,10 +136,10 @@ PRD §11.5.1 要求**收款渠道双通道**：
 
 ### 需要更新的文档
 
-- [PRD-sieve v1.3 §1.4](../prd/sieve-prd-v1.3.md) —— 项目性质 + 法律实体已对齐
-- [PRD-sieve v1.3 §11.5](../prd/sieve-prd-v1.3.md) —— 中国大陆合规边界整章已对齐
-- [PRD-sieve v1.3 §10.1 Week 7-8](../prd/sieve-prd-v1.3.md) —— Stripe 接入时间点
-- [PRD-sieve v1.3 §14 第 3、5 条](../prd/sieve-prd-v1.3.md) —— Open Questions（具体注册地选择 + 加密支付实现细节）
+- [PRD-sieve v1.4 §1.4](../prd/sieve-prd-v1.5.md) —— 项目性质 + 法律实体已对齐
+- [PRD-sieve v1.4 §11.5](../prd/sieve-prd-v1.5.md) —— 中国大陆合规边界整章已对齐
+- [PRD-sieve v1.4 §10.1 Week 7-8](../prd/sieve-prd-v1.5.md) —— Stripe 接入时间点
+- [PRD-sieve v1.4 §14 第 3、5 条](../prd/sieve-prd-v1.5.md) —— Open Questions（具体注册地选择 + 加密支付实现细节）
 - `docs/guides/deployment.md`（待编写）—— Stripe webhook + Coinbase Commerce webhook 接入指南
 - `docs/changelog/CHANGELOG.md`（待编写）—— Phase 1 启动时记录公司主体决策
 
@@ -147,9 +147,9 @@ PRD §11.5.1 要求**收款渠道双通道**：
 
 ## 相关文档
 
-- [PRD-sieve v1.3 §1.4](../prd/sieve-prd-v1.3.md) —— 法律实体明确
-- [PRD-sieve v1.3 §11.5](../prd/sieve-prd-v1.3.md) —— 中国大陆合规边界
-- [PRD-sieve v1.3 §10.1 Week 7-8](../prd/sieve-prd-v1.3.md) —— Stripe + license key 上线
-- [PRD-sieve v1.3 §12](../prd/sieve-prd-v1.3.md) —— 风险登记册（海外公司注册周期延误）
-- [PRD-sieve v1.3 §14](../prd/sieve-prd-v1.3.md) —— Open Questions（注册地、加密收款）
+- [PRD-sieve v1.4 §1.4](../prd/sieve-prd-v1.5.md) —— 法律实体明确
+- [PRD-sieve v1.4 §11.5](../prd/sieve-prd-v1.5.md) —— 中国大陆合规边界
+- [PRD-sieve v1.4 §10.1 Week 7-8](../prd/sieve-prd-v1.5.md) —— Stripe + license key 上线
+- [PRD-sieve v1.4 §12](../prd/sieve-prd-v1.5.md) —— 风险登记册（海外公司注册周期延误）
+- [PRD-sieve v1.4 §14](../prd/sieve-prd-v1.5.md) —— Open Questions（注册地、加密收款）
 - [data-model.md §8](./data-model.md) —— License key 数据结构（依赖海外公司颁发）
