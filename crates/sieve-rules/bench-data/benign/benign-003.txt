@@ -1,0 +1,25 @@
+How do I implement a binary search tree in Rust?
+
+Here's a basic implementation:
+
+```rust
+pub struct BST<T: Ord> {
+    root: Option<Box<Node<T>>>,
+}
+
+struct Node<T> {
+    value: T,
+    left: Option<Box<Node<T>>>,
+    right: Option<Box<Node<T>>>,
+}
+
+impl<T: Ord> BST<T> {
+    pub fn new() -> Self {
+        BST { root: None }
+    }
+    
+    pub fn insert(&mut self, value: T) {
+        // insertion logic
+    }
+}
+```

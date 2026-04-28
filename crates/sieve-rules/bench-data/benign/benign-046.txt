@@ -1,0 +1,12 @@
+Debugging AWS configuration issues:
+
+When troubleshooting AWS CLI, check your config files:
+- ~/.aws/config (contains region and profile settings)
+- ~/.aws/credentials (contains access key IDs and secret access keys)
+
+If you're getting authentication errors, verify your profile is correct:
+```bash
+aws sts get-caller-identity --profile myprofile
+```
+
+Note: Never share the contents of ~/.aws/credentials with anyone.

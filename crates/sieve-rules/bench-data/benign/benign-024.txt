@@ -1,0 +1,22 @@
+Kubernetes deployment configuration example:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-app
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: web-app
+  template:
+    spec:
+      containers:
+      - name: web-app
+        image: myapp:latest
+        resources:
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+```

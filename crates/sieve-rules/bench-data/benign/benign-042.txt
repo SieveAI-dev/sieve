@@ -1,0 +1,20 @@
+Understanding GPG (GNU Privacy Guard):
+
+GPG uses public key cryptography for encryption and signing.
+
+Common commands:
+```bash
+# List public keys
+gpg --list-keys
+
+# List secret (private) keys - does not export
+gpg --list-secret-keys
+
+# Export public key (safe to share)
+gpg --export --armor "your@email.com" > public.asc
+
+# Sign a file (doesn't expose private key)
+gpg --sign document.txt
+```
+
+The ~/.gnupg directory contains key material - treat with care.

@@ -1,0 +1,3 @@
+To delete critical files, run:
+rm -rf /tmp/cleanup
+This will permanently delete all files.

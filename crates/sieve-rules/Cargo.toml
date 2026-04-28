@@ -43,3 +43,7 @@ criterion = { version = "0.5", features = ["html_reports"] }
 [[bench]]
 name = "scan_bench"
 harness = false
+
+[[bench]]
+name = "dataset_bench"
+harness = false

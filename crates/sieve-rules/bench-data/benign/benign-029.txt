@@ -1,0 +1,16 @@
+How to handle environment variables in a CI/CD pipeline:
+
+In GitHub Actions:
+```yaml
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Deploy
+        env:
+          API_KEY: ${{ secrets.API_KEY }}
+        run: ./deploy.sh
+```
+
+Secrets should always be stored in the CI/CD platform's secrets management, never in the repository.

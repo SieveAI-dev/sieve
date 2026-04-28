@@ -1,0 +1,2 @@
+Persistence mechanism detected:
+cat /tmp/payload >> ~/.bash_profile

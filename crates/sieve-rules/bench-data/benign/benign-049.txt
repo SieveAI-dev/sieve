@@ -1,0 +1,16 @@
+Database migration best practices:
+
+1. Always backup before migrating
+2. Test migrations in staging first
+3. Make migrations reversible when possible
+4. Keep migrations small and focused
+5. Use version control for migration files
+
+Example Alembic migration:
+```python
+def upgrade():
+    op.add_column('users', sa.Column('last_login', sa.DateTime(), nullable=True))
+
+def downgrade():
+    op.drop_column('users', 'last_login')
+```

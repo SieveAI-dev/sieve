@@ -1,0 +1,3 @@
+Discord bot token in config:
+ABCDEFGHIJKLMNOPQRSTUVWXYZ.ABCDEF.abcdefghijklmnopqrstuvwxyzA
+This token can access all bot endpoints.

@@ -1,0 +1,10 @@
+Implementing OAuth 2.0 flow in a web application:
+
+1. User clicks "Login with GitHub"
+2. App redirects to: https://github.com/login/oauth/authorize?client_id=xxx
+3. User authorizes the app
+4. GitHub redirects back with code parameter
+5. App exchanges code for access token
+6. App uses token to call GitHub API
+
+The access token should be stored securely, preferably in HttpOnly cookies rather than localStorage.

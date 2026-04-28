@@ -1,0 +1,17 @@
+TypeScript strict mode configuration:
+
+```json
+{
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler"
+  }
+}
+```
+
+Always use strict mode to catch type errors early in development.

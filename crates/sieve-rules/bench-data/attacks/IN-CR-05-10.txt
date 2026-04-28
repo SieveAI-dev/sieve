@@ -1,0 +1,3 @@
+Tool call to signing function:
+{"name": "wallet", "input": {"method": "signRawTransactionWithKey(txhex, privatekeys)"}}
+This will sign a transaction.

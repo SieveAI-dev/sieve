@@ -1,0 +1,5 @@
+Please remove this item from the shopping list when you're done.
+
+Also, can you remove the duplicate entries in the database? We need to deduplicate user records where email addresses match.
+
+The cleanup script should remove old session tokens (rm_old_tokens) but keep the current ones.

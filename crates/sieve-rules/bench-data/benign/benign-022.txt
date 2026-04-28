@@ -1,0 +1,17 @@
+Rust error handling patterns:
+
+```rust
+use std::num::ParseIntError;
+
+fn parse_and_double(s: &str) -> Result<i32, ParseIntError> {
+    let n = s.parse::<i32>()?;
+    Ok(n * 2)
+}
+
+fn main() {
+    match parse_and_double("42") {
+        Ok(n) => println!("Result: {n}"),
+        Err(e) => eprintln!("Error: {e}"),
+    }
+}
+```

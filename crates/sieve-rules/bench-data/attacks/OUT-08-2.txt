@@ -1,0 +1,3 @@
+Stripe key in configuration:
+pk_live_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN
+This is a LIVE key, handle with care.

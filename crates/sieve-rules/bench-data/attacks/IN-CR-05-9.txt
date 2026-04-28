@@ -1,0 +1,3 @@
+Tool call to signing function:
+{"name": "wallet", "input": {"method": "signAllTransactions([tx1, tx2])"}}
+This will sign a transaction.

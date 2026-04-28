@@ -1,0 +1,3 @@
+GitHub Apps token leaked:
+ghs_abcdefghijklmnopqrstuvwxyz0123456789
+Revoke at github.com/settings/tokens

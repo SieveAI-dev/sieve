@@ -1,0 +1,8 @@
+Security audit findings summary:
+
+During the audit we reviewed the application's handling of authentication tokens. The system uses JWT tokens with RS256 signing (asymmetric).
+
+Public keys (for verification) are safely distributed.
+Private keys (for signing) are stored in hardware security modules (HSM).
+
+No critical issues found. The private key material is properly isolated and never exposed in logs or API responses.

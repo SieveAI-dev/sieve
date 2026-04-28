@@ -1,0 +1,16 @@
+Understanding Bitcoin transaction types:
+
+P2PKH (Pay to Public Key Hash):
+- Most common transaction type
+- Sends funds to the hash of a public key
+- Requires signature to spend
+
+P2SH (Pay to Script Hash):
+- Enables complex spending conditions
+- Used for multisig wallets
+
+SegWit:
+- Reduces transaction size
+- Fixes transaction malleability
+
+All transaction types involve cryptographic signing, which should be done with proper wallet software.

@@ -32,7 +32,9 @@ default_on_timeout = "block"
 [[rules]]
 id = "IN-CR-02-CURL-PIPE"
 description = "Curl-pipe-shell pattern (curl ... | sh)"
-pattern = '''(?i)curl\s+\S+\s*\|\s*(ba)?sh'''
+# Week 4 benchmark 发现：原 pattern `curl\s+\S+\s*\|...` 只匹配一个 token，
+# 漏报 `curl -s URL | bash`（-s 是第一个 token）。改为允许多个空白分隔的 token。
+pattern = '''(?i)curl(?:\s+\S+)+\s*\|\s*(ba)?sh'''
 severity = "critical"
 action = "block"
 keywords = ["curl"]
@@ -43,7 +45,7 @@ default_on_timeout = "block"
 [[rules]]
 id = "IN-CR-02-WGET-PIPE"
 description = "Wget-pipe-shell pattern"
-pattern = '''(?i)wget\s+\S+\s*\|\s*(ba)?sh'''
+pattern = '''(?i)wget(?:\s+\S+)+\s*\|\s*(ba)?sh'''
 severity = "critical"
 action = "block"
 keywords = ["wget"]

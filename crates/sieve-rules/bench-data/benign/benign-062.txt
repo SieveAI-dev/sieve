@@ -1,0 +1,8 @@
+How SSH key authentication works (educational):
+
+1. Server has your public key in ~/.ssh/authorized_keys
+2. Client signs a challenge with private key (~/.ssh/id_ed25519)
+3. Server verifies signature using stored public key
+4. If valid, connection is established
+
+The private key never leaves your machine. This is why SSH key authentication is more secure than passwords.
