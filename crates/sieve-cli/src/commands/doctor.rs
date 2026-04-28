@@ -1,11 +1,13 @@
-//! `sieve doctor` 命令实现（ADR-015 / SPEC-003 §doctor）。
+//! `sieve doctor` 命令实现（ADR-015 / SPEC-003 §doctor / SPEC-004 §6）。
 //!
-//! 5 项检查：
+//! 5 项检查（Claude Code）：
 //! 1. settings.json 中 ANTHROPIC_BASE_URL 是否为 http://127.0.0.1:11453
 //! 2. hooks.PreToolUse 是否含 sieve-hook check
 //! 3. daemon 是否在 :11453 监听（TCP 连接）
 //! 4. launchd 状态（launchctl list | grep com.sieve.daemon）
 //! 5. canary 本地引擎命中测试（OUT-01 规则 scan，不发真实网络请求）
+//!
+//! `--agent openclaw` / `--agent hermes` 为 stub（SPEC-004 §6.2/6.3 TBD-01/TBD-02，Week 7 实测后实现）。
 //!
 //! 仅 macOS Phase 1 支持；非 macOS 编译进 stub。
 //!
@@ -23,7 +25,19 @@
 //!
 //! 原实现任一检查失败仍返回 `Ok(())`，导致 CI 假绿灯。
 //! 新实现收集所有失败项，任一失败则返回 `Err`，含失败项名称列表。
+//!
+//! # R5-#2 修复说明
+//!
+//! 原实现 canary 规则路径列表硬编码，只看 `$HOME/.sieve/rules/outbound.toml`，
+//! 不读 `SIEVE_HOME` env var / `sieve.toml` 的 `rules_path` 字段。
+//!
+//! 新实现通过 `resolve_rules_path()` 按 4 级优先级解析：
+//! 1. `SIEVE_RULES_PATH` env var（显式覆盖，dev/CI 用）
+//! 2. `$SIEVE_HOME/sieve.toml`（或 `~/.sieve/sieve.toml`）中的 `rules_path` 字段
+//! 3. `$SIEVE_HOME/rules/outbound.toml`（env var 指定的 sieve home）
+//! 4. `$HOME/.sieve/rules/outbound.toml`（最终 fallback）
 
+use crate::cli::{AgentKind, DoctorArgs};
 use anyhow::Result;
 
 #[cfg(target_os = "macos")]
@@ -37,14 +51,135 @@ pub use stub::run;
 #[cfg(target_os = "macos")]
 mod macos {
     use super::*;
+    use std::path::PathBuf;
     use std::process::Command;
 
-    /// 运行 `sieve doctor`。关联 ADR-015 / SPEC-003 §doctor。
+    /// 按 4 级优先级解析出站规则路径（R5-#2）。
+    ///
+    /// 优先级（高 → 低）：
+    /// 1. `SIEVE_RULES_PATH` env var（显式覆盖，dev/CI 用）
+    /// 2. `$SIEVE_HOME/sieve.toml`（或 `~/.sieve/sieve.toml`）中的 `rules_path` 字段
+    /// 3. `$SIEVE_HOME/rules/outbound.toml`（env var 指定的 sieve home）
+    /// 4. `$HOME/.sieve/rules/outbound.toml`（最终 fallback）
+    ///
+    /// # Errors
+    ///
+    /// 所有候选路径均未找到有效文件时返回 `Err`，含每个候选尝试情况的说明。
+    pub fn resolve_rules_path() -> Result<PathBuf> {
+        // ── 优先级 1：SIEVE_RULES_PATH 显式覆盖 ────────────────────────────
+        if let Ok(val) = std::env::var("SIEVE_RULES_PATH") {
+            if !val.is_empty() {
+                return Ok(PathBuf::from(val));
+            }
+        }
+
+        // ── 优先级 2：从 sieve.toml 读 rules_path 字段 ─────────────────────
+        let sieve_home = resolve_sieve_home();
+        let toml_path = sieve_home.join("sieve.toml");
+        if toml_path.exists() {
+            if let Ok(raw) = std::fs::read_to_string(&toml_path) {
+                // 只解析 rules_path 字段，容忍其他字段（避免引入 config::Config 循环依赖）
+                if let Ok(table) = raw.parse::<toml::Table>() {
+                    if let Some(toml::Value::String(p)) = table.get("rules_path") {
+                        if !p.is_empty() {
+                            return Ok(PathBuf::from(p));
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── 优先级 3：$SIEVE_HOME/rules/outbound.toml ──────────────────────
+        let sieve_home_rules = sieve_home.join("rules").join("outbound.toml");
+
+        // ── 优先级 4：$HOME/.sieve/rules/outbound.toml（fallback）──────────
+        let home_rules = PathBuf::from(std::env::var("HOME").unwrap_or_default())
+            .join(".sieve")
+            .join("rules")
+            .join("outbound.toml");
+
+        // 优先级 3 和 4 可能相同（当 SIEVE_HOME 未设置时），只在文件存在时返回
+        if sieve_home_rules.exists() {
+            return Ok(sieve_home_rules);
+        }
+        if home_rules.exists() {
+            return Ok(home_rules);
+        }
+
+        // 所有候选均失败：返回明确的 Err
+        Err(anyhow::anyhow!(
+            "出站规则文件未找到，尝试过的候选路径：\n\
+             1. SIEVE_RULES_PATH（未设置或为空）\n\
+             2. {toml} 中的 rules_path 字段（文件{toml_status}）\n\
+             3. {sieve_home_rules}\n\
+             4. {home_rules}",
+            toml = toml_path.display(),
+            toml_status = if toml_path.exists() {
+                "存在但无 rules_path 字段"
+            } else {
+                "不存在"
+            },
+            sieve_home_rules = sieve_home_rules.display(),
+            home_rules = home_rules.display(),
+        ))
+    }
+
+    /// 解析 sieve home 目录：`$SIEVE_HOME` env var，否则 `$HOME/.sieve`。
+    fn resolve_sieve_home() -> PathBuf {
+        if let Ok(val) = std::env::var("SIEVE_HOME") {
+            if !val.is_empty() {
+                return PathBuf::from(val);
+            }
+        }
+        PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".sieve")
+    }
+
+    /// 运行 `sieve doctor`。关联 ADR-015 / SPEC-003 §doctor / SPEC-004 §6。
+    ///
+    /// `args.agent` 指定时只检查该 agent；否则检查所有。
     ///
     /// # Errors
     ///
     /// 任一检查项失败时返回 `Err`，错误信息含失败项名称列表（R4-#8）。
-    pub fn run() -> Result<()> {
+    pub fn run(args: DoctorArgs) -> Result<()> {
+        // 确定要检查的 agent 列表
+        let agents: Vec<AgentKind> = if let Some(a) = args.agent {
+            vec![a]
+        } else {
+            // 默认检查所有（目前 Claude 有实质检查；openclaw/hermes 为 stub）
+            vec![AgentKind::Claude, AgentKind::Openclaw, AgentKind::Hermes]
+        };
+
+        let mut all_passed = true;
+
+        for agent in &agents {
+            match agent {
+                AgentKind::Claude => {
+                    if let Err(e) = run_claude_checks() {
+                        eprintln!("[doctor] Claude Code 检查失败：{e}");
+                        all_passed = false;
+                    }
+                }
+                AgentKind::Openclaw => {
+                    run_openclaw_checks_stub();
+                }
+                AgentKind::Hermes => {
+                    run_hermes_checks_stub();
+                }
+            }
+        }
+
+        if all_passed {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("doctor 检查未全部通过，见上方输出"))
+        }
+    }
+
+    /// Claude Code 5 项检查（SPEC-003 §doctor / SPEC-004 §6.1）。
+    fn run_claude_checks() -> Result<()> {
+        println!("=== Claude Code doctor 检查 ===");
+
         let home = std::env::var("HOME").unwrap_or_default();
         let settings_path = std::path::PathBuf::from(&home)
             .join(".claude")
@@ -111,6 +246,29 @@ mod macos {
         }
     }
 
+    /// OpenClaw doctor 检查（SPEC-004 §6.2；当前为 stub，Week 7 实测后实现）。
+    fn run_openclaw_checks_stub() {
+        println!("=== OpenClaw doctor 检查 ===");
+        // TODO（Week 7 实测后实现）：
+        // 1. TCP connect 127.0.0.1:11453（daemon 监听）
+        // 2. 解析 ~/.openclaw/config.toml，验证 provider base_url（TBD-01）
+        // 3. Canary（OpenAI 协议）（TBD-05）
+        // 见 SPEC-004 §6.2。
+        println!("  ⚠ OpenClaw 检查为 stub（SPEC-004 §6.2 TBD-01/TBD-05），Week 7 实测后实现");
+    }
+
+    /// Hermes doctor 检查（SPEC-004 §6.3；当前为 stub，Week 7 实测后实现）。
+    fn run_hermes_checks_stub() {
+        println!("=== Hermes doctor 检查 ===");
+        // TODO（Week 7 实测后实现）：
+        // 1. hermes --version 检查
+        // 2. 解析 Hermes 配置文件（TBD-02），验证 provider base_url
+        // 3. Canary（OpenAI 协议）
+        // 4. X-Sieve-Origin header 注入（TBD-06）
+        // 见 SPEC-004 §6.3。
+        println!("  ⚠ Hermes 检查为 stub（SPEC-004 §6.3 TBD-02/TBD-06），Week 7 实测后实现");
+    }
+
     fn print_check(label: &str, ok: bool) {
         let icon = if ok { "✅" } else { "❌" };
         println!("  {} {}", icon, label);
@@ -171,12 +329,13 @@ mod macos {
         stdout.contains("com.sieve.daemon")
     }
 
-    /// Canary 本地规则引擎命中测试（R4-#7 修复）。
+    /// Canary 本地规则引擎命中测试（R4-#7 修复 / R5-#2 修复）。
     ///
     /// 构造一个**精确匹配 OUT-01 规则格式**的 canary token，
     /// 直接调用 sieve-rules VectorscanEngine + 出站规则，验证至少 1 个 Detection 命中 OUT-01。
     ///
     /// 不发任何网络请求，不依赖 daemon 是否在线。
+    /// 规则路径通过 `resolve_rules_path()` 按 4 级优先级解析（R5-#2）。
     ///
     /// # 为什么不发 HTTP 请求验证
     ///
@@ -188,25 +347,16 @@ mod macos {
         use sieve_rules::engine::{MatchEngine as _, VectorscanEngine};
         use sieve_rules::loader::load_outbound_rules;
 
-        // 定位 outbound.toml：相对二进制路径推断，或 fallback 到 workspace 路径。
-        // 在测试环境中，从 CARGO_MANIFEST_DIR 推断；生产环境从二进制同级目录推断。
-        let rules_candidates: Vec<std::path::PathBuf> = vec![
-            // 生产：~/.sieve/rules/outbound.toml
-            std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default())
-                .join(".sieve")
-                .join("rules")
-                .join("outbound.toml"),
-            // 开发：workspace 相对路径（通过 SIEVE_RULES_PATH 覆盖）
-            std::path::PathBuf::from(std::env::var("SIEVE_RULES_PATH").unwrap_or_default()),
-        ];
-
-        let rules_path = rules_candidates
-            .into_iter()
-            .find(|p| !p.as_os_str().is_empty() && p.exists());
-
-        let Some(rules_path) = rules_path else {
-            // 规则文件不存在：canary 检查无法执行
-            return false;
+        // R5-#2：按 4 级优先级解析规则路径（SIEVE_RULES_PATH > sieve.toml > SIEVE_HOME > HOME）
+        let rules_path = match resolve_rules_path() {
+            Ok(p) => {
+                println!("  canary using rules from: {}", p.display());
+                p
+            }
+            Err(e) => {
+                println!("  canary 规则路径解析失败：{e}");
+                return false;
+            }
         };
 
         let Ok(rules) = load_outbound_rules(&rules_path) else {
@@ -237,7 +387,7 @@ mod stub {
     use super::*;
 
     /// `sieve doctor` 非 macOS 占位实现。
-    pub fn run() -> Result<()> {
+    pub fn run(_args: DoctorArgs) -> Result<()> {
         anyhow::bail!(
             "sieve doctor is macOS only in Phase 1. \
              Linux/Windows support is planned for Phase 2."

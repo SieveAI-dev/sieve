@@ -5,6 +5,7 @@
 
 pub mod decision_file;
 pub mod error;
+pub mod origin_header;
 pub mod paths;
 pub mod pending_file;
 pub mod protocol;
@@ -13,9 +14,13 @@ pub mod socket_server;
 
 // 常用类型直接 re-export，调用方无需深层 import。
 pub use error::IpcError;
+pub use origin_header::{
+    build_signed_origin_header, parse_and_verify_origin_header, parse_origin_header, OriginHeader,
+    OriginHeaderError, SIEVE_ORIGIN_PUBLIC_KEY,
+};
 pub use protocol::{
     DecisionAction, DecisionRequest, DecisionResponse, DefaultOnTimeout, DetectionPayload,
-    Disposition, Severity,
+    Disposition, OriginHop, Severity, SourceAgent,
 };
 pub use socket_server::IpcServer;
 
@@ -43,6 +48,10 @@ mod tests {
                 one_line_summary: "检测到 BIP39 助记词（12 词，checksum 通过）".to_owned(),
                 details: serde_json::json!({ "word_count": 12 }),
             }],
+            source_agent: SourceAgent::Unknown,
+            origin_chain: vec![],
+            source_channel: None,
+            explicit_chain_depth: None,
         };
 
         let json = serde_json::to_string(&req).expect("serialize");
@@ -98,6 +107,133 @@ mod tests {
         );
     }
 
+    // ── v1.5 multi-agent 字段 ───────────────────────────────────────────────
+
+    /// 旧 v1.4 JSON（不含 source_agent / origin_chain / source_channel）能正常反序列化。
+    ///
+    /// source_agent 默认 Unknown，origin_chain 默认 []，source_channel 默认 None。
+    #[test]
+    fn v14_compat_missing_fields_use_defaults() {
+        let json = serde_json::json!({
+            "request_id": "01901234-5678-7abc-def0-123456789abc",
+            "created_at": "2026-04-27T00:00:00Z",
+            "timeout_seconds": 60,
+            "default_on_timeout": "block",
+            "detections": []
+        });
+        let req: DecisionRequest = serde_json::from_value(json).expect("v1.4 compat deserialize");
+        assert_eq!(req.source_agent, SourceAgent::Unknown);
+        assert!(req.origin_chain.is_empty());
+        assert!(req.source_channel.is_none());
+    }
+
+    /// v1.5 完整 JSON 含全部新字段，deserialize 正确并 roundtrip。
+    #[test]
+    fn v15_full_fields_roundtrip() {
+        let req = DecisionRequest {
+            request_id: uuid::Uuid::now_v7(),
+            created_at: Utc::now(),
+            timeout_seconds: 30,
+            default_on_timeout: DefaultOnTimeout::Block,
+            detections: vec![],
+            source_agent: SourceAgent::Claude,
+            origin_chain: vec![OriginHop {
+                agent: SourceAgent::Hermes,
+                action: "delegate".to_owned(),
+                timestamp: Utc::now(),
+            }],
+            source_channel: Some("slack".to_owned()),
+            explicit_chain_depth: None,
+        };
+
+        let json = serde_json::to_string(&req).expect("serialize");
+        let decoded: DecisionRequest = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(decoded.source_agent, SourceAgent::Claude);
+        assert_eq!(decoded.origin_chain.len(), 1);
+        assert_eq!(decoded.origin_chain[0].action, "delegate");
+        assert_eq!(decoded.source_channel.as_deref(), Some("slack"));
+    }
+
+    /// chain_depth() 返回 origin_chain 的长度。
+    #[test]
+    fn chain_depth_returns_origin_chain_len() {
+        let mut req = DecisionRequest {
+            request_id: uuid::Uuid::now_v7(),
+            created_at: Utc::now(),
+            timeout_seconds: 60,
+            default_on_timeout: DefaultOnTimeout::Block,
+            detections: vec![],
+            source_agent: SourceAgent::Unknown,
+            origin_chain: vec![],
+            source_channel: None,
+            explicit_chain_depth: None,
+        };
+        assert_eq!(req.chain_depth(), 0);
+
+        req.origin_chain.push(OriginHop {
+            agent: SourceAgent::Claude,
+            action: "user_input".to_owned(),
+            timestamp: Utc::now(),
+        });
+        assert_eq!(req.chain_depth(), 1);
+
+        req.origin_chain.push(OriginHop {
+            agent: SourceAgent::Hermes,
+            action: "skill_invoke".to_owned(),
+            timestamp: Utc::now(),
+        });
+        req.origin_chain.push(OriginHop {
+            agent: SourceAgent::OpenClaw,
+            action: "channel_message".to_owned(),
+            timestamp: Utc::now(),
+        });
+        assert_eq!(req.chain_depth(), 3);
+    }
+
+    /// SourceAgent 枚举 serde snake_case 序列化正确。
+    #[test]
+    fn source_agent_serde_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&SourceAgent::Claude).unwrap(),
+            "\"claude\""
+        );
+        assert_eq!(
+            serde_json::to_string(&SourceAgent::OpenClaw).unwrap(),
+            "\"open_claw\""
+        );
+        assert_eq!(
+            serde_json::to_string(&SourceAgent::Hermes).unwrap(),
+            "\"hermes\""
+        );
+        assert_eq!(
+            serde_json::to_string(&SourceAgent::Unknown).unwrap(),
+            "\"unknown\""
+        );
+        // 反序列化验证。
+        let agent: SourceAgent = serde_json::from_str("\"open_claw\"").unwrap();
+        assert_eq!(agent, SourceAgent::OpenClaw);
+    }
+
+    /// OriginHop 时间戳以 RFC3339 格式序列化。
+    #[test]
+    fn origin_hop_timestamp_rfc3339() {
+        let ts = chrono::DateTime::parse_from_rfc3339("2026-04-27T12:34:56Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let hop = OriginHop {
+            agent: SourceAgent::Claude,
+            action: "user_input".to_owned(),
+            timestamp: ts,
+        };
+        let json = serde_json::to_string(&hop).expect("serialize");
+        assert!(
+            json.contains("2026-04-27T12:34:56Z"),
+            "timestamp should be RFC3339, got: {json}"
+        );
+        let decoded: OriginHop = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(decoded.timestamp, ts);
+    }
+
     // ── jsonrpc envelope ────────────────────────────────────────────────────
 
     #[test]
@@ -145,6 +281,10 @@ mod file_tests {
             timeout_seconds: 60,
             default_on_timeout: DefaultOnTimeout::Block,
             detections: vec![],
+            source_agent: SourceAgent::Unknown,
+            origin_chain: vec![],
+            source_channel: None,
+            explicit_chain_depth: None,
         }
     }
 
@@ -302,6 +442,10 @@ mod socket_tests {
             timeout_seconds: 30,
             default_on_timeout: DefaultOnTimeout::Block,
             detections: vec![],
+            source_agent: SourceAgent::Unknown,
+            origin_chain: vec![],
+            source_channel: None,
+            explicit_chain_depth: None,
         }
     }
 
@@ -370,6 +514,10 @@ mod socket_tests {
             timeout_seconds: 30,
             default_on_timeout: DefaultOnTimeout::Allow,
             detections: vec![],
+            source_agent: SourceAgent::Unknown,
+            origin_chain: vec![],
+            source_channel: None,
+            explicit_chain_depth: None,
         };
 
         let start = std::time::Instant::now();
@@ -417,6 +565,10 @@ mod socket_tests {
             timeout_seconds: 30,
             default_on_timeout: DefaultOnTimeout::Block,
             detections: vec![],
+            source_agent: SourceAgent::Unknown,
+            origin_chain: vec![],
+            source_channel: None,
+            explicit_chain_depth: None,
         };
 
         let start = std::time::Instant::now();
@@ -607,6 +759,10 @@ mod socket_tests {
             timeout_seconds: 1,
             default_on_timeout: DefaultOnTimeout::Allow,
             detections: vec![],
+            source_agent: SourceAgent::Unknown,
+            origin_chain: vec![],
+            source_channel: None,
+            explicit_chain_depth: None,
         };
 
         // GUI 连着但不回复，100ms 超时后应返回 Allow（default_on_timeout）。

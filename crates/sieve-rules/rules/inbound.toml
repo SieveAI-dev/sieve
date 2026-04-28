@@ -358,6 +358,40 @@ disposition = "gui_popup"
 timeout_seconds = 120
 default_on_timeout = "block"
 
+# ---------------------------------------------------------------------------
+# IN-GEN-06 外部 channel prompt injection（PRD v1.5 §5.2 / §4.5，Week 5 新增）
+# 算法：命令式短语正则匹配；来源 channel 不可信时由引擎运行时提级 Critical。
+# 关联 ADR-016 二维处置矩阵。
+# ---------------------------------------------------------------------------
+[[rules]]
+id = "IN-GEN-06"
+description = "External channel prompt injection (untrusted source, PRD v1.5 §4.5)"
+# 命令式短语：忽略/ignore 之前指令（中英文双语）；
+# 来源 channel 不可信时由 sieve-core::pipeline::inbound 运行时提级 Critical。
+pattern = '(?i)(ignore|disregard|忽略).{0,30}(previous|earlier|之前).{0,30}(instructions|prompts|指令)'
+severity = "high"
+action = "warn"
+keywords = ["ignore", "disregard", "忽略"]
+disposition = "gui_popup"
+timeout_seconds = 60
+default_on_timeout = "block"
+
+# ---------------------------------------------------------------------------
+# IN-CR-06 OpenClaw 动态 skill 加载 fail-closed（PRD v1.5 §4.6，Week 5 新增）
+# 占位规则；实际命中由 sieve-core::skill_install_guard 处理。
+# 参考 IN-CR-01 placeholder 模式：loader 看到特殊 pattern 时跳过 vectorscan 编译。
+# TBD（Week 7）：OpenClaw skill install endpoint 路径需实测后补充真实匹配逻辑。
+# ---------------------------------------------------------------------------
+[[rules]]
+id = "IN-CR-06"
+description = "OpenClaw dynamic skill installation, fail-closed (PRD v1.5 §4.6)"
+pattern = "__OPENCLAW_SKILL_GUARD_PLACEHOLDER__"
+severity = "critical"
+action = "block"
+disposition = "gui_popup"
+timeout_seconds = 120
+default_on_timeout = "block"
+
 # IN-GEN-01~03 候选（Week 4 完整化）
 [[rules]]
 id = "IN-GEN-01"

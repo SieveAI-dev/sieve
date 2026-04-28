@@ -37,3 +37,10 @@ path = "fuzz_targets/inbound_filter.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "sse_parser_openai"
+path = "fuzz_targets/sse_parser_openai.rs"
+test = false
+doc = false
+bench = false

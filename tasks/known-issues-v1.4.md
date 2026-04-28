@@ -17,6 +17,10 @@
 | R3（验证 R2）| 6 (4 P1 + 2 P2) | **0**（暂不修） | **6** | 都是 R2 修暴露的更深层架构缺口；继续修会无限循环 |
 | R4（v1.5 PRD review）| 6 (3 P1 + 3 P2) | 0 | **+2 doctor** | 4 条是 R3 已登记的；新增 2 条 doctor 问题；v1.5 PRD 文档零问题 ✅ |
 | R5（A1+D3 验证）| 2 (1 P1 + 1 P2) | **修完 4 旧条目** ✅（R3-#2 / R3-#6 / R4-#7 / R4-#8）| **+2 R5 次生** | A1+D3 4 个修全部落地；R4-#7+#8 修引入 R5-#1（半配置回滚）+ R5-#2（canary 规则路径）|
+| R6（A2 验证）| 4 (1 P1 + 3 P2) | **修完 R5-#1/#2 + 4 R6** ✅ | 0 | F-A2a/b 修 R6 后无残留 |
+| R7（A2 R6 后验证）| 5 (2 P1 + 3 P2) | **修完 6 R6 残留 + 5 R7** ✅ | 0 | F-A2c/d/e 修 R7 后无残留 |
+| R8（A2 R7 后验证）| 4 (0 P1 + 4 P2) | **修完 5 R7 残留 + 4 R8** ✅ | 0 | F-A2f/g/h 修 R8 后无残留；问题严重度递减 |
+| R9（A2 R8 后验证）| 2 (1 P1 + 1 P2) | **R9-#1 修；R9-#2 P2 登记**（用户决策"P0/P1 修，P2 登记"） | 1 (R9-#2) | A2 主体收口 |
 
 **核心 lesson**：v1.4 是大型架构翻转（一维处置 → 二维 + IPC + 双层防御 + GUI 独立仓库），单次"按规格实现"无法覆盖全部 fail-closed 路径。残留的 6 个问题都需要**端到端真实跑通**才能彻底验证，等 GUI App 在独立仓库落地后回头一次性闭环。
 
@@ -159,52 +163,81 @@
 
 ---
 
-### P1-R5-#1：setup 调 doctor 失败时半配置状态 🚨
+### ~~P1-R5-#1：setup 调 doctor 失败时半配置状态~~ ✅ Fixed
 
-**位置**：`crates/sieve-cli/src/commands/setup.rs` 调用 `doctor::run()?` 处（约行 105-110）
+**位置**：`crates/sieve-cli/src/commands/setup.rs`
 
-**触发条件**：A1c 修了 R4-#8 让 doctor 失败时返回 Err 后引入。
-
-**症状**：
-- `sieve setup` 跑完 `do_setup`（已改 settings.json + 已加载 launchd plist）
-- 然后调 `doctor::run()?` 验证
-- doctor 失败（daemon 没启 / canary 失败 / launchd 异常）→ Err 直接 return setup::run
-- **回滚逻辑只包了 do_setup 那段**，doctor 失败后不调 `ctx.rollback()`
-- 结果：用户的 settings.json 已改为 127.0.0.1，plist 已 launchctl load，但 setup 报错
-- 用户不知道是"成功一半"还是"完全失败"，要么手动 uninstall，要么留烂摊子
-
-**修法**：
-- setup 的 doctor 失败分支也要调 `ctx.rollback()` 后再 return Err
-- 或者把 doctor 调用包在一个 finally-style guard 里，失败必回滚
-- 友好错误信息说明"setup 已自动回滚，请检查 doctor 报告"
-
-**影响**：违反 SPEC-003 §5 错误恢复承诺；用户体验灾难
-
-**等待依赖**：无；改起来很简单
+**修复方案**：
+- `doctor::run()?` 改为 `if let Err(doctor_err) = doctor::run()` 显式捕获
+- 失败时先调 `ctx.rollback()` 再返回 `Err`，携带友好消息："setup 已自动回滚（doctor 验证失败：<原因>）；请检查 doctor 报告"
+- `SetupContext` 新增 `#[cfg(test)] fn new_with_written_files(...)` 辅助构造函数
+- 新增 2 个单元测试（`macos::tests_rollback`）直接验证 rollback 行为
+- 新增集成测试 `tests/setup_doctor_rollback.rs`（T1 dry-run happy-path + T2 doctor 失败回滚验证）
 
 ---
 
-### P2-R5-#2：doctor canary 用硬编码规则路径，不读 SIEVE_HOME / sieve.toml
+### ~~P2-R5-#2：doctor canary 用硬编码规则路径，不读 SIEVE_HOME / sieve.toml~~ ✅ Fixed
 
-**位置**：`crates/sieve-cli/src/commands/doctor.rs` canary 检查处（约行 193-200）
+**位置**：`crates/sieve-cli/src/commands/doctor.rs`
 
-**触发条件**：A1c 修 R4-#7 时的 canary 改造引入。
-
-**症状**：
-- doctor 用 `VectorscanEngine::compile(outbound_rules)` 做本地 canary scan
-- 候选规则路径硬编码列表，第一个是 `$HOME/.sieve/rules/outbound.toml`
-- **不看** `SIEVE_HOME` env var / `~/.sieve/sieve.toml` 的 `rules_path` 字段
-- 用户用自定义路径安装时 doctor 扫错规则集
-- 旧规则可能误报通过；新规则路径上的有效安装可能失败
-
-**修法**：
-- 解析顺序：`SIEVE_RULES_PATH` env var 显式覆盖 > sieve.toml `rules_path` > `$SIEVE_HOME/rules/` > `$HOME/.sieve/rules/`
-- doctor 启动时先尝试读 sieve.toml（`SIEVE_HOME` 或 `--config` 指定），从配置取 `rules_path`
-- 找不到 sieve.toml 时再 fallback 到默认路径
-
-**影响**：自定义安装路径用户的 doctor 静默扫错文件，假绿/假红
+**修复**：抽出 `resolve_rules_path()` 实现 4 级优先级——`SIEVE_RULES_PATH` > `sieve.toml rules_path` > `$SIEVE_HOME/rules/outbound.toml` > `$HOME/.sieve/rules/outbound.toml`；doctor 输出明确说明所用路径。新增 5 个优先级测试（R5-#2-T1～T5），全部通过。
 
 **等待依赖**：无；改起来不复杂
+
+---
+
+### ~~P1-R7-#1~~ ✅ Fixed (F-A2f) / ~~R7-#2~~ / ~~R7-#3~~ / ~~R7-#4~~ / ~~R7-#5~~ ✅ Fixed (F-A2g/h)
+
+R7 5 条全部修复，详见 codex review R7 log。
+
+---
+
+### ~~P2-R8-#1 4-段签名 header 解析~~ ✅ Fixed (F-A2i)
+
+daemon 改用 sieve_ipc::parse_origin_header 支持 3 段/4 段格式。
+
+---
+
+### ~~P2-R8-#2 入站 chain_depth ≥ 2 升级 HookMark~~ ✅ Fixed (F-A2i)
+
+classify_inbound_detections 加 chain_depth 参数，HookMark → HoldForDecision。
+
+---
+
+### ~~P2-R8-#3 OpenAI stream + AutoRedact 后跳过入站检测~~ ✅ Fixed (F-A2i)
+
+脱敏后仍走 forward_with_openai_inbound_inspection。
+
+---
+
+### ~~P2-R8-#4 OpenAIMessage 缺 flatten extra~~ ✅ Fixed (F-A2j)
+
+OpenAIMessage 加 #[serde(flatten)] extra 字段，AutoRedact 重序列化保留 legacy function_call / 厂商扩展。
+
+---
+
+### ~~P1-R9-#1 OpenAI 入站缺 prompt 地址 seed~~ ✅ Fixed (F-A2k 派出中)
+
+OpenAI 路径 stream=true 时调 inbound_filter.seed_known_addresses_from_text，IN-CR-01 不再绕过。
+
+---
+
+### P2-R9-#2：chain_depth ≥ 2 时 Action::Redact 没升级 GUI
+
+**位置**：`crates/sieve-cli/src/daemon.rs:872-875`（OpenAI 路径，Anthropic 路径同样模式）
+
+**症状**：
+- daemon 顶部说明 chain_depth ≥ 2 时**所有**检测命中强制升级为 GUI 弹窗
+- 当前实现只升级 `Action::HookMark` → `Action::HoldForDecision`
+- `Action::Redact` 命中（OUT-01~05 secret）仍走 redact_hits 静默脱敏转发
+- 嵌套调用上下文中的 secret 应该 GUI 弹窗确认而不是静默处理
+
+**修法**：
+- chain_depth ≥ 2 检查中加入 Redact → HoldForDecision 升级
+- Anthropic + OpenAI 路径都要修
+- 类比 R8-#2 的升级模式
+
+**等待依赖**：无；按用户决策"P2 只登记不修"
 
 ---
 

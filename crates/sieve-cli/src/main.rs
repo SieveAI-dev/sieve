@@ -3,9 +3,9 @@
 //! 子命令：
 //! - `sieve start [--config <path>] [--dry-run]`：启动 daemon
 //! - `sieve version`：打印版本号
-//! - `sieve setup [--dry-run] [--yes]`：自动配置 Claude Code（仅 macOS，ADR-015）
-//! - `sieve doctor`：诊断 Sieve 安装状态（仅 macOS）
-//! - `sieve uninstall [--dry-run] [--yes]`：回滚 setup 改动（仅 macOS）
+//! - `sieve setup [--agent <name>] [--all-detected] [--dry-run] [--yes]`：配置 AI agent（仅 macOS，ADR-015 / SPEC-004）
+//! - `sieve doctor [--agent <name>] [--all]`：诊断 Sieve 安装状态（仅 macOS）
+//! - `sieve uninstall [--agent <name>] [--all] [--dry-run] [--yes]`：回滚 setup 改动（仅 macOS）
 
 // unsafe_code 在生产代码中禁止（等效 forbid），测试代码通过 #[allow(unsafe_code)] 豁免
 // 以支持 Rust 1.80+ 的 std::env::set_var 必须用 unsafe {} 的要求。
@@ -30,6 +30,16 @@ use engine_adapter::{InboundAdapter, OutboundAdapter};
 use sieve_core::pipeline::outbound::OutboundFilter;
 use sieve_rules::engine::VectorscanEngine;
 use sieve_rules::loader::{load_inbound_rules, load_outbound_rules};
+
+/// 入站规则中不送入 vectorscan 编译的占位 pattern 列表（R6-#6）。
+///
+/// IN-CR-01 使用 `__ADDRESS_GUARD_PLACEHOLDER__`，由运行时地址守卫逻辑处理；
+/// IN-CR-06 使用 `__OPENCLAW_SKILL_GUARD_PLACEHOLDER__`，由 skill_install_guard 逻辑处理。
+/// 字面量传入 vectorscan 会导致含该字符串的任意文本被误触发。
+pub(crate) const INBOUND_PLACEHOLDER_PATTERNS: &[&str] = &[
+    "__ADDRESS_GUARD_PLACEHOLDER__",
+    "__OPENCLAW_SKILL_GUARD_PLACEHOLDER__",
+];
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -100,11 +110,11 @@ async fn main() -> Result<()> {
                 )
             })?;
 
-            // 占位规则（pattern == "__ADDRESS_GUARD_PLACEHOLDER__"）不传 vectorscan 编译
+            // 占位规则不传 vectorscan 编译（R6-#6：含 IN-CR-01 + IN-CR-06 两个 placeholder）
             let (placeholder_rules, vectorscan_rules): (Vec<_>, Vec<_>) = inbound_rules_raw
                 .iter()
                 .cloned()
-                .partition(|r| r.pattern == "__ADDRESS_GUARD_PLACEHOLDER__");
+                .partition(|r| INBOUND_PLACEHOLDER_PATTERNS.contains(&r.pattern.as_str()));
             tracing::info!(
                 count = vectorscan_rules.len(),
                 placeholders = placeholder_rules.len(),
@@ -135,9 +145,9 @@ async fn main() -> Result<()> {
         Command::Setup(args) => {
             commands::setup::run(args)?;
         }
-        Command::Doctor => {
+        Command::Doctor(args) => {
             // R4-#8：doctor 失败时返回非零 exit code，CI 脚本可捕获。
-            if let Err(e) = commands::doctor::run() {
+            if let Err(e) = commands::doctor::run(args) {
                 eprintln!("sieve doctor: {e}");
                 std::process::exit(1);
             }
@@ -205,4 +215,82 @@ fn init_tracing() {
         .with(filter)
         .with(fmt::layer().with_target(false))
         .init();
+}
+
+// ──────────────────────────────── 单元测试 ──────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::INBOUND_PLACEHOLDER_PATTERNS;
+
+    /// R6-#6 测试 4：PLACEHOLDER_PATTERNS 常量至少含 IN-CR-01 和 IN-CR-06 两个占位（R6-#6）
+    ///
+    /// 保证未来新增 placeholder 时不会漏掉添加到常量列表。
+    #[test]
+    fn inbound_placeholder_patterns_contains_both_known_placeholders() {
+        assert!(
+            INBOUND_PLACEHOLDER_PATTERNS.contains(&"__ADDRESS_GUARD_PLACEHOLDER__"),
+            "INBOUND_PLACEHOLDER_PATTERNS 应含 IN-CR-01 的 __ADDRESS_GUARD_PLACEHOLDER__"
+        );
+        assert!(
+            INBOUND_PLACEHOLDER_PATTERNS.contains(&"__OPENCLAW_SKILL_GUARD_PLACEHOLDER__"),
+            "INBOUND_PLACEHOLDER_PATTERNS 应含 IN-CR-06 的 __OPENCLAW_SKILL_GUARD_PLACEHOLDER__"
+        );
+        assert!(
+            INBOUND_PLACEHOLDER_PATTERNS.len() >= 2,
+            "INBOUND_PLACEHOLDER_PATTERNS 应至少包含 2 个 placeholder（IN-CR-01 + IN-CR-06）"
+        );
+    }
+
+    /// R6-#6 测试 3：partition 后含 placeholder 字面量的文本不被 vectorscan 命中
+    ///
+    /// 直接验证 partition 逻辑将两个 placeholder pattern 都过滤出去，
+    /// 确保 vectorscan 不编译这两个字面量（否则任何含该字符串的文本会被误触发）。
+    #[test]
+    fn placeholder_patterns_are_excluded_from_vectorscan_partition() {
+        use sieve_rules::loader::load_inbound_rules;
+
+        // 定位 inbound.toml（相对于 CARGO_MANIFEST_DIR）
+        let rules_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("sieve-rules")
+            .join("rules")
+            .join("inbound.toml");
+
+        if !rules_path.exists() {
+            // CI 环境中规则文件路径可能不同，跳过
+            eprintln!("跳过：inbound.toml 未找到（{:?}）", rules_path);
+            return;
+        }
+
+        let rules = load_inbound_rules(&rules_path).expect("load inbound rules");
+
+        // 用 INBOUND_PLACEHOLDER_PATTERNS partition
+        let (placeholder_rules, vectorscan_rules): (Vec<_>, Vec<_>) = rules
+            .iter()
+            .cloned()
+            .partition(|r| INBOUND_PLACEHOLDER_PATTERNS.contains(&r.pattern.as_str()));
+
+        // 两个占位规则都应被 partition 出
+        let ph_ids: Vec<&str> = placeholder_rules.iter().map(|r| r.id.as_str()).collect();
+        assert!(
+            ph_ids.contains(&"IN-CR-01"),
+            "IN-CR-01 应被 partition 到 placeholder_rules，ph_ids={ph_ids:?}"
+        );
+        assert!(
+            ph_ids.contains(&"IN-CR-06"),
+            "IN-CR-06 应被 partition 到 placeholder_rules，ph_ids={ph_ids:?}"
+        );
+
+        // vectorscan_rules 中不含任何 placeholder pattern
+        for r in &vectorscan_rules {
+            assert!(
+                !INBOUND_PLACEHOLDER_PATTERNS.contains(&r.pattern.as_str()),
+                "vectorscan_rules 中不应有 placeholder pattern，rule_id={} pattern={}",
+                r.id,
+                r.pattern
+            );
+        }
+    }
 }

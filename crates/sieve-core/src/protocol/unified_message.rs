@@ -30,12 +30,14 @@ pub enum Direction {
     Inbound,
 }
 
-/// 上游 provider（Phase 1 仅 Anthropic；Relay 预留给未来非 Anthropic 中转站，见 ADR-004）。
+/// 上游 provider（Phase 1 仅 Anthropic；Phase 1 Week 6 新增 OpenAI；Relay 预留，见 ADR-004 + ADR-018）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "value")]
 pub enum UpstreamProvider {
-    /// Anthropic Messages API（Phase 1 唯一实现）。
+    /// Anthropic Messages API（Phase 1 唯一实现，ADR-004）。
     Anthropic,
+    /// OpenAI Chat Completions API（Phase 1 Week 6 新增，ADR-018）。
+    OpenAI,
     /// 中转站（Phase 2 预留，不实现解析）。
     Relay(String),
 }

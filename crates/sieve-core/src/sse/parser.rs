@@ -1,12 +1,47 @@
-//! SSE 增量解析器（关联 PRD §9 #5 硬约束）。
+//! SSE 增量解析器（关联 PRD §9 #5 硬约束 / ADR-018 OpenAI 协议支持）。
 //!
 //! 设计：
 //! - 增量 push_chunk 接口，支持半行 / 跨 chunk / 多 event 粘包 / C0 控制字符 / 提前断流
 //! - 内部维护 buffer + 状态机，**不缓冲整流**，每次 push_chunk 立即返回已 parse 完整的 events
 //! - malformed event 返回 SseEvent::Unknown，不 panic
 //! - 超过 MAX_SSE_EVENT_BYTES 时返回 SseParserError::EventTooLarge（P0-5 容量上限，防 OOM）
+//! - ADR-018：支持 OpenAI Chat Completions SSE 格式（`OpenAiSseParser`）并通过 `SseParse` trait
+//!   向上游 pipeline 暴露统一接口，pipeline 无需感知具体协议
 
 use serde::{Deserialize, Serialize};
+
+// ── 协议标记 ──────────────────────────────────────────────────────────────────
+
+/// SSE 上游协议判别（关联 ADR-018 §协议路由）。
+///
+/// 用于在 pipeline 层区分 Anthropic 和 OpenAI SSE 格式，
+/// 并选择对应的解析器实现（`SseParse` trait）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SseProtocol {
+    /// Anthropic Messages API SSE 格式（带 `event:` 头行）。
+    Anthropic,
+    /// OpenAI Chat Completions SSE 格式（仅 `data:` 行，最后一条 `[DONE]`）。
+    OpenAI,
+}
+
+// ── 统一解析器 trait ──────────────────────────────────────────────────────────
+
+/// SSE 解析器统一接口（关联 ADR-018 §trait 抽象）。
+///
+/// pipeline / inbound_filter 通过此 trait 消费 SSE 事件，
+/// 无需感知底层协议差异（Anthropic vs OpenAI）。
+pub trait SseParse {
+    /// 喂入一个 chunk，返回所有当前已可解析的完整 events。
+    ///
+    /// # Errors
+    /// 若 buffer 累积超过 [`MAX_SSE_EVENT_BYTES`]，返回 [`SseParserError::EventTooLarge`]。
+    fn feed(&mut self, chunk: &[u8]) -> Result<Vec<SseEvent>, SseParserError>;
+
+    /// 强制冲刷 buffer 中残留（连接关闭时调用）。
+    ///
+    /// 若 buffer 中有尚未以 `\n\n` 结尾的不完整 event，尝试解析并返回（或丢弃）。
+    fn flush(&mut self) -> Vec<SseEvent>;
+}
 
 /// 单个 SSE event 允许的最大字节数（含 event: / data: / 前缀，不含分隔符 \n\n）。
 ///
@@ -129,14 +164,17 @@ pub enum SseDelta {
     Unknown,
 }
 
-/// SSE 增量解析器。
+/// Anthropic SSE 增量解析器（实现 [`SseParse`] trait）。
+///
+/// 处理带 `event:` 头行的 Anthropic Messages API SSE 格式。
+/// OpenAI 格式请使用 [`super::openai_parser::OpenAiSseParser`]（ADR-018）。
 ///
 /// 典型用法：
 /// ```rust
-/// use sieve_core::sse::parser::SseParser;
+/// use sieve_core::sse::parser::{SseParser, SseParse};
 ///
 /// let mut parser = SseParser::new();
-/// let events = parser.push_chunk(b"event: ping\ndata: {\"type\":\"ping\"}\n\n");
+/// let events = parser.feed(b"event: ping\ndata: {\"type\":\"ping\"}\n\n").unwrap();
 /// ```
 pub struct SseParser {
     buf: Vec<u8>,
@@ -163,7 +201,23 @@ impl SseParser {
     /// # Errors
     /// 若 buffer 累积超过 [`MAX_SSE_EVENT_BYTES`]，返回 [`SseParserError::EventTooLarge`]。
     /// 调用方应将此视为 fail-closed Critical（IN-CAP-01），注入 sieve_blocked 并截断流。
+    ///
+    /// 注：`push_chunk` 是 [`SseParse::feed`] 的别名，保留以维持向后兼容。
     pub fn push_chunk(&mut self, bytes: &[u8]) -> Result<Vec<SseEvent>, SseParserError> {
+        self.feed(bytes)
+    }
+
+    /// 强制冲刷 buffer 中残留（连接关闭时调用）。
+    ///
+    /// 注：此方法是 [`SseParse::flush`] 的 inherent 别名，
+    /// 调用方无需将 `SseParse` trait 引入 scope（向后兼容）。
+    pub fn flush(&mut self) -> Vec<SseEvent> {
+        <Self as SseParse>::flush(self)
+    }
+}
+
+impl SseParse for SseParser {
+    fn feed(&mut self, bytes: &[u8]) -> Result<Vec<SseEvent>, SseParserError> {
         self.buf.extend_from_slice(bytes);
 
         // P0-5 容量上限检查：单个 event buffer 不允许超过 MAX_SSE_EVENT_BYTES。
@@ -190,7 +244,7 @@ impl SseParser {
     /// 强制冲刷 buffer 中残留（连接关闭时调用）。
     ///
     /// 若 buffer 中有尚未以 `\n\n` 结尾的 event，尝试解析并返回。
-    pub fn flush(&mut self) -> Vec<SseEvent> {
+    fn flush(&mut self) -> Vec<SseEvent> {
         if self.buf.is_empty() {
             return Vec::new();
         }

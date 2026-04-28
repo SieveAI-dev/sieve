@@ -1,4 +1,4 @@
-//! `sieve doctor` 集成测试（R4-#7 + R4-#8 修复验证）。
+//! `sieve doctor` 集成测试（R4-#7 + R4-#8 + R5-#2 修复验证）。
 //!
 //! 仅 macOS 编译运行（`#[cfg(target_os = "macos")]`）。
 //!
@@ -7,6 +7,11 @@
 //! - R4-#7-T2: daemon 未在线 → canary 检查不误判通过（SIEVE_RULES_PATH 指向无效路径）
 //! - R4-#8-T1: 任一检查失败 → run() 返回 Err，含失败项名
 //! - R4-#8-T2: sieve doctor 命令 exit code 非零（受限 HOME，检查必然失败）
+//! - R5-#2-T1: SIEVE_RULES_PATH 优先级 1 → resolve 返回该路径
+//! - R5-#2-T2: sieve.toml rules_path 优先级 2 → resolve 返回该路径
+//! - R5-#2-T3: SIEVE_HOME 优先级 3 → resolve 返回 $SIEVE_HOME/rules/outbound.toml
+//! - R5-#2-T4: fallback 优先级 4 → resolve 返回 $HOME/.sieve/rules/outbound.toml
+//! - R5-#2-T5: 混合优先级：SIEVE_RULES_PATH + sieve.toml 同时设 → 前者赢
 
 #![cfg(target_os = "macos")]
 
@@ -218,26 +223,86 @@ fn sieve_doctor_exits_nonzero_when_checks_fail() {
 /// 这里通过将核心逻辑提取为独立模块并在测试中重新实现来验证行为。
 mod sieve_cli_doctor {
     use anyhow::Result;
+    use std::path::PathBuf;
 
-    /// 镜像 doctor::check_canary_local_engine 逻辑，供测试调用。
+    /// 镜像 doctor::resolve_rules_path() 的 4 级优先级逻辑（R5-#2）。
+    ///
+    /// 优先级（高 → 低）：
+    /// 1. `SIEVE_RULES_PATH` env var
+    /// 2. `$SIEVE_HOME/sieve.toml`（或 `~/.sieve/sieve.toml`）中的 `rules_path` 字段
+    /// 3. `$SIEVE_HOME/rules/outbound.toml`
+    /// 4. `$HOME/.sieve/rules/outbound.toml`
+    pub fn resolve_rules_path() -> Result<PathBuf> {
+        // 优先级 1
+        if let Ok(val) = std::env::var("SIEVE_RULES_PATH") {
+            if !val.is_empty() {
+                return Ok(PathBuf::from(val));
+            }
+        }
+
+        // 优先级 2：从 sieve.toml 读 rules_path
+        let sieve_home = resolve_sieve_home();
+        let toml_path = sieve_home.join("sieve.toml");
+        if toml_path.exists() {
+            if let Ok(raw) = std::fs::read_to_string(&toml_path) {
+                if let Ok(table) = raw.parse::<toml::Table>() {
+                    if let Some(toml::Value::String(p)) = table.get("rules_path") {
+                        if !p.is_empty() {
+                            return Ok(PathBuf::from(p));
+                        }
+                    }
+                }
+            }
+        }
+
+        // 优先级 3
+        let sieve_home_rules = sieve_home.join("rules").join("outbound.toml");
+
+        // 优先级 4
+        let home_rules = PathBuf::from(std::env::var("HOME").unwrap_or_default())
+            .join(".sieve")
+            .join("rules")
+            .join("outbound.toml");
+
+        if sieve_home_rules.exists() {
+            return Ok(sieve_home_rules);
+        }
+        if home_rules.exists() {
+            return Ok(home_rules);
+        }
+
+        Err(anyhow::anyhow!(
+            "出站规则文件未找到，尝试过的候选路径：\n\
+             1. SIEVE_RULES_PATH（未设置或为空）\n\
+             2. {toml} 中的 rules_path 字段（文件{toml_status}）\n\
+             3. {sieve_home_rules}\n\
+             4. {home_rules}",
+            toml = toml_path.display(),
+            toml_status = if toml_path.exists() {
+                "存在但无 rules_path 字段"
+            } else {
+                "不存在"
+            },
+            sieve_home_rules = sieve_home_rules.display(),
+            home_rules = home_rules.display(),
+        ))
+    }
+
+    fn resolve_sieve_home() -> PathBuf {
+        if let Ok(val) = std::env::var("SIEVE_HOME") {
+            if !val.is_empty() {
+                return PathBuf::from(val);
+            }
+        }
+        PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".sieve")
+    }
+
+    /// 镜像 doctor::check_canary_local_engine 逻辑，供测试调用（已迁移为 4 级优先级）。
     pub fn run_check_canary_local_engine_via_test_hook() -> bool {
         use sieve_rules::engine::{MatchEngine as _, VectorscanEngine};
         use sieve_rules::loader::load_outbound_rules;
-        use std::path::PathBuf;
 
-        let rules_candidates: Vec<PathBuf> = vec![
-            PathBuf::from(std::env::var("HOME").unwrap_or_default())
-                .join(".sieve")
-                .join("rules")
-                .join("outbound.toml"),
-            PathBuf::from(std::env::var("SIEVE_RULES_PATH").unwrap_or_default()),
-        ];
-
-        let rules_path = rules_candidates
-            .into_iter()
-            .find(|p| !p.as_os_str().is_empty() && p.exists());
-
-        let Some(rules_path) = rules_path else {
+        let Ok(rules_path) = resolve_rules_path() else {
             return false;
         };
 
@@ -264,9 +329,7 @@ mod sieve_cli_doctor {
     /// 不调用 launchctl（避免系统依赖）。
     pub fn run_doctor() -> Result<()> {
         let home = std::env::var("HOME").unwrap_or_default();
-        let settings_path = std::path::PathBuf::from(&home)
-            .join(".claude")
-            .join("settings.json");
+        let settings_path = PathBuf::from(&home).join(".claude").join("settings.json");
 
         let mut results: Vec<(&'static str, bool)> = Vec::new();
 
@@ -293,4 +356,266 @@ mod sieve_cli_doctor {
             ))
         }
     }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// R5-#2：resolve_rules_path() 4 级优先级测试
+// 所有 env var 测试用同一把 Mutex 串行化，防止并发 flaky。
+// ─────────────────────────────────────────────────────────────────
+
+/// 全局 Mutex，保证 env var 操作串行执行（同 sieve-ipc paths_tests ENV_LOCK 模式）。
+static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+// ─────────────────────────────────────────────────────────────────
+// R5-#2-T1: SIEVE_RULES_PATH 显式覆盖（优先级 1）
+// ─────────────────────────────────────────────────────────────────
+
+/// 设 `SIEVE_RULES_PATH=/tmp/x.toml` → resolve_rules_path 返回该路径（不检查文件是否存在）。
+#[test]
+#[allow(unsafe_code)]
+fn resolve_rules_path_priority1_sieve_rules_path_wins() {
+    let _guard = ENV_LOCK.lock().unwrap();
+
+    let orig = std::env::var("SIEVE_RULES_PATH").ok();
+
+    // SAFETY: 单线程，ENV_LOCK 保证串行访问
+    unsafe { std::env::set_var("SIEVE_RULES_PATH", "/tmp/x.toml") };
+
+    let result = sieve_cli_doctor::resolve_rules_path();
+
+    // 恢复
+    unsafe {
+        match orig.as_deref() {
+            Some(v) => std::env::set_var("SIEVE_RULES_PATH", v),
+            None => std::env::remove_var("SIEVE_RULES_PATH"),
+        }
+    }
+
+    let path = result.expect("SIEVE_RULES_PATH 设置时应返回 Ok");
+    assert_eq!(
+        path,
+        std::path::PathBuf::from("/tmp/x.toml"),
+        "优先级 1：SIEVE_RULES_PATH 应直接返回，不做文件存在检查"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// R5-#2-T2: sieve.toml rules_path 字段（优先级 2）
+// ─────────────────────────────────────────────────────────────────
+
+/// sieve.toml 含 `rules_path = "/tmp/y.toml"` → resolve 返回该路径。
+#[test]
+#[allow(unsafe_code)]
+fn resolve_rules_path_priority2_sieve_toml_rules_path() {
+    use tempfile::tempdir;
+
+    let _guard = ENV_LOCK.lock().unwrap();
+
+    let dir = tempdir().unwrap();
+    let sieve_home = dir.path().join("dot_sieve");
+    std::fs::create_dir_all(&sieve_home).unwrap();
+
+    // 写 sieve.toml 含 rules_path 字段
+    std::fs::write(
+        sieve_home.join("sieve.toml"),
+        r#"upstream_url = "https://api.anthropic.com"
+port = 11453
+rules_path = "/tmp/y.toml"
+"#,
+    )
+    .unwrap();
+
+    let orig_sieve_home = std::env::var("SIEVE_HOME").ok();
+    let orig_rules = std::env::var("SIEVE_RULES_PATH").ok();
+
+    // SAFETY: 单线程，ENV_LOCK 保证串行访问
+    unsafe {
+        std::env::set_var("SIEVE_HOME", sieve_home.to_str().unwrap());
+        std::env::remove_var("SIEVE_RULES_PATH");
+    }
+
+    let result = sieve_cli_doctor::resolve_rules_path();
+
+    // 恢复
+    unsafe {
+        match orig_sieve_home.as_deref() {
+            Some(v) => std::env::set_var("SIEVE_HOME", v),
+            None => std::env::remove_var("SIEVE_HOME"),
+        }
+        match orig_rules.as_deref() {
+            Some(v) => std::env::set_var("SIEVE_RULES_PATH", v),
+            None => std::env::remove_var("SIEVE_RULES_PATH"),
+        }
+    }
+
+    let path = result.expect("sieve.toml 含 rules_path 时应返回 Ok");
+    assert_eq!(
+        path,
+        std::path::PathBuf::from("/tmp/y.toml"),
+        "优先级 2：sieve.toml 的 rules_path 字段应被读取"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// R5-#2-T3: SIEVE_HOME/rules/outbound.toml（优先级 3）
+// ─────────────────────────────────────────────────────────────────
+
+/// 设 `SIEVE_HOME` 且该目录下存在 `rules/outbound.toml` →
+/// resolve 返回 `$SIEVE_HOME/rules/outbound.toml`。
+#[test]
+#[allow(unsafe_code)]
+fn resolve_rules_path_priority3_sieve_home_rules_dir() {
+    use tempfile::tempdir;
+
+    let _guard = ENV_LOCK.lock().unwrap();
+
+    let dir = tempdir().unwrap();
+    let sieve_home = dir.path().join("sieve_alt");
+    let rules_dir = sieve_home.join("rules");
+    std::fs::create_dir_all(&rules_dir).unwrap();
+    // 创建规则文件（让 .exists() 返回 true）
+    std::fs::write(rules_dir.join("outbound.toml"), "# placeholder\n").unwrap();
+    // 不放 sieve.toml，确保不走优先级 2
+
+    let orig_sieve_home = std::env::var("SIEVE_HOME").ok();
+    let orig_rules = std::env::var("SIEVE_RULES_PATH").ok();
+
+    // SAFETY: 单线程，ENV_LOCK 保证串行访问
+    unsafe {
+        std::env::set_var("SIEVE_HOME", sieve_home.to_str().unwrap());
+        std::env::remove_var("SIEVE_RULES_PATH");
+    }
+
+    let result = sieve_cli_doctor::resolve_rules_path();
+
+    // 恢复
+    unsafe {
+        match orig_sieve_home.as_deref() {
+            Some(v) => std::env::set_var("SIEVE_HOME", v),
+            None => std::env::remove_var("SIEVE_HOME"),
+        }
+        match orig_rules.as_deref() {
+            Some(v) => std::env::set_var("SIEVE_RULES_PATH", v),
+            None => std::env::remove_var("SIEVE_RULES_PATH"),
+        }
+    }
+
+    let path = result.expect("SIEVE_HOME/rules/outbound.toml 存在时应返回 Ok");
+    assert_eq!(
+        path,
+        rules_dir.join("outbound.toml"),
+        "优先级 3：应返回 $SIEVE_HOME/rules/outbound.toml"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// R5-#2-T4: $HOME/.sieve/rules/outbound.toml（优先级 4 fallback）
+// ─────────────────────────────────────────────────────────────────
+
+/// 以上都没有 → resolve 返回 `$HOME/.sieve/rules/outbound.toml`（文件存在时）。
+#[test]
+#[allow(unsafe_code)]
+fn resolve_rules_path_priority4_home_fallback() {
+    use tempfile::tempdir;
+
+    let _guard = ENV_LOCK.lock().unwrap();
+
+    let dir = tempdir().unwrap();
+    let fake_home = dir.path().to_path_buf();
+    let rules_dir = fake_home.join(".sieve").join("rules");
+    std::fs::create_dir_all(&rules_dir).unwrap();
+    std::fs::write(rules_dir.join("outbound.toml"), "# placeholder\n").unwrap();
+
+    let orig_home = std::env::var("HOME").ok();
+    let orig_sieve_home = std::env::var("SIEVE_HOME").ok();
+    let orig_rules = std::env::var("SIEVE_RULES_PATH").ok();
+
+    // SAFETY: 单线程，ENV_LOCK 保证串行访问
+    unsafe {
+        std::env::set_var("HOME", fake_home.to_str().unwrap());
+        std::env::remove_var("SIEVE_HOME");
+        std::env::remove_var("SIEVE_RULES_PATH");
+    }
+
+    let result = sieve_cli_doctor::resolve_rules_path();
+
+    // 恢复
+    unsafe {
+        match orig_home.as_deref() {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+        match orig_sieve_home.as_deref() {
+            Some(v) => std::env::set_var("SIEVE_HOME", v),
+            None => std::env::remove_var("SIEVE_HOME"),
+        }
+        match orig_rules.as_deref() {
+            Some(v) => std::env::set_var("SIEVE_RULES_PATH", v),
+            None => std::env::remove_var("SIEVE_RULES_PATH"),
+        }
+    }
+
+    let path = result.expect("$HOME/.sieve/rules/outbound.toml 存在时应返回 Ok");
+    assert_eq!(
+        path,
+        rules_dir.join("outbound.toml"),
+        "优先级 4：fallback 应返回 $HOME/.sieve/rules/outbound.toml"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// R5-#2-T5: 混合优先级：SIEVE_RULES_PATH + sieve.toml 同时设 → 前者赢
+// ─────────────────────────────────────────────────────────────────
+
+/// 同时设 `SIEVE_RULES_PATH=/tmp/explicit.toml` + `sieve.toml rules_path="/tmp/y.toml"` →
+/// `SIEVE_RULES_PATH` 优先，resolve 返回 `/tmp/explicit.toml`。
+#[test]
+#[allow(unsafe_code)]
+fn resolve_rules_path_priority1_beats_sieve_toml() {
+    use tempfile::tempdir;
+
+    let _guard = ENV_LOCK.lock().unwrap();
+
+    let dir = tempdir().unwrap();
+    let sieve_home = dir.path().join("dot_sieve");
+    std::fs::create_dir_all(&sieve_home).unwrap();
+
+    std::fs::write(
+        sieve_home.join("sieve.toml"),
+        r#"upstream_url = "https://api.anthropic.com"
+port = 11453
+rules_path = "/tmp/y.toml"
+"#,
+    )
+    .unwrap();
+
+    let orig_sieve_home = std::env::var("SIEVE_HOME").ok();
+    let orig_rules = std::env::var("SIEVE_RULES_PATH").ok();
+
+    // SAFETY: 单线程，ENV_LOCK 保证串行访问
+    unsafe {
+        std::env::set_var("SIEVE_HOME", sieve_home.to_str().unwrap());
+        std::env::set_var("SIEVE_RULES_PATH", "/tmp/explicit.toml");
+    }
+
+    let result = sieve_cli_doctor::resolve_rules_path();
+
+    // 恢复
+    unsafe {
+        match orig_sieve_home.as_deref() {
+            Some(v) => std::env::set_var("SIEVE_HOME", v),
+            None => std::env::remove_var("SIEVE_HOME"),
+        }
+        match orig_rules.as_deref() {
+            Some(v) => std::env::set_var("SIEVE_RULES_PATH", v),
+            None => std::env::remove_var("SIEVE_RULES_PATH"),
+        }
+    }
+
+    let path = result.expect("SIEVE_RULES_PATH 设置时应返回 Ok");
+    assert_eq!(
+        path,
+        std::path::PathBuf::from("/tmp/explicit.toml"),
+        "优先级 1 应胜过优先级 2（sieve.toml rules_path）"
+    );
 }

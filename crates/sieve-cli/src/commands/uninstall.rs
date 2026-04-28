@@ -1,15 +1,18 @@
-//! `sieve uninstall` 命令实现（ADR-015 / SPEC-003 §uninstall）。
+//! `sieve uninstall` 命令实现（ADR-015 / SPEC-003 §uninstall / SPEC-004 §2.3）。
 //!
 //! 步骤：
 //! 1. 读 `~/.sieve/setup.log` 反向遍历 entries（了解 backup_dir + created_new 标志）
-//! 2. dry-run 打印将恢复的内容
-//! 3. 非 --yes 等待用户确认
-//! 4. 按 setup.log 记录的 created_new 字段决定还原策略：
+//! 2. 按 `--agent` 过滤 entries（SPEC-004 §5.2）；`--all` 时不过滤
+//! 3. dry-run 打印将恢复的内容
+//! 4. 非 --yes 等待用户确认
+//! 5. 按 setup.log 记录的 created_new 字段决定还原策略：
 //!    - `created_new = true`：setup 前不存在，直接删除（恢复"原状"）
 //!    - `created_new = false`：仅移除 Sieve entries（ANTHROPIC_BASE_URL + sieve-hook），
 //!      保留用户 setup 后添加的其他配置
-//! 5. `launchctl unload` 并删除 plist 文件
-//! 6. 提示用户手动删 `~/.sieve/`
+//! 6. `launchctl unload` 并删除 plist 文件（仅在 --all 或最后一家 agent 时）
+//! 7. 提示用户手动删 `~/.sieve/`
+//!
+//! 不传 `--agent` 且不传 `--all` 时：输出提示并 exit 2（SPEC-004 §2.3）。
 //!
 //! 仅 macOS Phase 1 支持；非 macOS 编译进 stub。
 
@@ -41,6 +44,9 @@ mod macos {
         detail: Option<String>,
         #[serde(default)]
         created_new: bool,
+        /// 归属 agent（SPEC-004 §5.1）。
+        #[serde(default)]
+        agent: Option<String>,
     }
 
     /// 记录 setup 写入文件的还原策略。
@@ -51,8 +57,16 @@ mod macos {
         pub(super) created_new: bool,
     }
 
-    /// 运行 `sieve uninstall`。关联 ADR-015 / SPEC-003 §uninstall。
+    /// 运行 `sieve uninstall`。关联 ADR-015 / SPEC-003 §uninstall / SPEC-004 §2.3。
     pub fn run(args: UninstallArgs) -> Result<()> {
+        // ── 0. 参数校验：必须传 --agent 或 --all（SPEC-004 §2.3）
+        if args.agent.is_none() && !args.all {
+            eprintln!("请指定 --agent <name> 或 --all。");
+            eprintln!("示例：sieve uninstall --agent claude");
+            eprintln!("      sieve uninstall --all");
+            std::process::exit(2);
+        }
+
         let home = std::env::var("HOME").map_err(|_| anyhow!("HOME 环境变量未设置"))?;
         let home_path = PathBuf::from(&home);
         let sieve_home =
@@ -64,11 +78,27 @@ mod macos {
             .join("com.sieve.daemon.plist");
         let backups_root = sieve_home.join("backups");
 
-        // ── 1. 读取 setup.log，找到最新 backup_dir + 各文件 created_new 标志
-        let (latest_backup, file_restore_infos) = read_setup_log(&setup_log_path, &backups_root);
+        // ── 1. 读取 setup.log，按 agent 过滤，找到 backup_dir + 各文件 created_new 标志
+        let agent_filter: Option<String> = args.agent.map(|a| a.to_string());
+        let (latest_backup, file_restore_infos) =
+            read_setup_log(&setup_log_path, &backups_root, agent_filter.as_deref());
+
+        // R6-#1：--agent <非 claude> 且无匹配 entry → 直接提示并退出，避免误恢复 Claude 文件
+        if latest_backup.is_none()
+            && file_restore_infos.is_empty()
+            && matches!(agent_filter.as_deref(), Some(f) if f != "claude")
+        {
+            let name = agent_filter.as_deref().unwrap_or("unknown");
+            eprintln!("no setup record found for --agent {name}; nothing to uninstall");
+            return Ok(());
+        }
 
         // ── 2. 打印将要恢复的内容
-        println!("=== sieve uninstall 预览 ===");
+        let agent_label = args
+            .agent
+            .map(|a| format!(" (agent: {})", a))
+            .unwrap_or_else(|| " (--all)".to_string());
+        println!("=== sieve uninstall 预览{} ===", agent_label);
         if !file_restore_infos.is_empty() {
             for info in &file_restore_infos {
                 if info.created_new {
@@ -83,13 +113,20 @@ mod macos {
         } else {
             println!("[restore] 未找到 setup.log 记录，将跳过文件恢复");
         }
-        if plist_path.exists() {
+
+        // daemon plist：仅 --all 或 Claude agent 时处理（daemon 共享资源，SPEC-004 §5.2）
+        let should_unload_plist = args.all
+            || args
+                .agent
+                .map(|a| matches!(a, crate::cli::AgentKind::Claude))
+                .unwrap_or(false);
+        if should_unload_plist && plist_path.exists() {
             println!("[launchd] launchctl unload {}", plist_path.display());
             println!("[launchd] 删除 {}", plist_path.display());
         }
         println!("[提示] ~/.sieve/ 目录将保留（含审计日志），请手动删除：");
         println!("       rm -rf {}", sieve_home.display());
-        println!("===========================");
+        println!("=============================");
 
         if args.dry_run {
             println!("[dry-run] 未做任何改动。");
@@ -116,8 +153,8 @@ mod macos {
             restore_from_backup(bd, &home_path)?;
         }
 
-        // ── 5. 卸载 launchd
-        if plist_path.exists() {
+        // ── 5. 卸载 launchd（仅 --all 或 Claude agent）
+        if should_unload_plist && plist_path.exists() {
             let status = Command::new("launchctl")
                 .args(["unload", &plist_path.to_string_lossy()])
                 .status();
@@ -145,15 +182,33 @@ mod macos {
 
     /// 从 setup.log 读取最新 backup_dir 和文件还原信息。
     ///
+    /// `agent_filter`：Some("claude") 时只处理该 agent 的 entry；None（--all）时处理全部。
+    ///
     /// 返回 (latest_backup_dir, file_restore_infos)。
     /// file_restore_infos 为空时表示 setup.log 是旧格式，退回全量备份恢复。
+    #[cfg(test)]
+    pub(super) fn read_setup_log_for_test(
+        setup_log: &std::path::Path,
+        backups_root: &std::path::Path,
+        agent_filter: Option<&str>,
+    ) -> (Option<PathBuf>, Vec<FileRestoreInfo>) {
+        read_setup_log(setup_log, backups_root, agent_filter)
+    }
+
     fn read_setup_log(
         setup_log: &std::path::Path,
         backups_root: &std::path::Path,
+        agent_filter: Option<&str>,
     ) -> (Option<PathBuf>, Vec<FileRestoreInfo>) {
         let Ok(raw) = fs::read_to_string(setup_log) else {
-            // setup.log 不存在，扫描 backups/ 最新目录兜底
-            return (find_latest_backup_dir(backups_root), vec![]);
+            // setup.log 不存在：仅在 --all 或 --agent claude 时 fallback 到全局备份目录，
+            // 避免 --agent openclaw 等非 Claude agent 误恢复 Claude 文件（R7-#4）。
+            let backup = if matches!(agent_filter, None | Some("claude")) {
+                find_latest_backup_dir(backups_root)
+            } else {
+                None
+            };
+            return (backup, vec![]);
         };
 
         let entries: Vec<SetupLogEntry> = raw
@@ -161,11 +216,11 @@ mod macos {
             .filter_map(|line| serde_json::from_str(line).ok())
             .collect();
 
-        // 找最新 setup_complete entry 的 backup_dir
+        // 找最新 setup_complete entry 的 backup_dir（按 agent 过滤）
         let latest_backup = entries
             .iter()
             .rev()
-            .find(|e| e.action == "setup_complete")
+            .find(|e| e.action == "setup_complete" && agent_matches(&e.agent, agent_filter))
             .and_then(|e| e.detail.as_deref())
             .and_then(|d| d.strip_prefix("backup_dir="))
             .map(PathBuf::from);
@@ -174,13 +229,15 @@ mod macos {
         // 策略：找最后一个 setup_complete 之后的所有文件 action
         let last_setup_idx = entries
             .iter()
-            .rposition(|e| e.action == "setup_complete")
+            .rposition(|e| e.action == "setup_complete" && agent_matches(&e.agent, agent_filter))
             .unwrap_or(0);
 
         let file_actions = ["settings_updated", "sieve_toml_written"];
         let infos: Vec<FileRestoreInfo> = entries[last_setup_idx..]
             .iter()
-            .filter(|e| file_actions.contains(&e.action.as_str()))
+            .filter(|e| {
+                file_actions.contains(&e.action.as_str()) && agent_matches(&e.agent, agent_filter)
+            })
             .filter_map(|e| {
                 let path_str = e.path.as_deref()?;
                 Some(FileRestoreInfo {
@@ -190,9 +247,37 @@ mod macos {
             })
             .collect();
 
-        // 如果没有文件记录（旧格式 setup.log），返回空 infos 触发备份恢复兜底
-        let backup = latest_backup.or_else(|| find_latest_backup_dir(backups_root));
+        // 如果没有文件记录（旧格式 setup.log），返回空 infos 触发备份恢复兜底。
+        //
+        // fallback 到全局备份仅允许在 --all 或 --agent claude 时触发，
+        // 避免 --agent openclaw / --agent hermes 等单 agent 误恢复 Claude 文件（R6-#1）。
+        let backup = latest_backup.or_else(|| {
+            // `agent_filter = None` 表示 --all；Some("claude") 允许旧格式 fallback（v1.4 兼容）
+            if matches!(agent_filter, None | Some("claude")) {
+                find_latest_backup_dir(backups_root)
+            } else {
+                None
+            }
+        });
         (backup, infos)
+    }
+
+    /// 判断 entry 的 agent 字段是否匹配过滤条件。
+    ///
+    /// - `agent_filter = None`（--all）：匹配所有
+    /// - `agent_filter = Some("claude")`：只匹配 agent == "claude"
+    ///
+    /// 旧格式 entry（无 agent 字段，`entry_agent = None`）默认归属 "claude"——
+    /// v1.4 只支持 Claude，因此旧 entry 必然是 Claude 的改动（SPEC-004 §5.2）。
+    pub(super) fn agent_matches(entry_agent: &Option<String>, filter: Option<&str>) -> bool {
+        match filter {
+            None => true, // --all：不过滤
+            Some(f) => {
+                // 无 agent 字段的旧格式 entry 默认归 claude
+                let agent = entry_agent.as_deref().unwrap_or("claude");
+                agent == f
+            }
+        }
     }
 
     /// 扫描 backups/ 下最新目录（按名称字典序，RFC3339 时间戳排序正确）。
@@ -598,6 +683,211 @@ mod tests {
         assert_eq!(
             restored, original_content,
             "sieve.toml 内容应从备份恢复为用户原始内容"
+        );
+    }
+
+    // ── A2-#4：agent_matches 旧格式 entry 默认归 claude ──────────────────────
+
+    use super::macos::agent_matches;
+
+    /// 旧 entry（无 agent 字段）+ --agent claude → 匹配（默认归 claude）
+    #[test]
+    fn agent_matches_legacy_entry_matches_claude() {
+        assert!(
+            agent_matches(&None, Some("claude")),
+            "无 agent 字段的旧格式 entry 应归 claude，--agent claude 应匹配"
+        );
+    }
+
+    /// 旧 entry（无 agent 字段）+ --agent openclaw → 不匹配（修复关键 case）
+    #[test]
+    fn agent_matches_legacy_entry_does_not_match_openclaw() {
+        assert!(
+            !agent_matches(&None, Some("openclaw")),
+            "无 agent 字段的旧格式 entry 不应被 --agent openclaw 误匹配"
+        );
+    }
+
+    /// 旧 entry（无 agent 字段）+ --agent hermes → 不匹配
+    #[test]
+    fn agent_matches_legacy_entry_does_not_match_hermes() {
+        assert!(
+            !agent_matches(&None, Some("hermes")),
+            "无 agent 字段的旧格式 entry 不应被 --agent hermes 误匹配"
+        );
+    }
+
+    /// 旧 entry（无 agent 字段）+ --all（filter=None）→ 匹配
+    #[test]
+    fn agent_matches_legacy_entry_matches_all() {
+        assert!(
+            agent_matches(&None, None),
+            "--all 时不过滤，旧格式 entry 应匹配"
+        );
+    }
+
+    /// 新 entry agent="openclaw" + --agent openclaw → 匹配（无回归）
+    #[test]
+    fn agent_matches_new_openclaw_matches_openclaw() {
+        assert!(
+            agent_matches(&Some("openclaw".to_string()), Some("openclaw")),
+            "新格式 entry agent=openclaw 应被 --agent openclaw 匹配"
+        );
+    }
+
+    /// 新 entry agent="claude" + --agent openclaw → 不匹配（无回归）
+    #[test]
+    fn agent_matches_new_claude_does_not_match_openclaw() {
+        assert!(
+            !agent_matches(&Some("claude".to_string()), Some("openclaw")),
+            "新格式 entry agent=claude 不应被 --agent openclaw 匹配"
+        );
+    }
+
+    // ── R6-#1 测试：uninstall --agent openclaw 无 entry → 不触发 fallback 备份 ──
+
+    use super::macos::read_setup_log_for_test;
+
+    /// R6-#1 场景 A：setup.log 仅含 Claude entry，--agent openclaw → backup 和 infos 均为 None/empty
+    ///
+    /// 修复关键：不应 fallback 到全局 backups/ 目录。
+    #[test]
+    fn uninstall_openclaw_no_entry_returns_none_no_fallback() {
+        let dir = tempdir().unwrap();
+        let setup_log = dir.path().join("setup.log");
+        let backups_root = dir.path().join("backups");
+
+        // setup.log 只含 claude entry（模拟旧版只装了 Claude 的用户）
+        let log_entry = serde_json::json!({
+            "action": "setup_complete",
+            "detail": "backup_dir=/tmp/backup_2026",
+            "agent": "claude"
+        });
+        fs::write(&setup_log, format!("{}\n", log_entry)).unwrap();
+
+        // backups/ 中放一个 fake 备份目录（如果 fallback 生效，就会被误用）
+        fs::create_dir_all(backups_root.join("2026-04-27T00:00:00")).unwrap();
+        fs::write(
+            backups_root
+                .join("2026-04-27T00:00:00")
+                .join("settings.json"),
+            r#"{"env":{}}"#,
+        )
+        .unwrap();
+
+        let (backup, infos) = read_setup_log_for_test(&setup_log, &backups_root, Some("openclaw"));
+
+        assert!(
+            backup.is_none(),
+            "--agent openclaw 无匹配 entry 时不应 fallback 到全局备份，得到 backup={backup:?}"
+        );
+        assert!(
+            infos.is_empty(),
+            "--agent openclaw 无匹配 entry 时 infos 应为空"
+        );
+    }
+
+    // ── R7-#4 测试：setup.log 完全不存在时的 agent_filter 保护 ──────────────
+
+    /// R7-#4 场景 A：setup.log 不存在 + --agent openclaw → backup=None，不 fallback
+    ///
+    /// 修复 R7-#4：早期缺失分支无条件返回 find_latest_backup_dir，忽略 agent_filter。
+    #[test]
+    fn uninstall_no_setup_log_openclaw_no_fallback() {
+        let dir = tempdir().unwrap();
+        let setup_log = dir.path().join("setup.log"); // 不创建，文件不存在
+        let backups_root = dir.path().join("backups");
+
+        // 构造 backups/ 含 Claude 文件（如果 fallback 生效，就会被误用）
+        fs::create_dir_all(backups_root.join("2026-04-27T00:00:00Z")).unwrap();
+        fs::write(
+            backups_root
+                .join("2026-04-27T00:00:00Z")
+                .join("settings.json"),
+            r#"{"env":{}}"#,
+        )
+        .unwrap();
+
+        let (backup, infos) = read_setup_log_for_test(&setup_log, &backups_root, Some("openclaw"));
+
+        assert!(
+            backup.is_none(),
+            "setup.log 缺失 + --agent openclaw 不应 fallback 到全局备份，backup={backup:?}"
+        );
+        assert!(
+            infos.is_empty(),
+            "setup.log 缺失 + --agent openclaw 时 infos 应为空"
+        );
+    }
+
+    /// R7-#4 场景 B：setup.log 不存在 + --agent claude → 仍允许 fallback（无回归）
+    #[test]
+    fn uninstall_no_setup_log_claude_still_fallbacks() {
+        let dir = tempdir().unwrap();
+        let setup_log = dir.path().join("setup.log"); // 不创建
+        let backups_root = dir.path().join("backups");
+
+        let backup_dir = backups_root.join("2026-04-27T00:00:00Z");
+        fs::create_dir_all(&backup_dir).unwrap();
+        fs::write(backup_dir.join("settings.json"), r#"{"env":{}}"#).unwrap();
+
+        let (backup, _infos) = read_setup_log_for_test(&setup_log, &backups_root, Some("claude"));
+
+        assert!(
+            backup.is_some(),
+            "setup.log 缺失 + --agent claude 应允许 fallback 到全局备份（v1.4 老用户兼容），backup={backup:?}"
+        );
+    }
+
+    /// R7-#4 场景 C：setup.log 不存在 + --all（filter=None）→ 仍允许 fallback（无回归）
+    #[test]
+    fn uninstall_no_setup_log_all_still_fallbacks() {
+        let dir = tempdir().unwrap();
+        let setup_log = dir.path().join("setup.log"); // 不创建
+        let backups_root = dir.path().join("backups");
+
+        let backup_dir = backups_root.join("2026-04-27T00:00:00Z");
+        fs::create_dir_all(&backup_dir).unwrap();
+        fs::write(backup_dir.join("settings.json"), r#"{"env":{}}"#).unwrap();
+
+        let (backup, _infos) = read_setup_log_for_test(&setup_log, &backups_root, None);
+
+        assert!(
+            backup.is_some(),
+            "setup.log 缺失 + --all 应允许 fallback 到全局备份，backup={backup:?}"
+        );
+    }
+
+    /// R6-#1 场景 B：旧格式 setup.log（无 agent 字段）+ --agent claude → 仍允许 fallback（无回归）
+    ///
+    /// v1.4 老用户只有 Claude，旧 setup.log 无 agent 字段，--agent claude 应能找到 backup。
+    #[test]
+    fn uninstall_claude_legacy_setup_log_fallback_works() {
+        let dir = tempdir().unwrap();
+        let setup_log = dir.path().join("setup.log");
+        let backups_root = dir.path().join("backups");
+
+        // 旧格式：无 agent 字段，且没有 setup_complete 中带 backup_dir
+        // （最老的 setup.log 格式，只有 settings_updated 记录，没有 setup_complete）
+        // → latest_backup = None，fallback 到 find_latest_backup_dir
+        let log_entry = serde_json::json!({
+            "action": "settings_updated",
+            "path": "/tmp/home/.claude/settings.json",
+            "created_new": true
+            // 注意：无 agent 字段（旧格式）
+        });
+        fs::write(&setup_log, format!("{}\n", log_entry)).unwrap();
+
+        // backups/ 有一个全局备份
+        let backup_dir = backups_root.join("2026-04-27T00:00:00Z");
+        fs::create_dir_all(&backup_dir).unwrap();
+        fs::write(backup_dir.join("settings.json"), r#"{"env":{}}"#).unwrap();
+
+        let (backup, _infos) = read_setup_log_for_test(&setup_log, &backups_root, Some("claude"));
+
+        assert!(
+            backup.is_some(),
+            "--agent claude 配合旧格式 setup.log 应允许 fallback 到全局备份，backup={backup:?}"
         );
     }
 }

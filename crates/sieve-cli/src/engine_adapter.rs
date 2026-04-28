@@ -210,6 +210,8 @@ impl InboundEngine for InboundAdapter {
                 },
                 evidence_truncated,
                 fingerprint: fp,
+                source_channel: None,
+                origin_chain_depth: 0,
             });
         }
         Ok(detections)
@@ -311,6 +313,8 @@ impl OutboundEngine for OutboundAdapter {
                 },
                 evidence_truncated,
                 fingerprint: fp,
+                source_channel: None,
+                origin_chain_depth: 0,
             });
         }
 
@@ -340,6 +344,8 @@ impl OutboundEngine for OutboundAdapter {
                     },
                     evidence_truncated,
                     fingerprint: fp,
+                    source_channel: None,
+                    origin_chain_depth: 0,
                 });
                 // 同一文本只需报一次（找到一个有效助记词即触发拦截）
                 break;

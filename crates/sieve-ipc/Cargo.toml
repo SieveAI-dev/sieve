@@ -18,7 +18,15 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 tracing = { workspace = true }
 fd-lock = { workspace = true }
+# Ed25519 签名验证（X-Sieve-Origin header 防伪造，关联 ADR-019）。
+# sieve-rules 已引入相同版本，保持一致避免重复编译。
+# rand_core feature：暴露 SigningKey::generate，测试侧密钥生成需要。
+ed25519-dalek = { version = "2", default-features = false, features = ["std", "rand_core"] }
+# Base64 编码/解码，用于 header 签名字段序列化。
+base64 = "0.22"
 
 [dev-dependencies]
 tempfile = "3"
 tokio = { workspace = true, features = ["full", "test-util"] }
+# 测试用随机数生成（生成 Ed25519 密钥对用于 roundtrip 测试）。
+rand = "0.8"
