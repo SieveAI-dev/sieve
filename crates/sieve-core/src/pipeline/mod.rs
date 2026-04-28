@@ -228,6 +228,10 @@ mod dispatch_impl {
                 timeout_seconds,
                 default_on_timeout: sieve_ipc::DefaultOnTimeout::Block,
                 detections: ipc_detections,
+                source_agent: sieve_ipc::SourceAgent::Unknown,
+                origin_chain: vec![],
+                source_channel: None,
+                explicit_chain_depth: None,
             };
 
             let outcome = inbound_hold::hold_and_decide(ipc, ipc_req, ka_tx).await?;
@@ -265,6 +269,10 @@ mod dispatch_impl {
                 timeout_seconds: 60,
                 default_on_timeout: sieve_ipc::DefaultOnTimeout::Block,
                 detections: ipc_detections,
+                source_agent: sieve_ipc::SourceAgent::Unknown,
+                origin_chain: vec![],
+                source_channel: None,
+                explicit_chain_depth: None,
             };
 
             sieve_ipc::pending_file::write_pending(&ipc_req, &sieve_home)
@@ -309,6 +317,8 @@ mod dispatch_impl {
                 span: ContentSpan { start: 0, end: 5 },
                 evidence_truncated: "sk-an".to_string(),
                 fingerprint: "abc123".to_string(),
+                source_channel: None,
+                origin_chain_depth: 0,
             }
         }
 

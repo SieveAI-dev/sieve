@@ -86,6 +86,21 @@ pub struct Detection {
     pub evidence_truncated: String,
     /// 命中指纹（用于 .sieveignore 匹配）。
     pub fingerprint: String,
+    /// 来源 channel 标识（来自 `X-Sieve-Source-Channel` 请求头）。
+    ///
+    /// 用于 IN-GEN-06 运行时提级逻辑：当 source_channel 属于不可信外部 channel
+    /// （WhatsApp / Slack / Telegram / Discord / iMessage 等）时，severity 提级为 Critical。
+    ///
+    /// PRD v1.5 §4.5 / §5.2；`serde(default)` 保证旧序列化格式向后兼容。
+    #[serde(default)]
+    pub source_channel: Option<String>,
+    /// 嵌套调用链深度（来自 `X-Sieve-Origin` 请求头，解析后计数）。
+    ///
+    /// 0 = 直接调用；> 0 = 经过中间层转发。超过阈值（如 3）时可作为额外风险信号。
+    ///
+    /// PRD v1.5 §4.5；`serde(default)` 保证向后兼容。
+    #[serde(default)]
+    pub origin_chain_depth: usize,
 }
 
 /// 计算命中指纹（关联 docs/design/data-model.md §155-161）。

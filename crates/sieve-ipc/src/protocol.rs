@@ -2,6 +2,38 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+// ── Multi-agent fields (v1.5) ────────────────────────────────────────────────
+
+/// 触发本次决策的上游 AI agent。
+///
+/// 关联：PRD v1.5 §6.5、ADR-019。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceAgent {
+    /// Claude Code（Anthropic Messages API）
+    Claude,
+    /// OpenClaw（多通道消息网关，OpenAI 兼容协议为主）
+    OpenClaw,
+    /// Hermes Agent（multi-provider 编排器）
+    Hermes,
+    /// 未识别（fallback；header 缺失或格式错）
+    #[default]
+    Unknown,
+}
+
+/// 嵌套调用链中的一跳。
+///
+/// 关联：PRD v1.5 §4.6 场景 F、ADR-019。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OriginHop {
+    /// 此跳的来源 agent。
+    pub agent: SourceAgent,
+    /// 此 hop 做了什么：user_input / delegate / skill_invoke / channel_message
+    pub action: String,
+    /// 此跳发生的时间（UTC）。
+    pub timestamp: DateTime<Utc>,
+}
+
 // ── Enums ────────────────────────────────────────────────────────────────────
 
 /// 检测结果的最终处置方式。
@@ -91,6 +123,49 @@ pub struct DecisionRequest {
     pub default_on_timeout: DefaultOnTimeout,
     /// 本次请求触发的所有检测命中列表（可多条）。
     pub detections: Vec<DetectionPayload>,
+
+    // v1.5 新增字段（serde default 保证 v1.4 旧请求依然可解析）
+    /// 触发此次决策的 agent。默认 Unknown（v1.4 旧请求）。
+    ///
+    /// 关联 PRD v1.5 §6.5、ADR-019。
+    #[serde(default)]
+    pub source_agent: SourceAgent,
+
+    /// sub-agent 嵌套调用链。空 = 用户直接调（chain_depth=0）。
+    ///
+    /// 关联 PRD v1.5 §4.6、ADR-019。
+    #[serde(default)]
+    pub origin_chain: Vec<OriginHop>,
+
+    /// OpenClaw 跨通道时的来源 channel（whatsapp / slack / etc）。
+    ///
+    /// 仅 OpenClaw 适配场景使用；其他 agent 为 None。
+    /// 关联 PRD v1.5 §4.5 场景 E、IN-GEN-06。
+    #[serde(default)]
+    pub source_channel: Option<String>,
+
+    /// `X-Sieve-Origin` header 中解析的真实嵌套深度（修 R7-#5）。
+    ///
+    /// `origin_chain` 只记录已知的 hop，中间层若无法重构则用占位符填充。
+    /// 此字段直接保留 header 中的 `chain_depth` 数值，使 GUI/hook 能展示
+    /// 真实嵌套层级，而不是受限于 `origin_chain.len()`。
+    ///
+    /// `None` 表示旧格式请求（v1.4 及以前），回退到 `origin_chain.len()`。
+    /// 关联：ADR-019 §chain_depth 语义、PRD v1.5 §4.6。
+    #[serde(default)]
+    pub explicit_chain_depth: Option<usize>,
+}
+
+impl DecisionRequest {
+    /// 嵌套调用层数。
+    ///
+    /// 优先使用 `explicit_chain_depth`（来自 `X-Sieve-Origin` header 真实数值，修 R7-#5）；
+    /// 旧格式请求（v1.4）回退到 `origin_chain.len()`。
+    ///
+    /// 0 = 用户直接调；≥2 强制 fail-closed GUI hold（ADR-019）；≥5 直接 426 拒绝。
+    pub fn chain_depth(&self) -> usize {
+        self.explicit_chain_depth.unwrap_or(self.origin_chain.len())
+    }
 }
 
 /// 用户或超时产生的决策动作。

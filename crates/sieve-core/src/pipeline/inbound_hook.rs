@@ -59,6 +59,10 @@ mod tests {
                 one_line_summary: "检测到 rm -rf 命令".to_owned(),
                 details: serde_json::json!({ "command": "rm -rf /tmp" }),
             }],
+            source_agent: sieve_ipc::SourceAgent::Unknown,
+            origin_chain: vec![],
+            source_channel: None,
+            explicit_chain_depth: None,
         }
     }
 

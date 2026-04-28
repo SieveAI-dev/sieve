@@ -119,6 +119,8 @@ mod tests {
                     },
                     evidence_truncated: "***".into(),
                     fingerprint: fingerprint("OUT-MOCK", "secret"),
+                    source_channel: None,
+                    origin_chain_depth: 0,
                 }])
             } else {
                 Ok(vec![])

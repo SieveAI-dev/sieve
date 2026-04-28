@@ -43,6 +43,10 @@ pub const FAIL_CLOSED_RULES: &[&str] = &[
     "IN-CR-05-SOLANA",
     "IN-CR-05-BITCOIN",
     "IN-CR-05-MALFORMED", // P0-6: malformed tool_use partial_json fail-closed（PRD §9 #3）
+    // IN-CR-06：OpenClaw 动态 skill 加载 fail-closed（gui_popup，PRD v1.5 §4.6）
+    "IN-CR-06",
+    // IN-GEN-06：外部 channel prompt injection（来源不可信时提级 Critical，PRD v1.5 §4.5）
+    "IN-GEN-06",
     // IN-GEN-01/03：JS URI + bash -c（hook_terminal）
     "IN-GEN-01",
     "IN-GEN-03",
@@ -106,8 +110,13 @@ pub const GUI_RULES: &[&str] = &[
     "IN-CR-05-SOLANA",
     "IN-CR-05-BITCOIN",
     "IN-CR-05-MALFORMED",
+    // IN-CR-06：OpenClaw 动态 skill 加载（PRD v1.5 §4.6）
+    "IN-CR-06",
     // IN-GEN-04：markdown exfil
     "IN-GEN-04",
+    // IN-GEN-06：外部 channel prompt injection（TOML 写 gui_popup；
+    //             来源不可信时运行时提级 Critical，仍走 GUI 路径，PRD v1.5 §4.5）
+    "IN-GEN-06",
     // 出站：JWT + PEM + Stripe + Slack + OpenSSH
     "OUT-06",
     "OUT-07",

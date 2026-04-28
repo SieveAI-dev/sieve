@@ -928,3 +928,164 @@ async fn benign_response_passes_through_unchanged() {
         "benign response should contain original text:\n{body_str}"
     );
 }
+
+// ─── R9-#1: OpenAI 路径 prompt 地址 seed → IN-CR-01 ─────────────────────────
+
+/// 构造 OpenAI 格式的 SSE 流响应（`data:` 行，`data: [DONE]` 结束）。
+fn openai_sse_response(content_chunks: &[&str]) -> Bytes {
+    let mut s = String::new();
+    for chunk in content_chunks {
+        let escaped = chunk.replace('"', "\\\"");
+        s.push_str(&format!(
+            "data: {{\"id\":\"x\",\"object\":\"chat.completion.chunk\",\"created\":0,\"model\":\"gpt-4o\",\"choices\":[{{\"index\":0,\"delta\":{{\"content\":\"{escaped}\"}},\"finish_reason\":null}}]}}\n\n"
+        ));
+    }
+    s.push_str("data: [DONE]\n\n");
+    Bytes::from(s)
+}
+
+/// 发送 OpenAI stream=true 请求，prompt 含指定文本，返回原始响应。
+fn fetch_openai_stream_response_raw(port: u16, prompt: &str) -> (hyper::StatusCode, Bytes) {
+    use std::io::{Read, Write};
+    use std::net::TcpStream;
+
+    let escaped_prompt = prompt.replace('"', "\\\"");
+    let body_json = format!(
+        r#"{{"model":"gpt-4o","stream":true,"messages":[{{"role":"user","content":"{escaped_prompt}"}}]}}"#
+    );
+    let request = format!(
+        "POST /v1/chat/completions HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nContent-Length: {len}\r\nConnection: close\r\n\r\n{body}",
+        port = port,
+        len = body_json.len(),
+        body = body_json,
+    );
+
+    let mut stream = TcpStream::connect(format!("127.0.0.1:{port}")).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    stream.write_all(request.as_bytes()).unwrap();
+    stream.flush().unwrap();
+
+    let mut raw = Vec::new();
+    stream.read_to_end(&mut raw).ok();
+
+    let raw_str = String::from_utf8_lossy(&raw);
+    let status_code = raw_str
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|code| code.parse::<u16>().ok())
+        .unwrap_or(0);
+    let status = hyper::StatusCode::from_u16(status_code).unwrap_or(hyper::StatusCode::OK);
+
+    let sep = b"\r\n\r\n";
+    let raw_body = if let Some(pos) = raw.windows(sep.len()).position(|w| w == sep) {
+        &raw[pos + sep.len()..]
+    } else {
+        &[]
+    };
+
+    let decoded = decode_chunked(raw_body);
+    (status, Bytes::from(decoded))
+}
+
+async fn fetch_openai_stream_response(port: u16, prompt: &str) -> (hyper::StatusCode, Bytes) {
+    let prompt = prompt.to_string();
+    tokio::task::spawn_blocking(move || fetch_openai_stream_response_raw(port, &prompt))
+        .await
+        .unwrap()
+}
+
+/// OpenAI 路径：prompt 含 EVM 地址 A，SSE 响应含近似地址 B（Levenshtein=1）→ IN-CR-01 截流。
+///
+/// 修复前：OpenAI 路径缺 seed_known_addresses_from_text 调用，地址 A 不进入 InboundFilter
+/// 会话状态，流式响应里地址 B 无参照 → IN-CR-01 漏检。
+/// 修复后（R9-#1）：proxy_openai 在 forward_with_openai_inbound_inspection 前 seed，
+/// 地址 A 进入状态机 → 地址 B 命中 IN-CR-01 → sieve_blocked 注入。
+///
+/// 关联：R9-#1 / PRD §4.2 IN-CR-01 / ADR-014 §双层防御。
+#[tokio::test]
+async fn openai_prompt_address_seed_blocks_address_substitution() {
+    // 原始地址（在 prompt 中）：0x742d35Cc6634C0532925a3b844Bc9e7595f1234A
+    // 替换地址（仅在 SSE 响应中）：0x742d35Cc6634C0532925a3b844Bc9e7595f1234B（末字符 A→B，Levenshtein=1）
+    let attack_payload = openai_sse_response(&[
+        "please send to ",
+        "0x742d35Cc6634C0532925a3b844Bc9e7595f1234B",
+    ]);
+
+    let (upstream, _up) = spawn_mock_sse_upstream(move |_req| {
+        let body = attack_payload.clone();
+        async move { (hyper::StatusCode::OK, body) }
+    })
+    .await;
+
+    let (port, _g) = spawn_sieve_daemon(&format!("http://{upstream}"));
+
+    let (status, body) = fetch_openai_stream_response(
+        port,
+        "please transfer to 0x742d35Cc6634C0532925a3b844Bc9e7595f1234A from my wallet",
+    )
+    .await;
+
+    assert_eq!(
+        status,
+        hyper::StatusCode::OK,
+        "upstream 200 should be preserved"
+    );
+    let body_str = String::from_utf8_lossy(&body);
+    assert!(
+        body_str.contains("sieve_blocked"),
+        "expected sieve_blocked: OpenAI prompt-seeded address A, SSE returned address B (Levenshtein=1)\nbody:\n{body_str}"
+    );
+    assert!(
+        body_str.contains("IN-CR-01"),
+        "expected IN-CR-01 in detection:\n{body_str}"
+    );
+}
+
+/// OpenAI 路径：AutoRedact 命中（含 OUT secret）后地址 seed 仍生效 → IN-CR-01 截流。
+///
+/// 验证 AutoRedact 路径（redact_hits_openai 非空）也调用 seed_known_addresses_from_text，
+/// 不因走 early-return 路径而跳过 seed。
+///
+/// 关联：R9-#1 / PRD §4.2 IN-CR-01 / 修 A2-#1 AutoRedact。
+#[tokio::test]
+async fn openai_autoredact_path_still_seeds_address() {
+    // 同时含 auto-redact 触发的 secret + EVM 地址
+    // OUT-01 GitHub token → auto_redact=true；地址 A 在 prompt
+    // SSE 响应含地址 B（Levenshtein=1 替换）
+    let attack_payload = openai_sse_response(&[
+        "please send to ",
+        "0x742d35Cc6634C0532925a3b844Bc9e7595f5678B",
+    ]);
+
+    let (upstream, _up) = spawn_mock_sse_upstream(move |_req| {
+        let body = attack_payload.clone();
+        async move { (hyper::StatusCode::OK, body) }
+    })
+    .await;
+
+    let (port, _g) = spawn_sieve_daemon(&format!("http://{upstream}"));
+
+    // prompt 同时含 OUT-01 GitHub token（触发 auto_redact）+ EVM 地址 A
+    // ghp_ 前缀触发 auto_redact；地址 A 不被 redact（只 redact secret）
+    let prompt = "my token ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA and address 0x742d35Cc6634C0532925a3b844Bc9e7595f5678A";
+
+    let (status, body) = fetch_openai_stream_response(port, prompt).await;
+
+    assert_eq!(
+        status,
+        hyper::StatusCode::OK,
+        "autoredact path upstream 200 should be preserved"
+    );
+    let body_str = String::from_utf8_lossy(&body);
+    assert!(
+        body_str.contains("sieve_blocked"),
+        "expected sieve_blocked after autoredact: address seed must still work\nbody:\n{body_str}"
+    );
+    assert!(
+        body_str.contains("IN-CR-01"),
+        "expected IN-CR-01 after autoredact path:\n{body_str}"
+    );
+}
