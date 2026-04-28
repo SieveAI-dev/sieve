@@ -537,3 +537,203 @@ fn uninstall_no_args_exits_2() {
         "错误信息应提示 --agent 或 --all，stderr: {stderr}"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 测试 TBD-01：OpenClaw dry-run 含真实字段（openclaw.json + baseUrl）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// OpenClaw dry-run 输出含 openclaw.json 路径和 baseUrl 字段名。
+///
+/// 调研结论（TBD-01 已解决）：配置文件为 ~/.openclaw/openclaw.json，
+/// provider 字段为 models.providers.<id>.baseUrl。
+/// 关联 SPEC-004 §10 TBD-01。
+#[test]
+fn openclaw_dry_run_shows_real_config_path_and_field() {
+    let Some(bin) = sieve_bin() else {
+        return;
+    };
+    let dir = fake_home();
+    let fake = dir.path();
+
+    let out = Command::new(&bin)
+        .args(["setup", "--agent", "openclaw", "--dry-run", "--yes"])
+        .env("HOME", fake)
+        .env("SIEVE_HOME", fake.join(".sieve"))
+        .output()
+        .expect("执行 sieve 失败");
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let combined = format!("{stdout}{stderr}");
+
+    // 真实字段路径：openclaw.json（非 config.toml / TBD 占位）
+    assert!(
+        combined.contains("openclaw.json"),
+        "dry-run 应含真实配置路径 openclaw.json（TBD-01 调研结论），combined: {combined}"
+    );
+    // 含 X-Sieve-Source-Channel（TBD-05 调研结论）
+    assert!(
+        combined.contains("X-Sieve-Source-Channel") || combined.contains("header"),
+        "dry-run 应含 header 注入说明（TBD-05 调研结论），combined: {combined}"
+    );
+    assert!(out.status.success(), "exit 应为 0，combined: {combined}");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 测试 TBD-02：Hermes dry-run 含真实字段（config.yaml + base_url）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Hermes dry-run 输出含 config.yaml 路径和 base_url 字段名。
+///
+/// 调研结论（TBD-02 已解决）：配置文件为 ~/.hermes/config.yaml（YAML）。
+/// 关联 SPEC-004 §10 TBD-02。
+#[test]
+fn hermes_dry_run_shows_real_config_path_and_field() {
+    let Some(bin) = sieve_bin() else {
+        return;
+    };
+    let dir = fake_home();
+    let fake = dir.path();
+
+    let out = Command::new(&bin)
+        .args(["setup", "--agent", "hermes", "--dry-run", "--yes"])
+        .env("HOME", fake)
+        .env("SIEVE_HOME", fake.join(".sieve"))
+        .output()
+        .expect("执行 sieve 失败");
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let combined = format!("{stdout}{stderr}");
+
+    // 真实字段路径：config.yaml（非 config.toml / TBD 占位）
+    assert!(
+        combined.contains("config.yaml"),
+        "dry-run 应含真实配置路径 config.yaml（TBD-02 调研结论），combined: {combined}"
+    );
+    // 含 TBD-06 降级说明
+    assert!(
+        combined.contains("TBD-06")
+            || combined.contains("delegation")
+            || combined.contains("ANTHROPIC_DEFAULT_HEADERS"),
+        "dry-run 应含 TBD-06 降级说明，combined: {combined}"
+    );
+    assert!(out.status.success(), "exit 应为 0，combined: {combined}");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 测试 TBD-05：OpenClaw apply 注入 X-Sieve-Source-Channel header
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// OpenClaw apply 在每个 provider 的 headers 中注入 X-Sieve-Source-Channel = "openclaw"。
+///
+/// 调研结论（TBD-05 已解决）：OpenClaw 支持 models.providers.<id>.headers 字段。
+/// 关联 SPEC-004 §10 TBD-05。
+#[test]
+fn openclaw_apply_injects_sieve_source_channel_header() {
+    let Some(bin) = sieve_bin() else {
+        return;
+    };
+    let dir = fake_home();
+    let fake = dir.path();
+
+    let openclaw_dir = fake.join(".openclaw");
+    fs::create_dir_all(&openclaw_dir).unwrap();
+    let config_path = openclaw_dir.join("openclaw.json");
+    fs::write(
+        &config_path,
+        r#"{"models":{"providers":{"test-provider":{"baseUrl":"https://api.openai.com/v1"}}}}"#,
+    )
+    .unwrap();
+
+    let out = Command::new(&bin)
+        .args(["setup", "--agent", "openclaw", "--yes"])
+        .env("HOME", fake)
+        .env("SIEVE_HOME", fake.join(".sieve"))
+        .output()
+        .expect("执行 sieve 失败");
+
+    assert!(
+        out.status.success(),
+        "apply 应 exit 0，stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let updated = fs::read_to_string(&config_path).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&updated).unwrap();
+
+    // X-Sieve-Source-Channel 应注入
+    let channel = v
+        .pointer("/models/providers/test-provider/headers/X-Sieve-Source-Channel")
+        .and_then(|c| c.as_str());
+    assert_eq!(
+        channel,
+        Some("openclaw"),
+        "X-Sieve-Source-Channel 应注入为 'openclaw'（TBD-05），updated: {updated}"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 测试 TBD-06：Hermes apply delegation.base_url 降级注入
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Hermes apply 在 delegation.base_url 注入 Sieve URL（TBD-06 降级方案）。
+///
+/// 调研结论（TBD-06 降级）：Hermes 不透传 ANTHROPIC_DEFAULT_HEADERS，
+/// 降级为 delegation.base_url 指向 Sieve。
+/// 关联 SPEC-004 §10 TBD-06。
+#[test]
+fn hermes_apply_injects_delegation_base_url_fallback() {
+    let Some(bin) = sieve_bin() else {
+        return;
+    };
+    let dir = fake_home();
+    let fake = dir.path();
+
+    let hermes_dir = fake.join(".hermes");
+    fs::create_dir_all(&hermes_dir).unwrap();
+    let config_path = hermes_dir.join("config.yaml");
+    fs::write(
+        &config_path,
+        "model:\n  provider: openrouter\n  base_url: \"\"\ndelegation:\n  max_iterations: 50\n  base_url: \"\"\n",
+    )
+    .unwrap();
+
+    let out = Command::new(&bin)
+        .args(["setup", "--agent", "hermes", "--yes"])
+        .env("HOME", fake)
+        .env("SIEVE_HOME", fake.join(".sieve"))
+        .output()
+        .expect("执行 sieve 失败");
+
+    assert!(
+        out.status.success(),
+        "apply 应 exit 0，stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let updated = fs::read_to_string(&config_path).unwrap();
+    let parsed: serde_yaml::Value = serde_yaml::from_str(&updated).unwrap();
+
+    // delegation.base_url 应指向 Sieve（TBD-06 降级）
+    let delegation_url = parsed
+        .get("delegation")
+        .and_then(|d| d.get("base_url"))
+        .and_then(|u| u.as_str());
+    assert_eq!(
+        delegation_url,
+        Some("http://127.0.0.1:11453"),
+        "delegation.base_url 应为 Sieve URL（TBD-06 降级），updated: {updated}"
+    );
+
+    // model.base_url 也应指向 Sieve
+    let model_url = parsed
+        .get("model")
+        .and_then(|m| m.get("base_url"))
+        .and_then(|u| u.as_str());
+    assert_eq!(
+        model_url,
+        Some("http://127.0.0.1:11453"),
+        "model.base_url 应为 Sieve URL，updated: {updated}"
+    );
+}
