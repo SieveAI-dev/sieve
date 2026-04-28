@@ -1,0 +1,2 @@
+Persistence mechanism detected:
+launchctl load ~/Library/LaunchAgents/com.evil.daemon.plist

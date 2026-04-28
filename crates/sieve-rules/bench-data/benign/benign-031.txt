@@ -1,0 +1,15 @@
+Rust async programming with tokio:
+
+```rust
+use tokio::time::{sleep, Duration};
+
+#[tokio::main]
+async fn main() {
+    let handle = tokio::spawn(async {
+        sleep(Duration::from_millis(100)).await;
+        println!("task completed");
+    });
+    
+    handle.await.unwrap();
+}
+```

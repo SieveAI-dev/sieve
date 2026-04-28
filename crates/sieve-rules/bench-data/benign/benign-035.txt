@@ -1,0 +1,27 @@
+Ethereum smart contract development best practices:
+
+1. Use OpenZeppelin for standard implementations
+2. Run Slither and Mythril for security analysis
+3. Write comprehensive test coverage
+4. Consider gas optimization
+5. Implement access controls with Ownable or AccessControl
+6. Emit events for state changes
+
+Example contract skeleton:
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "@openzeppelin/contracts/access/Ownable.sol";
+
+contract MyContract is Ownable {
+    event ValueChanged(uint256 newValue);
+    
+    uint256 private value;
+    
+    function setValue(uint256 newValue) external onlyOwner {
+        value = newValue;
+        emit ValueChanged(newValue);
+    }
+}
+```

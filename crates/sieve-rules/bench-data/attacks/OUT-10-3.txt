@@ -1,0 +1,6 @@
+-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAA...
+[truncated for safety]
+-----END OPENSSH PRIVATE KEY-----
+
+This SSH key was found in the deployment scripts.

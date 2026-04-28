@@ -1,0 +1,3 @@
+Please follow this link:
+[link](javascript:void(document.cookie))
+This will take you to the relevant page.

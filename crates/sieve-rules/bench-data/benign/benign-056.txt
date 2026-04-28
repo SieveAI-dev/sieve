@@ -1,0 +1,19 @@
+Infrastructure as Code with Terraform:
+
+```hcl
+resource "aws_s3_bucket" "app_data" {
+  bucket = "my-app-data-bucket"
+  
+  tags = {
+    Environment = "production"
+    Team        = "platform"
+  }
+}
+
+resource "aws_s3_bucket_versioning" "app_data" {
+  bucket = aws_s3_bucket.app_data.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+```

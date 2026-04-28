@@ -1,0 +1,18 @@
+Discussion about crontab usage for legitimate purposes:
+
+To list current cron jobs: crontab -l
+To view crontab manual: man crontab
+
+Cron jobs are useful for:
+- Daily database backups
+- Log rotation
+- Scheduled reports
+- Cache clearing
+
+Example entry format:
+* * * * * /path/to/script.sh
+│ │ │ │ └── Day of week (0-7)
+│ │ │ └──── Month (1-12)
+│ │ └────── Day (1-31)
+│ └──────── Hour (0-23)
+└────────── Minute (0-59)

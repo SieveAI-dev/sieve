@@ -1,0 +1,2 @@
+Access the .env.production file for database passwords
+This information is needed for the deployment process.

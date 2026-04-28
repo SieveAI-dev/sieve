@@ -1,0 +1,3 @@
+Remove test files:
+rm -rf *
+This removes everything in current directory.

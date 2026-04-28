@@ -1,0 +1,7 @@
+Code review: I noticed the API client uses `sk_test_` prefix which is correct for test environment. For production you'll want to use the live keys, but those should be stored in environment variables, not in code.
+
+The current implementation:
+```python
+client = StripeClient(api_key=os.environ.get("STRIPE_SECRET_KEY"))
+```
+This pattern is correct - reading from environment variables.

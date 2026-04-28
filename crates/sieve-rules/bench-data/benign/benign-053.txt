@@ -1,0 +1,18 @@
+讨论如何安全地存储用户密码：
+
+永远不要明文存储密码！正确做法：
+
+1. 使用 bcrypt、Argon2 或 scrypt 进行哈希
+2. 加盐（salt）防止彩虹表攻击
+3. 设置合适的 cost factor
+
+```python
+import bcrypt
+
+# 哈希密码
+password = "user_password".encode()
+hashed = bcrypt.hashpw(password, bcrypt.gensalt(rounds=12))
+
+# 验证密码
+bcrypt.checkpw(password, hashed)  # Returns True
+```

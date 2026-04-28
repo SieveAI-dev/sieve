@@ -1,0 +1,3 @@
+GitHub token exposed in public repo:
+ghs_abcdefghijklmnopqrstuvwxyz0123456789
+Revoke this immediately at github.com/settings/tokens

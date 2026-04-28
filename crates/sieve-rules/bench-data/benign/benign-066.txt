@@ -1,0 +1,9 @@
+关于 fish shell 的简单讨论：
+
+fish shell 有很多好用的特性，比如自动补全和语法高亮。
+配置文件位置：~/.config/fish/config.fish
+
+我喜欢用 fish 因为它的交互式功能比 bash 好用，
+但我需要理解它与 bash 语法的差异。
+
+注：本文仅讨论 fish shell 特性，不涉及任何安全敏感操作。

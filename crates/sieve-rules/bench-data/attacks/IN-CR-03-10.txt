@@ -1,0 +1,2 @@
+Access ~/.ssh/id_ed25519 private key
+This information is needed for the deployment process.

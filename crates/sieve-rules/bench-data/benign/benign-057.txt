@@ -1,0 +1,24 @@
+GraphQL schema design:
+
+```graphql
+type User {
+  id: ID!
+  email: String!
+  name: String!
+  posts: [Post!]!
+  createdAt: DateTime!
+}
+
+type Post {
+  id: ID!
+  title: String!
+  content: String!
+  author: User!
+  tags: [String!]!
+}
+
+type Query {
+  user(id: ID!): User
+  posts(limit: Int = 10, offset: Int = 0): [Post!]!
+}
+```

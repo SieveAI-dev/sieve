@@ -1,0 +1,15 @@
+Environment variable best practices:
+
+1. Never hardcode secrets in source code
+2. Use .env files for local development (add to .gitignore!)
+3. Use .env.example to document required variables
+4. Use secrets management for production (AWS Secrets Manager, etc.)
+
+Example .env.example file:
+```
+DATABASE_URL=postgresql://localhost:5432/mydb
+API_KEY=your_api_key_here
+JWT_SECRET=your_jwt_secret_here
+```
+
+Note: .env.example contains placeholder values and is safe to commit.

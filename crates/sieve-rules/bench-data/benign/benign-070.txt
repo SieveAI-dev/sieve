@@ -1,0 +1,26 @@
+Rust testing patterns:
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_basic_case() {
+        assert_eq!(add(2, 3), 5);
+    }
+    
+    #[test]
+    #[should_panic(expected = "division by zero")]
+    fn test_division_by_zero() {
+        divide(1, 0);
+    }
+    
+    #[test]
+    fn test_with_fixtures() {
+        let input = load_test_fixture("test_data.json");
+        let result = process(input);
+        assert!(result.is_ok());
+    }
+}
+```

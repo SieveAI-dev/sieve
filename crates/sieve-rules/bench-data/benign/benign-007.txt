@@ -1,0 +1,18 @@
+Can you review this code for potential issues?
+
+```python
+def calculate_average(numbers):
+    total = 0
+    for n in numbers:
+        total += n
+    return total / len(numbers)
+```
+
+Issue: Division by zero if numbers is empty. Better approach:
+
+```python
+def calculate_average(numbers: list[float]) -> float:
+    if not numbers:
+        raise ValueError("Cannot calculate average of empty list")
+    return sum(numbers) / len(numbers)
+```

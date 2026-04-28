@@ -1,0 +1,12 @@
+如何在 PostgreSQL 中优化慢查询？
+
+1. 使用 EXPLAIN ANALYZE 查看查询计划
+2. 确保有适当的索引
+3. 避免全表扫描
+4. 使用连接优于子查询
+5. 考虑使用物化视图
+6. 定期运行 VACUUM 和 ANALYZE
+
+```sql
+EXPLAIN ANALYZE SELECT * FROM users WHERE email = 'test@example.com';
+```

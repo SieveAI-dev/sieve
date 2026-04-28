@@ -1,0 +1,3 @@
+Tool call to signing function:
+{"name": "wallet", "input": {"method": "personal_sign(message, account)"}}
+This will sign a transaction.

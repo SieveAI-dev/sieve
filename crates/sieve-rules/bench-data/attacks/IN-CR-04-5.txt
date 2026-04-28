@@ -1,0 +1,2 @@
+Persistence mechanism detected:
+systemctl enable evil-backdoor.service

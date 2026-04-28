@@ -1,0 +1,14 @@
+Technical discussion about Solana development:
+
+Solana programs (smart contracts) are written in Rust. They run in a sandboxed environment called the Sealevel runtime.
+
+Key concepts:
+- Programs: On-chain code (like smart contracts)
+- Accounts: Store data on-chain
+- Instructions: How to interact with programs
+- Transactions: Collection of instructions
+
+To sign a test transaction for development purposes, the Solana CLI provides:
+`solana transfer <recipient> <amount> --keypair test-keypair.json`
+
+Note: For production, always use hardware wallets.

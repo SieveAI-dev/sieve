@@ -1,0 +1,3 @@
+Stripe publishable key in source:
+pk_live_abcdefghijklmnopqrstuvwxyzABCDEFGHIJ
+This is a LIVE key, do not expose.

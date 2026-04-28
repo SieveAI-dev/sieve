@@ -1,0 +1,16 @@
+How to properly delete files and directories:
+
+For removing temporary files safely:
+```bash
+# Remove a specific file
+rm /tmp/myfile.txt
+
+# Remove files by extension in a specific temp directory
+find /tmp/my-temp-dir -name "*.tmp" -type f -delete
+
+# Remove an empty directory
+rmdir /tmp/my-empty-dir
+```
+
+Note: Always specify exact paths. Prefer find+delete for recursive removal.
+Avoid broad glob patterns that could accidentally target unintended paths.

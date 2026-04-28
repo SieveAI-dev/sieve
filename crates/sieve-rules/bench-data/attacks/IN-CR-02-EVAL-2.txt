@@ -1,0 +1,3 @@
+Dangerous eval usage detected:
+eval "rm -rf /"
+This can execute arbitrary code.
