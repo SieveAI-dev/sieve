@@ -2,11 +2,11 @@
 
 ## 状态
 
-**已接受**（v1.3 锁定执行）
+**已接受**（v1.4 锁定执行）
 
 > 决策日期：2026-04-26
 > 范围：Sieve 二进制分发、规则更新、CI/CD 整套供应链
-> 关联 PRD：[v1.3 §1.2 第 4 句、§9.6、§10.1 Week 1、§11.3](../prd/sieve-prd-v1.3.md)
+> 关联 PRD：[v1.4 §1.2 第 4 句、§9.6、§10.1 Week 1、§11.3](../prd/sieve-prd-v1.5.md)
 
 ---
 
@@ -162,10 +162,10 @@ PRD §10.1 Week 1 已修订（v1.3）：**sigstore 签名 pipeline + GitHub Acti
 
 ### 需要更新的文档
 
-- [PRD-sieve v1.3 §1.2 第 4 句](../prd/sieve-prd-v1.3.md) —— 已对齐"自证清白"叙事
-- [PRD-sieve v1.3 §9.6](../prd/sieve-prd-v1.3.md) —— 工程硬约束第 6 条
-- [PRD-sieve v1.3 §10.1 Week 1](../prd/sieve-prd-v1.3.md) —— Week 1 sigstore + reproducible build 必须跑通
-- [PRD-sieve v1.3 §11.3](../prd/sieve-prd-v1.3.md) —— 开源策略 + 透明更新日志
+- [PRD-sieve v1.4 §1.2 第 4 句](../prd/sieve-prd-v1.5.md) —— 已对齐"自证清白"叙事
+- [PRD-sieve v1.4 §9.6](../prd/sieve-prd-v1.5.md) —— 工程硬约束第 6 条
+- [PRD-sieve v1.4 §10.1 Week 1](../prd/sieve-prd-v1.5.md) —— Week 1 sigstore + reproducible build 必须跑通
+- [PRD-sieve v1.4 §11.3](../prd/sieve-prd-v1.5.md) —— 开源策略 + 透明更新日志
 - [data-model.md §7](./data-model.md) —— 规则签名文件格式
 - `docs/guides/development.md`（待编写）—— 写明本地复现构建步骤
 - `docs/guides/deployment.md`（待编写）—— 写明用户如何独立验证 sigstore 签名
@@ -175,12 +175,12 @@ PRD §10.1 Week 1 已修订（v1.3）：**sigstore 签名 pipeline + GitHub Acti
 
 ## 相关文档
 
-- [PRD-sieve v1.3 §1.2 第 4 句](../prd/sieve-prd-v1.3.md) —— 自证清白核心叙事
-- [PRD-sieve v1.3 §9.6](../prd/sieve-prd-v1.3.md) —— 工程硬约束
-- [PRD-sieve v1.3 §10.1 Week 1](../prd/sieve-prd-v1.3.md) —— Pipeline 必须 Week 1 跑通
-- [PRD-sieve v1.3 §10.2 Week 10](../prd/sieve-prd-v1.3.md) —— 文章 2 营销战略
-- [PRD-sieve v1.3 §11.3](../prd/sieve-prd-v1.3.md) —— 开源策略
-- [PRD-sieve v1.3 §15.3](../prd/sieve-prd-v1.3.md) —— Sigstore + Reproducible Builds 必读项目
+- [PRD-sieve v1.4 §1.2 第 4 句](../prd/sieve-prd-v1.5.md) —— 自证清白核心叙事
+- [PRD-sieve v1.4 §9.6](../prd/sieve-prd-v1.5.md) —— 工程硬约束
+- [PRD-sieve v1.4 §10.1 Week 1](../prd/sieve-prd-v1.5.md) —— Pipeline 必须 Week 1 跑通
+- [PRD-sieve v1.4 §10.2 Week 10](../prd/sieve-prd-v1.5.md) —— 文章 2 营销战略
+- [PRD-sieve v1.4 §11.3](../prd/sieve-prd-v1.5.md) —— 开源策略
+- [PRD-sieve v1.4 §15.3](../prd/sieve-prd-v1.5.md) —— Sigstore + Reproducible Builds 必读项目
 - [ADR-001](./ADR-001-rust-tech-stack.md) —— Rust 技术栈是 reproducible build 的基础
 - [ADR-003](./ADR-003-local-only-no-cloud-verifier.md) —— 可验证性双支柱
 - [ADR-011 GA 前 repo 私有](./ADR-011-private-until-ga.md) —— GA 之前 sigstore CI 照常跑通，但 Rekor 公开痕迹由 workflow_dispatch 而非 tag 触发；GA 时恢复 tag-based release 并对外提供验证教程

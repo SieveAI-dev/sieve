@@ -203,3 +203,29 @@ PRD §11.2 ToS 必须包含：
 - [ADR-002](./ADR-002-rule-engine-only-phase1.md) —— 规则引擎可解释性是 fail-closed 的前置条件
 - [ADR-003](./ADR-003-local-only-no-cloud-verifier.md) —— 不联网 verifier（与本 ADR 同为产品安全承诺）
 
+---
+
+## 2026-04-28 补充（v1.4 双层防御对实现路径的影响）
+
+> 本段由 [ADR-014](./ADR-014-dual-layer-defense.md) 引入，不修改本 ADR 原有内容。
+
+**Fail-closed 原则完全保留**，以下约束在 v1.4 之后仍然是产品硬承诺：
+- Critical 规则在所有版本（含降级模式 / 降级触发 / license 异常）不可关闭
+- YOLO mode 不穿透 Sieve 层的 Critical 判断
+- `default_on_timeout` 对 Critical 规则只允许 `"Block"`
+
+**变化的是实现路径**，分两类：
+
+| 规则类型 | Week 3 实现 | v1.4 实现 |
+|---------|------------|---------|
+| **GUI 类**（IN-CR-01 / IN-CR-05 / IN-GEN-04）| `build_sieve_blocked_sse()` 截流注入 sieve_blocked | 保留 hold 流 + sieve_blocked 截流，语义改为"用户拒绝后的优雅终止" |
+| **Hook 类**（IN-CR-02/03/04 / IN-GEN-01~03）| `build_sieve_blocked_sse()` 截流注入 sieve_blocked | 不再修改 SSE 流；仅写 `~/.sieve/pending/` 文件；fail-closed 由 sieve-hook 在 Claude Code PreToolUse 阶段完成（exit 1）|
+
+Week 3 落地的 `build_sieve_blocked_sse()` 对 Hook 类规则的调用必须在 Week 5 删除。GUI 类调用保留。
+
+原因：Hook 类 SSE 截流会把 tool_use 从 Claude Code 上下文中截断，导致上下文污染；且违反 v1.4 §9 第 11 条"不伪造协议字段"硬约束（详见 ADR-014 §背景）。
+
+**Hook 类 fail-closed 依赖**：sieve-hook 进程注册为 `onError: block`（由 `sieve setup` 配置），确保 hook 进程崩溃或未安装时 Claude Code 也拒绝执行该工具调用。
+
+相关文档：[ADR-014 双层防御](./ADR-014-dual-layer-defense.md)
+

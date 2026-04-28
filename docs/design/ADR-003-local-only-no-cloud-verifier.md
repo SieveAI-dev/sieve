@@ -2,11 +2,11 @@
 
 ## 状态
 
-**已接受**（v1.3 锁定执行，**永久性决策**，未来任何版本都不放开）
+**已接受**（v1.4 锁定执行，**永久性决策**，未来任何版本都不放开）
 
 > 决策日期：2026-04-26
 > 范围：Sieve 全产品周期，所有版本
-> 关联 PRD：[v1.3 §1.2、§9.2、§11.2](../prd/sieve-prd-v1.3.md)
+> 关联 PRD：[v1.4 §1.2、§9.2、§11.2](../prd/sieve-prd-v1.5.md)
 
 ---
 
@@ -98,8 +98,8 @@ Sieve 进程在运行期**仅**会向以下 host 发起出站请求：
 
 ### 需要更新的文档
 
-- [PRD-sieve v1.3 §1.2 第 3 句、第 4 句](../prd/sieve-prd-v1.3.md) —— 已对齐"完全本地零上传"
-- [PRD-sieve v1.3 §11.2](../prd/sieve-prd-v1.3.md) —— ToS 条款已写明"不存储、不传输、不分析 prompt 内容"
+- [PRD-sieve v1.4 §1.2 第 3 句、第 4 句](../prd/sieve-prd-v1.5.md) —— 已对齐"完全本地零上传"
+- [PRD-sieve v1.4 §11.2](../prd/sieve-prd-v1.5.md) —— ToS 条款已写明"不存储、不传输、不分析 prompt 内容"
 - [data-model.md](./data-model.md) §5、§6、§8 —— 配置 / 审计 / license 三处已对齐离线优先
 - [architecture.md](./architecture.md) §1.2 数据流图 —— 没有任何分支指向第三方 host
 - `docs/guides/deployment.md`（待编写）—— 写明"如何用 mitmproxy 验证 Sieve 没 phone home"作为信任叙事的工具
@@ -108,10 +108,10 @@ Sieve 进程在运行期**仅**会向以下 host 发起出站请求：
 
 ## 相关文档
 
-- [PRD-sieve v1.3 §1.2](../prd/sieve-prd-v1.3.md) —— 四句话核心叙事
-- [PRD-sieve v1.3 §9.2](../prd/sieve-prd-v1.3.md) —— 工程硬约束第 2 条："绝不做联网 verifier"
-- [PRD-sieve v1.3 §11.2](../prd/sieve-prd-v1.3.md) —— ToS 不存储/不传输/不分析 prompt
-- [PRD-sieve v1.3 §11.5.3](../prd/sieve-prd-v1.3.md) —— 数据本地化合规论证
+- [PRD-sieve v1.4 §1.2](../prd/sieve-prd-v1.5.md) —— 四句话核心叙事
+- [PRD-sieve v1.4 §9.2](../prd/sieve-prd-v1.5.md) —— 工程硬约束第 2 条："绝不做联网 verifier"
+- [PRD-sieve v1.4 §11.2](../prd/sieve-prd-v1.5.md) —— ToS 不存储/不传输/不分析 prompt
+- [PRD-sieve v1.4 §11.5.3](../prd/sieve-prd-v1.5.md) —— 数据本地化合规论证
 - [architecture.md](./architecture.md) —— 整体架构与数据流
 - [data-model.md](./data-model.md) —— 配置、审计、license 数据格式
 - [ADR-006](./ADR-006-sigstore-reproducible-build.md) —— 可验证性的另一支柱

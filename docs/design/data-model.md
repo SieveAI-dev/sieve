@@ -2,7 +2,7 @@
 
 > **状态**：设计阶段 / 锁定执行
 > **文档版本**：v1.0 / 2026-04-27
-> **依据 PRD**：[`docs/prd/sieve-prd-v1.3.md`](../prd/sieve-prd-v1.3.md)
+> **依据 PRD**：[`docs/prd/sieve-prd-v1.5.md`](../prd/sieve-prd-v1.5.md)
 > **范围**：Phase 1 内部数据结构、配置文件、审计日志、规则签名、license 数据格式
 
 ---
@@ -125,27 +125,60 @@ pub enum ContentSource {
 
 ---
 
-## 3. 处置矩阵编码
+## 3. 处置矩阵编码（v1.4 二维矩阵）
 
-> 默认映射，可被 `config.toml` 中 `severity_overrides` 修改，但 Critical 不可关闭（详见 [ADR-007](./ADR-007-fail-closed-critical-actions.md)）。
+> v1.4 重构为二维矩阵（出站/入站 × 严重度），引入 `Disposition` 执行路径字段，替代原一维四级模型（详见 [ADR-016](./ADR-016-disposition-matrix-2d.md)）。Critical 不可关闭（[ADR-007](./ADR-007-fail-closed-critical-actions.md)）。
 
-| Severity | 默认 Action | 用户可见 | 可否被 config 覆盖 |
-|----------|------------|---------|-------------------|
-| Critical | `Block` + `WarnConfirm{countdown=0}`（强制确认） | 全屏 / 阻塞式弹窗 | ❌ 不可（任何 override 启动时被忽略并打印警告） |
-| High | `WarnConfirm{countdown=5}` | 弹窗 + 5 秒倒计时 | ✅ 可降级到 `MarkOnly` |
-| Medium | `MarkOnly` | 状态栏图标 / SQLite 记录 | ✅ 可升级或降级 |
-| Low | `SilentLog` | 仅 SQLite | ✅ 可升级到 `MarkOnly` |
+### 3.1 Disposition 枚举
 
-特殊规则映射（详见 PRD §5.1、§5.2）：
+对应 `crates/sieve-rules/src/manifest.rs` + `crates/sieve-ipc/src/protocol.rs` 中的 `Disposition` 枚举（两处定义镜像，避免循环依赖）：
 
-| Rule ID | 默认 Severity | 备注 |
-|---------|--------------|------|
-| OUT-01 ~ OUT-05 | Critical | 各类高确定度密钥 |
-| OUT-06、OUT-08 | High | ETH / Solana 私钥 entropy 边界模糊 |
-| OUT-07、OUT-09、OUT-10 | Critical | WIF / BIP39 / Keystore 有结构化校验位 |
-| OUT-11 | Medium | .env 仅 Medium，避免误伤 |
-| IN-CR-05 | Critical（**永不可降级**） | 签名工具调用 |
-| IN-GEN-01~03 | Critical（**永不可降级**） | rm -rf / curl\|sh / eval(base64) |
+| Disposition | 执行路径 | 代理行为 | 用户界面 |
+|-------------|---------|---------|---------|
+| `AutoRedact` | 出站主路径 | 自动脱敏改写 body bytes 后转发，**不弹窗，不返 426** | 状态栏静默显示 |
+| `GuiPopup` | 入站 GUI 类 / 出站例外 | hold SSE 流，每 25s 发 keep-alive comment；经 IPC 通道 A 通知 Native GUI App | HIPS 弹窗（倒计时 + 授权/拒绝/typed data 详情） |
+| `HookTerminal` | 入站 Hook 类 | **不修改 SSE 流**，写 `~/.sieve/pending/<id>.json`；由 sieve-hook 在 PreToolUse 阶段拦截 | TTY y/n 倒计时（终端内联） |
+| `StatusBar` | 低优先级通知 | 透传 + IPC 通道 A 发 `sieve.event_notify` | 菜单栏图标/数字徽章 |
+
+**DefaultOnTimeout 枚举**（对应 `manifest.rs` 中 `DefaultOnTimeout`）：
+- `Block`：超时 fail-closed，Critical 规则**只允许此值**
+- `Redact`：超时后脱敏转发（出站可选）
+- `Allow`：超时放行（仅 IN-GEN Relaxed preset 可用）
+
+### 3.2 二维矩阵默认推导
+
+| 方向 × 严重度 | 默认 Disposition | 备注 |
+|-------------|----------------|------|
+| Outbound × Critical | `AutoRedact` | 出站"帮用户擦屁股不打断"哲学 |
+| Outbound × High | `AutoRedact` | 同上 |
+| Outbound × Medium | `StatusBar` | |
+| Outbound × Low | `StatusBar` | |
+| Inbound × Critical | `GuiPopup` | Hook 类规则用 manifest 显式覆盖为 `HookTerminal` |
+| Inbound × High | `GuiPopup` | |
+| Inbound × Medium | `StatusBar` | |
+| Inbound × Low | `StatusBar` | |
+
+矩阵推导仅用于过渡期兼容；规则 TOML 中**必须显式写 `disposition`**（Week 5 后强制）。
+
+### 3.3 规则特殊映射表
+
+| Rule ID | Severity | Disposition | timeout_seconds | default_on_timeout | 备注 |
+|---------|----------|-------------|----------------|--------------------|------|
+| OUT-01~05/12 | Critical | `AutoRedact` | — | — | 高确定度密钥，自动脱敏不打断 |
+| OUT-06/08 | High | `AutoRedact` | — | — | ETH/Solana entropy 边界模糊，脱敏继续 |
+| OUT-07/09/10 | Critical | `GuiPopup` | 60 | Block | **Sieve 差异化点**：校验位通过的高确定性助记词/私钥，出站必须人工确认（覆盖矩阵默认 AutoRedact） |
+| OUT-11 | Medium | `StatusBar` | — | — | .env 仅状态栏，避免误伤 |
+| IN-CR-01 | Critical | `GuiPopup` | 60 | Block | 地址替换，需展示地址对比 diff |
+| IN-CR-02/03 | Critical | `HookTerminal` | 30 | Block | 危险 shell / 敏感路径 |
+| IN-CR-04（9 条） | Critical | `HookTerminal` | 60 | Block | 持久化机制 |
+| IN-CR-05 | Critical | `GuiPopup` | 120 | Block | 签名工具调用，120s 读 typed data |
+| IN-GEN-01~03 | High | `HookTerminal` | 30 | Block | 危险 shell / 远程脚本 / 编码执行 |
+| IN-GEN-04 | Medium | `GuiPopup` | 30 | Block | markdown exfil |
+| IN-GEN-05 | Low | `StatusBar` | — | — | 低风险通知 |
+
+**可覆盖规则**（`config.toml severity_overrides`）：
+- OUT-11、IN-GEN-04、IN-GEN-05 可降级；
+- Critical 规则（OUT-01~05/07/09/10/12、IN-CR-01~05、IN-GEN-01~03 为 High 但 HookTerminal）**不可关闭**，覆盖会被启动时忽略并打印警告。
 
 ---
 
@@ -210,20 +243,54 @@ deadbeef00112233  # known dev fixture address 0x000...dead
 | `severity_overrides` | table | `{}` | 规则级 severity 覆盖（Critical 规则的覆盖会被忽略） |
 | `telemetry_enabled` | bool | `false` | **强制 false**，启动时如设 true 会被强制改回并打印警告 |
 | `tls_verify_upstream` | bool | `true` | 是否校验上游 TLS 证书；改 false 启动时打印 WARN |
-| `dry_run` | bool | `false` | 干跑模式：Critical 命中只 tracing::warn! 记录，不返 426，继续转发上游（用于规则调试）。CLI `--dry-run` flag 出现即覆盖为 true。 |
+| `dry_run` | bool | `false` | 干跑模式：Critical 命中只 tracing::warn! 记录，不拦截，继续转发上游（用于规则调试）。CLI `--dry-run` flag 出现即覆盖为 true。 |
+| `ipc_socket_path` | path | `"~/.sieve/ipc.sock"` | Unix socket 路径（IPC 通道 A，代理 ↔ GUI App）；可被 `SIEVE_HOME` 覆盖 |
+| `pending_dir` | path | `"~/.sieve/pending/"` | Hook 类规则 pending 文件目录（IPC 通道 B）；`sieve setup` 自动创建（权限 0700） |
+| `decisions_dir` | path | `"~/.sieve/decisions/"` | Hook 类规则 decisions 文件目录（IPC 通道 B）；`sieve setup` 自动创建（权限 0700） |
+| `preset` | enum | `"default"` | 规则集预设：`"strict"` / `"default"` / `"relaxed"` / `"custom"`；影响 StatusBar 类规则阈值，**不影响 Critical**（详见 [ADR-016](./ADR-016-disposition-matrix-2d.md)） |
+| `launchd_plist_path` | path | `"~/Library/LaunchAgents/com.sieve.daemon.plist"` | launchd plist 路径（macOS only）；`sieve setup` 生成并 `launchctl bootstrap` |
+| `gui_socket_enabled` | bool | `true` | 是否启用 GUI App Unix socket（IPC 通道 A）；设为 `false` 时降级为 macOS `osascript` 系统通知，不弹 HIPS 弹窗（仍 fail-closed） |
 
-### 5.2 示例
+### 5.2 `~/.sieve/` 目录结构
+
+`sieve setup` 自动创建，所有目录权限 `0700`，文件权限 `0600`：
+
+```
+~/.sieve/
+├── config.toml           # 主配置文件
+├── ipc.sock              # Unix socket（代理 ↔ GUI App，IPC 通道 A）
+├── pending/              # Hook 类规则 pending 文件（代理写，sieve-hook 读）
+├── decisions/            # Hook 类规则 decisions 文件（sieve-hook 写，代理读）
+├── locks/                # fd-lock 文件锁（防止并发读写）
+├── audit.db              # SQLite 审计日志（append-only）
+├── rules/                # 已签名规则包目录
+├── sieveignore           # 白名单 fingerprint 文件
+├── backups/              # sieve setup 改动的原始文件备份
+└── setup.log             # sieve setup/doctor/uninstall 操作日志（追加格式）
+```
+
+### 5.3 示例
 
 ```toml
 # ~/.sieve/config.toml
 upstream_url = "https://api.anthropic.com"
 port = 11453
 bind_addr = "127.0.0.1"
+preset = "default"
 
-rules_path = "~/.sieve/rules.tar.zst"
+rules_path = "~/.sieve/rules"
 sieveignore_path = "~/.sieve/sieveignore"
 log_path = "~/.sieve/audit.db"
 log_level = "info"
+
+# IPC（sieve setup 自动配置，通常不需手动设）
+ipc_socket_path = "~/.sieve/ipc.sock"
+pending_dir = "~/.sieve/pending/"
+decisions_dir = "~/.sieve/decisions/"
+gui_socket_enabled = true
+
+# macOS 守护（sieve setup 自动写入）
+launchd_plist_path = "~/Library/LaunchAgents/com.sieve.daemon.plist"
 
 license_key = "eyJhbGciOiJFZERTQSJ9..."
 
@@ -408,7 +475,7 @@ JWT-like，**Ed25519 签名**（不用 RSA / HMAC）：
 - **完全离线验证**：本地公钥 + 签名校验，**不联网 verify**（详见 [ADR-003](./ADR-003-local-only-no-cloud-verifier.md)）；
 - 设备绑定：用 `device_id`（macOS：硬件 UUID hash / Linux：machine-id hash）+ `sub` 组合的本地 SQLite 记录；超过 `device_limit` 时 daemon 拒绝在新设备上启动；
 - 撤销机制：Phase 1 **不做** CRL —— [redacted]没有撤销基础设施，离线验证 + exp 已经覆盖 99% 场景；
-- **降级模式（降级触发 / license 失效）行为矩阵**——直接对齐 [PRD §7.1 + §9 #8](../prd/sieve-prd-v1.3.md#71-单一定价)：
+- **降级模式（降级触发 / license 失效）行为矩阵**——直接对齐 [PRD §7.1 + §9 #8](../prd/sieve-prd-v1.5.md#71-单一定价)：
   - **Critical**：**全部仍然 fail-closed 拦截**（包括出站 OUT-* 与入站 IN-CR-05 / IN-GEN-01~03 等所有 Critical 规则）。这是产品安全承诺，不是付费用户特权（详见 [ADR-007](./ADR-007-fail-closed-critical-actions.md)）；
   - **High**：从"弹窗 + 5 秒倒计时"降级为"仅审计记录，不弹窗"（即"只读警告"）；
   - **Medium / Low**：行为不变（本就静默 / 标记）；
@@ -418,7 +485,7 @@ JWT-like，**Ed25519 签名**（不用 RSA / HMAC）：
 
 ## 9. 相关文档
 
-- [PRD-sieve v1.3](../prd/sieve-prd-v1.3.md) §5、§6.6、§7、§11
+- [PRD-sieve v1.4](../prd/sieve-prd-v1.5.md) §5、§6.6、§7、§11
 - [architecture.md](./architecture.md) —— 模块职责、性能预算、Phase 2 演进路径
 - [ADR-003](./ADR-003-local-only-no-cloud-verifier.md) —— 不联网 verifier 的硬约束
 - [ADR-004](./ADR-004-anthropic-first-unified-interface.md) —— UnifiedMessage 接口预留

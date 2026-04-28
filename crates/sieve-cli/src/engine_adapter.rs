@@ -50,13 +50,51 @@ fn map_severity(r: RulesSeverity) -> Severity {
     }
 }
 
-/// 把 `sieve_rules::Action` 映射为 `sieve_core::Action`。
+/// 根据 `RuleEntry.disposition` 和 `RulesAction` 映射为 `sieve_core::Action`。
 ///
-/// `Warn` → `WarnConfirm { countdown_secs: 5 }`：Week 4 实际接入弹窗，此处占位。
+/// v1.4 重构：优先按 `effective_disposition()` 路由，`RulesAction` 作为兜底。
+///
+/// | Disposition       | Action                                       |
+/// |-------------------|----------------------------------------------|
+/// | AutoRedact        | `Redact { placeholder }`                     |
+/// | GuiPopup          | `HoldForDecision { request_id, timeout_s }`  |
+/// | HookTerminal      | `HookMark`                                   |
+/// | StatusBar         | `MarkOnly`                                   |
+///
+/// `timeout_seconds` / `default_on_timeout` 取自 `RuleEntry`，不再硬编码 5。
+///
+/// 关联：ADR-016（二维处置矩阵）、PRD v1.4 §5.4。
+fn map_action_by_disposition(
+    disposition: sieve_rules::manifest::Disposition,
+    _rule_action: RulesAction,
+    rule_id: &str,
+    timeout_seconds: u32,
+) -> Action {
+    use sieve_rules::manifest::Disposition;
+    match disposition {
+        Disposition::AutoRedact => Action::Redact {
+            placeholder: format!("[REDACTED:{rule_id}]"),
+        },
+        Disposition::GuiPopup => Action::HoldForDecision {
+            request_id: uuid::Uuid::new_v4(),
+            timeout_seconds,
+        },
+        Disposition::HookTerminal => Action::HookMark,
+        Disposition::StatusBar => Action::MarkOnly,
+    }
+}
+
+/// 旧接口：仅用 `RulesAction` 映射（兜底，无 disposition 信息时使用）。
+///
+/// `Warn` → `HookMark`（v1.4 后 Warn 一律走 HookTerminal 路径）。
+///
+/// 注：修 #2 后生产路径不再调用此函数（disposition 优先），
+/// 保留用于单元测试验证 Warn → HookMark 的语义不变。
+#[allow(dead_code)]
 fn map_action(r: RulesAction) -> Action {
     match r {
         RulesAction::Block => Action::Block,
-        RulesAction::Warn => Action::WarnConfirm { countdown_secs: 5 },
+        RulesAction::Warn => Action::HookMark,
         RulesAction::Mark => Action::MarkOnly,
         RulesAction::Allow => Action::SilentLog,
     }
@@ -127,11 +165,35 @@ impl InboundEngine for InboundAdapter {
                 .map(|r| map_severity(r.severity))
                 .unwrap_or(Severity::Critical);
 
-            // critical_lock 强制：fail-closed 规则 action 一律覆盖为 Block
-            let raw_action = rule.map(|r| r.action).unwrap_or(RulesAction::Block);
-            let enforced_action =
-                sieve_rules::critical_lock::enforce_action(&hit.rule_id, raw_action);
-            let action = map_action(enforced_action);
+            // v1.4：disposition 优先于 enforce_action（修 #2：路由短路修复，入站侧）。
+            //
+            // 规则显式写了 disposition 时直接路由；
+            // disposition=None 且 fail-closed 时才强制 Block。
+            // 这确保 IN-CR-02（hook_terminal）/ IN-CR-05（gui_popup）即使在 fail-closed
+            // 名单里也能走正确的 HookMark / HoldForDecision 路径（不被截成 Block）。
+            //
+            // 关联：ADR-016（二维处置矩阵）、ADR-014（双层防御）、PRD v1.4 §5.4。
+            let action = if let Some(r) = rule {
+                if let Some(disp) = r.disposition {
+                    // 显式 disposition：直接路由，不经过 enforce_action
+                    let timeout = r.timeout_seconds.unwrap_or(60);
+                    map_action_by_disposition(disp, r.action, &hit.rule_id, timeout)
+                } else {
+                    // 无显式 disposition：走旧路径（enforce_action → Block or action）
+                    let enforced =
+                        sieve_rules::critical_lock::enforce_action(&hit.rule_id, r.action);
+                    if enforced == RulesAction::Block {
+                        Action::Block
+                    } else {
+                        let disp = r.effective_disposition();
+                        let timeout = r.timeout_seconds.unwrap_or(60);
+                        map_action_by_disposition(disp, enforced, &hit.rule_id, timeout)
+                    }
+                }
+            } else {
+                // 规则表中找不到：fail-closed Block
+                Action::Block
+            };
 
             let evidence_truncated = redact_evidence(matched_text);
             let fp = fingerprint(&hit.rule_id, matched_text);
@@ -207,7 +269,33 @@ impl OutboundEngine for OutboundAdapter {
             let severity = rule
                 .map(|r| map_severity(r.severity))
                 .unwrap_or(Severity::Critical);
-            let action = rule.map(|r| map_action(r.action)).unwrap_or(Action::Block);
+            // v1.4：disposition 优先于 enforce_action（修 #2：路由短路修复）。
+            //
+            // 规则显式写了 disposition 时，**直接按 disposition 路由**——
+            // 这确保 OUT-01（auto_redact）即使在 fail-closed 名单里也走 Redact 而非 Block。
+            // 只有 disposition=None（旧规则 / 无显式配置）且 fail-closed 时，才走 Block。
+            //
+            // 关联：ADR-016（二维处置矩阵）、PRD v1.4 §5.4。
+            let action = rule
+                .map(|r| {
+                    if let Some(disp) = r.disposition {
+                        // 显式 disposition：直接路由，不经过 enforce_action
+                        let timeout = r.timeout_seconds.unwrap_or(60);
+                        map_action_by_disposition(disp, r.action, &hit.rule_id, timeout)
+                    } else {
+                        // 无显式 disposition：走旧路径（enforce_action → Block or action）
+                        let enforced =
+                            sieve_rules::critical_lock::enforce_action(&hit.rule_id, r.action);
+                        if enforced == RulesAction::Block {
+                            Action::Block
+                        } else {
+                            let disp = r.effective_disposition();
+                            let timeout = r.timeout_seconds.unwrap_or(60);
+                            map_action_by_disposition(disp, enforced, &hit.rule_id, timeout)
+                        }
+                    }
+                })
+                .unwrap_or(Action::Block);
             let evidence_truncated = redact_evidence(matched_text);
             let fp = fingerprint(&hit.rule_id, matched_text);
 
@@ -284,6 +372,9 @@ mod tests {
             keywords: vec![],
             allowlist_regexes: vec![],
             allowlist_stopwords: vec![],
+            disposition: None,
+            timeout_seconds: None,
+            default_on_timeout: sieve_rules::manifest::DefaultOnTimeout::Block,
         }
     }
 
@@ -327,9 +418,10 @@ mod tests {
     }
 
     #[test]
-    fn map_action_warn_becomes_warn_confirm() {
+    fn map_action_warn_becomes_hook_mark() {
+        // v1.4：Warn 一律走 HookTerminal 路径（HookMark action）
         let a = map_action(RulesAction::Warn);
-        assert!(matches!(a, Action::WarnConfirm { countdown_secs: 5 }));
+        assert!(matches!(a, Action::HookMark));
     }
 
     #[test]
@@ -363,5 +455,98 @@ mod tests {
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].span.start, 104); // 100 + 4
         assert_eq!(hits[0].span.end, 109); // 100 + 9
+    }
+
+    // ── 修 #2 回归：disposition 优先于 enforce_action ──────────────────────────
+
+    /// disposition=auto_redact 即使 action=block（fail-closed 名单）也走 Redact 路径。
+    ///
+    /// 修 #2（路由短路修复）：OUT-01 等 AutoRedact 规则在 fail-closed 名单里，
+    /// 旧代码 enforce_action 会把 action 强制变 Block，跳过 disposition 路由。
+    /// 修复后：显式 disposition 优先，OUT-01 必须走 Action::Redact 而非 Action::Block。
+    #[test]
+    fn disposition_auto_redact_beats_enforce_action() {
+        let mut rule = make_rule(
+            "OUT-01", // 在 fail-closed 名单里
+            r"sk-ant",
+            RulesSeverity::Critical,
+            RulesAction::Block,
+        );
+        rule.disposition = Some(sieve_rules::manifest::Disposition::AutoRedact);
+
+        let engine = VectorscanEngine::compile(vec![rule.clone()]).unwrap();
+        let adapter = OutboundAdapter::new(Arc::new(engine), vec![rule]);
+
+        let hits = adapter
+            .scan_text("my sk-ant-key here", ContentSource::OutboundUserText, 0)
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].rule_id, "OUT-01");
+        // 关键断言：应该是 Redact，不是 Block
+        assert!(
+            matches!(hits[0].action, Action::Redact { .. }),
+            "disposition=auto_redact 应走 Redact 路径，实际: {:?}",
+            hits[0].action
+        );
+    }
+
+    /// disposition=hook_terminal 即使在 fail-closed 名单里也走 HookMark 路径。
+    ///
+    /// 修 #2 回归：IN-CR-02 等 HookTerminal 规则不应被 enforce_action 截成 Block。
+    #[test]
+    fn disposition_hook_terminal_beats_enforce_action() {
+        let mut rule = make_rule(
+            "IN-CR-02", // 在 fail-closed 名单里
+            r"rm -rf",
+            RulesSeverity::Critical,
+            RulesAction::Block,
+        );
+        rule.disposition = Some(sieve_rules::manifest::Disposition::HookTerminal);
+
+        let engine = VectorscanEngine::compile(vec![rule.clone()]).unwrap();
+        let adapter = InboundAdapter::new(Arc::new(engine), vec![rule]);
+
+        let hits = adapter
+            .scan_text("run: rm -rf /tmp", ContentSource::InboundAssistantText, 0)
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].rule_id, "IN-CR-02");
+        // 关键断言：应该是 HookMark，不是 Block
+        assert!(
+            matches!(hits[0].action, Action::HookMark),
+            "disposition=hook_terminal 应走 HookMark 路径，实际: {:?}",
+            hits[0].action
+        );
+    }
+
+    /// disposition=gui_popup 即使在 fail-closed 名单里也走 HoldForDecision 路径。
+    #[test]
+    fn disposition_gui_popup_beats_enforce_action() {
+        let mut rule = make_rule(
+            "IN-CR-05-EVM", // 在 fail-closed 名单里
+            r"eth_signTypedData",
+            RulesSeverity::Critical,
+            RulesAction::Block,
+        );
+        rule.disposition = Some(sieve_rules::manifest::Disposition::GuiPopup);
+        rule.timeout_seconds = Some(60);
+
+        let engine = VectorscanEngine::compile(vec![rule.clone()]).unwrap();
+        let adapter = InboundAdapter::new(Arc::new(engine), vec![rule]);
+
+        let hits = adapter
+            .scan_text(
+                "call eth_signTypedData method",
+                ContentSource::InboundAssistantText,
+                0,
+            )
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        // 关键断言：应该是 HoldForDecision，不是 Block
+        assert!(
+            matches!(hits[0].action, Action::HoldForDecision { .. }),
+            "disposition=gui_popup 应走 HoldForDecision 路径，实际: {:?}",
+            hits[0].action
+        );
     }
 }

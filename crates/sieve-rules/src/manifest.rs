@@ -1,6 +1,4 @@
-//! 规则包 manifest（关联 ADR-002 / data-model.md）。
-//!
-//! 实际 manifest schema 在 Week 2 完整实现，Week 1 占位以验证 serde 可用。
+//! 规则包 manifest（关联 ADR-002 / data-model.md / PRD v1.4 §5.3 §5.4）。
 
 use serde::{Deserialize, Serialize};
 
@@ -42,6 +40,68 @@ pub struct RuleEntry {
     /// 允许放行的停用词列表（命中后检查，任一出现则不定级 Critical）。
     #[serde(default)]
     pub allowlist_stopwords: Vec<String>,
+    /// 处置形式（PRD v1.4 §5.4.1）。
+    ///
+    /// `None` 表示 TOML 未显式写，调用 [`RuleEntry::effective_disposition`] 获取
+    /// 按 severity 保守推断的值：Critical → [`Disposition::GuiPopup`]，
+    /// 其他 → [`Disposition::StatusBar`]。
+    #[serde(default)]
+    pub disposition: Option<Disposition>,
+    /// 等待 GUI/hook 决策的超时秒数（`None` = 不超时，适用于 AutoRedact / StatusBar）。
+    #[serde(default)]
+    pub timeout_seconds: Option<u32>,
+    /// 超时后的默认处置（PRD v1.4 §5.4.2）。
+    #[serde(default = "default_on_timeout_block")]
+    pub default_on_timeout: DefaultOnTimeout,
+}
+
+impl RuleEntry {
+    /// 返回规则的最终处置形式（PRD v1.4 §5.4.1）。
+    ///
+    /// TOML 未显式写 `disposition` 时，按 severity 保守推断：
+    /// - [`Severity::Critical`] → [`Disposition::GuiPopup`]
+    /// - 其他 → [`Disposition::StatusBar`]
+    pub fn effective_disposition(&self) -> Disposition {
+        self.disposition.unwrap_or(match self.severity {
+            Severity::Critical => Disposition::GuiPopup,
+            _ => Disposition::StatusBar,
+        })
+    }
+}
+
+/// 规则触发后的处置形式（PRD v1.4 §5.4.1 / ADR-016）。
+///
+/// 决定命中后产物如何到达用户：自动改写、GUI 弹窗、hook 拦截还是静默通知。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Disposition {
+    /// 自动脱敏改写 body bytes 后转发，不弹窗（OUT-01~05/12）。
+    AutoRedact,
+    /// hold 住 SSE 流，通过 IPC 通知 GUI 弹窗等待决策（IN-CR-01/05、IN-GEN-04、OUT-06~10）。
+    GuiPopup,
+    /// 不修改 SSE 流，写 IPC pending file，由 sieve-hook 在 PreToolUse 阶段拦截
+    /// （IN-CR-02~04、IN-GEN-01~03）。
+    HookTerminal,
+    /// 状态栏通知，不打断用户流程（OUT-11、IN-GEN-05）。
+    StatusBar,
+}
+
+/// 规则超时后的默认处置（PRD v1.4 §5.4.2）。
+///
+/// 当 GUI 弹窗或 hook 等待超过 `timeout_seconds` 后触发此动作。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DefaultOnTimeout {
+    /// 脱敏后发送（出站默认 fail-open 到脱敏）。
+    Redact,
+    /// 拒绝（入站默认 fail-closed）。
+    Block,
+    /// 允许通过（仅 IN-GEN Relaxed preset 用）。
+    Allow,
+}
+
+fn default_on_timeout_block() -> DefaultOnTimeout {
+    DefaultOnTimeout::Block
 }
 
 /// 严重等级。
@@ -124,5 +184,158 @@ mod tests {
         let a = Action::Block;
         let json = serde_json::to_string(&a).unwrap();
         assert_eq!(json, "\"block\"");
+    }
+
+    // -------------------------------------------------------------------------
+    // PRD v1.4 §5.4 新字段测试
+    // -------------------------------------------------------------------------
+
+    /// 旧格式 TOML（无 disposition / timeout_seconds / default_on_timeout）
+    /// 必须能正常解析，不 break 现有规则文件。
+    #[test]
+    fn old_toml_without_disposition_parses_ok() {
+        let toml = r#"
+[[rules]]
+id = "OUT-01"
+description = "test"
+pattern = "secret"
+severity = "critical"
+action = "block"
+"#;
+        #[derive(serde::Deserialize)]
+        struct F {
+            rules: Vec<RuleEntry>,
+        }
+        let f: F = toml::from_str(toml).unwrap();
+        let r = &f.rules[0];
+        assert!(r.disposition.is_none());
+        assert!(r.timeout_seconds.is_none());
+        assert_eq!(r.default_on_timeout, DefaultOnTimeout::Block);
+    }
+
+    /// Critical 规则未写 disposition 时 effective_disposition → GuiPopup。
+    #[test]
+    fn effective_disposition_critical_defaults_to_gui_popup() {
+        let toml = r#"
+[[rules]]
+id = "IN-CR-02"
+description = "test"
+pattern = "rm"
+severity = "critical"
+action = "block"
+"#;
+        #[derive(serde::Deserialize)]
+        struct F {
+            rules: Vec<RuleEntry>,
+        }
+        let f: F = toml::from_str(toml).unwrap();
+        assert_eq!(
+            f.rules[0].effective_disposition(),
+            Disposition::GuiPopup,
+            "Critical without explicit disposition must default to GuiPopup"
+        );
+    }
+
+    /// 非 Critical 规则未写 disposition 时 effective_disposition → StatusBar。
+    #[test]
+    fn effective_disposition_non_critical_defaults_to_status_bar() {
+        let toml = r#"
+[[rules]]
+id = "IN-GEN-02"
+description = "test"
+pattern = "img"
+severity = "high"
+action = "warn"
+"#;
+        #[derive(serde::Deserialize)]
+        struct F {
+            rules: Vec<RuleEntry>,
+        }
+        let f: F = toml::from_str(toml).unwrap();
+        assert_eq!(
+            f.rules[0].effective_disposition(),
+            Disposition::StatusBar,
+            "Non-critical without explicit disposition must default to StatusBar"
+        );
+    }
+
+    /// 显式写了 disposition = "hook_terminal" 时必须正确解析。
+    #[test]
+    fn explicit_hook_terminal_disposition_parses() {
+        let toml = r#"
+[[rules]]
+id = "IN-CR-02"
+description = "test"
+pattern = "rm"
+severity = "critical"
+action = "block"
+disposition = "hook_terminal"
+timeout_seconds = 30
+default_on_timeout = "block"
+"#;
+        #[derive(serde::Deserialize)]
+        struct F {
+            rules: Vec<RuleEntry>,
+        }
+        let f: F = toml::from_str(toml).unwrap();
+        let r = &f.rules[0];
+        assert_eq!(r.effective_disposition(), Disposition::HookTerminal);
+        assert_eq!(r.timeout_seconds, Some(30));
+        assert_eq!(r.default_on_timeout, DefaultOnTimeout::Block);
+    }
+
+    /// disposition = "auto_redact" + default_on_timeout = "redact" 正确解析。
+    #[test]
+    fn auto_redact_disposition_parses() {
+        let toml = r#"
+[[rules]]
+id = "OUT-01"
+description = "test"
+pattern = "sk-ant"
+severity = "critical"
+action = "block"
+disposition = "auto_redact"
+default_on_timeout = "redact"
+"#;
+        #[derive(serde::Deserialize)]
+        struct F {
+            rules: Vec<RuleEntry>,
+        }
+        let f: F = toml::from_str(toml).unwrap();
+        let r = &f.rules[0];
+        assert_eq!(r.effective_disposition(), Disposition::AutoRedact);
+        assert_eq!(r.default_on_timeout, DefaultOnTimeout::Redact);
+        assert!(r.timeout_seconds.is_none());
+    }
+
+    /// Disposition 枚举 serde snake_case 正确。
+    #[test]
+    fn disposition_serde_roundtrip() {
+        for (d, expected) in [
+            (Disposition::AutoRedact, "\"auto_redact\""),
+            (Disposition::GuiPopup, "\"gui_popup\""),
+            (Disposition::HookTerminal, "\"hook_terminal\""),
+            (Disposition::StatusBar, "\"status_bar\""),
+        ] {
+            let json = serde_json::to_string(&d).unwrap();
+            assert_eq!(json, expected);
+            let back: Disposition = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, d);
+        }
+    }
+
+    /// DefaultOnTimeout 枚举 serde snake_case 正确。
+    #[test]
+    fn default_on_timeout_serde_roundtrip() {
+        for (d, expected) in [
+            (DefaultOnTimeout::Redact, "\"redact\""),
+            (DefaultOnTimeout::Block, "\"block\""),
+            (DefaultOnTimeout::Allow, "\"allow\""),
+        ] {
+            let json = serde_json::to_string(&d).unwrap();
+            assert_eq!(json, expected);
+            let back: DefaultOnTimeout = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, d);
+        }
     }
 }

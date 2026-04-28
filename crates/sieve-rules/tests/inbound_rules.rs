@@ -545,6 +545,148 @@ fn in_cr_04_unrelated_commands_no_hit() {
 }
 
 // ---------------------------------------------------------------------------
+// PRD v1.4 §5.4 新字段解析验证
+// ---------------------------------------------------------------------------
+
+/// 验证入站规则 TOML 中 disposition / timeout_seconds / default_on_timeout 正确解析。
+#[test]
+fn inbound_rules_disposition_fields_parsed() {
+    use sieve_rules::loader::load_inbound_rules;
+    use sieve_rules::manifest::{DefaultOnTimeout, Disposition};
+
+    let path = rules_path();
+    let rules = load_inbound_rules(&path).expect("load inbound.toml failed");
+
+    // IN-CR-01：gui_popup, 60s, block
+    let r = rules.iter().find(|r| r.id == "IN-CR-01").expect("IN-CR-01");
+    assert_eq!(r.effective_disposition(), Disposition::GuiPopup);
+    assert_eq!(r.timeout_seconds, Some(60));
+    assert_eq!(r.default_on_timeout, DefaultOnTimeout::Block);
+
+    // IN-CR-02 系列：hook_terminal, 30s, block
+    for id in [
+        "IN-CR-02",
+        "IN-CR-02-CURL-PIPE",
+        "IN-CR-02-WGET-PIPE",
+        "IN-CR-02-EVAL",
+        "IN-CR-02-NC-REVERSE",
+        "IN-CR-02-DD-WIPE",
+    ] {
+        let r = rules
+            .iter()
+            .find(|r| r.id == id)
+            .unwrap_or_else(|| panic!("{id} not found"));
+        assert_eq!(
+            r.effective_disposition(),
+            Disposition::HookTerminal,
+            "{id}: expected HookTerminal"
+        );
+        assert_eq!(r.timeout_seconds, Some(30), "{id}: expected 30s timeout");
+        assert_eq!(
+            r.default_on_timeout,
+            DefaultOnTimeout::Block,
+            "{id}: expected Block on timeout"
+        );
+    }
+
+    // IN-CR-03 系列：hook_terminal, 30s, block
+    for id in [
+        "IN-CR-03-SSH-PRIVATE",
+        "IN-CR-03-SSH-DIR",
+        "IN-CR-03-AWS-CREDS",
+        "IN-CR-03-DOTENV",
+        "IN-CR-03-ETH-KEYSTORE",
+        "IN-CR-03-GPG-DIR",
+        "IN-CR-03-NETRC",
+        "IN-CR-03-MACOS-KEYCHAIN",
+        "IN-CR-03-GCP-CREDS",
+        "IN-CR-03-SOLANA-KEYPAIR",
+    ] {
+        let r = rules
+            .iter()
+            .find(|r| r.id == id)
+            .unwrap_or_else(|| panic!("{id} not found"));
+        assert_eq!(
+            r.effective_disposition(),
+            Disposition::HookTerminal,
+            "{id}: expected HookTerminal"
+        );
+        assert_eq!(r.timeout_seconds, Some(30), "{id}: expected 30s timeout");
+    }
+
+    // IN-CR-04 系列（9 条）：hook_terminal, 60s, block
+    for id in [
+        "IN-CR-04-SHELL-RC-APPEND",
+        "IN-CR-04-CRONTAB",
+        "IN-CR-04-CRON-D-WRITE",
+        "IN-CR-04-LAUNCHCTL",
+        "IN-CR-04-LAUNCH-AGENT-PLIST",
+        "IN-CR-04-SYSTEMCTL-ENABLE",
+        "IN-CR-04-SYSTEMD-UNIT-WRITE",
+        "IN-CR-04-FISH-CONFIG",
+        "IN-CR-04-LOGIN-ITEMS",
+    ] {
+        let r = rules
+            .iter()
+            .find(|r| r.id == id)
+            .unwrap_or_else(|| panic!("{id} not found"));
+        assert_eq!(
+            r.effective_disposition(),
+            Disposition::HookTerminal,
+            "{id}: expected HookTerminal"
+        );
+        assert_eq!(r.timeout_seconds, Some(60), "{id}: expected 60s timeout");
+        assert_eq!(
+            r.default_on_timeout,
+            DefaultOnTimeout::Block,
+            "{id}: expected Block on timeout"
+        );
+    }
+
+    // IN-CR-05 系列：gui_popup, 120s, block
+    for id in ["IN-CR-05-EVM", "IN-CR-05-SOLANA", "IN-CR-05-BITCOIN"] {
+        let r = rules
+            .iter()
+            .find(|r| r.id == id)
+            .unwrap_or_else(|| panic!("{id} not found"));
+        assert_eq!(
+            r.effective_disposition(),
+            Disposition::GuiPopup,
+            "{id}: expected GuiPopup"
+        );
+        assert_eq!(r.timeout_seconds, Some(120), "{id}: expected 120s timeout");
+        assert_eq!(
+            r.default_on_timeout,
+            DefaultOnTimeout::Block,
+            "{id}: expected Block on timeout"
+        );
+    }
+
+    // IN-GEN-01~03：hook_terminal, 30s, block
+    for id in ["IN-GEN-01", "IN-GEN-02", "IN-GEN-03"] {
+        let r = rules
+            .iter()
+            .find(|r| r.id == id)
+            .unwrap_or_else(|| panic!("{id} not found"));
+        assert_eq!(
+            r.effective_disposition(),
+            Disposition::HookTerminal,
+            "{id}: expected HookTerminal"
+        );
+        assert_eq!(r.timeout_seconds, Some(30), "{id}: expected 30s timeout");
+    }
+
+    // IN-GEN-04：gui_popup, 30s, block
+    let r = rules
+        .iter()
+        .find(|r| r.id == "IN-GEN-04")
+        .expect("IN-GEN-04");
+    assert_eq!(r.effective_disposition(), Disposition::GuiPopup);
+    assert_eq!(r.timeout_seconds, Some(30));
+    assert_eq!(r.default_on_timeout, DefaultOnTimeout::Block);
+}
+
+// ---------------------------------------------------------------------------
 // 无害文本不命中
 // ---------------------------------------------------------------------------
 #[test]

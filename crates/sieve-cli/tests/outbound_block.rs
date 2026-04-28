@@ -107,6 +107,8 @@ struct DaemonGuard {
     proc: Child,
     // 持有 tempfile 引用，防止进程运行期间被删除
     _config_file: tempfile::NamedTempFile,
+    /// 持有 sieve home 临时目录（若设置了），防止 Drop 时被清理
+    _sieve_home: Option<tempfile::TempDir>,
 }
 
 impl Drop for DaemonGuard {
@@ -121,6 +123,17 @@ impl Drop for DaemonGuard {
 /// 写临时 sieve.toml，其中 rules_path 为绝对路径（避免 cwd 歧义）。
 /// `tls_verify_upstream = false`：mock 上游是 plain HTTP，不需要 TLS 握手。
 fn spawn_sieve_daemon(upstream_url: &str, dry_run: bool) -> (u16, DaemonGuard) {
+    spawn_sieve_daemon_with_home(upstream_url, dry_run, None)
+}
+
+/// 启动真实 sieve daemon，支持传入自定义 `sieve_home`（供 IPC 集成测试使用）。
+///
+/// `sieve_home`：若 Some，则设置 `SIEVE_HOME` 环境变量；daemon 会把 IPC socket 放在此目录下。
+fn spawn_sieve_daemon_with_home(
+    upstream_url: &str,
+    dry_run: bool,
+    sieve_home: Option<&std::path::Path>,
+) -> (u16, DaemonGuard) {
     let port = find_free_port();
     let rules = outbound_rules_path();
     assert!(
@@ -161,15 +174,19 @@ dry_run = {}
         binary.display()
     );
 
-    let proc = Command::new(&binary)
-        .arg("start")
+    let mut cmd = Command::new(&binary);
+    cmd.arg("start")
         .arg("--config")
         .arg(config_file.path())
         .env("SIEVE_LOG", "warn")
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("spawn sieve daemon");
+        .stderr(Stdio::null());
+
+    if let Some(home) = sieve_home {
+        cmd.env("SIEVE_HOME", home);
+    }
+
+    let proc = cmd.spawn().expect("spawn sieve daemon");
 
     // 等 daemon 监听，最长 10 秒
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -193,6 +210,7 @@ dry_run = {}
         DaemonGuard {
             proc,
             _config_file: config_file,
+            _sieve_home: None,
         },
     )
 }
@@ -225,28 +243,40 @@ fn plain_http_client() -> Client<HttpConnector, Full<Bytes>> {
 
 // ─── 测试 ──────────────────────────────────────────────────────────────────────
 
-/// POST /v1/messages 含 fake Anthropic key → 返回 426 + sieve_blocked JSON body。
+/// POST /v1/messages 含 fake Anthropic key → AutoRedact 脱敏后转发上游（200）。
 ///
-/// 关联 PRD §5.1 OUT-01 / ADR-008。
+/// OUT-01 有 disposition=auto_redact，修 #2（disposition 优先于 enforce_action）后：
+/// fail-closed 名单里的 OUT-01 不再直接 Block，而是先脱敏再转发。
+/// 验证 PRD v1.4 §6.1（AutoRedact 路径）。
+///
+/// 关联 PRD §5.1 OUT-01 / ADR-016（二维处置矩阵）。
 #[tokio::test]
-async fn fake_anthropic_key_blocked_with_426() {
-    // 1. 启动 mock 上游（若 sieve 转发了请求，计数器就不为 0，测试 fail）
+async fn fake_anthropic_key_auto_redacted_and_forwarded() {
+    // 1. 启动 mock 上游（OUT-01 AutoRedact → sieve 脱敏后转发，计数器应为 1）
     let upstream_call_count = Arc::new(AtomicUsize::new(0));
     let counter_clone = upstream_call_count.clone();
 
-    let (upstream_addr, _up_shutdown) = spawn_mock_upstream(move |_req| {
+    // 记录上游收到的请求 body（验证 key 已被脱敏）
+    let upstream_body_received = Arc::new(tokio::sync::Mutex::new(Bytes::new()));
+    let body_clone = upstream_body_received.clone();
+
+    let (upstream_addr, _up_shutdown) = spawn_mock_upstream(move |req| {
         let c = counter_clone.clone();
+        let b = body_clone.clone();
         async move {
             c.fetch_add(1, Ordering::SeqCst);
+            let mut guard = b.lock().await;
+            *guard = req.body().clone();
+            drop(guard);
             Response::builder()
                 .status(200)
-                .body(Full::new(Bytes::from_static(b"upstream-not-blocked")))
+                .body(Full::new(Bytes::from_static(b"ok-from-upstream")))
                 .unwrap()
         }
     })
     .await;
 
-    // 2. 启动 sieve daemon（指向 mock 上游，不是真实 Anthropic）
+    // 2. 启动 sieve daemon（指向 mock 上游）
     let (sieve_port, _guard) = spawn_sieve_daemon(
         &format!("http://{upstream_addr}"),
         false, /* dry_run=false */
@@ -268,43 +298,40 @@ async fn fake_anthropic_key_blocked_with_426() {
         .await
         .unwrap();
 
-    // 4. 验证 status = 426
+    // 4. OUT-01 AutoRedact：脱敏后转发，上游返回 200
     assert_eq!(
         resp.status(),
-        StatusCode::UPGRADE_REQUIRED,
-        "expected 426 Upgrade Required (OUT-01 block)"
+        StatusCode::OK,
+        "OUT-01 AutoRedact 应脱敏后转发，上游返回 200"
     );
 
-    // 5. 验证 body 是 sieve_blocked JSON
-    let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
-    let body_str = String::from_utf8_lossy(&body_bytes);
-    assert!(
-        body_str.contains(r#""type":"sieve_blocked""#),
-        "body missing sieve_blocked type: {body_str}"
-    );
-    assert!(
-        body_str.contains("OUT-01"),
-        "body should mention OUT-01 rule: {body_str}"
-    );
-    assert!(
-        body_str.contains("guidance"),
-        "body should contain guidance field: {body_str}"
-    );
-
-    // 6. 验证上游未被调用
+    // 5. 上游应被调用一次
     assert_eq!(
         upstream_call_count.load(Ordering::SeqCst),
-        0,
-        "upstream should NOT be called when blocked"
+        1,
+        "OUT-01 AutoRedact 后上游应被调用"
+    );
+
+    // 6. 上游收到的 body 中不应含原始 key（已被 [REDACTED:OUT-01] 替换）
+    let received = upstream_body_received.lock().await.clone();
+    let received_str = String::from_utf8_lossy(&received);
+    assert!(
+        !received_str.contains("sk-ant-api03-"),
+        "脱敏后上游不应收到原始 key：{received_str}"
+    );
+    assert!(
+        received_str.contains("REDACTED"),
+        "脱敏后 body 应含 REDACTED 占位符：{received_str}"
     );
 }
 
-/// dry_run = true 时：OUT-01 属于 fail-closed 规则，即使 dry_run 也返回 426。
+/// dry_run = true 时：OUT-01（disposition=auto_redact）仍然脱敏转发，不受 dry_run 影响。
 ///
-/// 关联 PRD §9 #3 / ADR-007：fail-closed 规则在任何模式（含 dry_run）下都强制 Block。
-/// dry_run 只豁免非 fail-closed 的 Critical；OUT-01~12 全部在 FAIL_CLOSED_RULES 名单。
+/// 修 #2（disposition 优先）后，OUT-01 走 AutoRedact 路径；
+/// dry_run 只影响 Block 路径（是否拦截），不影响 AutoRedact（始终脱敏）。
+/// 验证 PRD v1.4 §6.1（AutoRedact 路径）、ADR-016（二维处置矩阵）。
 #[tokio::test]
-async fn dry_run_fail_closed_still_blocks() {
+async fn dry_run_auto_redact_still_redacts() {
     let upstream_call_count = Arc::new(AtomicUsize::new(0));
     let counter_clone = upstream_call_count.clone();
 
@@ -340,17 +367,17 @@ async fn dry_run_fail_closed_still_blocks() {
         .await
         .unwrap();
 
-    // OUT-01 是 fail-closed：dry_run 不豁免，仍返回 426
+    // OUT-01 AutoRedact：dry_run 不影响脱敏逻辑，脱敏后转发 → 200
     assert_eq!(
         resp.status(),
-        StatusCode::UPGRADE_REQUIRED,
-        "dry_run must NOT bypass fail-closed OUT-01 (PRD §9 #3)"
+        StatusCode::OK,
+        "OUT-01 AutoRedact 在 dry_run 模式下仍然脱敏转发（200）"
     );
-    // 上游不应被调用
+    // 上游应被调用（脱敏后转发）
     assert_eq!(
         upstream_call_count.load(Ordering::SeqCst),
-        0,
-        "upstream must NOT be called when fail-closed rule blocks"
+        1,
+        "OUT-01 AutoRedact 脱敏后上游应被调用"
     );
 }
 
@@ -404,5 +431,241 @@ async fn benign_message_passes_through() {
         upstream_call_count.load(Ordering::SeqCst),
         1,
         "upstream should be called for benign message"
+    );
+}
+
+// ─── 出站 GUI hold 测试（R2-#1 修复验证）────────────────────────────────────────
+
+/// 模拟 GUI 客户端：连接 IPC socket，通知 ready channel，等待 request_decision，用真实 request_id 回复。
+///
+/// 时序：
+/// 1. 连接 Unix socket（阻塞等待 socket 出现）
+/// 2. 发送 ready 信号（via `ready_tx`），通知调用方 GUI 已就绪
+/// 3. 阻塞等待服务端推来的 `request_decision` JSON-RPC 帧
+/// 4. 提取真实 request_id，用传入 decision 回复
+///
+/// 从请求帧提取 request_id 而非使用外部传入值，确保 IPC pending map 路由正确。
+async fn mock_gui_respond_with_ready(
+    socket_path: &std::path::Path,
+    decision: sieve_ipc::DecisionAction,
+    ready_tx: tokio::sync::oneshot::Sender<()>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::UnixStream;
+
+    // 等 socket 出现
+    let mut stream = None;
+    for _ in 0..200 {
+        match UnixStream::connect(socket_path).await {
+            Ok(s) => {
+                stream = Some(s);
+                break;
+            }
+            Err(_) => tokio::time::sleep(Duration::from_millis(100)).await,
+        }
+    }
+    let stream = stream.ok_or("IPC socket not ready after 20s")?;
+
+    // 稍等让 IPC server 完成 handle_connection spawn 和 gui_writer 注册（async 调度延迟）
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // 通知主任务：GUI 已连接且 IPC server 已注册，可以发 HTTP 请求了
+    let _ = ready_tx.send(());
+
+    let (reader, mut writer) = stream.into_split();
+    let mut lines = BufReader::new(reader).lines();
+
+    // 读服务端推来的 request_decision 帧
+    while let Some(line) = lines.next_line().await? {
+        let line = line.trim().to_owned();
+        if line.is_empty() {
+            continue;
+        }
+        // 从 JSON-RPC 帧中提取真实 request_id
+        let rpc: serde_json::Value = serde_json::from_str(&line)?;
+        let params = rpc.get("params").ok_or("no params")?;
+        let real_id: uuid::Uuid =
+            serde_json::from_value(params["request_id"].clone()).map_err(|e| e.to_string())?;
+
+        // 构造回复
+        let resp = sieve_ipc::protocol::DecisionResponse {
+            request_id: real_id,
+            decision,
+            decided_at: chrono::Utc::now(),
+            by_user: true,
+            remember: false,
+        };
+        let rpc_resp = sieve_ipc::protocol::jsonrpc::Response {
+            jsonrpc: "2.0".to_owned(),
+            result: Some(serde_json::to_value(&resp)?),
+            error: None,
+            id: serde_json::Value::String(real_id.to_string()),
+        };
+        let mut payload = serde_json::to_string(&rpc_resp)?;
+        payload.push('\n');
+        writer.write_all(payload.as_bytes()).await?;
+        break;
+    }
+    Ok(())
+}
+
+/// 构造含 PEM private key 的请求 body（触发 OUT-07，disposition=gui_popup）。
+fn pem_key_body() -> String {
+    serde_json::json!({
+        "model": "claude-sonnet-4-5",
+        "max_tokens": 16,
+        "messages": [{
+            "role": "user",
+            "content": "这是我的密钥：-----BEGIN EC PRIVATE KEY-----\nMHQCAQEEINsamplekey\n-----END EC PRIVATE KEY-----",
+        }],
+    })
+    .to_string()
+}
+
+/// OUT-07 GuiPopup hold：GUI Deny → 客户端收到 426，上游未被调用。
+///
+/// 验证 R2-#1 修复：daemon 出站路径正确处理 HoldForDecision action。
+/// 关联：PRD v1.4 §5.4.2（出站超时策略表）、ADR-016（二维处置矩阵）。
+#[tokio::test]
+async fn outbound_gui_popup_deny_returns_426() {
+    let upstream_call_count = Arc::new(AtomicUsize::new(0));
+    let counter_clone = upstream_call_count.clone();
+
+    let (upstream_addr, _up_shutdown) = spawn_mock_upstream(move |_req| {
+        let c = counter_clone.clone();
+        async move {
+            c.fetch_add(1, Ordering::SeqCst);
+            Response::builder()
+                .status(200)
+                .body(Full::new(Bytes::from_static(b"should-not-reach")))
+                .unwrap()
+        }
+    })
+    .await;
+
+    // 为 IPC 准备临时目录
+    let sieve_home_dir = tempfile::tempdir().unwrap();
+    let sieve_home = sieve_home_dir.path().to_owned();
+    let socket_path = sieve_home.join("ipc.sock");
+
+    let (sieve_port, _guard) =
+        spawn_sieve_daemon_with_home(&format!("http://{upstream_addr}"), false, Some(&sieve_home));
+
+    // 启动 GUI 模拟任务：先连接 IPC socket（通知 ready），再等 request_decision，回复 Deny
+    let socket_path_clone = socket_path.clone();
+    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<()>();
+    let ipc_task = tokio::spawn(async move {
+        let _ = mock_gui_respond_with_ready(
+            &socket_path_clone,
+            sieve_ipc::DecisionAction::Deny,
+            ready_tx,
+        )
+        .await;
+    });
+
+    // 等 GUI 已连接后再发 HTTP 请求，确保 IPC gui_writer 不为 None（最多等 15 秒）
+    let _ = tokio::time::timeout(Duration::from_secs(15), ready_rx).await;
+
+    let body = pem_key_body();
+    let client = plain_http_client();
+    let resp = client
+        .request(
+            Request::builder()
+                .method(http::Method::POST)
+                .uri(format!("http://127.0.0.1:{sieve_port}/v1/messages"))
+                .header(http::header::CONTENT_TYPE, "application/json")
+                .header(http::header::HOST, format!("127.0.0.1:{sieve_port}"))
+                .body(Full::new(Bytes::from(body)))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let _ = ipc_task.await;
+
+    // GUI Deny → 426
+    assert_eq!(
+        resp.status(),
+        StatusCode::UPGRADE_REQUIRED,
+        "OUT-07 GuiPopup GUI Deny 应返回 426"
+    );
+
+    // 上游不应被调用
+    assert_eq!(
+        upstream_call_count.load(Ordering::SeqCst),
+        0,
+        "GUI Deny 后上游不应被调用"
+    );
+}
+
+/// OUT-07 GuiPopup hold：GUI Allow → 请求转发上游，上游返回 200。
+///
+/// 验证 R2-#1 修复：Allow 决策后原 body 转发给上游。
+#[tokio::test]
+async fn outbound_gui_popup_allow_forwards_to_upstream() {
+    let upstream_call_count = Arc::new(AtomicUsize::new(0));
+    let counter_clone = upstream_call_count.clone();
+
+    let (upstream_addr, _up_shutdown) = spawn_mock_upstream(move |_req| {
+        let c = counter_clone.clone();
+        async move {
+            c.fetch_add(1, Ordering::SeqCst);
+            Response::builder()
+                .status(200)
+                .body(Full::new(Bytes::from_static(b"upstream-ok")))
+                .unwrap()
+        }
+    })
+    .await;
+
+    let sieve_home_dir = tempfile::tempdir().unwrap();
+    let sieve_home = sieve_home_dir.path().to_owned();
+    let socket_path = sieve_home.join("ipc.sock");
+
+    let (sieve_port, _guard) =
+        spawn_sieve_daemon_with_home(&format!("http://{upstream_addr}"), false, Some(&sieve_home));
+
+    // 启动 GUI 模拟任务：先连接 IPC socket（通知 ready），再等 request_decision，回复 Allow
+    let socket_path_clone = socket_path.clone();
+    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<()>();
+    let ipc_task = tokio::spawn(async move {
+        let _ = mock_gui_respond_with_ready(
+            &socket_path_clone,
+            sieve_ipc::DecisionAction::Allow,
+            ready_tx,
+        )
+        .await;
+    });
+
+    // 等 GUI 已连接后再发 HTTP 请求
+    let _ = tokio::time::timeout(Duration::from_secs(5), ready_rx).await;
+
+    let body = pem_key_body();
+    let client = plain_http_client();
+    let resp = client
+        .request(
+            Request::builder()
+                .method(http::Method::POST)
+                .uri(format!("http://127.0.0.1:{sieve_port}/v1/messages"))
+                .header(http::header::CONTENT_TYPE, "application/json")
+                .header(http::header::HOST, format!("127.0.0.1:{sieve_port}"))
+                .body(Full::new(Bytes::from(body)))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let _ = ipc_task.await;
+
+    // GUI Allow → 请求到达上游（200）
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "OUT-07 GuiPopup GUI Allow 后应转发到上游并返回 200"
+    );
+    assert_eq!(
+        upstream_call_count.load(Ordering::SeqCst),
+        1,
+        "GUI Allow 后上游应被调用一次"
     );
 }

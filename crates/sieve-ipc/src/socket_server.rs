@@ -1,0 +1,330 @@
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
+
+use chrono::Utc;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::{UnixListener, UnixStream};
+use tokio::sync::{mpsc, oneshot, Mutex};
+use tracing::{debug, error, info, warn};
+use uuid::Uuid;
+
+use crate::{
+    error::IpcError,
+    protocol::{DecisionAction, DecisionRequest, DecisionResponse, DefaultOnTimeout},
+};
+
+/// pending map：request_id → oneshot 发送端，等待 GUI 回复。
+type PendingMap = Arc<Mutex<HashMap<Uuid, oneshot::Sender<DecisionResponse>>>>;
+
+/// GUI 客户端的写通道：向其发送换行分隔的 JSON 字符串即可推送到对端。
+///
+/// 使用 mpsc 而非直接持有 WriteHalf，这样写检测（`send` 失败）就能代替
+/// TCP keepalive 检测 GUI 进程崩溃。通道容量设为 32，满了则视为 GUI 卡死。
+type GuiWriter = Arc<Mutex<Option<mpsc::Sender<String>>>>;
+
+/// IPC 服务端，监听 Unix socket，维护与 GUI 的长连接并推送决策请求。
+///
+/// # 连接语义
+///
+/// - GUI 启动后主动连接此 socket，保持长连接。
+/// - 同一时刻只允许一个 GUI 客户端（多连接时拒绝第二个，记录警告）。
+/// - GUI 断线后 `gui_writer` 自动清空；下一次 `request_decision` 立即 fallback。
+///
+/// # 双向通信模型
+///
+/// ```text
+/// [主代理]  ─request_decision JSON-RPC request─▶  [GUI]
+/// [主代理]  ◀─decision_response JSON-RPC response─  [GUI]
+/// ```
+///
+/// 每个方向在同一条 TCP/Unix 连接上用换行分隔的 JSON-RPC 帧传输。
+/// `handle_connection` 负责从 GUI 读取响应帧并派发到 `pending` map；
+/// `request_decision` 通过 `gui_writer` mpsc 通道写入请求帧。
+///
+/// 关联：ADR-013 §3（JSON-RPC over Unix socket）、ADR-014 §5（GUI 路径）。
+pub struct IpcServer {
+    socket_path: PathBuf,
+    pending: PendingMap,
+    /// 当前已连接的 GUI 客户端写通道；无 GUI 时为 None。
+    gui_writer: GuiWriter,
+}
+
+impl IpcServer {
+    /// 绑定 Unix socket 并返回服务端实例。
+    ///
+    /// socket_path 已存在时先删除旧文件（daemon 重启场景）。
+    pub fn bind(socket_path: PathBuf) -> Result<(Self, UnixListener), IpcError> {
+        // 旧 socket 文件存在则先删除，否则 bind 会失败。
+        if socket_path.exists() {
+            std::fs::remove_file(&socket_path)?;
+        }
+        let listener = UnixListener::bind(&socket_path)?;
+        let server = Self {
+            socket_path,
+            pending: Arc::new(Mutex::new(HashMap::new())),
+            gui_writer: Arc::new(Mutex::new(None)),
+        };
+        Ok((server, listener))
+    }
+
+    /// 运行 accept 循环，处理来自 GUI 的长连接。
+    ///
+    /// 每个连接独立 spawn；同一时刻只接受一个 GUI 客户端，多余的直接关闭。
+    pub async fn run(&self, listener: UnixListener) {
+        info!(socket = %self.socket_path.display(), "IPC server listening");
+        loop {
+            match listener.accept().await {
+                Ok((stream, _addr)) => {
+                    let pending = Arc::clone(&self.pending);
+                    let gui_writer = Arc::clone(&self.gui_writer);
+
+                    // 检查是否已有 GUI 客户端。
+                    // 用 try_lock 避免阻塞 accept 循环；如果锁被占用就放通并让
+                    // handle_connection 内部处理（竞态概率极低）。
+                    {
+                        let mut guard = gui_writer.lock().await;
+                        if guard.is_some() {
+                            warn!("second GUI client attempted to connect; rejecting");
+                            // 直接 drop stream 关闭连接，不 spawn 处理。
+                            drop(stream);
+                            continue;
+                        }
+                        // 还没有 GUI 客户端——创建 mpsc 通道，把发送端存入 gui_writer，
+                        // 接收端传给 handle_connection 用于写回 GUI。
+                        let (tx, rx) = mpsc::channel::<String>(32);
+                        *guard = Some(tx);
+                        drop(guard);
+
+                        tokio::spawn(async move {
+                            if let Err(e) =
+                                handle_connection(stream, pending, gui_writer.clone(), rx).await
+                            {
+                                error!("IPC connection error: {e}");
+                            }
+                            // 连接断开后清理 gui_writer，下一个 GUI 可以重连。
+                            let mut w = gui_writer.lock().await;
+                            *w = None;
+                            info!("GUI client disconnected; gui_writer cleared");
+                        });
+                    }
+                }
+                Err(e) => {
+                    error!("IPC accept error: {e}");
+                    break;
+                }
+            }
+        }
+    }
+
+    /// 向已连接的 GUI 发送决策请求，等待响应或超时。
+    ///
+    /// # 行为
+    ///
+    /// - 如果没有 GUI 客户端连接：**立即 fallback**，不等超时。
+    ///   （等超时无意义——没人能决策。）
+    /// - 如果 GUI 写通道已满或 GUI 进程崩溃（mpsc send 失败）：立即 fallback。
+    /// - 如果 GUI 在 `timeout` 内回复：返回 GUI 的决策。
+    /// - 如果超时：按 `default_on_timeout` 构造兜底响应，并从 pending map 清理。
+    pub async fn request_decision(
+        &self,
+        req: DecisionRequest,
+        timeout: Duration,
+    ) -> Result<DecisionResponse, IpcError> {
+        let request_id = req.request_id;
+        let default_on_timeout = req.default_on_timeout;
+
+        // 1. 检查 GUI 是否已连接。
+        let sender = {
+            let guard = self.gui_writer.lock().await;
+            guard.clone()
+        };
+
+        let Some(sender) = sender else {
+            // 没有 GUI——立即 fallback，不消耗超时时间。
+            debug!(%request_id, "no GUI client connected; immediate fallback");
+            return Ok(make_timeout_fallback(request_id, default_on_timeout));
+        };
+
+        // 2. 注册 oneshot channel，等待 GUI 回复。
+        let (tx, rx) = oneshot::channel::<DecisionResponse>();
+        {
+            let mut map = self.pending.lock().await;
+            map.insert(request_id, tx);
+        }
+
+        // 3. 通过 mpsc 通道把请求推到 handle_connection 的写循环，
+        //    再由写循环写入真正的 GUI socket 连接。
+        let rpc_req = crate::protocol::jsonrpc::Request::call(
+            "request_decision",
+            serde_json::to_value(&req)?,
+            serde_json::Value::String(request_id.to_string()),
+        );
+        let mut payload = serde_json::to_string(&rpc_req)?;
+        payload.push('\n');
+
+        if let Err(_e) = sender.send(payload).await {
+            // GUI 写通道关闭（GUI 进程崩溃或通道满），立即 fallback。
+            warn!(%request_id, "GUI writer channel closed; immediate fallback");
+            self.pending.lock().await.remove(&request_id);
+            return Ok(make_timeout_fallback(request_id, default_on_timeout));
+        }
+
+        // 4. 等待 GUI 回复或超时。
+        match tokio::time::timeout(timeout, rx).await {
+            Ok(Ok(resp)) => Ok(resp),
+            Ok(Err(_)) => {
+                // oneshot sender 已丢弃（handle_connection 因断线退出），走超时兜底。
+                warn!(%request_id, "decision sender dropped (GUI disconnected); fallback");
+                Ok(make_timeout_fallback(request_id, default_on_timeout))
+            }
+            Err(_elapsed) => {
+                // 超时，清理 pending map。
+                self.pending.lock().await.remove(&request_id);
+                warn!(%request_id, "decision timeout");
+                Ok(make_timeout_fallback(request_id, default_on_timeout))
+            }
+        }
+    }
+
+    /// 供测试使用：直接注入一个决策响应，模拟 GUI 回调。
+    pub async fn inject_decision(&self, resp: DecisionResponse) {
+        let mut map = self.pending.lock().await;
+        if let Some(tx) = map.remove(&resp.request_id) {
+            let _ = tx.send(resp);
+        }
+    }
+}
+
+/// 处理单个 GUI 长连接。
+///
+/// 同时管理两个方向：
+/// - **读方向**：从 GUI 读换行分隔的 JSON-RPC response，派发到 `pending` map。
+/// - **写方向**：从 `write_rx` mpsc 通道读取待发送的帧，写入 GUI socket。
+///
+/// 任一方向出错（GUI 断线 / 写失败）都会退出，调用方负责清理 `gui_writer`。
+async fn handle_connection(
+    stream: UnixStream,
+    pending: PendingMap,
+    gui_writer: GuiWriter,
+    mut write_rx: mpsc::Receiver<String>,
+) -> Result<(), IpcError> {
+    info!("GUI client connected");
+
+    let (read_half, mut write_half) = stream.into_split();
+    let mut lines = BufReader::new(read_half).lines();
+
+    loop {
+        tokio::select! {
+            // 读方向：GUI 发来 decision_response。
+            line_result = lines.next_line() => {
+                match line_result? {
+                    None => {
+                        // GUI 关闭连接。
+                        info!("GUI client closed connection");
+                        break;
+                    }
+                    Some(line) => {
+                        let line = line.trim().to_owned();
+                        if line.is_empty() {
+                            continue;
+                        }
+                        debug!(raw = %line, "received IPC message from GUI");
+                        dispatch_response(&line, &pending).await;
+                    }
+                }
+            }
+
+            // 写方向：主代理 push request_decision 给 GUI。
+            msg = write_rx.recv() => {
+                match msg {
+                    None => {
+                        // 发送端已丢弃（IpcServer 被 drop），退出。
+                        debug!("GUI write channel closed");
+                        break;
+                    }
+                    Some(payload) => {
+                        if let Err(e) = write_half.write_all(payload.as_bytes()).await {
+                            warn!("failed to write to GUI socket: {e}");
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 连接断开：把所有 pending oneshot 全部触发 fallback（drop sender）。
+    // 丢弃 sender 会让 rx 收到 Err(RecvError)，request_decision 走 fallback。
+    let mut map = pending.lock().await;
+    let count = map.len();
+    if count > 0 {
+        warn!(
+            pending_count = count,
+            "GUI disconnected with pending requests; dropping all"
+        );
+        map.clear(); // 清空 map，sender 被 drop，所有等待者收到 Err 并 fallback。
+    }
+    // gui_writer 由 run() 的 spawn closure 在此函数返回后清理。
+    drop(gui_writer); // 显式 drop 避免编译器警告。
+
+    Ok(())
+}
+
+/// 解析 GUI 发来的一行 JSON-RPC response 并派发到 pending map。
+async fn dispatch_response(line: &str, pending: &PendingMap) {
+    let rpc: crate::protocol::jsonrpc::Response = match serde_json::from_str(line) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!("failed to parse IPC response from GUI: {e}");
+            return;
+        }
+    };
+
+    if let Some(err_obj) = &rpc.error {
+        error!(
+            code = err_obj.code,
+            message = %err_obj.message,
+            "GUI returned rpc error"
+        );
+        return;
+    }
+
+    if let Some(result) = rpc.result {
+        match serde_json::from_value::<DecisionResponse>(result) {
+            Ok(resp) => {
+                let mut map = pending.lock().await;
+                if let Some(tx) = map.remove(&resp.request_id) {
+                    let _ = tx.send(resp);
+                } else {
+                    warn!(
+                        request_id = %resp.request_id,
+                        "no pending request for this decision"
+                    );
+                }
+            }
+            Err(e) => {
+                warn!("failed to deserialize DecisionResponse: {e}");
+            }
+        }
+    }
+}
+
+fn make_timeout_fallback(
+    request_id: Uuid,
+    default_on_timeout: DefaultOnTimeout,
+) -> DecisionResponse {
+    let action = match default_on_timeout {
+        DefaultOnTimeout::Block => DecisionAction::Deny,
+        DefaultOnTimeout::Allow => DecisionAction::Allow,
+        DefaultOnTimeout::Redact => DecisionAction::RedactAndAllow,
+    };
+    DecisionResponse {
+        request_id,
+        decision: action,
+        decided_at: Utc::now(),
+        by_user: false,
+        remember: false,
+    }
+}

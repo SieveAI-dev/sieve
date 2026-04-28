@@ -20,6 +20,8 @@ entropy_min = 4.5
 keywords = ["sk-ant-api03"]
 allowlist_regexes = ['sk-ant-api03-[xX]{5,}']
 allowlist_stopwords = []
+disposition = "auto_redact"
+default_on_timeout = "redact"
 
 # ---------------------------------------------------------------------------
 # OUT-02: OpenAI API Key
@@ -37,6 +39,8 @@ entropy_min = 4.5
 keywords = ["T3BlbkFJ"]
 allowlist_regexes = []
 allowlist_stopwords = []
+disposition = "auto_redact"
+default_on_timeout = "redact"
 
 # ---------------------------------------------------------------------------
 # OUT-03: AWS Access Key ID
@@ -52,6 +56,8 @@ entropy_min = 3.0
 keywords = ["AKIA", "ASIA", "ABIA", "ACCA"]
 allowlist_regexes = []
 allowlist_stopwords = ["AKIAIOSFODNN7EXAMPLE"]  # AWS 官方文档示例 key
+disposition = "auto_redact"
+default_on_timeout = "redact"
 
 # ---------------------------------------------------------------------------
 # OUT-04: GitHub Personal Access Token
@@ -67,6 +73,8 @@ entropy_min = 4.0
 keywords = ["ghp_", "gho_", "ghu_", "ghs_", "ghr_"]
 allowlist_regexes = []
 allowlist_stopwords = []
+disposition = "auto_redact"
+default_on_timeout = "redact"
 
 # ---------------------------------------------------------------------------
 # OUT-05: Google Cloud API Key
@@ -82,6 +90,8 @@ entropy_min = 4.0
 keywords = ["AIza"]
 allowlist_regexes = []
 allowlist_stopwords = []
+disposition = "auto_redact"
+default_on_timeout = "redact"
 
 # ---------------------------------------------------------------------------
 # OUT-06: JWT Token
@@ -98,6 +108,9 @@ entropy_min = 3.5
 keywords = ["eyJ"]
 allowlist_regexes = []
 allowlist_stopwords = []
+disposition = "gui_popup"
+timeout_seconds = 15
+default_on_timeout = "redact"
 
 # ---------------------------------------------------------------------------
 # OUT-07: PEM Private Key Header
@@ -114,6 +127,9 @@ entropy_min = 0.0
 keywords = ["-----BEGIN"]
 allowlist_regexes = []
 allowlist_stopwords = []
+disposition = "gui_popup"
+timeout_seconds = 60
+default_on_timeout = "block"
 
 # ---------------------------------------------------------------------------
 # OUT-08: Stripe Live Secret / Publishable / Restricted Key
@@ -129,6 +145,9 @@ entropy_min = 3.5
 keywords = ["_live_"]
 allowlist_regexes = ['(?i)test|example']
 allowlist_stopwords = []
+disposition = "gui_popup"
+timeout_seconds = 15
+default_on_timeout = "redact"
 
 # ---------------------------------------------------------------------------
 # OUT-09: Slack Token
@@ -144,6 +163,9 @@ entropy_min = 3.0
 keywords = ["xoxb", "xoxp", "xoxa", "xoxs"]
 allowlist_regexes = []
 allowlist_stopwords = []
+disposition = "gui_popup"
+timeout_seconds = 60
+default_on_timeout = "block"
 
 # ---------------------------------------------------------------------------
 # OUT-10: OpenSSH Private Key Header
@@ -159,6 +181,9 @@ entropy_min = 0.0
 keywords = ["BEGIN OPENSSH"]
 allowlist_regexes = []
 allowlist_stopwords = []
+disposition = "gui_popup"
+timeout_seconds = 60
+default_on_timeout = "block"
 
 # ---------------------------------------------------------------------------
 # OUT-11: Discord Bot Token
@@ -175,6 +200,7 @@ entropy_min = 3.5
 keywords = ["."]
 allowlist_regexes = []
 allowlist_stopwords = []
+disposition = "status_bar"
 
 # ---------------------------------------------------------------------------
 # OUT-09（BIP39 助记词）在 engine_adapter 中通过 second-pass 实现，

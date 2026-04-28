@@ -1,6 +1,6 @@
 # Sieve · Cursor 项目规则
 
-> 本文件是 Sieve 项目的 Cursor 工作规则，分两层：**文档规则**（沿用用户级 `.cursorrules` 模板骨架）+ **Sieve 工程硬约束**（来自 PRD v1.3 §9 与项目级共识）。
+> 本文件是 Sieve 项目的 Cursor 工作规则，分两层：**文档规则**（沿用用户级 `.cursorrules` 模板骨架）+ **Sieve 工程硬约束**（来自 PRD v1.5 §9 与项目级共识）。
 >
 > 当前项目状态：**设计阶段（Pre-Code）**，所有约束按"将开始写代码"语境提前生效。
 
@@ -13,7 +13,7 @@
 1. **改代码前必须先读** `@docs/` 中相关文档（需求 → 设计 → API），不盲目重构
 2. **完成代码修改后必须更新所有关联文档**，禁止单独更新一个文档而忽略关联文档
 3. **临时文档**使用前缀 `_temp-` 或 `_draft-`，存放于 `docs/_temp/`，**任务完成后 24 小时内删除或归档**
-4. PRD v1.3 全文不复制到其他文档，所有跨文档引用一律使用相对路径链接
+4. PRD v1.5 全文不复制到其他文档，所有跨文档引用一律使用相对路径链接
 
 ### 1.2 文档位置约定
 
@@ -43,7 +43,7 @@ docs/
 ```
 README.md
   ↓ 链接到
-docs/requirements/PRD-sieve.md → docs/prd/sieve-prd-v1.3.md（活动版本）
+docs/requirements/PRD-sieve.md → docs/prd/sieve-prd-v1.5.md（活动版本）
   ↓ 关联
 docs/design/architecture.md
   ↓ 约束
@@ -69,7 +69,7 @@ docs/changelog/CHANGELOG.md
 
 ---
 
-## 二、Sieve 工程硬约束（来自 PRD v1.3 §9）
+## 二、Sieve 工程硬约束（来自 PRD v1.5 §9，十三条）
 
 每条都是"做错就死"，**不是优化项**，**不接受任何阶段性妥协**：
 
@@ -81,8 +81,11 @@ docs/changelog/CHANGELOG.md
 6. **Sieve 自身的供应链必须 sigstore + reproducible build + pinned dependencies**——LiteLLM 事件就是先例。**这件事比检测精度重要**，且要做成产品营销 talking point（详见 PRD §1.2 第 4 句）
 7. **Critical 拦截 FP 必须 < 0.5%**——公理 12，不可妥协；超过即用户禁用产品
 8. **Critical 在所有版本（包括降级模式）不可关闭**——产品安全承诺，不是用户偏好
-9. **Phase 1 只做 Claude Code，UnifiedMessage 接口预留**——公理 7，**不为想象用户写代码**；OpenAI / Gemini / OpenRouter 接入等真有用户主动要再做
+9. **Phase 1 GA 适配三家：Claude Code / OpenClaw / Hermes，UnifiedMessage 真实双协议**——Anthropic Messages API + OpenAI Chat Completions 都跑通；Gemini / Mistral 等其他协议推 Phase 2，真有用户主动要再做
 10. **Week 12 GA 时一次性公开 repo + 代码 + 文档，GA 前完全私有**——见 [ADR-011](./docs/design/ADR-011-private-until-ga.md)；sigstore + reproducible build pipeline GA 前照常跑通（关联 ADR-006）
+11. **不在 Anthropic API 协议层撒谎**——不伪造 tool_use / stop_reason / id / usage / type；拦截发生时允许截 SSE 流注入 `sieve_blocked` event（Sieve 自报，不是冒充模型）；keep-alive comment 行不算伪造
+12. **不装本地 CA 做 MITM**——Network Extension / 本地 CA 注入 / 系统 proxy 修改推 Phase 3 选购，Phase 1/2 不做
+13. **出站脱敏不打断工作流**——OUT-01~05/12 高频类自动脱敏 + 状态栏 5s 通知，不弹窗；弹窗次数过多用户直接禁用产品
 
 ---
 
@@ -103,13 +106,15 @@ docs/changelog/CHANGELOG.md
 
 ### 3.3 模块边界
 
-按 PRD §6 分三个 crate：
+按 PRD §6 分五个 crate：
 
 | crate | 职责 | 不允许做 |
 |-------|------|---------|
 | `sieve-core` | Pipeline / SSE Parser / UnifiedMessage / Forwarder | 任何 CLI / TUI / 配置加载 |
 | `sieve-rules` | 规则定义 / vectorscan 编译 / 匹配引擎 / Ed25519 验证 | 任何网络 IO |
 | `sieve-cli` | 入口 / 配置 / 弹窗 / 审计日志（SQLite） | 直接做规则匹配 |
+| `sieve-ipc` | IPC 协议（JSON-RPC over Unix socket + 文件锁 + pending/decisions 文件 IO） | 不参与请求处理 / 不依赖 sieve-core 业务逻辑 |
+| `sieve-hook` | 极简 PreToolUse hook 二进制，启动时延 < 50ms | 不依赖 sieve-core / sieve-rules / sieve-ipc / tokio |
 
 跨 crate 调用走显式 trait，避免互相 import 实现细节。
 
@@ -128,7 +133,7 @@ docs/changelog/CHANGELOG.md
 | 明确需求 | 直接给方案 + 必要文档更新清单 |
 | 模糊需求 | 引用相关 PRD/设计文档 + 给最可能方案 + 1 个关键追问 |
 | 破坏性操作（删文件、改 schema、重构 crate 边界） | **先确认后执行**，给出回退方案 |
-| 涉及 PRD §9 十条硬约束 | **任何放宽都必须显式让用户确认**，默认不允许 |
+| 涉及 PRD §9 十三条硬约束 | **任何放宽都必须显式让用户确认**，默认不允许 |
 
 ---
 
@@ -136,7 +141,7 @@ docs/changelog/CHANGELOG.md
 
 - [ ] `cargo fmt --check` + `cargo clippy -- -D warnings` 通过
 - [ ] 涉及 SSE / 规则 / 工具调用判定的改动有对应 fuzz / 单元测试
-- [ ] PRD §9 十条硬约束未被绕过
+- [ ] PRD §9 十三条硬约束未被绕过
 - [ ] CHANGELOG 已更新（依赖升级 / 行为变更 / 检测项 ID 变化必记）
 - [ ] 关联文档（requirements / design / api）已同步
 - [ ] 临时文档（`_temp-` / `_draft-`）已清理或归档
@@ -146,6 +151,6 @@ docs/changelog/CHANGELOG.md
 ## 参考
 
 - 项目入口：[README.md](./README.md)
-- 当前活动 PRD：[docs/prd/sieve-prd-v1.3.md](./docs/prd/sieve-prd-v1.3.md)
+- 当前活动 PRD：[docs/prd/sieve-prd-v1.5.md](./docs/prd/sieve-prd-v1.5.md)
 - 需求入口：[docs/requirements/PRD-sieve.md](./docs/requirements/PRD-sieve.md)
 - 用户故事：[docs/requirements/user-stories.md](./docs/requirements/user-stories.md)

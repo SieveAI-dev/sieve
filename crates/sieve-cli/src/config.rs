@@ -4,12 +4,31 @@
 //! `tls_verify_upstream`。
 //! Week 2 新增：`rules_path` / `sieveignore_path` / `dry_run`。
 //! Week 3 新增：`inbound_rules_path`（入站规则路径）。
+//! Week 5 新增：`ipc_socket_path` / `pending_dir` / `decisions_dir` /
+//!              `preset` / `launchd_plist_path` / `gui_socket_enabled` /
+//!              `audit_db_path`（SPEC-003 / data-model.md §5）。
 //! `#[serde(deny_unknown_fields)]` 确保配置文件中的危险字段（如
 //! `disable_critical`）被强制拒绝，不会静默忽略。
 
 use anyhow::{anyhow, Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+
+/// 检测预设级别（SPEC-003 / data-model.md §5）。
+///
+/// - `Strict`：所有规则最高灵敏度
+/// - `Default`：推荐平衡配置（默认）
+/// - `Relaxed`：降低误报，适合受信任环境
+/// - `Custom`：完全自定义（忽略内置默认值）
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Preset {
+    Strict,
+    #[default]
+    Default,
+    Relaxed,
+    Custom,
+}
 
 /// Sieve 顶层配置。
 ///
@@ -57,6 +76,75 @@ pub struct Config {
     /// 入站规则 toml 路径（Week 3，默认 `crates/sieve-rules/rules/inbound.toml`）。
     #[serde(default)]
     pub inbound_rules_path: Option<PathBuf>,
+
+    // ── Week 5 新字段（SPEC-003 / data-model.md §5）────────────────────────
+    // Week 6+ 会在 daemon 启动时读取这些字段；当前仅反序列化使用，暂时 allow dead_code。
+    /// Unix socket 路径（GUI / sieve-hook 连接用，默认 `~/.sieve/ipc.sock`）。
+    #[serde(default = "default_ipc_socket")]
+    #[allow(dead_code)]
+    pub ipc_socket_path: PathBuf,
+
+    /// 待决策文件目录（默认 `~/.sieve/pending/`）。
+    #[serde(default = "default_pending_dir")]
+    #[allow(dead_code)]
+    pub pending_dir: PathBuf,
+
+    /// 决策文件目录（默认 `~/.sieve/decisions/`）。
+    #[serde(default = "default_decisions_dir")]
+    #[allow(dead_code)]
+    pub decisions_dir: PathBuf,
+
+    /// 检测预设级别（默认 `Default`）。
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub preset: Preset,
+
+    /// launchd plist 路径（macOS，默认 `~/Library/LaunchAgents/com.sieve.daemon.plist`）。
+    #[serde(default = "default_launchd_plist")]
+    #[allow(dead_code)]
+    pub launchd_plist_path: PathBuf,
+
+    /// 是否启用 GUI Unix socket（默认 `false`；Week 6+ 启用）。
+    #[serde(default = "default_gui_socket_enabled")]
+    #[allow(dead_code)]
+    pub gui_socket_enabled: bool,
+
+    /// SQLite 审计数据库路径（Week 5；`None` 时沿用 `log_path` 或 `~/.sieve/audit.db`）。
+    #[serde(default)]
+    pub audit_db_path: Option<PathBuf>,
+}
+
+fn home_path() -> PathBuf {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn sieve_home() -> PathBuf {
+    home_path().join(".sieve")
+}
+
+fn default_ipc_socket() -> PathBuf {
+    sieve_home().join("ipc.sock")
+}
+
+fn default_pending_dir() -> PathBuf {
+    sieve_home().join("pending")
+}
+
+fn default_decisions_dir() -> PathBuf {
+    sieve_home().join("decisions")
+}
+
+fn default_launchd_plist() -> PathBuf {
+    home_path()
+        .join("Library")
+        .join("LaunchAgents")
+        .join("com.sieve.daemon.plist")
+}
+
+fn default_gui_socket_enabled() -> bool {
+    false
 }
 
 fn default_upstream() -> String {
@@ -87,6 +175,13 @@ impl Default for Config {
             sieveignore_path: None,
             dry_run: false,
             inbound_rules_path: None,
+            ipc_socket_path: default_ipc_socket(),
+            pending_dir: default_pending_dir(),
+            decisions_dir: default_decisions_dir(),
+            preset: Preset::default(),
+            launchd_plist_path: default_launchd_plist(),
+            gui_socket_enabled: default_gui_socket_enabled(),
+            audit_db_path: None,
         }
     }
 }
@@ -175,16 +270,20 @@ impl Config {
             .map_err(|e| anyhow!("invalid bind addr/port: {e}"))
     }
 
-    /// 解析审计日志路径。`log_path` 显式给定时直接用,否则回退到 `~/.sieve/audit.db`。
+    /// 解析审计日志路径。优先级：`audit_db_path` > `log_path` > `~/.sieve/audit.db`。
     ///
     /// # Errors
     /// `$HOME` 不存在或不可识别时返回错误。
     pub fn audit_db_path(&self) -> Result<PathBuf> {
+        if let Some(p) = &self.audit_db_path {
+            return Ok(p.clone());
+        }
         if let Some(p) = &self.log_path {
             return Ok(p.clone());
         }
-        let home = std::env::var_os("HOME")
-            .ok_or_else(|| anyhow!("HOME env var not set; specify log_path explicitly"))?;
+        let home = std::env::var_os("HOME").ok_or_else(|| {
+            anyhow!("HOME env var not set; specify audit_db_path or log_path explicitly")
+        })?;
         Ok(PathBuf::from(home).join(".sieve").join("audit.db"))
     }
 }
@@ -292,6 +391,54 @@ mod tests {
         assert_eq!(
             c.resolved_sieveignore_path(),
             PathBuf::from("/my/.sieveignore")
+        );
+    }
+
+    // ── R2-#6 audit_db_path 优先级链测试 ────────────────────────────────────
+
+    #[test]
+    fn audit_db_path_explicit_field_wins() {
+        // audit_db_path 字段优先于 log_path 和默认值
+        let toml_str = r#"
+            upstream_url = "https://api.anthropic.com"
+            port = 11453
+            audit_db_path = "/custom/audit.db"
+            log_path = "/old/log.db"
+        "#;
+        let c: Config = toml::from_str(toml_str).unwrap();
+        let path = c.audit_db_path().unwrap();
+        assert_eq!(
+            path,
+            PathBuf::from("/custom/audit.db"),
+            "audit_db_path 字段应优先于 log_path"
+        );
+    }
+
+    #[test]
+    fn audit_db_path_falls_back_to_log_path() {
+        // 没有 audit_db_path 时应回退到 log_path
+        let toml_str = r#"
+            upstream_url = "https://api.anthropic.com"
+            port = 11453
+            log_path = "/old/log.db"
+        "#;
+        let c: Config = toml::from_str(toml_str).unwrap();
+        let path = c.audit_db_path().unwrap();
+        assert_eq!(path, PathBuf::from("/old/log.db"), "应回退到 log_path");
+    }
+
+    #[test]
+    fn audit_db_path_falls_back_to_default() {
+        // 两个字段都没有时，应回退到 ~/.sieve/audit.db
+        // 假设 HOME 已设置（CI 环境通常有）
+        if std::env::var_os("HOME").is_none() {
+            return; // HOME 未设置时跳过
+        }
+        let c = Config::default();
+        let path = c.audit_db_path().unwrap();
+        assert!(
+            path.ends_with(".sieve/audit.db"),
+            "默认路径应以 .sieve/audit.db 结尾，实际: {path:?}"
         );
     }
 }

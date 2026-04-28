@@ -1,7 +1,7 @@
 # Sieve 部署与运维指南
 
 > **状态：设计阶段（Pre-Code）。**
-> Sieve 尚未发布任何二进制版本。本文反映 Week 12 GA 后的目标交付形态（参见 [PRD §10 12 周里程碑](../prd/sieve-prd-v1.3.md#10-12-周里程碑8-周-dogfood--4-周闭测)）。Phase A dogfood 期间仅 doskey 自用 + Phase B 闭测白名单（5-10 人）使用，**不接受外部安装**。
+> Sieve 尚未发布任何二进制版本。本文反映 Week 12 GA 后的目标交付形态（参见 [PRD §10 12 周里程碑](../prd/sieve-prd-v1.5.md#10-12-周里程碑8-周-dogfood--4-周闭测)）。Phase A dogfood 期间仅 doskey 自用 + Phase B 闭测白名单（5-10 人）使用，**不接受外部安装**。
 
 ---
 
@@ -24,71 +24,56 @@
 
 ### 2.1 macOS
 
-通过自建 Homebrew tap：
+Phase 1 GA 交付形态：**三件套 .dmg**（Native GUI App + 后台代理 + sieve-hook）。
 
-```bash
-brew tap doskey/sieve
-brew install sieve
-```
+**安装步骤**：
 
-> tap 仓库 `doskey/homebrew-sieve` 在 GA 当天公开。
+1. 从 [GitHub Releases](https://github.com/doskey/sieve/releases) 下载 `Sieve-<version>.dmg`
 
-### 2.2 Linux（推荐：从 GitHub Releases 下载二进制 + cosign 验证）
+2. cosign 验证 .dmg 签名（**必做**）：
+   ```bash
+   cosign verify-blob \
+     --certificate-identity-regexp '^https://github.com/doskey/sieve/\.github/workflows/release\.yml@refs/tags/v[0-9.]+$' \
+     --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+     --bundle Sieve-<version>.dmg.sigstore \
+     Sieve-<version>.dmg
+   # 期望输出：Verified OK
+   ```
 
-```bash
-# 1. 下载二进制 + sigstore bundle
-SIEVE_VERSION=v0.1.0
-curl -LO https://github.com/doskey/sieve/releases/download/${SIEVE_VERSION}/sieve-linux-amd64
-curl -LO https://github.com/doskey/sieve/releases/download/${SIEVE_VERSION}/sieve-linux-amd64.sigstore
+3. 双击挂载 .dmg，将 Sieve.app 拖入 `/Applications`
 
-# 2. 用 cosign 验证（详见 §3）
-cosign verify-blob \
-  --certificate-identity-regexp '^https://github.com/doskey/sieve/' \
-  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-  --bundle sieve-linux-amd64.sigstore \
-  sieve-linux-amd64
+4. 首次启动 Sieve.app，按引导运行初始化：
+   ```bash
+   sieve setup
+   ```
 
-# 3. 验证通过后安装
-chmod +x sieve-linux-amd64
-sudo install -m 0755 sieve-linux-amd64 /usr/local/bin/sieve
-sieve --version
-```
+5. `setup` 自动完成以下操作（详见 [SPEC-003](../specs/SPEC-003-setup-doctor-uninstall.md)）：
+   - 改写 Claude Code `settings.json`，注册 `PreToolUse` hook（sieve-hook 二进制）
+   - 写入 `ANTHROPIC_BASE_URL=http://127.0.0.1:11453` 到 shell 配置
+   - 注册 `~/Library/LaunchAgents/tools.sieve.agent.plist`，launchd 接管后台代理
+
+6. `setup` 完成后自动执行 `sieve doctor` 验证所有组件就位
 
 > **Sieve 不提供 `curl ... | sh` 一键安装脚本。**
-> 远程脚本盲跑是 [PRD §9](../prd/sieve-prd-v1.3.md#9-工程上必须做对的硬约束) 反对的攻击面（[IN-GEN-02](../prd/sieve-prd-v1.3.md#52-入站检测sieve-真正的护城河)），自己更不能反着做。
+> 远程脚本盲跑是 [PRD §9](../prd/sieve-prd-v1.5.md#9-工程上必须做对的硬约束) 反对的攻击面，自己不能反着做。
 
-### 2.3 Windows（**Tier 2** —— Week 6+ 才出二进制）
+> Homebrew tap（`brew install sieve`）推 Phase 2，当前不可用。
 
-> ⚠️ **Tier 2 平台限制**（[ADR-006](../design/ADR-006-sigstore-reproducible-build.md)）：
-> - **Week 1–5** 完全不提供 Windows 二进制（dogfood 阶段 macOS / Linux 优先）；
-> - **Week 6+** 出二进制 + sigstore 签名（与"Windows 二进制可用"承诺同步）；
-> - **reproducible build 推到 Phase 2 单独立项**（MSVC 时间戳 + 动态链接 CRT 工程量大）；
-> - Tier 1（macOS / Linux）的可验证性承诺不动，Tier 2 用户暂时只能验证签名、无法独立复现字节相同的二进制。
+### 2.2 Linux
 
-GitHub Releases 提供 `.exe` + sigstore bundle（同 Linux 流程）+ Windows Authenticode 签名（额外）：
+Phase 1 不支持 Linux。Phase 2 计划：Linux GUI App 与代理同源构建，sieve-hook 行为不变。Linux 用户暂时无法使用 Sieve。
 
-```powershell
-# 1. cosign 验证（与 Linux 一致，推荐）
-cosign verify-blob `
-  --certificate-identity-regexp '^https://github.com/doskey/sieve/' `
-  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' `
-  --bundle .\sieve-windows-amd64.exe.sigstore `
-  .\sieve-windows-amd64.exe
+### 2.3 Windows
 
-# 2. Authenticode 签名（Windows 原生信任链，二选一即可）
-Get-AuthenticodeSignature .\sieve-windows-amd64.exe
-# 输出 Status 必须为 Valid，SignerCertificate.Subject 必须匹配 doskey 证书
-```
-
-> Phase 1 GA 时 Windows 仅承诺"二进制 + 签名可用"，**不承诺 reproducible build**；以 Releases 页面声明为准。
+Phase 1 不支持 Windows。Phase 2 计划。
 
 ### 2.4 配置目录
 
+Phase 1 仅 macOS：
 
-| OS            | 路径                 |
-| ------------- | ------------------ |
-| Linux / macOS | `~/.sieve/`        |
-| Windows       | `%APPDATA%\sieve\` |
+| OS | 路径 |
+|----|------|
+| macOS | `~/.sieve/` |
 
 
 子目录 / 文件：
@@ -111,19 +96,19 @@ Get-AuthenticodeSignature .\sieve-windows-amd64.exe
 
 ## 3. 二进制签名验证（**必做**）
 
-> Sieve 把"自证清白"作为产品定位的一部分（[PRD §1.2 第 4 句](../prd/sieve-prd-v1.3.md#12-四句话核心叙事v13-加第-4-句)）。**用户不应仅凭信任安装 Sieve，而应能自己验证它。**
+> Sieve 把"自证清白"作为产品定位的一部分（[PRD §1.2 第 4 句](../prd/sieve-prd-v1.5.md#12-四句话核心叙事v13-加第-4-句)）。**用户不应仅凭信任安装 Sieve，而应能自己验证它。**
 
 ### 3.1 sigstore / cosign 验证
 
 **首次安装必跑。**
 
 ```bash
-# Linux 示例
+# macOS 示例
 cosign verify-blob \
   --certificate-identity-regexp '^https://github.com/doskey/sieve/\.github/workflows/release\.yml@refs/tags/v[0-9.]+$' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-  --bundle sieve-linux-amd64.sigstore \
-  sieve-linux-amd64
+  --bundle Sieve-<version>.dmg.sigstore \
+  Sieve-<version>.dmg
 
 # 期望输出
 # Verified OK
@@ -140,8 +125,8 @@ cosign verify-blob \
 每次签名都会写入公开透明日志 [rekor](https://search.sigstore.dev/)：
 
 ```bash
-# 用二进制 SHA-256 查询所有签名记录
-SHA=$(sha256sum sieve-linux-amd64 | awk '{print $1}')
+# 用 .dmg SHA-256 查询所有签名记录
+SHA=$(shasum -a 256 Sieve-<version>.dmg | awk '{print $1}')
 rekor-cli search --sha $SHA
 
 # 或在浏览器搜索
@@ -150,22 +135,22 @@ open "https://search.sigstore.dev/?hash=$SHA"
 
 任何对 Sieve 二进制的"重签名"会在 rekor 留痕，无法静默替换。
 
-### 3.3 Reproducible Build 验证（强烈推荐，**Tier 1 平台**）
+### 3.3 Reproducible Build 验证（强烈推荐，**macOS only**）
 
-> 仅 Tier 1 平台（macOS / Linux）支持，Windows 见 §2.3 Tier 2 说明。
+> Phase 1 仅支持 macOS（`aarch64-apple-darwin` / `x86_64-apple-darwin`）。Linux / Windows 推 Phase 2。
 
 ```bash
 # 1. clone 当前 release tag
 git clone https://github.com/doskey/sieve.git --branch v0.1.0
 cd sieve
 
-# 2. 在干净 docker 容器内复构建（脚本待写于 GA 前）
-./scripts/repro-build.sh linux-amd64
-# 或 macos-arm64 / macos-amd64
+# 2. 在干净环境内复构建（脚本待写于 GA 前）
+./scripts/repro-build.sh macos-arm64
+# 或 macos-amd64
 
 # 3. 对比 SHA-256
-sha256sum target/repro/sieve-linux-amd64
-sha256sum ../sieve-linux-amd64
+shasum -a 256 target/repro/sieve-macos-arm64
+shasum -a 256 ../Sieve-<version>.dmg
 
 # 期望：两个 SHA-256 完全一致
 ```
@@ -176,20 +161,22 @@ sha256sum ../sieve-linux-amd64
 
 ## 4. 配置 Claude Code 接入
 
+**推荐方案**：`sieve setup` 自动处理，用户无需手动操作。
+
+`setup` 改写 Claude Code `~/.claude/settings.json`，插入：
+- `hooks.PreToolUse`：注册 sieve-hook 二进制路径（详见 [SPEC-003](../specs/SPEC-003-setup-doctor-uninstall.md)）
+- `env.ANTHROPIC_BASE_URL`：写入 `http://127.0.0.1:11453`
+
+**备用方案（开发者 dogfood）**：手动 export 仍有效：
+
 ```bash
 export ANTHROPIC_BASE_URL=http://127.0.0.1:11453
 export ANTHROPIC_AUTH_TOKEN=<your-real-anthropic-or-router-key>
 ```
 
-> Sieve 是中间层。**你原来的 Anthropic 官方 key / 中转站 key 仍然要给**，Sieve 只是把请求扫描后透传到上游。
+> 注意：手动方案不会注册 `PreToolUse` hook，意味着 Hook 类规则（IN-CR-02/03/04/05）的 fail-closed 拦截**不会触发**。仅推荐 dogfood / 调试用，**不推荐生产**。
 
-写入 `~/.zshrc` / `~/.bashrc` / `~/.config/fish/config.fish` 持久化：
-
-```bash
-# Sieve 接入
-export ANTHROPIC_BASE_URL=http://127.0.0.1:11453
-export ANTHROPIC_AUTH_TOKEN="$(cat ~/.config/anthropic/key)"   # 或其他 secret 管理
-```
+> Sieve 是中间层。原来的 Anthropic 官方 key / 中转站 key 仍然要给，Sieve 只做扫描后透传。
 
 API 参见 [API 参考 §1](../api/api-reference.md#1-反向代理端点对-claude-code)。
 
@@ -200,97 +187,36 @@ API 参见 [API 参考 §1](../api/api-reference.md#1-反向代理端点对-clau
 ### 5.1 前台调试
 
 ```bash
-sieve --config ~/.sieve/config.toml
+sieve start --config ~/.sieve/config.toml
 # Ctrl-C 退出
 ```
 
-适合：首次安装 / 调试 / 编写规则。
+适合：首次安装验证 / 开发调试 / 编写规则。
 
-### 5.2 macOS launchd
+### 5.2 macOS launchd（生产模式）
 
-将以下 plist 保存为 `~/Library/LaunchAgents/tools.sieve.agent.plist`：
+plist 内容由 `sieve setup` 自动写入 `~/Library/LaunchAgents/tools.sieve.agent.plist`，用户无需手写。
 
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>tools.sieve.agent</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/opt/homebrew/bin/sieve</string>
-        <string>--config</string>
-        <string>/Users/doskey/.sieve/config.toml</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>StandardOutPath</key>
-    <string>/Users/doskey/.sieve/logs/launchd.out.log</string>
-    <key>StandardErrorPath</key>
-    <string>/Users/doskey/.sieve/logs/launchd.err.log</string>
-</dict>
-</plist>
-```
-
-加载：
+手动管理（调试 / 重载时可用）：
 
 ```bash
-launchctl load ~/Library/LaunchAgents/tools.sieve.agent.plist
+# 查看状态
 launchctl list | grep sieve
-```
 
-卸载：
-
-```bash
+# 重启
 launchctl unload ~/Library/LaunchAgents/tools.sieve.agent.plist
+launchctl load ~/Library/LaunchAgents/tools.sieve.agent.plist
 ```
 
-### 5.3 Linux systemd（用户态）
-
-将以下保存为 `~/.config/systemd/user/sieve.service`：
-
-```ini
-[Unit]
-Description=Sieve local LLM traffic proxy
-Documentation=https://github.com/doskey/sieve
-
-[Service]
-ExecStart=/usr/local/bin/sieve --config %h/.sieve/config.toml
-Restart=on-failure
-RestartSec=2
-# Sieve 已强制 bind 127.0.0.1，systemd 不再额外加 NetworkNamespace
-PrivateTmp=true
-NoNewPrivileges=true
-
-[Install]
-WantedBy=default.target
-```
-
-启用：
-
+日志：
 ```bash
-systemctl --user daemon-reload
-systemctl --user enable --now sieve.service
-systemctl --user status sieve.service
+tail -f ~/.sieve/logs/launchd.out.log
+tail -f ~/.sieve/logs/launchd.err.log
 ```
 
-查看日志：
+### 5.3 sigstore CI（macOS only）
 
-```bash
-journalctl --user -u sieve.service -f
-```
-
-### 5.4 Windows 服务（占位 TODO Phase 1 后期）
-
-```
-TODO(Phase 1 后期)：
-- 用 sc.exe 注册 NT Service，binPath 指向 sieve.exe
-- 服务账号建议 LocalService，避免拿到用户 secret 的访问权
-- 详见 docs/design/ADR-009-windows-service.md（待写）
-```
+v1.4 起 CI 仅跑 macOS target（`aarch64-apple-darwin` + `x86_64-apple-darwin`）。Linux / Windows target 推 Phase 2 时再加。实际 CI 配置见 `.github/workflows/`，本节仅说明策略。
 
 ---
 
@@ -298,7 +224,7 @@ TODO(Phase 1 后期)：
 
 ### 6.1 默认端口
 
-`11453`（[PRD §6.1](../prd/sieve-prd-v1.3.md#61-phase-1-单-agent-架构只-claude-code)）。
+`11453`（[PRD §6.1](../prd/sieve-prd-v1.5.md#61-phase-1-单-agent-架构只-claude-code)）。
 
 ### 6.2 端口被占用时
 
@@ -323,7 +249,7 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:21453
 - ❌ `0.0.0.0` —— Sieve 启动时 schema 校验会拒绝
 - ❌ 任何公网 IP / LAN IP —— 同上
 
-> Sieve 完全本地运行是产品承诺（[PRD §1.1](../prd/sieve-prd-v1.3.md#11-一句话) / [§9 #2](../prd/sieve-prd-v1.3.md#9-工程上必须做对的硬约束)），暴露公网会**摧毁产品定位**。
+> Sieve 完全本地运行是产品承诺（[PRD §1.1](../prd/sieve-prd-v1.5.md#11-一句话) / [§9 #2](../prd/sieve-prd-v1.5.md#9-工程上必须做对的硬约束)），暴露公网会**摧毁产品定位**。
 
 ---
 
@@ -349,7 +275,7 @@ SIEVE_LOG_LEVEL=debug sieve --config ~/.sieve/config.toml
 
 `~/.sieve/audit.db`（**append-only**）：
 
-- 仅存 fingerprint + 元信息，**绝不存原始 prompt 内容**（[PRD §11.3](../prd/sieve-prd-v1.3.md#113-开源策略) / API 参考 §2.2.3）
+- 仅存 fingerprint + 元信息，**绝不存原始 prompt 内容**（[PRD §11.3](../prd/sieve-prd-v1.5.md#113-开源策略) / API 参考 §2.2.3）
 - schema 详见 [data-model.md](../design/data-model.md)
 
 ### 7.3 查询 CLI
@@ -369,17 +295,13 @@ sieve events --rule OUT-09 --limit 50
 ### 8.1 升级
 
 ```bash
-# Homebrew
-brew update && brew upgrade sieve
-
-# 二进制（Linux）
-# 1. 在新版本上重跑 §3.1 cosign 验证
-# 2. 替换前先停服务（避免 SQLite 锁）
-launchctl unload ~/Library/LaunchAgents/tools.sieve.agent.plist     # macOS
-systemctl --user stop sieve.service                                 # Linux
-sudo install -m 0755 sieve-linux-amd64 /usr/local/bin/sieve
+# macOS：下载新版 .dmg → 重跑 §3.1 cosign 验证 → 替换前先停服务
+launchctl unload ~/Library/LaunchAgents/tools.sieve.agent.plist
+# 双击新版 .dmg，拖入 Applications 覆盖
 launchctl load ~/Library/LaunchAgents/tools.sieve.agent.plist
-systemctl --user start sieve.service
+
+# Homebrew（Phase 2 可用时）
+# brew update && brew upgrade sieve
 ```
 
 ### 8.2 回滚
@@ -406,21 +328,33 @@ sieve self-rollback              # CLI 子命令，等价于：
 
 ## 9. 卸载
 
+推荐使用 `sieve uninstall`，按 `setup.log` 逐步回滚（详见 [SPEC-003](../specs/SPEC-003-setup-doctor-uninstall.md)）：
+
 ```bash
-# Homebrew
-brew uninstall sieve
-brew untap doskey/sieve
+# Step 1：dry-run 预览将要撤销的操作
+sieve uninstall --dry-run
 
-# 二进制
-sudo rm /usr/local/bin/sieve
+# Step 2：确认后执行
+sieve uninstall
 
-# 配置 + 审计（**注意：包含审计日志，建议先备份**）
+# sieve uninstall 自动完成：
+# - 从 Claude Code settings.json 移除 PreToolUse hook 注册
+# - 移除 ANTHROPIC_BASE_URL 环境变量注入
+# - unload + 删除 launchd plist
+# - 删除 /usr/local/bin/sieve（或安装路径）
+# - 不自动删除 ~/.sieve/（含审计日志），提示用户手动处理
+```
+
+审计日志（`~/.sieve/audit.db`）是用户本地资产，`sieve uninstall` **不自动删除**，需手动处理：
+
+```bash
+# 备份
 mv ~/.sieve ~/.sieve.bak.$(date +%Y%m%d)
-# 或彻底删除
+# 或彻底删除（不可恢复）
 # rm -rf ~/.sieve
 ```
 
-> 审计 DB (`audit.db`) 是用户的本地资产，删除前务必确认无后续合规 / 复盘需要。
+> 删除前确认无后续合规 / 复盘需要。
 
 ---
 
@@ -459,21 +393,21 @@ enabled = false
 
 ### 11.2 正式版定价
 
-- **[redacted] / 月**（[PRD §7.1](../prd/sieve-prd-v1.3.md#71-单一定价)）
+- **[redacted] / 月**（[PRD §7.1](../prd/sieve-prd-v1.5.md#71-单一定价)）
 - **年付 [redacted]0**（省 2 个月）
-- 支付通道：[redacted]（USDC / USDT）双通道（[PRD §11.5.1](../prd/sieve-prd-v1.3.md#1151-公司主体与收款)）
+- 支付通道：[redacted]（USDC / USDT）双通道（[PRD §11.5.1](../prd/sieve-prd-v1.5.md#1151-公司主体与收款)）
 
 ### 11.3 降级模式（试用结束未付费）
 
-[PRD §7.1](../prd/sieve-prd-v1.3.md#71-单一定价) 描述的"只读警告"模式：
+[PRD §7.1](../prd/sieve-prd-v1.5.md#71-单一定价) 描述的"只读警告"模式：
 
-- ✅ **Critical 仍然阻断**（产品安全承诺，[PRD §9 #8](../prd/sieve-prd-v1.3.md#9-工程上必须做对的硬约束)）
+- ✅ **Critical 仍然阻断**（产品安全承诺，[PRD §9 #8](../prd/sieve-prd-v1.5.md#9-工程上必须做对的硬约束)）
 - ⚠ High / Medium / Low 仅记录，不弹窗、不警告
 - 不停止运行 —— 不让用户因为没付费而失去基本保护
 
 ### 11.4 License 验证流程
 
-- **本地 Ed25519 公钥** 验证 license key 签名 → **不联网 verify**（[PRD §9 #2](../prd/sieve-prd-v1.3.md#9-工程上必须做对的硬约束)）
+- **本地 Ed25519 公钥** 验证 license key 签名 → **不联网 verify**（[PRD §9 #2](../prd/sieve-prd-v1.5.md#9-工程上必须做对的硬约束)）
 - 公钥内置在二进制 + 落盘 `~/.sieve/keys/`
 - License 包含：邮箱、签发时间、过期时间、计划等级（trial / paid_monthly / paid_yearly）
 
@@ -550,7 +484,7 @@ sieve license info
 ## 相关文档
 
 - 项目入口：[../../README.md](../../README.md)
-- 当前活动 PRD：[../prd/sieve-prd-v1.3.md](../prd/sieve-prd-v1.3.md)
+- 当前活动 PRD：[../prd/sieve-prd-v1.5.md](../prd/sieve-prd-v1.5.md)
 - API 参考：[../api/api-reference.md](../api/api-reference.md)
 - 开发指南：[development.md](development.md)
 - 变更日志：[../changelog/CHANGELOG.md](../changelog/CHANGELOG.md)
