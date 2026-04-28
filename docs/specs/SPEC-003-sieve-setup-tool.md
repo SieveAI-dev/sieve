@@ -340,7 +340,25 @@ Sieve 已卸载。
 
 ---
 
-## 7. 未决事项（TBD）
+## 7. 补充说明：Canary 检测实现变更（R4-#7 修复，2026-04-27）
+
+§4.2 "Canary 检测"原定向 `127.0.0.1:11453` 发 HTTP 请求，验证响应不含原始 token。
+该方案有致命缺陷：daemon 透传时拿到 401/502，响应同样不含 canary token，导致误判通过。
+
+**当前实现改为本地引擎 scan 方案**（已落地）：
+
+- 直接调用 `sieve_rules::engine::VectorscanEngine::compile(outbound_rules).scan(canary_token)`
+- canary token 精确匹配 OUT-01 pattern（`sk-ant-api03-[a-zA-Z0-9_\-]{93}AA`）
+- 不发任何网络请求，不依赖 daemon 是否在线
+- 输出标注：「canary 本地规则引擎命中 OUT-01（注：端到端需手动验证）」
+- 规则文件路径优先读 `~/.sieve/rules/outbound.toml`，可通过 `SIEVE_RULES_PATH` env var 覆盖
+
+**限制说明**：本地 scan 验证了规则编译 + pattern 命中，但不验证 daemon 是否真的拦截了转发请求。
+端到端验证（daemon 实际改写 body）需要手动测试或后续引入 fake upstream。
+
+---
+
+## 8. 未决事项（TBD）
 
 | 编号 | 问题 | 选项 |
 |------|------|------|

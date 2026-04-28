@@ -58,16 +58,30 @@ pub fn run_check(request_id: Uuid, base: &Path) -> i32 {
 
 /// 启发式运行逻辑：无 request_id 时扫目录。
 ///
-/// 优先级 3（SPEC-001 §4.3）：
-/// - 零 fresh pending → fail-open（exit 0）
-/// - stale 文件 → 删除 + warn + fail-open（exit 0）
-/// - 有 fresh pending → 合并所有 detection，按 default_on_timeout 决定（非 TTY 路径）
+/// 优先级 3（SPEC-001 §4.3），决策表（P1-R3-#6 修复后）：
+/// - fresh=[] && stale=[] && corrupt=[] → fail-open（exit 0）：Sieve 未标记任何请求
+/// - corrupt 非空 → fail-closed（exit 1）：无法确认 Sieve 判定，保守拒绝
+/// - fresh 非空（corrupt=[]） → 合并所有 detection，按 default_on_timeout 决定（非 TTY 路径）
+/// - fresh=[] && stale 非空（corrupt=[]） → 删 stale + fail-open（exit 0）
 ///   多 pending 时用户一次决策广播给所有 request_id。
 ///
 /// 返回进程退出码：0 = 允许，1 = 拒绝。
-/// 关联：SPEC-001 §4.3（启发式查 pending 目录最新文件）。
+/// 关联：SPEC-001 §4.3（启发式查 pending 目录最新文件）；known-issues-v1.4.md §P1-R3-#6。
 pub fn run_check_heuristic(base: &Path) -> i32 {
     let scan = scan_pending_dir(base, STALE_THRESHOLD_SECS);
+
+    // 损坏文件优先检查：只要有损坏文件，立即 fail-closed，不管 fresh 有没有。
+    // 因为损坏文件可能对应本次工具调用的 Sieve 拦截标记，无法安全放行。
+    // 关联：P1-R3-#6（corrupt → fail-open 漏洞修复）。
+    if !scan.corrupt_paths.is_empty() {
+        for corrupt_path in &scan.corrupt_paths {
+            eprintln!(
+                "sieve-hook: pending file {} corrupt, refusing tool call to be safe",
+                corrupt_path.display()
+            );
+        }
+        return 1;
+    }
 
     // 删除 stale 文件 + 打 warning。
     for stale_path in &scan.stale_paths {
@@ -79,7 +93,7 @@ pub fn run_check_heuristic(base: &Path) -> i32 {
     }
 
     if scan.fresh.is_empty() {
-        // 零 pending：Sieve 代理未标记任何请求，fail-open。
+        // 零 pending（corrupt=[]，stale 已清理）：Sieve 代理未标记任何请求，fail-open。
         return 0;
     }
 
@@ -537,5 +551,147 @@ mod tests {
             result2.stale_paths.is_empty(),
             "second scan should return empty stale_paths"
         );
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // P1-R3-#6 修复：corrupt pending 文件 fail-closed 的 7 个新测试
+    // ════════════════════════════════════════════════════════════════════════
+
+    fn write_corrupt_pending(base: &Path, filename: &str) {
+        let dir = base.join("pending");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(filename), b"not valid json{{{").unwrap();
+    }
+
+    // 测试 13：scan 包含 corrupt 文件 → corrupt_paths 非空，fresh/stale 不变
+    #[test]
+    fn scan_corrupt_json_goes_to_corrupt_paths() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_corrupt_pending(tmp.path(), "corrupt-A.json");
+
+        let result = pending::scan_pending_dir(tmp.path(), 600);
+        assert_eq!(
+            result.corrupt_paths.len(),
+            1,
+            "corrupt json file should appear in corrupt_paths"
+        );
+        assert!(
+            result.fresh.is_empty(),
+            "corrupt file should not appear in fresh"
+        );
+        assert!(
+            result.stale_paths.is_empty(),
+            "corrupt file should not appear in stale_paths"
+        );
+        let corrupt_name = result.corrupt_paths[0]
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert_eq!(corrupt_name, "corrupt-A.json");
+    }
+
+    // 测试 14：scan IO 错误（chmod 000 文件）→ 算 corrupt（unix only）
+    #[cfg(unix)]
+    #[test]
+    fn scan_io_error_goes_to_corrupt_paths() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let pending_dir = tmp.path().join("pending");
+        std::fs::create_dir_all(&pending_dir).unwrap();
+        let file_path = pending_dir.join("unreadable.json");
+        std::fs::write(&file_path, b"{}").unwrap();
+        // 移除读权限，使 read_to_string 失败。
+        std::fs::set_permissions(&file_path, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let result = pending::scan_pending_dir(tmp.path(), 600);
+
+        // 恢复权限（tempdir drop 时需要能清理）。
+        std::fs::set_permissions(&file_path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        assert_eq!(
+            result.corrupt_paths.len(),
+            1,
+            "IO-unreadable file should appear in corrupt_paths"
+        );
+        assert!(result.fresh.is_empty());
+        assert!(result.stale_paths.is_empty());
+    }
+
+    // 测试 15：scan 全 corrupt → fresh=[]，corrupt_paths 非空
+    #[test]
+    fn scan_all_corrupt_yields_empty_fresh() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_corrupt_pending(tmp.path(), "bad1.json");
+        write_corrupt_pending(tmp.path(), "bad2.json");
+
+        let result = pending::scan_pending_dir(tmp.path(), 600);
+        assert!(
+            result.fresh.is_empty(),
+            "all-corrupt scan should yield empty fresh"
+        );
+        assert_eq!(
+            result.corrupt_paths.len(),
+            2,
+            "all corrupt files should appear in corrupt_paths"
+        );
+    }
+
+    // 测试 16：run_check_heuristic 全 corrupt → exit 1（fail-closed）
+    #[test]
+    fn heuristic_all_corrupt_returns_1() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_corrupt_pending(tmp.path(), "evil.json");
+
+        let code = super::run_check_heuristic(tmp.path());
+        assert_eq!(code, 1, "all-corrupt pending should fail-closed (exit 1)");
+    }
+
+    // 测试 17：run_check_heuristic 混合 fresh + corrupt → exit 1（保守 fail-closed）
+    #[test]
+    fn heuristic_mixed_fresh_and_corrupt_returns_1() {
+        let tmp = tempfile::tempdir().unwrap();
+        // 写一个合法 fresh pending（Allow）。
+        let id = Uuid::now_v7();
+        write_pending_json(
+            tmp.path(),
+            &make_req(id, DefaultOnTimeout::Allow, Utc::now()),
+        );
+        // 再写一个损坏文件。
+        write_corrupt_pending(tmp.path(), "corrupt.json");
+
+        let code = super::run_check_heuristic(tmp.path());
+        assert_eq!(
+            code, 1,
+            "mixed fresh+corrupt should fail-closed (exit 1), corrupt wins"
+        );
+    }
+
+    // 测试 18：run_check_heuristic 仅 stale → 删 stale + exit 0（保持原行为）
+    #[test]
+    fn heuristic_only_stale_deletes_and_returns_0() {
+        let tmp = tempfile::tempdir().unwrap();
+        let id = Uuid::now_v7();
+        let stale_time = Utc::now() - Duration::minutes(11);
+        let req = make_req(id, DefaultOnTimeout::Block, stale_time);
+        write_pending_json(tmp.path(), &req);
+
+        let pending_file = tmp.path().join("pending").join(format!("{id}.json"));
+        let code = super::run_check_heuristic(tmp.path());
+        assert_eq!(code, 0, "stale-only should fail-open (exit 0)");
+        assert!(
+            !pending_file.exists(),
+            "stale file should be deleted after heuristic run"
+        );
+    }
+
+    // 测试 19：run_check_heuristic 全空 → exit 0（fail-open 默认）
+    #[test]
+    fn heuristic_completely_empty_returns_0() {
+        let tmp = tempfile::tempdir().unwrap();
+        // pending 目录不存在，完全空白。
+        let code = super::run_check_heuristic(tmp.path());
+        assert_eq!(code, 0, "completely empty state should fail-open (exit 0)");
     }
 }

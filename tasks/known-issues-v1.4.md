@@ -16,6 +16,7 @@
 | R2（验证 R1）| 6 (3 P1 + 3 P2) | 6 全修 | 0 | 派 3 子代理，6 新 bug 都是 R1 修引入的；R1 的旧 9 个无回归 |
 | R3（验证 R2）| 6 (4 P1 + 2 P2) | **0**（暂不修） | **6** | 都是 R2 修暴露的更深层架构缺口；继续修会无限循环 |
 | R4（v1.5 PRD review）| 6 (3 P1 + 3 P2) | 0 | **+2 doctor** | 4 条是 R3 已登记的；新增 2 条 doctor 问题；v1.5 PRD 文档零问题 ✅ |
+| R5（A1+D3 验证）| 2 (1 P1 + 1 P2) | **修完 4 旧条目** ✅（R3-#2 / R3-#6 / R4-#7 / R4-#8）| **+2 R5 次生** | A1+D3 4 个修全部落地；R4-#7+#8 修引入 R5-#1（半配置回滚）+ R5-#2（canary 规则路径）|
 
 **核心 lesson**：v1.4 是大型架构翻转（一维处置 → 二维 + IPC + 双层防御 + GUI 独立仓库），单次"按规格实现"无法覆盖全部 fail-closed 路径。残留的 6 个问题都需要**端到端真实跑通**才能彻底验证，等 GUI App 在独立仓库落地后回头一次性闭环。
 
@@ -44,23 +45,9 @@
 
 ---
 
-### P1-R3-#2：Hook pending 写入失败时 fail-open 🚨
+### ~~P1-R3-#2：Hook pending 写入失败时 fail-open~~（已修复）
 
-**位置**：`crates/sieve-cli/src/daemon.rs:877-879`
-
-**症状**：
-- IN-CR-02 / IN-CR-04 等 `hook_terminal` 命中后，daemon 调用 `write_hook_pending_silent()` 写 `~/.sieve/pending/<id>.json`
-- 写失败（磁盘满 / 权限错 / IO 异常）→ 当前代码**只 warn 后继续转发 SSE**
-- 静态注册的 `sieve-hook check` 启发式扫目录找不到 pending → fail-open exit 0
-- **危险工具调用没有任何拦截点**，违反 §9 fail-closed 硬约束
-
-**修法**：
-- pending 写失败时**走 fail-closed 路径**：注入 `sieve_blocked` SSE event + 关流
-- 或者 daemon 在写失败后改 disposition 为 GuiPopup 路径，强制 hold + GUI 处理
-
-**影响**：违反 PRD §9 第 3 条 + ADR-007 fail-closed 原则。攻击场景罕见但严重——攻击者诱发磁盘满即可绕过
-
-**等待依赖**：无；可独立修复，但需要审计日志同步告警
+**修复**：`write_hook_pending_silent` 改为 `write_hook_pending_or_fail_closed`（返回 `Result`）；写失败时注入 `sieve_blocked` SSE event 并截流。提取 `write_hook_pending_to(d, base)` 供单元测试注入路径，新增 2 个测试全部通过。
 
 ---
 
@@ -84,26 +71,25 @@
 
 ---
 
-### P1-R3-#6：sieve-hook 启发式扫遇坏 pending fail-open 🚨
+### ~~P1-R3-#6：sieve-hook 启发式扫遇坏 pending fail-open~~ **[Fixed]**
 
-**位置**：`crates/sieve-hook/src/pending.rs:83-90`
+**位置**：`crates/sieve-hook/src/pending.rs`（已修复）
 
-**症状**：
-- 启发式扫描 `~/.sieve/pending/` 时如果某个文件写到一半 / 损坏 / 读权限异常 → 当前代码直接 `continue` skip
+**症状**（已修复）：
+- 启发式扫描 `~/.sieve/pending/` 时如果某个文件写到一半 / 损坏 / 读权限异常 → 旧代码直接 `continue` skip
 - 如果**所有** fresh pending 都是损坏的 → fresh=[] → exit 0 fail-open
 - 应该被 HookTerminal 拦截的工具调用被放行
 
-**修法**：
-- 解析失败的 pending **不能 skip**，应当：
-  - 记 stale_paths（让后续逻辑处理）
-  - 或直接按 fail-closed 处理：发现解析失败立即 exit 1，让 Claude Code 拒绝
-- 启发式扫描的语义需要重新审视：
-  - 当前假设"扫不到 = 没有 Sieve 标记 = 让 Claude Code 通过"
-  - 但"扫到坏文件 = 不知道 Sieve 怎么判 = 应该保守 fail-closed"
+**修复方案**：
+- `ScanResult` 新增 `corrupt_paths: Vec<PathBuf>` 字段
+- IO 读取失败或 JSON 解析失败 → 加入 `corrupt_paths`（不再 skip）
+- `run_check_heuristic` 新决策表：
+  - `corrupt_paths` 非空 → 立即 fail-closed（exit 1），打 stderr 提示
+  - `fresh` 非空（corrupt=[]）→ 正常弹窗流程
+  - 全空 / 仅 stale → 原有行为不变
+- 新增 7 个单元/集成测试覆盖 corrupt 路径
 
-**影响**：违反 fail-closed；攻击者可以人工损坏 pending 绕过
-
-**等待依赖**：无；改起来很简单，但是要决定"扫到 0 个有效 pending 时" 的行为语义
+**影响**：违反 fail-closed 漏洞已消除
 
 ---
 
@@ -127,45 +113,28 @@
 
 ---
 
-### P2-R4-#7：doctor canary 检查太弱，会误报通过
+### ~~P2-R4-#7：doctor canary 检查太弱，会误报通过~~ ✅ Fixed
 
-**位置**：`crates/sieve-cli/src/commands/doctor.rs:191-192`
+**位置**：`crates/sieve-cli/src/commands/doctor.rs`
 
-**症状**：
-- doctor 只检查响应里**不含**原始 canary token
-- 如果 daemon 只是把请求透传到 Anthropic 后拿到 401/502，响应也不会包含 canary token → doctor 误判"脱敏正常"
-- 如果 canary token 本身没命中 OUT-01（拼写错 / 格式不匹配），同样会误判通过
-- 用户以为 setup 验证通过，实际拦截链路根本没工作
-
-**修法**：
-- 校验**真的命中**了本地拦截/脱敏路径——构造一个明确匹配 OUT-01 规则的 token + 验证 upstream 收到的是 redacted body
-- 或者用 fake upstream（local stub）拦请求 + 验证收到的 body 已经被改写
-- doctor 输出明确区分"未走代理"vs"走了代理但没拦截"
-
-**影响**：v1.5 §6.6 / SPEC-003 §doctor 的核心承诺失效，"装上即可用"无法验证
-
-**等待依赖**：无；可独立修
+**修复方案**：采用本地引擎直接 scan 方案（方案4）。
+- 废弃原 HTTP 请求验证（401/502 透传误判根本原因）
+- `check_canary_local_engine()`：直接调用 `VectorscanEngine::compile(outbound_rules).scan(canary_token)`
+- canary token 精确匹配 OUT-01 pattern（`sk-ant-api03-[a-zA-Z0-9_\-]{93}AA`）
+- 输出明确标注「仅验证规则引擎 + daemon listening；端到端验证需手动测」
+- 新增集成测试 `tests/doctor.rs::canary_token_hits_out01_in_local_engine`（T1）+ `canary_check_fails_when_rules_file_missing`（T2）
 
 ---
 
-### P2-R4-#8：doctor 失败时仍返回 Ok，CI 脚本无法捕获
+### ~~P2-R4-#8：doctor 失败时仍返回 Ok，CI 脚本无法捕获~~ ✅ Fixed
 
-**位置**：`crates/sieve-cli/src/commands/doctor.rs:70-76`
+**位置**：`crates/sieve-cli/src/commands/doctor.rs` + `src/main.rs`
 
-**症状**：
-- 任一检查项失败时 `doctor::run()` 仍返回 `Ok(())`
-- `sieve doctor` 在 CI / 脚本里以 exit 0 成功退出
-- `sieve setup` 中的 `doctor::run()?` 无法捕获安装失败
-- daemon 没启动 / 规则路径无效 / launchd 异常 → setup 显示成功但实际不可用
-
-**修法**：
-- 任一检查项失败时 `doctor::run()` 返回 `Err`（含失败项汇总）
-- main.rs 把 doctor 的 Err 映射为 exit code != 0
-- setup 自动调 doctor 时如果 doctor Err → 触发自动回滚
-
-**影响**：违反 SPEC-003 doctor 设计承诺；CI 集成时假绿灯
-
-**等待依赖**：无；改起来很简单
+**修复方案**：
+- `run()` 收集所有失败项到 `Vec<(&str, bool)>`，任一失败返回 `Err("N 项检查失败：...")`
+- `main.rs` `Command::Doctor` 分支：`if let Err(e) = run() { eprintln!(...); std::process::exit(1); }`
+- 新增集成测试 `tests/doctor.rs::doctor_run_returns_err_when_checks_fail`（T1）+ `sieve_doctor_exits_nonzero_when_checks_fail`（T2，子进程验证 exit code 非零）
+- setup 调用路径 `doctor::run()?` 已可正确捕获 Err（setup 回滚由 F-B1 子代理负责）
 
 ---
 
@@ -187,6 +156,55 @@
 **影响**：v1.4 §4.2 场景 B（地址替换 GUI 弹窗 60s 倒计时让用户人眼对比）**完全不工作**——这是 PRD 的核心场景之一
 
 **等待依赖**：address_guard 与 InboundAdapter 解耦机制需要梳理；中等复杂度
+
+---
+
+### P1-R5-#1：setup 调 doctor 失败时半配置状态 🚨
+
+**位置**：`crates/sieve-cli/src/commands/setup.rs` 调用 `doctor::run()?` 处（约行 105-110）
+
+**触发条件**：A1c 修了 R4-#8 让 doctor 失败时返回 Err 后引入。
+
+**症状**：
+- `sieve setup` 跑完 `do_setup`（已改 settings.json + 已加载 launchd plist）
+- 然后调 `doctor::run()?` 验证
+- doctor 失败（daemon 没启 / canary 失败 / launchd 异常）→ Err 直接 return setup::run
+- **回滚逻辑只包了 do_setup 那段**，doctor 失败后不调 `ctx.rollback()`
+- 结果：用户的 settings.json 已改为 127.0.0.1，plist 已 launchctl load，但 setup 报错
+- 用户不知道是"成功一半"还是"完全失败"，要么手动 uninstall，要么留烂摊子
+
+**修法**：
+- setup 的 doctor 失败分支也要调 `ctx.rollback()` 后再 return Err
+- 或者把 doctor 调用包在一个 finally-style guard 里，失败必回滚
+- 友好错误信息说明"setup 已自动回滚，请检查 doctor 报告"
+
+**影响**：违反 SPEC-003 §5 错误恢复承诺；用户体验灾难
+
+**等待依赖**：无；改起来很简单
+
+---
+
+### P2-R5-#2：doctor canary 用硬编码规则路径，不读 SIEVE_HOME / sieve.toml
+
+**位置**：`crates/sieve-cli/src/commands/doctor.rs` canary 检查处（约行 193-200）
+
+**触发条件**：A1c 修 R4-#7 时的 canary 改造引入。
+
+**症状**：
+- doctor 用 `VectorscanEngine::compile(outbound_rules)` 做本地 canary scan
+- 候选规则路径硬编码列表，第一个是 `$HOME/.sieve/rules/outbound.toml`
+- **不看** `SIEVE_HOME` env var / `~/.sieve/sieve.toml` 的 `rules_path` 字段
+- 用户用自定义路径安装时 doctor 扫错规则集
+- 旧规则可能误报通过；新规则路径上的有效安装可能失败
+
+**修法**：
+- 解析顺序：`SIEVE_RULES_PATH` env var 显式覆盖 > sieve.toml `rules_path` > `$SIEVE_HOME/rules/` > `$HOME/.sieve/rules/`
+- doctor 启动时先尝试读 sieve.toml（`SIEVE_HOME` 或 `--config` 指定），从配置取 `rules_path`
+- 找不到 sieve.toml 时再 fallback 到默认路径
+
+**影响**：自定义安装路径用户的 doctor 静默扫错文件，假绿/假红
+
+**等待依赖**：无；改起来不复杂
 
 ---
 
@@ -220,6 +238,7 @@
 - codex review R2 log: [docs/review/2026-04-28-codex-review-v1.4-r2.md](../docs/review/2026-04-28-codex-review-v1.4-r2.md)
 - codex review R3 log: [docs/review/2026-04-28-codex-review-v1.4-r3.md](../docs/review/2026-04-28-codex-review-v1.4-r3.md)
 - codex review R4 (v1.5 PRD) log: [docs/review/2026-04-28-codex-review-v1.5.md](../docs/review/2026-04-28-codex-review-v1.5.md)
+- codex review R5 (A1+D3 验证) log: [docs/review/2026-04-28-codex-review-a1-d3.md](../docs/review/2026-04-28-codex-review-a1-d3.md)
 - v1.4 同步执行计划: `tasks/todo.md`
 - v1.5 PRD: [docs/prd/sieve-prd-v1.5.md](../docs/prd/sieve-prd-v1.5.md)
 - 回滚基线: `git tag pre-v1.4-refactor`（commit 743e681）

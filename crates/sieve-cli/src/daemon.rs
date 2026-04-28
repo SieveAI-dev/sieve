@@ -582,9 +582,18 @@ async fn forward_with_inbound_inspection(
                         return;
                     }
 
-                    // 2. Hook 类：写 pending 文件，继续转发（不截流，不注入 sieve_blocked）
+                    // 2. Hook 类：写 pending 文件，失败时 fail-closed（不允许 fail-open）
                     for d in &hook_detections {
-                        write_hook_pending_silent(d);
+                        if let Err(e) = write_hook_pending_or_fail_closed(d) {
+                            tracing::error!(
+                                error = %e,
+                                rule = %d.rule_id,
+                                "Hook pending write failed; fail-closed: truncating SSE stream"
+                            );
+                            let blocked_payload = build_sieve_blocked_sse(&[d.clone()]);
+                            let _ = tx.send(Ok(hyper::body::Frame::data(blocked_payload))).await;
+                            return;
+                        }
                     }
 
                     // 3. GUI 类：hold 流 + keep-alive + 等用户决策
@@ -726,8 +735,18 @@ async fn forward_with_inbound_inspection(
         let (blocking, hook_detections, flush_hold_detections) =
             classify_inbound_detections(&flushed, &mut inbound_filter, &mut aggregator, dry_run);
 
+        // flush 阶段 Hook 类同样 fail-closed：写失败即截流
         for d in &hook_detections {
-            write_hook_pending_silent(d);
+            if let Err(e) = write_hook_pending_or_fail_closed(d) {
+                tracing::error!(
+                    error = %e,
+                    rule = %d.rule_id,
+                    "Hook pending write failed (flush); fail-closed: truncating SSE stream"
+                );
+                let blocked_payload = build_sieve_blocked_sse(&[d.clone()]);
+                let _ = tx.send(Ok(hyper::body::Frame::data(blocked_payload))).await;
+                return;
+            }
         }
 
         if !blocking.is_empty() {
@@ -843,20 +862,29 @@ fn classify_inbound_detections(
     (blocking, hook_detections, hold_detections)
 }
 
-/// 静默写 IPC pending 文件（错误只 warn，不中断 SSE 流）。
+/// 写 IPC pending 文件，失败时返回 `Err`（调用方负责 fail-closed）。
 ///
-/// Hook 类：SSE 流继续转发，**不注入 sieve_blocked**。
-/// 关联 ADR-014 §Hook 路径、SPEC-001 §3.1。
-fn write_hook_pending_silent(d: &sieve_core::Detection) {
-    use chrono::Utc;
+/// 旧函数 `write_hook_pending_silent` 只 warn 后继续，违反 fail-closed 原则。
+/// 新函数返回 `Result`，调用方在 `Err` 时必须注入 `sieve_blocked` 并截流。
+///
+/// 关联 PRD §9 #3（Critical 不可关）、ADR-014 §Hook 路径、SPEC-001 §3.1。
+fn write_hook_pending_or_fail_closed(
+    d: &sieve_core::Detection,
+) -> Result<(), sieve_ipc::error::IpcError> {
+    let sieve_home = sieve_ipc::paths::sieve_home()?;
+    write_hook_pending_to(d, &sieve_home)
+}
 
-    let sieve_home = match sieve_ipc::paths::sieve_home() {
-        Ok(h) => h,
-        Err(e) => {
-            tracing::warn!(error = %e, rule = %d.rule_id, "cannot get SIEVE_HOME for hook pending write");
-            return;
-        }
-    };
+/// 写 IPC pending 文件到指定 base 目录，失败时返回 `Err`。
+///
+/// 内部实现，分离出来方便测试注入临时路径，不依赖环境变量。
+///
+/// 关联 SPEC-001 §3.1、ADR-014 §Hook 路径。
+fn write_hook_pending_to(
+    d: &sieve_core::Detection,
+    sieve_home: &std::path::Path,
+) -> Result<(), sieve_ipc::error::IpcError> {
+    use chrono::Utc;
 
     let request_id = uuid::Uuid::new_v4();
     let ipc_req = sieve_ipc::DecisionRequest {
@@ -874,15 +902,15 @@ fn write_hook_pending_silent(d: &sieve_core::Detection) {
         }],
     };
 
-    if let Err(e) = sieve_ipc::pending_file::write_pending(&ipc_req, &sieve_home) {
-        tracing::warn!(error = %e, rule = %d.rule_id, "failed to write hook pending file");
-    } else {
-        tracing::info!(
-            rule = %d.rule_id,
-            request_id = %request_id,
-            "HookMark: pending file written, SSE stream continues"
-        );
-    }
+    sieve_ipc::pending_file::write_pending(&ipc_req, sieve_home)?;
+
+    tracing::info!(
+        rule = %d.rule_id,
+        request_id = %request_id,
+        "HookMark: pending file written, SSE stream continues"
+    );
+
+    Ok(())
 }
 
 /// 把 `sieve_core::Severity` 映射为 `sieve_ipc::Severity`。
@@ -1211,4 +1239,71 @@ fn apply_redacted_texts_to_request(
         tool_choice: req.tool_choice.clone(),
         extra: req.extra.clone(),
     })
+}
+
+// ─── 单元测试：Hook pending fail-closed ──────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sieve_core::detection::{Action, ContentSource, Detection, Severity};
+    use sieve_core::protocol::unified_message::ContentSpan;
+    use uuid::Uuid;
+
+    /// 构造最小化的 HookMark Detection，用于测试 write_hook_pending_to。
+    fn make_hook_detection() -> Detection {
+        Detection {
+            id: Uuid::new_v4(),
+            rule_id: "IN-CR-02".to_string(),
+            severity: Severity::Critical,
+            action: Action::HookMark,
+            source: ContentSource::InboundToolUseInput,
+            span: ContentSpan { start: 0, end: 10 },
+            evidence_truncated: "rm -rf /".to_string(),
+            fingerprint: "deadbeef01234567".to_string(),
+        }
+    }
+
+    /// happy path：base 目录可写 → 返回 Ok，pending 文件存在。
+    ///
+    /// 验证 HookMark 写成功后调用方可继续转发 SSE 流，不触发 fail-closed。
+    /// 关联 PRD §9 #3、SPEC-001 §3.1。
+    #[test]
+    fn hook_pending_write_happy_path() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let d = make_hook_detection();
+
+        let result = write_hook_pending_to(&d, tmp.path());
+
+        assert!(result.is_ok(), "可写目录应返回 Ok，得到: {result:?}");
+
+        // 验证 pending 目录下有 .json 文件
+        let pending_dir = tmp.path().join("pending");
+        let entries: Vec<_> = std::fs::read_dir(&pending_dir)
+            .expect("pending dir should exist")
+            .filter_map(|e| e.ok())
+            .collect();
+        assert!(
+            !entries.is_empty(),
+            "pending 目录应有写入的 .json 文件，但为空"
+        );
+    }
+
+    /// fail-closed：base 指向不可写路径 → 返回 Err（调用方应注入 sieve_blocked 截流）。
+    ///
+    /// 确认 Hook pending 写失败必须返回 Err，禁止 fail-open。
+    /// 关联 PRD §9 #3 fail-closed 硬约束、ADR-007（fail-closed 语义）。
+    #[test]
+    fn hook_pending_write_fails_on_unwritable_base() {
+        // /dev/null 在 macOS/Linux 上是字符设备，不是目录，create_dir_all 必然失败
+        let unwritable = std::path::Path::new("/dev/null/nonexistent_sieve_home");
+        let d = make_hook_detection();
+
+        let result = write_hook_pending_to(&d, unwritable);
+
+        assert!(
+            result.is_err(),
+            "不可写 base 应返回 Err 以触发 fail-closed，但得到 Ok"
+        );
+    }
 }
