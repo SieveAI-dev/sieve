@@ -49,6 +49,12 @@ pub struct ScanResult {
     pub fresh: Vec<DecisionRequest>,
     /// 过期的 pending 文件路径（供调用方删除）。
     pub stale_paths: Vec<std::path::PathBuf>,
+    /// 损坏的 pending 文件路径（IO 读取失败或 JSON 解析失败）。
+    ///
+    /// 调用方收到非空 corrupt_paths 时必须 fail-closed（exit 1），
+    /// 因为无法确定 Sieve 对这些请求的判定结果。
+    /// 关联：known-issues-v1.4.md §P1-R3-#6（fail-open 漏洞修复）。
+    pub corrupt_paths: Vec<std::path::PathBuf>,
 }
 
 /// 扫描 `<base>/pending/` 目录，收集所有未过期的 pending 文件。
@@ -61,12 +67,17 @@ pub fn scan_pending_dir(base: &Path, stale_threshold_secs: i64) -> ScanResult {
     let pending_dir = base.join("pending");
     let mut fresh: Vec<DecisionRequest> = Vec::new();
     let mut stale_paths: Vec<std::path::PathBuf> = Vec::new();
+    let mut corrupt_paths: Vec<std::path::PathBuf> = Vec::new();
 
     let entries = match std::fs::read_dir(&pending_dir) {
         Ok(e) => e,
         Err(_) => {
             // 目录不存在或无权读 → 视为空目录，fail-open。
-            return ScanResult { fresh, stale_paths };
+            return ScanResult {
+                fresh,
+                stale_paths,
+                corrupt_paths,
+            };
         }
     };
 
@@ -82,11 +93,19 @@ pub fn scan_pending_dir(base: &Path, stale_threshold_secs: i64) -> ScanResult {
         }
         let content = match std::fs::read_to_string(&path) {
             Ok(c) => c,
-            Err(_) => continue,
+            Err(_) => {
+                // IO 读取失败 → 算损坏，不 skip（P1-R3-#6）。
+                corrupt_paths.push(path);
+                continue;
+            }
         };
         let req: DecisionRequest = match serde_json::from_str(&content) {
             Ok(r) => r,
-            Err(_) => continue, // 解析失败的文件跳过。
+            Err(_) => {
+                // JSON 解析失败 → 算损坏，不 skip（P1-R3-#6）。
+                corrupt_paths.push(path);
+                continue;
+            }
         };
 
         // 已决策的 pending 跳过（避免重复弹窗）。
@@ -108,5 +127,9 @@ pub fn scan_pending_dir(base: &Path, stale_threshold_secs: i64) -> ScanResult {
     // 按 created_at 升序排列，保证确定性。
     fresh.sort_by_key(|r| r.created_at);
 
-    ScanResult { fresh, stale_paths }
+    ScanResult {
+        fresh,
+        stale_paths,
+        corrupt_paths,
+    }
 }

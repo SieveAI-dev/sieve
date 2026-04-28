@@ -1,5 +1,7 @@
 name: CI
 
+# Phase 1 仅 macOS（PRD v1.4 §6.6 + ADR-012）；Linux/Windows 推 Phase 2 后才恢复 matrix
+
 on:
   push:
     branches: [main]
@@ -14,7 +16,7 @@ env:
 jobs:
   fmt:
     name: rustfmt
-    runs-on: ubuntu-latest
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       - name: 安装 toolchain（via rust-toolchain.toml）
@@ -23,42 +25,31 @@ jobs:
 
   clippy:
     name: clippy
-    runs-on: ubuntu-latest
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       - run: rustup show
       - uses: Swatinem/rust-cache@v2
       - name: 安装构建依赖（vectorscan 需要 cmake/ninja/ragel）
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build pkg-config libssl-dev libboost-dev ragel
+          brew install cmake ninja pkg-config boost ragel
       - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
   test:
-    name: test (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-14]
-    runs-on: ${{ matrix.os }}
+    name: test (macos-14)
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       - run: rustup show
       - uses: Swatinem/rust-cache@v2
-      - name: 安装构建依赖（Linux）
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build pkg-config libssl-dev libboost-dev ragel
       - name: 安装构建依赖（macOS）
-        if: runner.os == 'macOS'
         run: |
           brew install cmake ninja pkg-config boost ragel
       - run: cargo test --workspace --locked
 
   deny:
     name: cargo-deny
-    runs-on: ubuntu-latest
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       # ADR-003: 检查出站依赖来源、license 合规、漏洞
@@ -68,6 +59,9 @@ jobs:
           arguments: --all-features
 
   fuzz-quick:
+    # cargo-fuzz 依赖 nightly + libfuzzer，在 Linux 上更稳定（macOS 支持有限）。
+    # fuzz 是 nightly 调研工具，不是发布支撑路径，保留 ubuntu-latest runner。
+    # Phase 1 仅 macOS 的约束不强制要求 fuzz runner 也切 macOS。
     name: fuzz-quick (cargo fuzz, 60s/target)
     runs-on: ubuntu-latest
     # 关 ASan 跑 fuzz：rust-fuzz/cargo-fuzz#404 已知问题。LLVM 20 的 ASan

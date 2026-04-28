@@ -136,7 +136,11 @@ async fn main() -> Result<()> {
             commands::setup::run(args)?;
         }
         Command::Doctor => {
-            commands::doctor::run()?;
+            // R4-#8：doctor 失败时返回非零 exit code，CI 脚本可捕获。
+            if let Err(e) = commands::doctor::run() {
+                eprintln!("sieve doctor: {e}");
+                std::process::exit(1);
+            }
         }
         Command::Uninstall(args) => {
             commands::uninstall::run(args)?;

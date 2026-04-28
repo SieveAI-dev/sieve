@@ -1,5 +1,7 @@
 name: Release
 
+# Phase 1 仅 macOS（PRD v1.4 §6.6 + ADR-012）；Linux/Windows 推 Phase 2 后才恢复 matrix
+
 on:
   # ADR-011: Tag-based release 在 Week 12 GA 时启用；GA 前仅用 workflow_dispatch 触发
   # 以减少 Rekor 透明日志记录 release 节奏（防止对手推断项目进度）
@@ -26,6 +28,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────
   # Tier 1 平台：reproducible build + cosign 签名
   # ADR-006 §2: Tier 1 失败 → release 中止（hard gate）
+  # Phase 1 仅 macOS（PRD v1.4 §6.6 + ADR-012）；Linux target 推 Phase 2
   # ─────────────────────────────────────────────────────────────
   reproducible-build:
     name: Reproducible build (${{ matrix.target }})
@@ -39,27 +42,13 @@ jobs:
           - target: x86_64-apple-darwin
             os: macos-14
             artifact: sieve-x86_64-apple-darwin
-          # Week 1 Linux 用 gnu(glibc):Ubuntu musl-tools 不含 musl-g++,vectorscan(C++ 库)无法
-          # 编译。reproducibility 与 musl/gnu 选择无关(关键是 SOURCE_DATE_EPOCH + remap-prefix +
-          # 双构建 SHA-256)。Week 6 Tier 2 切回 musl 静态链接(用 cross-rs docker 镜像或预编译
-          # musl-cross)。见 docs/design/ADR-006-sigstore-reproducible-build.md。
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-            artifact: sieve-x86_64-unknown-linux-gnu
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0  # 需要完整 git 历史以获取 commit timestamp
 
-      - name: 安装构建依赖（Linux）
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build pkg-config libboost-dev ragel
-
       - name: 安装构建依赖（macOS）
-        if: runner.os == 'macOS'
         run: |
           brew install cmake ninja pkg-config boost ragel
 
@@ -212,7 +201,7 @@ jobs:
   publish:
     name: 发布 GitHub Release
     needs: [reproducible-build, macos-universal]
-    runs-on: ubuntu-latest
+    runs-on: macos-14
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/checkout@v4
