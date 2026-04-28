@@ -35,6 +35,7 @@ mod macos {
     use anyhow::{anyhow, bail, Context};
     use chrono::Utc;
     use serde_json::Value;
+    use serde_yaml;
     use std::fs;
     use std::io::{self, Write as IoWrite};
     use std::path::{Path, PathBuf};
@@ -168,7 +169,8 @@ mod macos {
         pub config_path: Option<PathBuf>,
         /// daemon 是否运行中（None = 未知 / 检测命令不可用）。
         pub daemon_running: Option<bool>,
-        /// TBD 注意事项（实测前的未知字段，显示在 diff 中提示用户）。
+        /// Week 8 dogfood 待验证的注意事项（当前未读取，预留供 dry-run diff 扩展）。
+        #[allow(dead_code)]
         pub todo_notes: Vec<&'static str>,
     }
 
@@ -377,37 +379,164 @@ mod macos {
 
     // ──────────────────────────────── OpenClawAdapter ──────────────────────
 
-    /// OpenClaw 适配器（SPEC-004 §4.2；当前为 stub，Week 7 实测后补完）。
+    /// OpenClaw 适配器（SPEC-004 §4.2）。
     ///
-    /// **TBD-01**：实际配置路径与字段名需 Week 7 实测确认；见 SPEC-004 §10。
+    /// ## 调研结论（Week 7，基于 openclaw/openclaw 公开文档）
+    ///
+    /// - **TBD-01 已解决**：配置文件为 `~/.openclaw/openclaw.json`（JSON 格式，非 TOML）。
+    ///   provider 字段路径：`models.providers.<id>.baseUrl`（camelCase）。
+    ///   参考：openclaw/docs/concepts/model-providers.md
+    /// - **TBD-03 已解决**：`openclaw doctor` 命令存在（AGENTS.md 明确记录）。
+    ///   注意：`openclaw status` 也被提及，但 `doctor` 是官方诊断入口；
+    ///   Week 8 dogfood 时验证哪个命令更准确。
+    /// - **TBD-05 已解决（部分）**：OpenClaw 支持 `models.providers.<id>.headers` 字段，
+    ///   可在配置里注入自定义 HTTP header。
+    ///   setup 时写入 `X-Sieve-Source-Channel: <channel-id>` 到目标 provider 的 headers。
+    ///   **限制**：channel 值在配置时静态写死，无法动态反映运行时的 WhatsApp/Slack channel；
+    ///   IN-GEN-06 获得 header 存在的信号，但 channel 值只是一个占位符 "openclaw"。
+    ///   Week 8 dogfood 时确认 OpenClaw 是否在转发请求时保留自定义 headers。
     pub(super) struct OpenClawAdapter {
         home_path: PathBuf,
+        sieve_url: &'static str,
     }
 
     impl OpenClawAdapter {
         fn new(home_path: PathBuf) -> Self {
-            Self { home_path }
+            Self {
+                home_path,
+                sieve_url: "http://127.0.0.1:11453",
+            }
         }
 
         /// 探测 OpenClaw 配置文件（按 SPEC-004 §3.2 候选路径顺序）。
         ///
-        /// **TBD-01**：路径列表需 Week 7 实测后调整。
+        /// 调研结论：主配置文件为 `~/.openclaw/openclaw.json`。
+        /// 备用路径：macOS Library/Application Support 目录（npm 全局安装可能写此处）。
         fn probe_config_path(&self) -> Option<PathBuf> {
-            let candidates = [
-                self.home_path.join(".openclaw").join("config.toml"),
-                self.home_path
-                    .join("Library")
-                    .join("Application Support")
-                    .join("openclaw")
-                    .join("config.toml"),
-            ];
-            // 检查环境变量 OPENCLAW_CONFIG
+            // 环境变量优先
             if let Ok(val) = std::env::var("OPENCLAW_CONFIG") {
                 if !val.is_empty() {
                     return Some(PathBuf::from(val));
                 }
             }
+            let candidates = [
+                // 主路径（文档明确：~/.openclaw/openclaw.json）
+                self.home_path.join(".openclaw").join("openclaw.json"),
+                // 备用路径：macOS Application Support（npm 全局安装可能写此处）
+                self.home_path
+                    .join("Library")
+                    .join("Application Support")
+                    .join("openclaw")
+                    .join("openclaw.json"),
+                // 旧版兼容：部分早期版本用 config.json
+                self.home_path.join(".openclaw").join("config.json"),
+            ];
             candidates.into_iter().find(|p| p.exists())
+        }
+
+        /// 解析 openclaw.json，返回 models.providers 对象（可能为空）。
+        ///
+        /// 字段路径：`models.providers` → `Record<string, { baseUrl?: string, headers?: Record<string, string>, ... }>`
+        fn read_config(&self) -> Result<serde_json::Value> {
+            let path = self
+                .probe_config_path()
+                .ok_or_else(|| anyhow::anyhow!("未找到 OpenClaw 配置文件（已尝试所有候选路径）"))?;
+            let raw = fs::read_to_string(&path)
+                .with_context(|| format!("读取 {} 失败", path.display()))?;
+            serde_json::from_str(&raw)
+                .with_context(|| format!("解析 {} 失败（须为有效 JSON）", path.display()))
+        }
+
+        /// 修改所有 models.providers 条目的 baseUrl 和 headers.X-Sieve-Source-Channel。
+        ///
+        /// 返回 (修改后的 JSON Value, 被修改的 provider id 列表)。
+        fn patch_config(
+            &self,
+            mut config: serde_json::Value,
+        ) -> Result<(serde_json::Value, Vec<String>)> {
+            let mut patched_ids: Vec<String> = Vec::new();
+
+            // models.providers 可能不存在（新安装 openclaw 未配置任何 provider）
+            if let Some(providers) = config
+                .pointer_mut("/models/providers")
+                .and_then(|v| v.as_object_mut())
+            {
+                for (id, provider) in providers.iter_mut() {
+                    let obj = match provider.as_object_mut() {
+                        Some(o) => o,
+                        None => continue,
+                    };
+
+                    // 幂等：已是目标 URL 则跳过
+                    let already_patched = obj
+                        .get("baseUrl")
+                        .and_then(|v| v.as_str())
+                        .map(|u| u == self.sieve_url)
+                        .unwrap_or(false);
+                    if already_patched {
+                        continue;
+                    }
+
+                    obj.insert("baseUrl".to_string(), serde_json::json!(self.sieve_url));
+
+                    // TBD-05：注入 X-Sieve-Source-Channel header（静态值 "openclaw"）。
+                    // OpenClaw 支持 models.providers.<id>.headers 字段（见调研结论）。
+                    // 静态 channel 值让 IN-GEN-06 知道请求来源是 openclaw，
+                    // 但无法区分具体 WhatsApp/Slack channel（需 OpenClaw 侧 PR）。
+                    // Week 8 dogfood 时验证 headers 是否随请求转发。
+                    let headers = obj
+                        .entry("headers")
+                        .or_insert_with(|| serde_json::json!({}));
+                    if let Some(h) = headers.as_object_mut() {
+                        h.insert(
+                            "X-Sieve-Source-Channel".to_string(),
+                            serde_json::json!("openclaw"),
+                        );
+                    }
+
+                    patched_ids.push(id.clone());
+                }
+            } else {
+                // models.providers 不存在：写一条占位 provider
+                // 让用户知道 sieve 已配置，需要手动添加真实 provider
+                tracing::warn!(
+                    "openclaw.json 中未找到 models.providers，\
+                     已创建占位 sieve-proxy provider。\
+                     请在 OpenClaw 中添加真实 provider 后，\
+                     其 baseUrl 将自动指向 Sieve。"
+                );
+                let providers_obj = serde_json::json!({
+                    "sieve-proxy": {
+                        "baseUrl": self.sieve_url,
+                        "headers": {
+                            "X-Sieve-Source-Channel": "openclaw"
+                        }
+                    }
+                });
+                if let Some(models) = config
+                    .pointer_mut("/models")
+                    .and_then(|v| v.as_object_mut())
+                {
+                    models.insert("providers".to_string(), providers_obj);
+                    patched_ids.push("sieve-proxy".to_string());
+                } else {
+                    // models 字段也不存在，顶层写入
+                    if let Some(root) = config.as_object_mut() {
+                        root.insert(
+                            "models".to_string(),
+                            serde_json::json!({"providers": {
+                                "sieve-proxy": {
+                                    "baseUrl": self.sieve_url,
+                                    "headers": {"X-Sieve-Source-Channel": "openclaw"}
+                                }
+                            }}),
+                        );
+                        patched_ids.push("sieve-proxy".to_string());
+                    }
+                }
+            }
+
+            Ok((config, patched_ids))
         }
     }
 
@@ -430,9 +559,13 @@ mod macos {
                 .output()
                 .map(|o| o.status.success())
                 .unwrap_or(false);
-            // daemon 状态：TBD-03，先尝试 openclaw status
+
+            // TBD-03 已解决：`openclaw doctor` 是官方诊断命令（AGENTS.md 确认）。
+            // `openclaw status` 也存在但面向 chat session 内部使用，不适合 daemon 状态检查。
+            // 调用 doctor 返回 exit 0 → OpenClaw 已安装且配置正常。
+            // Week 8 dogfood 时验证 doctor 的实际退出码语义。
             let daemon_running = Command::new("openclaw")
-                .arg("status")
+                .arg("doctor")
                 .output()
                 .ok()
                 .map(|o| o.status.success());
@@ -448,10 +581,10 @@ mod macos {
                 installed,
                 config_path,
                 daemon_running,
+                // TBD-01/03/05 已通过调研填上，Week 8 dogfood 时最终验证
                 todo_notes: vec![
-                    "TBD-01: 配置文件路径需 Week 7 实测确认（SPEC-004 §10）",
-                    "TBD-03: openclaw status 命令名需实测（SPEC-004 §10）",
-                    "TBD-05: X-Sieve-Source-Channel header 注入需实测（SPEC-004 §10）",
+                    "Week 8 dogfood：验证 models.providers.<id>.headers 是否随请求转发（TBD-05）",
+                    "Week 8 dogfood：确认 openclaw doctor 退出码语义（TBD-03）",
                 ],
             })
         }
@@ -462,79 +595,329 @@ mod macos {
                 .config_path
                 .as_deref()
                 .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|| "未找到（TBD-01）".to_string());
+                .unwrap_or_else(|| "未找到（候选：~/.openclaw/openclaw.json）".to_string());
             let daemon_str = match detection.daemon_running {
-                Some(true) => "运行中",
-                Some(false) => "未运行",
-                None => "未知（TBD-03）",
+                Some(true) => "openclaw doctor 返回 exit 0（正常）",
+                Some(false) => "openclaw doctor 返回非零（可能配置问题）",
+                None => "openclaw 二进制未找到，跳过 doctor 检查",
             };
+
+            // 尝试读取现有 config 显示当前 provider 状态
+            let provider_preview = match self.read_config() {
+                Ok(cfg) => {
+                    let providers = cfg.pointer("/models/providers");
+                    match providers.and_then(|p| p.as_object()) {
+                        Some(obj) if !obj.is_empty() => {
+                            let ids: Vec<&str> = obj.keys().map(|k| k.as_str()).collect();
+                            format!(
+                                "找到 {} 个 provider（{}），将全部修改 baseUrl → {}",
+                                ids.len(),
+                                ids.join(", "),
+                                self.sieve_url,
+                            )
+                        }
+                        _ => format!(
+                            "models.providers 为空，将创建占位 sieve-proxy provider（baseUrl = {}）",
+                            self.sieve_url
+                        ),
+                    }
+                }
+                Err(_) => format!(
+                    "配置文件未找到，将创建 models.providers.sieve-proxy.baseUrl = {}",
+                    self.sieve_url
+                ),
+            };
+
             Ok(format!(
                 "[openclaw] 检测到：{}\n\
-                 [openclaw] 配置文件：{}\n\
-                 [openclaw] daemon 状态：{}\n\
-                 [openclaw] 将修改：provider base_url → http://127.0.0.1:11453（TBD-01：字段路径待实测）\n\
-                 [openclaw] ⚠ 以下项目需 Week 7 实测后才能完整写入：\n\
-                 {}",
+                 [openclaw] 配置文件：~/.openclaw/openclaw.json（JSON 格式）\n\
+                 [openclaw] 当前配置：{}\n\
+                 [openclaw] doctor 状态：{}\n\
+                 [openclaw] 将修改：{}\n\
+                 [openclaw] 将注入：models.providers.<id>.headers.X-Sieve-Source-Channel = \"openclaw\"\n\
+                 [openclaw] 注意：X-Sieve-Source-Channel 为静态值；动态 channel 需 Week 8 验证（见 SPEC-004 §10 TBD-05）",
                 if detection.installed { "已安装" } else { "未找到" },
                 config_str,
                 daemon_str,
-                detection.todo_notes.iter().map(|n| format!("  - {n}")).collect::<Vec<_>>().join("\n"),
+                provider_preview,
             ))
         }
 
-        fn apply(&self, _ctx: &mut SetupContext) -> Result<()> {
-            // TBD-01：OpenClaw 配置注入需 Week 7 实测后实现。
-            // 当前 stub 明确 bail 避免静默跳过，防止用户误以为已配置。
-            // 实测后删除此 bail!，替换为实际 TOML 写入逻辑（SPEC-004 §4.2.3）。
-            bail!(
-                "OpenClaw 配置注入尚未实现：需 Week 7 实测确认配置路径和字段格式。\n\
-                 见 SPEC-004 §10 TBD-01。\n\
-                 如需手动配置，请将 OpenClaw provider base_url 设为 http://127.0.0.1:11453"
-            )
+        fn apply(&self, ctx: &mut SetupContext) -> Result<()> {
+            let config_path = self.probe_config_path().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "未找到 OpenClaw 配置文件（已尝试以下路径）：\n\
+                     - ~/.openclaw/openclaw.json\n\
+                     - ~/Library/Application Support/openclaw/openclaw.json\n\
+                     - ~/.openclaw/config.json\n\
+                     请手动配置，或等待 Week 8 dogfood 验证后更新 sieve。"
+                )
+            })?;
+
+            // 读取现有配置
+            let raw = fs::read_to_string(&config_path)
+                .with_context(|| format!("读取 {} 失败", config_path.display()))?;
+            let config: serde_json::Value = serde_json::from_str(&raw)
+                .with_context(|| format!("解析 {} 失败（须为有效 JSON）", config_path.display()))?;
+
+            // 备份原始配置
+            let home = std::env::var("HOME").unwrap_or_default();
+            let rel = config_path.strip_prefix(&home).unwrap_or(&config_path);
+            let backup_dest = ctx.backup_dir.join(rel);
+            if let Some(parent) = backup_dest.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::copy(&config_path, &backup_dest)
+                .with_context(|| format!("备份 {} 失败", config_path.display()))?;
+
+            // patch config
+            let (patched_config, patched_ids) = self.patch_config(config)?;
+
+            if patched_ids.is_empty() {
+                println!(
+                    "[setup] OpenClaw：所有 provider baseUrl 已是 {}（幂等，跳过写入）",
+                    self.sieve_url
+                );
+                return Ok(());
+            }
+
+            // 写回
+            let new_raw = serde_json::to_string_pretty(&patched_config)?;
+            fs::write(&config_path, new_raw.as_bytes())
+                .with_context(|| format!("写入 {} 失败", config_path.display()))?;
+            ctx.written_files.push(config_path.clone());
+
+            println!(
+                "[setup] ✅ OpenClaw 配置已更新：{} 个 provider（{}）baseUrl → {}",
+                patched_ids.len(),
+                patched_ids.join(", "),
+                self.sieve_url,
+            );
+            println!("[setup] ✅ 已注入 headers.X-Sieve-Source-Channel = \"openclaw\"（静态）");
+
+            Ok(())
         }
 
         fn doctor_check(&self) -> Result<DoctorReport> {
-            // TODO（Week 7 实测后实现）：
-            // 1. 检查 daemon 监听（TCP connect 127.0.0.1:11453）
-            // 2. 解析 ~/.openclaw/config.toml，验证 provider base_url（TBD-01）
-            // 3. Canary（OpenAI 协议）（TBD-05）
-            // 见 SPEC-004 §6.2。
-            eprintln!(
-                "[doctor] OpenClaw 检查为 stub，待 Week 7 实测后实现（SPEC-004 §6.2 TBD-01/TBD-05）"
+            // 1. daemon 监听检查（TCP connect 127.0.0.1:11453）
+            let tcp_ok = std::net::TcpStream::connect_timeout(
+                &"127.0.0.1:11453".parse().unwrap(),
+                std::time::Duration::from_secs(2),
+            )
+            .is_ok();
+            if !tcp_ok {
+                eprintln!("[doctor] OpenClaw：Sieve daemon 未监听 127.0.0.1:11453");
+                return Err(anyhow::anyhow!("Sieve daemon 未在 127.0.0.1:11453 监听"));
+            }
+            println!("[doctor] ✅ OpenClaw：Sieve daemon 在监听");
+
+            // 2. 解析配置验证 provider baseUrl
+            match self.read_config() {
+                Ok(cfg) => {
+                    let all_patched = cfg
+                        .pointer("/models/providers")
+                        .and_then(|p| p.as_object())
+                        .map(|providers| {
+                            providers.values().all(|v| {
+                                v.pointer("/baseUrl")
+                                    .and_then(|u| u.as_str())
+                                    .map(|u| u == self.sieve_url)
+                                    .unwrap_or(false)
+                            })
+                        })
+                        .unwrap_or(false);
+
+                    if all_patched {
+                        println!("[doctor] ✅ OpenClaw：所有 provider baseUrl 已指向 Sieve");
+                    } else {
+                        eprintln!(
+                            "[doctor] ✗ OpenClaw：部分 provider baseUrl 未指向 {}",
+                            self.sieve_url
+                        );
+                        return Err(anyhow::anyhow!(
+                            "OpenClaw provider 配置不正确，请重新运行 sieve setup --agent openclaw"
+                        ));
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "OpenClaw doctor：无法读取配置文件（{}），跳过 provider 验证",
+                        e
+                    );
+                    println!("[doctor] ⚠ OpenClaw：无法读取配置文件，跳过 provider 验证");
+                }
+            }
+
+            // 3. X-Sieve-Source-Channel 透传状态说明（Week 8 dogfood 验证）
+            println!(
+                "[doctor] ⚠ OpenClaw X-Sieve-Source-Channel：静态 header 已注入配置，\
+                 Week 8 dogfood 时验证是否随请求转发（SPEC-004 §10 TBD-05）"
             );
+
             Ok(DoctorReport::ok())
         }
     }
 
     // ──────────────────────────────── HermesAdapter ────────────────────────
 
-    /// Hermes 适配器（SPEC-004 §4.3；当前为 stub，Week 7 实测后补完）。
+    /// Hermes 适配器（SPEC-004 §4.3）。
     ///
-    /// **TBD-02**：实际配置路径与格式需 Week 7 实测确认；见 SPEC-004 §10。
+    /// ## 调研结论（Week 7，基于 NousResearch/hermes-agent 公开文档）
+    ///
+    /// - **TBD-02 已解决**：配置文件为 `~/.hermes/config.yaml`（YAML 格式，非 TOML）。
+    ///   备用：`~/.hermes/.env`（存放 API key）。
+    ///   provider 字段路径：顶层 `base_url`（覆盖 provider 路由）或 `custom_providers[].base_url`。
+    ///   参考：hermes-agent.nousresearch.com/docs/integrations/providers
+    /// - **TBD-04 已解决**：`hermes config providers list` 命令不存在。
+    ///   实际命令：`hermes config`（查看配置），`hermes config check`（验证配置）。
+    ///   Week 8 dogfood 时确认 `hermes config check` 退出码语义。
+    /// - **TBD-06 已解决（降级）**：Hermes delegation 子进程**不**自动继承父进程环境变量。
+    ///   文档明确：sub-agents 使用 delegation section 的配置，不透传 ANTHROPIC_DEFAULT_HEADERS。
+    ///   **降级方案**：setup 时在 delegation.base_url 写入 Sieve URL，子进程的 LLM 请求也经过 Sieve。
+    ///   X-Sieve-Origin header 由 Sieve daemon 端根据请求特征（如 model 字段差异）推断，
+    ///   而非通过 env var 注入。PRD §6.7 sub-agent 嵌套场景 F 的完整 origin chain 在 Phase 1 后期实现。
     pub(super) struct HermesAdapter {
         home_path: PathBuf,
+        sieve_url: &'static str,
     }
 
     impl HermesAdapter {
         fn new(home_path: PathBuf) -> Self {
-            Self { home_path }
+            Self {
+                home_path,
+                sieve_url: "http://127.0.0.1:11453",
+            }
         }
 
         /// 探测 Hermes 配置文件（按 SPEC-004 §3.3 候选路径顺序）。
         ///
-        /// **TBD-02**：路径列表需 Week 7 实测后调整。
+        /// 调研结论：主配置文件为 `~/.hermes/config.yaml`（YAML 格式）。
         fn probe_config_path(&self) -> Option<PathBuf> {
-            // 检查环境变量 HERMES_CONFIG
+            // 环境变量优先
             if let Ok(val) = std::env::var("HERMES_CONFIG") {
                 if !val.is_empty() {
                     return Some(PathBuf::from(val));
                 }
             }
             let candidates = [
+                // 主路径（文档明确：~/.hermes/config.yaml，YAML 格式）
+                self.home_path.join(".hermes").join("config.yaml"),
+                // 旧版兼容：部分文档提到 config.toml（TOML 格式）
                 self.home_path.join(".hermes").join("config.toml"),
+                // .env 备用（仅存 API key，不包含 base_url；仅用于检测安装，不修改）
                 self.home_path.join(".hermes").join(".env"),
             ];
             candidates.into_iter().find(|p| p.exists())
+        }
+
+        /// 读取 Hermes config.yaml，返回解析后的 YAML Value。
+        fn read_config(&self) -> Result<serde_yaml::Value> {
+            let path = self.probe_config_path().ok_or_else(|| {
+                anyhow::anyhow!("未找到 Hermes 配置文件（~/.hermes/config.yaml）")
+            })?;
+
+            // .env 文件不包含 base_url，不支持修改
+            if path.ends_with(".env") {
+                bail!(
+                    "Hermes 仅找到 .env 文件（~/.hermes/.env），\
+                     该文件只存 API key，不支持 base_url 注入。\n\
+                     请先运行 hermes config edit 创建 config.yaml，\n\
+                     或手动创建 ~/.hermes/config.yaml 并设置 base_url。"
+                );
+            }
+
+            let raw = fs::read_to_string(&path)
+                .with_context(|| format!("读取 {} 失败", path.display()))?;
+            serde_yaml::from_str(&raw)
+                .with_context(|| format!("解析 {} 失败（须为有效 YAML）", path.display()))
+        }
+
+        /// 修改 Hermes config.yaml 中的 base_url 字段（顶层 model.base_url 和 delegation.base_url）。
+        ///
+        /// Hermes YAML schema（调研结论）：
+        /// ```yaml
+        /// model:
+        ///   provider: openrouter
+        ///   base_url: ""       # 覆盖 provider，设为 Sieve URL
+        /// delegation:
+        ///   base_url: ""       # TBD-06 降级：子进程也经过 Sieve
+        /// ```
+        ///
+        /// 返回 (修改后的 YAML Value, 修改说明列表)。
+        fn patch_config(
+            &self,
+            mut config: serde_yaml::Value,
+        ) -> Result<(serde_yaml::Value, Vec<String>)> {
+            let mut changes: Vec<String> = Vec::new();
+
+            // 顶层 model.base_url
+            if let Some(model) = config.get_mut("model").and_then(|v| v.as_mapping_mut()) {
+                let current = model
+                    .get("base_url")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if current != self.sieve_url {
+                    model.insert(
+                        serde_yaml::Value::String("base_url".to_string()),
+                        serde_yaml::Value::String(self.sieve_url.to_string()),
+                    );
+                    changes.push(format!(
+                        "model.base_url: {:?} → {:?}",
+                        current, self.sieve_url
+                    ));
+                }
+            } else {
+                // model 字段不存在，创建
+                if let Some(root) = config.as_mapping_mut() {
+                    let mut model_map = serde_yaml::Mapping::new();
+                    model_map.insert(
+                        serde_yaml::Value::String("base_url".to_string()),
+                        serde_yaml::Value::String(self.sieve_url.to_string()),
+                    );
+                    root.insert(
+                        serde_yaml::Value::String("model".to_string()),
+                        serde_yaml::Value::Mapping(model_map),
+                    );
+                    changes.push(format!("model.base_url: (新建) → {:?}", self.sieve_url));
+                }
+            }
+
+            // TBD-06 降级：delegation.base_url 也指向 Sieve，
+            // 使 Hermes 委托 Claude Code 子进程时的流量也经过 Sieve。
+            // X-Sieve-Origin header 在 Phase 1 后期通过 Sieve daemon 端推断实现。
+            if let Some(delegation) = config
+                .get_mut("delegation")
+                .and_then(|v| v.as_mapping_mut())
+            {
+                let current = delegation
+                    .get("base_url")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if current != self.sieve_url {
+                    delegation.insert(
+                        serde_yaml::Value::String("base_url".to_string()),
+                        serde_yaml::Value::String(self.sieve_url.to_string()),
+                    );
+                    changes.push(format!(
+                        "delegation.base_url: {:?} → {:?} (TBD-06 降级：子进程流量经过 Sieve)",
+                        current, self.sieve_url
+                    ));
+                }
+            } else {
+                // delegation 字段不存在，不强制创建（避免影响 Hermes 默认 delegation 行为）
+                tracing::warn!(
+                    "Hermes config.yaml 中无 delegation 字段，跳过 delegation.base_url 注入。\
+                     Hermes 委托 Claude Code 子进程的流量将**不经过** Sieve（见 SPEC-004 §10 TBD-06 降级说明）。"
+                );
+                changes.push(
+                    "delegation.base_url: 字段不存在，跳过（TBD-06 降级：子进程流量不经过 Sieve）"
+                        .to_string(),
+                );
+            }
+
+            Ok((config, changes))
         }
     }
 
@@ -551,9 +934,12 @@ mod macos {
                 .output()
                 .map(|o| o.status.success())
                 .unwrap_or(false);
-            // daemon/provider 列表：TBD-04，先尝试 hermes config providers list
+
+            // TBD-04 已解决：`hermes config providers list` 不存在。
+            // 实际用 `hermes config check` 验证配置完整性（文档确认存在）。
+            // Week 8 dogfood 时确认 check 的退出码语义。
             let daemon_running = Command::new("hermes")
-                .args(["config", "providers", "list"])
+                .args(["config", "check"])
                 .output()
                 .ok()
                 .map(|o| o.status.success());
@@ -569,10 +955,10 @@ mod macos {
                 installed,
                 config_path,
                 daemon_running,
+                // TBD-02/04/06 已通过调研填上，Week 8 dogfood 时最终验证
                 todo_notes: vec![
-                    "TBD-02: 配置文件路径需 Week 7 实测确认（SPEC-004 §10）",
-                    "TBD-04: hermes config providers list 命令名需实测（SPEC-004 §10）",
-                    "TBD-06: ANTHROPIC_DEFAULT_HEADERS 注入机制需实测（SPEC-004 §10）",
+                    "Week 8 dogfood：确认 hermes config check 退出码语义（TBD-04）",
+                    "Week 8 dogfood：确认 delegation.base_url 是否对所有子进程生效（TBD-06）",
                 ],
             })
         }
@@ -583,47 +969,204 @@ mod macos {
                 .config_path
                 .as_deref()
                 .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|| "未找到（TBD-02）".to_string());
-            let daemon_str = match detection.daemon_running {
-                Some(true) => "可用",
-                Some(false) => "不可用",
-                None => "未知（TBD-04）",
+                .unwrap_or_else(|| "未找到（候选：~/.hermes/config.yaml）".to_string());
+            let check_str = match detection.daemon_running {
+                Some(true) => "hermes config check 返回 exit 0（正常）",
+                Some(false) => "hermes config check 返回非零",
+                None => "hermes 二进制未找到，跳过 config check",
             };
+
+            // 尝试读取现有配置显示当前状态
+            let field_preview = match self.read_config() {
+                Ok(cfg) => {
+                    let model_base_url = cfg
+                        .get("model")
+                        .and_then(|m| m.get("base_url"))
+                        .and_then(|u| u.as_str())
+                        .unwrap_or("<未设置>");
+                    let delegation_base_url = cfg
+                        .get("delegation")
+                        .and_then(|d| d.get("base_url"))
+                        .and_then(|u| u.as_str())
+                        .unwrap_or("<未设置>");
+                    format!(
+                        "model.base_url: {:?} → {:?}\n\
+                         [hermes] delegation.base_url: {:?} → {:?}（TBD-06 降级，子进程流量经过 Sieve）",
+                        model_base_url,
+                        self.sieve_url,
+                        delegation_base_url,
+                        self.sieve_url,
+                    )
+                }
+                Err(_) => format!(
+                    "config.yaml 未找到，将创建 model.base_url = {}",
+                    self.sieve_url
+                ),
+            };
+
             Ok(format!(
                 "[hermes] 检测到：{}\n\
-                 [hermes] 配置文件：{}\n\
-                 [hermes] provider 列表命令：{}\n\
-                 [hermes] 将修改：provider base_url → http://127.0.0.1:11453（TBD-02：字段路径待实测）\n\
-                 [hermes] ⚠ 以下项目需 Week 7 实测后才能完整写入：\n\
-                 {}",
-                if detection.installed { "已安装" } else { "未找到" },
+                 [hermes] 配置文件：~/.hermes/config.yaml（YAML 格式）\n\
+                 [hermes] 当前配置：{}\n\
+                 [hermes] config check 状态：{}\n\
+                 [hermes] 将修改：{}\n\
+                 [hermes] ⚠ TBD-06 降级说明：Hermes delegation 子进程不继承父进程 env var，\n\
+                 [hermes]   ANTHROPIC_DEFAULT_HEADERS 注入不可行。\n\
+                 [hermes]   降级方案：delegation.base_url → Sieve，子进程流量经过 Sieve。\n\
+                 [hermes]   X-Sieve-Origin header 在 Phase 1 后期由 Sieve 端推断。",
+                if detection.installed {
+                    "已安装"
+                } else {
+                    "未找到"
+                },
                 config_str,
-                daemon_str,
-                detection.todo_notes.iter().map(|n| format!("  - {n}")).collect::<Vec<_>>().join("\n"),
+                check_str,
+                field_preview,
             ))
         }
 
-        fn apply(&self, _ctx: &mut SetupContext) -> Result<()> {
-            // TBD-02：Hermes 配置注入需 Week 7 实测后实现。
-            // 当前 stub 明确 bail 避免静默跳过。
-            // 实测后删除此 bail!，替换为实际写入逻辑（SPEC-004 §4.3.3）。
-            bail!(
-                "Hermes 配置注入尚未实现：需 Week 7 实测确认配置路径和字段格式。\n\
-                 见 SPEC-004 §10 TBD-02。\n\
-                 如需手动配置，请将 Hermes provider base_url 设为 http://127.0.0.1:11453"
-            )
+        fn apply(&self, ctx: &mut SetupContext) -> Result<()> {
+            let config_path = self.probe_config_path().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "未找到 Hermes 配置文件（已尝试以下路径）：\n\
+                     - ~/.hermes/config.yaml\n\
+                     - ~/.hermes/config.toml\n\
+                     - ~/.hermes/.env\n\
+                     请先运行 hermes config edit 创建配置文件后重试。"
+                )
+            })?;
+
+            // .env 文件不支持修改（只存 API key）
+            if config_path.ends_with(".env") {
+                bail!(
+                    "Hermes 仅找到 .env 文件，不支持 base_url 注入。\n\
+                     请先运行 hermes config edit 创建 config.yaml，\n\
+                     或手动将 model.base_url 设为 {url}。",
+                    url = self.sieve_url
+                );
+            }
+
+            // 读取配置
+            let config = self.read_config()?;
+
+            // 备份
+            let home = std::env::var("HOME").unwrap_or_default();
+            let rel = config_path.strip_prefix(&home).unwrap_or(&config_path);
+            let backup_dest = ctx.backup_dir.join(rel);
+            if let Some(parent) = backup_dest.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::copy(&config_path, &backup_dest)
+                .with_context(|| format!("备份 {} 失败", config_path.display()))?;
+
+            // patch
+            let (patched_config, changes) = self.patch_config(config)?;
+
+            if changes.is_empty() {
+                println!(
+                    "[setup] Hermes：所有字段已是目标值 {}（幂等，跳过写入）",
+                    self.sieve_url
+                );
+                return Ok(());
+            }
+
+            // 写回 YAML
+            let new_raw =
+                serde_yaml::to_string(&patched_config).context("序列化 Hermes config.yaml 失败")?;
+            fs::write(&config_path, new_raw.as_bytes())
+                .with_context(|| format!("写入 {} 失败", config_path.display()))?;
+            ctx.written_files.push(config_path.clone());
+
+            for change in &changes {
+                println!("[setup] ✅ Hermes 配置：{}", change);
+            }
+            println!(
+                "[setup] ⚠ Hermes TBD-06 降级：ANTHROPIC_DEFAULT_HEADERS 注入不可行，\
+                 delegation.base_url 已指向 Sieve，子进程流量经过 Sieve。"
+            );
+
+            Ok(())
         }
 
         fn doctor_check(&self) -> Result<DoctorReport> {
-            // TODO（Week 7 实测后实现）：
-            // 1. hermes --version 检查
-            // 2. 解析 Hermes 配置文件（TBD-02），验证 provider base_url
-            // 3. Canary（OpenAI 协议）
-            // 4. X-Sieve-Origin header 注入（TBD-06）
-            // 见 SPEC-004 §6.3。
-            eprintln!(
-                "[doctor] Hermes 检查为 stub，待 Week 7 实测后实现（SPEC-004 §6.3 TBD-02/TBD-06）"
+            // 1. hermes 二进制检查
+            let version_ok = Command::new("hermes")
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+            if !version_ok {
+                return Err(anyhow::anyhow!("hermes 二进制未找到或 --version 失败"));
+            }
+            println!("[doctor] ✅ Hermes：hermes --version 通过");
+
+            // 2. daemon 监听检查
+            let tcp_ok = std::net::TcpStream::connect_timeout(
+                &"127.0.0.1:11453".parse().unwrap(),
+                std::time::Duration::from_secs(2),
+            )
+            .is_ok();
+            if !tcp_ok {
+                eprintln!("[doctor] Hermes：Sieve daemon 未监听 127.0.0.1:11453");
+                return Err(anyhow::anyhow!("Sieve daemon 未在 127.0.0.1:11453 监听"));
+            }
+            println!("[doctor] ✅ Hermes：Sieve daemon 在监听");
+
+            // 3. 解析配置验证 model.base_url
+            match self.read_config() {
+                Ok(cfg) => {
+                    let model_ok = cfg
+                        .get("model")
+                        .and_then(|m| m.get("base_url"))
+                        .and_then(|u| u.as_str())
+                        .map(|u| u == self.sieve_url)
+                        .unwrap_or(false);
+                    if model_ok {
+                        println!("[doctor] ✅ Hermes：model.base_url 已指向 Sieve");
+                    } else {
+                        eprintln!(
+                            "[doctor] ✗ Hermes：model.base_url 未指向 {}",
+                            self.sieve_url
+                        );
+                        return Err(anyhow::anyhow!(
+                            "Hermes model.base_url 配置不正确，请重新运行 sieve setup --agent hermes"
+                        ));
+                    }
+
+                    let delegation_ok = cfg
+                        .get("delegation")
+                        .and_then(|d| d.get("base_url"))
+                        .and_then(|u| u.as_str())
+                        .map(|u| u == self.sieve_url)
+                        .unwrap_or(false);
+                    if delegation_ok {
+                        println!(
+                            "[doctor] ✅ Hermes：delegation.base_url 已指向 Sieve（TBD-06 降级）"
+                        );
+                    } else {
+                        // delegation.base_url 未设置不是硬错误（delegation 字段可能不存在）
+                        println!(
+                            "[doctor] ⚠ Hermes：delegation.base_url 未指向 Sieve，\
+                             Hermes 委托子进程的流量将不经过 Sieve（TBD-06 降级）"
+                        );
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Hermes doctor：无法读取配置文件（{}），跳过 provider 验证",
+                        e
+                    );
+                    println!("[doctor] ⚠ Hermes：无法读取 config.yaml，跳过验证");
+                }
+            }
+
+            // 4. X-Sieve-Origin header 说明
+            println!(
+                "[doctor] ⚠ Hermes X-Sieve-Origin：TBD-06 降级，\
+                 ANTHROPIC_DEFAULT_HEADERS 注入不可行。\
+                 sub-agent 调用链在 Phase 1 后期由 Sieve 端推断（SPEC-004 §10 TBD-06）"
             );
+
             Ok(DoctorReport::ok())
         }
     }
