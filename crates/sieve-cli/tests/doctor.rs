@@ -1,4 +1,4 @@
-//! `sieve doctor` 集成测试（R4-#7 + R4-#8 + R5-#2 修复验证）。
+//! `sieve doctor` 集成测试（R4-#7 + R4-#8 + R5-#2 + R10-#5 修复验证）。
 //!
 //! 仅 macOS 编译运行（`#[cfg(target_os = "macos")]`）。
 //!
@@ -12,6 +12,10 @@
 //! - R5-#2-T3: SIEVE_HOME 优先级 3 → resolve 返回 $SIEVE_HOME/rules/outbound.toml
 //! - R5-#2-T4: fallback 优先级 4 → resolve 返回 $HOME/.sieve/rules/outbound.toml
 //! - R5-#2-T5: 混合优先级：SIEVE_RULES_PATH + sieve.toml 同时设 → 前者赢
+//! - R10-#5-T1: doctor --agent openclaw 配置正确 + daemon 跑 → 通过（mock）
+//! - R10-#5-T2: doctor --agent openclaw daemon 未跑 → exit 1（失败不假绿）
+//! - R10-#5-T3: doctor --agent hermes daemon 未跑 → exit 1
+//! - R10-#5-T4: doctor --all 无 openclaw/hermes 安装 → 跳过 + 友好提示
 
 #![cfg(target_os = "macos")]
 
@@ -617,5 +621,262 @@ rules_path = "/tmp/y.toml"
         path,
         std::path::PathBuf::from("/tmp/explicit.toml"),
         "优先级 1 应胜过优先级 2（sieve.toml rules_path）"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// R10-#5 测试：doctor --agent openclaw/hermes 不再走假绿 stub
+// ─────────────────────────────────────────────────────────────────
+
+/// 找到 debug 构建的 sieve 二进制（不存在则跳过）。
+fn sieve_bin_for_doctor() -> Option<PathBuf> {
+    let bin = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("target")
+        .join("debug")
+        .join("sieve");
+    if bin.exists() {
+        Some(bin)
+    } else {
+        eprintln!("跳过 R10-#5 测试：sieve 二进制未找到（请先 cargo build -p sieve-cli）");
+        None
+    }
+}
+
+// R10-#5-T1: --agent openclaw 配置正确 + daemon 跑 → 通过（mock TcpServer）
+//
+// 用临时 TCP listener 模拟 daemon 在 11453 监听；
+// 同时创建有效的 openclaw.json（baseUrl 已指向 Sieve URL）。
+// 期望 doctor exit 0（OpenClaw 所有检查通过）。
+#[test]
+fn r10_5_t1_doctor_openclaw_with_daemon_and_config_passes() {
+    use std::net::TcpListener;
+    use tempfile::tempdir;
+
+    let Some(bin) = sieve_bin_for_doctor() else {
+        return;
+    };
+
+    let dir = tempdir().unwrap();
+    let fake_home = dir.path().to_path_buf();
+
+    // 创建 openclaw.json，baseUrl 已指向 Sieve
+    let openclaw_dir = fake_home.join(".openclaw");
+    std::fs::create_dir_all(&openclaw_dir).unwrap();
+    std::fs::write(
+        openclaw_dir.join("openclaw.json"),
+        r#"{"models":{"providers":{"test":{"baseUrl":"http://127.0.0.1:11453"}}}}"#,
+    )
+    .unwrap();
+
+    // 绑定 11453 端口模拟 daemon 在线
+    // （如果端口已被占用则跳过，避免 CI 冲突）
+    let _listener = TcpListener::bind("127.0.0.1:11453").ok();
+
+    let out = std::process::Command::new(&bin)
+        .args(["doctor", "--agent", "openclaw"])
+        .env("HOME", &fake_home)
+        .env("SIEVE_HOME", fake_home.join(".sieve"))
+        .output()
+        .expect("执行 sieve doctor 失败");
+
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // 不应含 stub 输出（R10-#5 核心验证：stub 已被移除）
+    assert!(
+        !combined.contains("检查为 stub"),
+        "R10-#5-T1: doctor --agent openclaw 不应输出 stub 消息，combined: {combined}"
+    );
+    // 不应含 OpenClaw 未检测到安装（因为 .openclaw/openclaw.json 存在）
+    assert!(
+        !combined.contains("OpenClaw 未检测到安装"),
+        "R10-#5-T1: 配置存在时不应输出未检测到安装，combined: {combined}"
+    );
+    // exit 0（daemon 在线 + 配置正确）
+    assert!(
+        out.status.success(),
+        "R10-#5-T1: openclaw 配置正确且 daemon 在线时 exit 应为 0，combined: {combined}"
+    );
+}
+
+// R10-#5-T2: --agent openclaw daemon 未跑 → exit 1（不假绿）
+//
+// 创建 openclaw.json 使 detect 返回 installed=true，
+// 但不绑定 11453 端口（daemon 未跑）。
+// 期望 doctor exit 非零，确认 all_passed 正确设为 false。
+#[test]
+fn r10_5_t2_doctor_openclaw_daemon_not_running_exits_nonzero() {
+    use std::net::TcpStream;
+    use tempfile::tempdir;
+
+    let Some(bin) = sieve_bin_for_doctor() else {
+        return;
+    };
+
+    // 先检测 11453 是否空闲，若被占用则跳过（避免测试误判）
+    if TcpStream::connect_timeout(
+        &"127.0.0.1:11453".parse().unwrap(),
+        std::time::Duration::from_millis(100),
+    )
+    .is_ok()
+    {
+        eprintln!("跳过 R10-#5-T2：11453 端口被占用（daemon 可能在跑）");
+        return;
+    }
+
+    let dir = tempdir().unwrap();
+    let fake_home = dir.path().to_path_buf();
+
+    // 创建 openclaw.json，但 daemon 不跑
+    let openclaw_dir = fake_home.join(".openclaw");
+    std::fs::create_dir_all(&openclaw_dir).unwrap();
+    std::fs::write(
+        openclaw_dir.join("openclaw.json"),
+        r#"{"models":{"providers":{"test":{"baseUrl":"http://127.0.0.1:11453"}}}}"#,
+    )
+    .unwrap();
+
+    let out = std::process::Command::new(&bin)
+        .args(["doctor", "--agent", "openclaw"])
+        .env("HOME", &fake_home)
+        .env("SIEVE_HOME", fake_home.join(".sieve"))
+        .output()
+        .expect("执行 sieve doctor 失败");
+
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // 不应含 stub 输出（R10-#5 核心验证）
+    assert!(
+        !combined.contains("检查为 stub"),
+        "R10-#5-T2: doctor --agent openclaw 不应输出 stub 消息，combined: {combined}"
+    );
+    // exit 非零（daemon 未在线 → 检查失败）
+    assert!(
+        !out.status.success(),
+        "R10-#5-T2: daemon 未跑时 doctor --agent openclaw 应以非零 exit，combined: {combined}"
+    );
+}
+
+// R10-#5-T3: --agent hermes daemon 未跑 → exit 1
+#[test]
+fn r10_5_t3_doctor_hermes_daemon_not_running_exits_nonzero() {
+    use std::net::TcpStream;
+    use tempfile::tempdir;
+
+    let Some(bin) = sieve_bin_for_doctor() else {
+        return;
+    };
+
+    // 先检测 11453 是否空闲
+    if TcpStream::connect_timeout(
+        &"127.0.0.1:11453".parse().unwrap(),
+        std::time::Duration::from_millis(100),
+    )
+    .is_ok()
+    {
+        eprintln!("跳过 R10-#5-T3：11453 端口被占用（daemon 可能在跑）");
+        return;
+    }
+
+    let dir = tempdir().unwrap();
+    let fake_home = dir.path().to_path_buf();
+
+    // 创建 hermes config.yaml，但 daemon 不跑
+    let hermes_dir = fake_home.join(".hermes");
+    std::fs::create_dir_all(&hermes_dir).unwrap();
+    std::fs::write(
+        hermes_dir.join("config.yaml"),
+        "model:\n  base_url: \"http://127.0.0.1:11453\"\n",
+    )
+    .unwrap();
+
+    // hermes --version 可能不存在，但我们只测 daemon 监听检查；
+    // hermes 二进制不存在时 doctor 也会提前 Err，非零 exit 同样满足测试条件
+    let out = std::process::Command::new(&bin)
+        .args(["doctor", "--agent", "hermes"])
+        .env("HOME", &fake_home)
+        .env("SIEVE_HOME", fake_home.join(".sieve"))
+        .output()
+        .expect("执行 sieve doctor 失败");
+
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // 不应含 stub 输出（R10-#5 核心验证）
+    assert!(
+        !combined.contains("检查为 stub"),
+        "R10-#5-T3: doctor --agent hermes 不应输出 stub 消息，combined: {combined}"
+    );
+    // exit 非零（daemon 未在线或 hermes 二进制未安装）
+    assert!(
+        !out.status.success(),
+        "R10-#5-T3: daemon 未跑时 doctor --agent hermes 应以非零 exit，combined: {combined}"
+    );
+}
+
+// R10-#5-T4: doctor --all 无 openclaw/hermes 安装 → 跳过 + 友好提示
+//
+// fake_home 无 .openclaw/ 也无 hermes 二进制 → detect 返回 installed=false。
+// 期望输出含跳过提示，Claude 失败（未配置）→ exit 非零。
+// 关键：不应含 stub 输出（R10-#5 修复后已删除 stub）。
+#[test]
+fn r10_5_t4_doctor_all_skips_not_installed_agents_with_friendly_message() {
+    use tempfile::tempdir;
+
+    let Some(bin) = sieve_bin_for_doctor() else {
+        return;
+    };
+
+    let dir = tempdir().unwrap();
+    let fake_home = dir.path().to_path_buf();
+    // 不创建 .openclaw/ 和 .hermes/
+
+    let out = std::process::Command::new(&bin)
+        .args(["doctor", "--all"])
+        .env("HOME", &fake_home)
+        .env("SIEVE_HOME", fake_home.join(".sieve"))
+        .env("SIEVE_RULES_PATH", "") // 确保 canary 规则找不到
+        .output()
+        .expect("执行 sieve doctor 失败");
+
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // 不应含 stub 输出（R10-#5 核心验证）
+    assert!(
+        !combined.contains("检查为 stub"),
+        "R10-#5-T4: doctor --all 不应含 stub 消息，combined: {combined}"
+    );
+    // 应含 openclaw 跳过提示
+    assert!(
+        combined.contains("OpenClaw 未检测到安装") || combined.contains("跳过检查"),
+        "R10-#5-T4: 应含 OpenClaw 跳过提示，combined: {combined}"
+    );
+    // 应含 hermes 跳过提示
+    assert!(
+        combined.contains("Hermes 未检测到安装") || combined.contains("跳过检查"),
+        "R10-#5-T4: 应含 Hermes 跳过提示，combined: {combined}"
+    );
+    // exit 非零（Claude 检查必然失败，fake_home 未配置 Sieve）
+    assert!(
+        !out.status.success(),
+        "R10-#5-T4: 未配置 Sieve 时 doctor --all 应 exit 非零，combined: {combined}"
     );
 }

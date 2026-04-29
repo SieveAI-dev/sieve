@@ -29,7 +29,7 @@ pub use stub::run;
 // ──────────────────────────────── macOS 实现 ────────────────────────────────
 
 #[cfg(target_os = "macos")]
-mod macos {
+pub(crate) mod macos {
     use super::*;
     use crate::commands::doctor;
     use crate::embedded_rules;
@@ -106,6 +106,8 @@ mod macos {
         written_files: Vec<PathBuf>,
         /// 已执行的 launchctl load，错误时需要 unload。
         launchd_loaded: Option<PathBuf>,
+        /// setup.log 路径，用于 append_log_entry。None 时跳过写入（如 daemon_ctx）。
+        setup_log_path: Option<PathBuf>,
     }
 
     impl SetupContext {
@@ -114,7 +116,35 @@ mod macos {
                 backup_dir,
                 written_files: Vec::new(),
                 launchd_loaded: None,
+                setup_log_path: None,
             }
+        }
+
+        /// 设置 setup.log 路径（链式调用）。
+        fn with_setup_log(mut self, path: PathBuf) -> Self {
+            self.setup_log_path = Some(path);
+            self
+        }
+
+        /// 追加一条 SetupLogEntry 到 setup.log（JSON Lines append）。
+        ///
+        /// setup_log_path 为 None 时静默跳过（daemon_ctx 不需要写 agent entry）。
+        /// 关联 SPEC-004 §5.1 / known-issues-v1.4.md R10-#1。
+        pub(super) fn append_log_entry(&mut self, entry: &SetupLogEntry) -> Result<()> {
+            let Some(ref path) = self.setup_log_path else {
+                return Ok(());
+            };
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            let mut file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .with_context(|| format!("打开 setup.log 失败: {}", path.display()))?;
+            let line = serde_json::to_string(entry)? + "\n";
+            file.write_all(line.as_bytes())?;
+            Ok(())
         }
 
         /// 测试专用：构造含已写文件列表的 SetupContext，用于验证 rollback 行为。
@@ -127,6 +157,7 @@ mod macos {
                 backup_dir,
                 written_files,
                 launchd_loaded: None,
+                setup_log_path: None,
             }
         }
 
@@ -178,14 +209,39 @@ mod macos {
 
     // ──────────────────────────────── DoctorReport ─────────────────────────
 
-    /// doctor 检查报告（SPEC-004 §6）。
+    /// doctor 检查报告（SPEC-004 §6 / R10-#5）。
     ///
-    /// Phase 1 stub：只表示成功/失败，无详细项；Week 7 OpenClaw/Hermes 实测后扩展字段。
-    pub struct DoctorReport;
+    /// 每项 adapter 的 doctor_check 返回此结构，doctor.rs 汇总后输出 ✅/❌ 列表。
+    /// 字段将在 doctor.rs 汇总阶段使用（R10-#5 后续实现）。
+    #[allow(dead_code)]
+    pub struct DoctorReport {
+        /// 归属 agent。
+        pub agent: AgentKind,
+        /// 各检查项 (名称, 是否通过)。
+        pub checks: Vec<(String, bool)>,
+        /// 全部通过则为 true。
+        pub all_passed: bool,
+    }
 
     impl DoctorReport {
-        fn ok() -> Self {
-            Self
+        /// 所有检查均通过的简单构造函数（供既有 apply 后 doctor 调用路径使用）。
+        pub(super) fn ok_for(agent: AgentKind) -> Self {
+            Self {
+                agent,
+                checks: vec![],
+                all_passed: true,
+            }
+        }
+
+        /// 通用构造函数：从检查列表推导 all_passed（R10-#5 后续实现接入）。
+        #[allow(dead_code)]
+        pub fn from_checks(agent: AgentKind, checks: Vec<(String, bool)>) -> Self {
+            let all_passed = checks.iter().all(|(_, ok)| *ok);
+            Self {
+                agent,
+                checks,
+                all_passed,
+            }
         }
     }
 
@@ -373,7 +429,7 @@ mod macos {
                 all: false,
             };
             doctor::run(args)?;
-            Ok(DoctorReport::ok())
+            Ok(DoctorReport::ok_for(AgentKind::Claude))
         }
     }
 
@@ -395,13 +451,13 @@ mod macos {
     ///   **限制**：channel 值在配置时静态写死，无法动态反映运行时的 WhatsApp/Slack channel；
     ///   IN-GEN-06 获得 header 存在的信号，但 channel 值只是一个占位符 "openclaw"。
     ///   Week 8 dogfood 时确认 OpenClaw 是否在转发请求时保留自定义 headers。
-    pub(super) struct OpenClawAdapter {
+    pub struct OpenClawAdapter {
         home_path: PathBuf,
         sieve_url: &'static str,
     }
 
     impl OpenClawAdapter {
-        fn new(home_path: PathBuf) -> Self {
+        pub fn new(home_path: PathBuf) -> Self {
             Self {
                 home_path,
                 sieve_url: "http://127.0.0.1:11453",
@@ -738,6 +794,27 @@ mod macos {
                 );
             }
 
+            // R10-#1：将 openclaw setup 记录到 setup.log，供 uninstall 查找（SPEC-004 §5.1）。
+            // setup_complete entry：让 uninstall 能找到此次 backup_dir。
+            let backup_detail = format!("backup_dir={}", ctx.backup_dir.display());
+            ctx.append_log_entry(
+                &SetupLogEntry::new("setup_complete")
+                    .with_detail(backup_detail)
+                    .with_agent(AgentKind::Openclaw),
+            )?;
+            // config_modified entry：记录哪个文件被改写，供 uninstall 恢复（R10-#1）。
+            ctx.append_log_entry(
+                &SetupLogEntry::new("config_modified")
+                    .with_path(config_path.to_string_lossy().to_string())
+                    .with_detail(format!(
+                        "patched providers: {}; fields: models.providers.*.baseUrl, \
+                     models.providers.*.headers.X-Sieve-Source-Channel, \
+                     models.providers.*.headers.X-Sieve-Provider",
+                        patched_ids.join(", ")
+                    ))
+                    .with_created_new(false)
+                    .with_agent(AgentKind::Openclaw),
+            )?;
             Ok(())
         }
 
@@ -797,7 +874,7 @@ mod macos {
                  Week 8 dogfood 时验证是否随请求转发（SPEC-004 §10 TBD-05）"
             );
 
-            Ok(DoctorReport::ok())
+            Ok(DoctorReport::ok_for(AgentKind::Openclaw))
         }
     }
 
@@ -819,13 +896,13 @@ mod macos {
     ///   **降级方案**：setup 时在 delegation.base_url 写入 Sieve URL，子进程的 LLM 请求也经过 Sieve。
     ///   X-Sieve-Origin header 由 Sieve daemon 端根据请求特征（如 model 字段差异）推断，
     ///   而非通过 env var 注入。PRD §6.7 sub-agent 嵌套场景 F 的完整 origin chain 在 Phase 1 后期实现。
-    pub(super) struct HermesAdapter {
+    pub struct HermesAdapter {
         home_path: PathBuf,
         sieve_url: &'static str,
     }
 
     impl HermesAdapter {
-        fn new(home_path: PathBuf) -> Self {
+        pub fn new(home_path: PathBuf) -> Self {
             Self {
                 home_path,
                 sieve_url: "http://127.0.0.1:11453",
@@ -1128,6 +1205,22 @@ mod macos {
                  delegation.base_url 已指向 Sieve，子进程流量经过 Sieve。"
             );
 
+            // R10-#1：将 hermes setup 记录到 setup.log，供 uninstall 查找（SPEC-004 §5.1）。
+            // setup_complete entry：让 uninstall 能找到此次 backup_dir。
+            let backup_detail_h = format!("backup_dir={}", ctx.backup_dir.display());
+            ctx.append_log_entry(
+                &SetupLogEntry::new("setup_complete")
+                    .with_detail(backup_detail_h)
+                    .with_agent(AgentKind::Hermes),
+            )?;
+            // config_modified entry：记录哪个文件被改写，供 uninstall 恢复（R10-#1）。
+            ctx.append_log_entry(
+                &SetupLogEntry::new("config_modified")
+                    .with_path(config_path.to_string_lossy().to_string())
+                    .with_detail(format!("fields: {}", changes.join("; ")))
+                    .with_created_new(false)
+                    .with_agent(AgentKind::Hermes),
+            )?;
             Ok(())
         }
 
@@ -1210,7 +1303,7 @@ mod macos {
                  sub-agent 调用链在 Phase 1 后期由 Sieve 端推断（SPEC-004 §10 TBD-06）"
             );
 
-            Ok(DoctorReport::ok())
+            Ok(DoctorReport::ok_for(AgentKind::Hermes))
         }
     }
 
@@ -1476,11 +1569,13 @@ mod macos {
 
         // ── 5. 顺序 apply（SPEC-004 §7.1：单个失败只回滚该 agent，不影响其他已成功的）
         // 同时保留成功 apply 的 ctx，供后续 doctor 失败时回滚使用。
+        let setup_log_path = sieve_home.join("setup.log");
         let mut any_failed = false;
         // (adapter_index, ctx) for successfully applied agents, in order
         let mut applied_ctxs: Vec<(AgentKind, SetupContext)> = Vec::new();
         for adapter in &adapters {
-            let mut ctx = SetupContext::new(backup_dir.clone());
+            let mut ctx =
+                SetupContext::new(backup_dir.clone()).with_setup_log(setup_log_path.clone());
             println!("\n[setup] 正在配置 {}…", adapter.kind());
             if let Err(e) = adapter.apply(&mut ctx) {
                 eprintln!("[setup] {} 配置失败：{e}", adapter.kind());
@@ -1794,6 +1889,41 @@ launchd_plist_path = "{launchd_plist}"
             })
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    // ── R10-#5 桥接：doctor.rs 复用 adapter doctor_check ────────────────────
+
+    /// OpenClaw adapter 的 detect + doctor_check 桥接函数（R10-#5）。
+    ///
+    /// doctor.rs 通过此函数复用 OpenClawAdapter 的真实实现，
+    /// 不需要直接引用 `pub(super)` 的结构体。
+    ///
+    /// 返回值：`None` = 未安装（跳过），`Some(Ok)` = 通过，`Some(Err)` = 失败。
+    pub fn run_openclaw_doctor_check(home_path: std::path::PathBuf) -> Option<anyhow::Result<()>> {
+        let adapter = OpenClawAdapter::new(home_path);
+        let detection = match adapter.detect() {
+            Ok(d) => d,
+            Err(e) => return Some(Err(e)),
+        };
+        if !detection.installed {
+            return None;
+        }
+        Some(adapter.doctor_check().map(|_| ()))
+    }
+
+    /// Hermes adapter 的 detect + doctor_check 桥接函数（R10-#5）。
+    ///
+    /// 同 `run_openclaw_doctor_check`，用途相同。
+    pub fn run_hermes_doctor_check(home_path: std::path::PathBuf) -> Option<anyhow::Result<()>> {
+        let adapter = HermesAdapter::new(home_path);
+        let detection = match adapter.detect() {
+            Ok(d) => d,
+            Err(e) => return Some(Err(e)),
+        };
+        if !detection.installed {
+            return None;
+        }
+        Some(adapter.doctor_check().map(|_| ()))
     }
 
     // ── 内部测试：SetupContext::rollback（直接访问私有结构）─────────────────────

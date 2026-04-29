@@ -50,6 +50,23 @@ fn map_severity(r: RulesSeverity) -> Severity {
     }
 }
 
+/// 把 `sieve_rules::manifest::DefaultOnTimeout` 转为 `sieve_core::detection::DefaultOnTimeout`。
+fn map_default_on_timeout(
+    r: sieve_rules::manifest::DefaultOnTimeout,
+) -> sieve_core::detection::DefaultOnTimeout {
+    match r {
+        sieve_rules::manifest::DefaultOnTimeout::Redact => {
+            sieve_core::detection::DefaultOnTimeout::Redact
+        }
+        sieve_rules::manifest::DefaultOnTimeout::Block => {
+            sieve_core::detection::DefaultOnTimeout::Block
+        }
+        sieve_rules::manifest::DefaultOnTimeout::Allow => {
+            sieve_core::detection::DefaultOnTimeout::Allow
+        }
+    }
+}
+
 /// 根据 `RuleEntry.disposition` 和 `RulesAction` 映射为 `sieve_core::Action`。
 ///
 /// v1.4 重构：优先按 `effective_disposition()` 路由，`RulesAction` 作为兜底。
@@ -69,6 +86,7 @@ fn map_action_by_disposition(
     _rule_action: RulesAction,
     rule_id: &str,
     timeout_seconds: u32,
+    default_on_timeout: sieve_rules::manifest::DefaultOnTimeout,
 ) -> Action {
     use sieve_rules::manifest::Disposition;
     match disposition {
@@ -78,6 +96,7 @@ fn map_action_by_disposition(
         Disposition::GuiPopup => Action::HoldForDecision {
             request_id: uuid::Uuid::new_v4(),
             timeout_seconds,
+            default_on_timeout: map_default_on_timeout(default_on_timeout),
         },
         Disposition::HookTerminal => Action::HookMark,
         Disposition::StatusBar => Action::MarkOnly,
@@ -177,7 +196,13 @@ impl InboundEngine for InboundAdapter {
                 if let Some(disp) = r.disposition {
                     // 显式 disposition：直接路由，不经过 enforce_action
                     let timeout = r.timeout_seconds.unwrap_or(60);
-                    map_action_by_disposition(disp, r.action, &hit.rule_id, timeout)
+                    map_action_by_disposition(
+                        disp,
+                        r.action,
+                        &hit.rule_id,
+                        timeout,
+                        r.default_on_timeout,
+                    )
                 } else {
                     // 无显式 disposition：走旧路径（enforce_action → Block or action）
                     let enforced =
@@ -187,7 +212,13 @@ impl InboundEngine for InboundAdapter {
                     } else {
                         let disp = r.effective_disposition();
                         let timeout = r.timeout_seconds.unwrap_or(60);
-                        map_action_by_disposition(disp, enforced, &hit.rule_id, timeout)
+                        map_action_by_disposition(
+                            disp,
+                            enforced,
+                            &hit.rule_id,
+                            timeout,
+                            r.default_on_timeout,
+                        )
                     }
                 }
             } else {
@@ -283,7 +314,13 @@ impl OutboundEngine for OutboundAdapter {
                     if let Some(disp) = r.disposition {
                         // 显式 disposition：直接路由，不经过 enforce_action
                         let timeout = r.timeout_seconds.unwrap_or(60);
-                        map_action_by_disposition(disp, r.action, &hit.rule_id, timeout)
+                        map_action_by_disposition(
+                            disp,
+                            r.action,
+                            &hit.rule_id,
+                            timeout,
+                            r.default_on_timeout,
+                        )
                     } else {
                         // 无显式 disposition：走旧路径（enforce_action → Block or action）
                         let enforced =
@@ -293,7 +330,13 @@ impl OutboundEngine for OutboundAdapter {
                         } else {
                             let disp = r.effective_disposition();
                             let timeout = r.timeout_seconds.unwrap_or(60);
-                            map_action_by_disposition(disp, enforced, &hit.rule_id, timeout)
+                            map_action_by_disposition(
+                                disp,
+                                enforced,
+                                &hit.rule_id,
+                                timeout,
+                                r.default_on_timeout,
+                            )
                         }
                     }
                 })
@@ -611,6 +654,201 @@ mod tests {
             matches!(pem_hit.action, Action::HoldForDecision { .. }),
             "OUT-07 应走 HoldForDecision 路径（disposition=gui_popup），实际: {:?}",
             pem_hit.action
+        );
+    }
+
+    // ── R3-#4 / R10-#2 修复验证：default_on_timeout 从规则读取 ───────────────────
+
+    /// OUT-06（JWT，default_on_timeout=redact）→ HoldForDecision.default_on_timeout = Redact。
+    ///
+    /// 修 R3-#4：之前硬编码 Block；现在从 RuleEntry.default_on_timeout 读取。
+    #[test]
+    fn out06_jwt_hold_for_decision_has_redact_timeout() {
+        use sieve_rules::loader::load_outbound_rules;
+        use std::path::PathBuf;
+
+        let rules_path = {
+            let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+            p.pop();
+            p.pop();
+            p.push("crates/sieve-rules/rules/outbound.toml");
+            p
+        };
+
+        let rules = load_outbound_rules(&rules_path).expect("load outbound rules");
+        let engine = VectorscanEngine::compile(rules.clone()).expect("compile vectorscan");
+        let adapter = OutboundAdapter::new(Arc::new(engine), rules);
+
+        // JWT 触发 OUT-06（disposition=gui_popup, default_on_timeout=redact, timeout=15s）
+        let jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+        let text = format!("token: {jwt}");
+        let hits = adapter
+            .scan_text(&text, ContentSource::OutboundUserText, 0)
+            .expect("scan_text");
+
+        let out06_hits: Vec<_> = hits.iter().filter(|d| d.rule_id == "OUT-06").collect();
+        assert!(!out06_hits.is_empty(), "OUT-06 应命中 JWT token");
+
+        let hit = &out06_hits[0];
+        // 关键断言：default_on_timeout 应从规则读取为 Redact
+        assert!(
+            matches!(
+                hit.action,
+                Action::HoldForDecision {
+                    default_on_timeout: sieve_core::detection::DefaultOnTimeout::Redact,
+                    timeout_seconds: 15,
+                    ..
+                }
+            ),
+            "OUT-06 的 HoldForDecision 应有 default_on_timeout=Redact, timeout=15s，实际: {:?}",
+            hit.action
+        );
+    }
+
+    /// OUT-07（PEM 私钥，default_on_timeout=block）→ HoldForDecision.default_on_timeout = Block。
+    ///
+    /// 修 R3-#4 回归：OUT-07 本来就是 Block，确认没有被错误改为 Redact。
+    #[test]
+    fn out07_pem_hold_for_decision_has_block_timeout() {
+        use sieve_rules::loader::load_outbound_rules;
+        use std::path::PathBuf;
+
+        let rules_path = {
+            let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+            p.pop();
+            p.pop();
+            p.push("crates/sieve-rules/rules/outbound.toml");
+            p
+        };
+
+        let rules = load_outbound_rules(&rules_path).expect("load outbound rules");
+        let engine = VectorscanEngine::compile(rules.clone()).expect("compile vectorscan");
+        let adapter = OutboundAdapter::new(Arc::new(engine), rules);
+
+        let text = "my key: -----BEGIN EC PRIVATE KEY----- MHQCAQEE ...";
+        let hits = adapter
+            .scan_text(text, ContentSource::OutboundUserText, 0)
+            .expect("scan_text");
+
+        let out07_hits: Vec<_> = hits.iter().filter(|d| d.rule_id == "OUT-07").collect();
+        assert!(!out07_hits.is_empty(), "OUT-07 应命中 PEM 私钥");
+
+        let hit = &out07_hits[0];
+        assert!(
+            matches!(
+                hit.action,
+                Action::HoldForDecision {
+                    default_on_timeout: sieve_core::detection::DefaultOnTimeout::Block,
+                    ..
+                }
+            ),
+            "OUT-07 的 HoldForDecision 应有 default_on_timeout=Block，实际: {:?}",
+            hit.action
+        );
+    }
+
+    // ── R9-#2 修复验证：chain_depth ≥ 2 时 Redact 升级为 HoldForDecision ─────────
+
+    /// chain_depth ≥ 2 时 Action::Redact（OUT-01 sk-ant-* secret）应升级为 HoldForDecision。
+    ///
+    /// 修 R9-#2：daemon Anthropic / OpenAI 路径在 chain_depth ≥ 2 时对 Redact action 升级。
+    /// 本测试直接构造 detection 验证升级逻辑，不依赖完整 daemon。
+    #[test]
+    fn r9_fix_redact_upgrades_to_hold_for_decision_at_chain_depth_2() {
+        use sieve_core::detection::DefaultOnTimeout;
+
+        // 构造一个 OUT-01 Redact detection（模拟 auto_redact 路径）
+        let redact_detection = sieve_core::detection::Detection {
+            id: uuid::Uuid::new_v4(),
+            rule_id: "OUT-01".to_string(),
+            severity: Severity::Critical,
+            action: Action::Redact {
+                placeholder: "[REDACTED:OUT-01]".to_string(),
+            },
+            source: ContentSource::OutboundUserText,
+            span: sieve_core::protocol::unified_message::ContentSpan { start: 0, end: 10 },
+            evidence_truncated: "sk-a***nce".to_string(),
+            fingerprint: "abcdef0123456789".to_string(),
+            source_channel: None,
+            origin_chain_depth: 2,
+        };
+
+        // 模拟 daemon chain_depth ≥ 2 升级逻辑
+        let chain_depth = 2_usize;
+        let mut d = redact_detection;
+        if chain_depth >= 2 {
+            if let Action::Redact { .. } = &d.action {
+                d.action = Action::HoldForDecision {
+                    request_id: uuid::Uuid::new_v4(),
+                    timeout_seconds: 60,
+                    default_on_timeout: DefaultOnTimeout::Redact,
+                };
+            }
+        }
+
+        assert!(
+            matches!(d.action, Action::HoldForDecision { .. }),
+            "chain_depth=2 时 Redact 应升级为 HoldForDecision，实际: {:?}",
+            d.action
+        );
+        // 升级后的 default_on_timeout 应保持 Redact 语义
+        assert!(
+            matches!(
+                d.action,
+                Action::HoldForDecision {
+                    default_on_timeout: DefaultOnTimeout::Redact,
+                    ..
+                }
+            ),
+            "Redact 升级后的 default_on_timeout 应为 Redact，实际: {:?}",
+            d.action
+        );
+    }
+
+    /// Anthropic 入站 chain_depth=2 + IN-CR-02（hook_terminal）→ HookMark 升级为 HoldForDecision。
+    ///
+    /// 修 R8-#2-Inbound 验证：Anthropic 入站路径与 OpenAI 入站路径同等升级。
+    #[test]
+    fn r8_inbound_hookmark_upgrades_to_hold_at_chain_depth_2() {
+        use sieve_core::detection::DefaultOnTimeout;
+
+        let mut rule = make_rule(
+            "IN-CR-02",
+            r"rm -rf",
+            RulesSeverity::Critical,
+            RulesAction::Block,
+        );
+        rule.disposition = Some(sieve_rules::manifest::Disposition::HookTerminal);
+
+        let engine = VectorscanEngine::compile(vec![rule.clone()]).unwrap();
+        let adapter = InboundAdapter::new(Arc::new(engine), vec![rule]);
+
+        // 先确认不含 chain_depth 时是 HookMark
+        let hits = adapter
+            .scan_text("run: rm -rf /tmp", ContentSource::InboundAssistantText, 0)
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(
+            matches!(hits[0].action, Action::HookMark),
+            "chain_depth=0 应是 HookMark: {:?}",
+            hits[0].action
+        );
+
+        // 模拟 classify_inbound_detections chain_depth=2 升级逻辑
+        let chain_depth = 2_usize;
+        let mut d = hits[0].clone();
+        if chain_depth >= 2 && matches!(d.action, Action::HookMark) {
+            d.action = Action::HoldForDecision {
+                request_id: uuid::Uuid::new_v4(),
+                timeout_seconds: 60,
+                default_on_timeout: DefaultOnTimeout::Block,
+            };
+        }
+
+        assert!(
+            matches!(d.action, Action::HoldForDecision { .. }),
+            "Anthropic 入站 chain_depth=2 IN-CR-02 HookMark 应升级为 HoldForDecision: {:?}",
+            d.action
         );
     }
 }

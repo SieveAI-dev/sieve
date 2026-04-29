@@ -7,7 +7,7 @@
 //! 4. launchd 状态（launchctl list | grep com.sieve.daemon）
 //! 5. canary 本地引擎命中测试（OUT-01 规则 scan，不发真实网络请求）
 //!
-//! `--agent openclaw` / `--agent hermes` 为 stub（SPEC-004 §6.2/6.3 TBD-01/TBD-02，Week 7 实测后实现）。
+//! `--agent openclaw` / `--agent hermes` 通过 setup::macos 桥接函数调用真实 adapter（R10-#5）。
 //!
 //! 仅 macOS Phase 1 支持；非 macOS 编译进 stub。
 //!
@@ -36,6 +36,16 @@
 //! 2. `$SIEVE_HOME/sieve.toml`（或 `~/.sieve/sieve.toml`）中的 `rules_path` 字段
 //! 3. `$SIEVE_HOME/rules/outbound.toml`（env var 指定的 sieve home）
 //! 4. `$HOME/.sieve/rules/outbound.toml`（最终 fallback）
+//!
+//! # R10-#5 修复说明
+//!
+//! 原实现 openclaw/hermes 分支调用本地 stub（只打印"⚠ 为 stub"），
+//! all_passed 保持 true → 假绿。
+//!
+//! 新实现通过 setup::macos 中的 run_openclaw_doctor_check / run_hermes_doctor_check
+//! 桥接函数调用真实 OpenClawAdapter::doctor_check / HermesAdapter::doctor_check：
+//! - 先 detect 确认是否安装，未安装则跳过（友好提示）
+//! - 安装了但检查失败 → run() 返回 Err，exit 1
 
 use crate::cli::{AgentKind, DoctorArgs};
 use anyhow::Result;
@@ -73,7 +83,7 @@ mod macos {
             }
         }
 
-        // ── 优先级 2：从 sieve.toml 读 rules_path 字段 ─────────────────────
+        // ── 优先级 2：从 sieve.toml 读 rules_path 字段 ────────────────���────
         let sieve_home = resolve_sieve_home();
         let toml_path = sieve_home.join("sieve.toml");
         if toml_path.exists() {
@@ -89,7 +99,7 @@ mod macos {
             }
         }
 
-        // ── 优先级 3：$SIEVE_HOME/rules/outbound.toml ──────────────────────
+        // ── 优先级 3：$SIEVE_HOME/rules/outbound.toml ────────────��─────────
         let sieve_home_rules = sieve_home.join("rules").join("outbound.toml");
 
         // ── 优先级 4：$HOME/.sieve/rules/outbound.toml（fallback）──────────
@@ -134,19 +144,21 @@ mod macos {
         PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".sieve")
     }
 
-    /// 运行 `sieve doctor`。关联 ADR-015 / SPEC-003 §doctor / SPEC-004 §6。
+    /// 运行 `sieve doctor`。关联 ADR-015 / SPEC-003 §doctor / SPEC-004 §6 / R10-#5。
     ///
-    /// `args.agent` 指定时只检查该 agent；否则检查所有。
+    /// - `args.agent` 指定时只检查该 agent
+    /// - 不传参数时：Claude 直接跑；OpenClaw/Hermes 先 detect，未装则跳过 + 友好提示
     ///
     /// # Errors
     ///
     /// 任一检查项失败时返回 `Err`，错误信息含失败项名称列表（R4-#8）。
     pub fn run(args: DoctorArgs) -> Result<()> {
+        let home = PathBuf::from(std::env::var("HOME").unwrap_or_default());
+
         // 确定要检查的 agent 列表
         let agents: Vec<AgentKind> = if let Some(a) = args.agent {
             vec![a]
         } else {
-            // 默认检查所有（目前 Claude 有实质检查；openclaw/hermes 为 stub）
             vec![AgentKind::Claude, AgentKind::Openclaw, AgentKind::Hermes]
         };
 
@@ -161,10 +173,34 @@ mod macos {
                     }
                 }
                 AgentKind::Openclaw => {
-                    run_openclaw_checks_stub();
+                    // R10-#5：调用真实 adapter，先 detect 确认是否安装
+                    match run_openclaw_doctor(&home) {
+                        RunAdapterResult::NotInstalled => {
+                            println!(
+                                "[doctor] ⚠ OpenClaw 未检测到安装，跳过检查（未找到 ~/.openclaw/ 或 openclaw 二进制）"
+                            );
+                        }
+                        RunAdapterResult::Passed => {}
+                        RunAdapterResult::Failed(e) => {
+                            eprintln!("[doctor] OpenClaw 检查失败：{e}");
+                            all_passed = false;
+                        }
+                    }
                 }
                 AgentKind::Hermes => {
-                    run_hermes_checks_stub();
+                    // R10-#5：调用真实 adapter，先 detect 确认是否安装
+                    match run_hermes_doctor(&home) {
+                        RunAdapterResult::NotInstalled => {
+                            println!(
+                                "[doctor] ⚠ Hermes 未检测到安装，跳过检查（未找到 ~/.hermes/ 或 hermes 二进制）"
+                            );
+                        }
+                        RunAdapterResult::Passed => {}
+                        RunAdapterResult::Failed(e) => {
+                            eprintln!("[doctor] Hermes 检查失败：{e}");
+                            all_passed = false;
+                        }
+                    }
                 }
             }
         }
@@ -173,6 +209,33 @@ mod macos {
             Ok(())
         } else {
             Err(anyhow::anyhow!("doctor 检查未全部通过，见上方输出"))
+        }
+    }
+
+    /// adapter doctor_check 的三态结果：未安装（跳过）/ 通过 / 失败。
+    enum RunAdapterResult {
+        NotInstalled,
+        Passed,
+        Failed(anyhow::Error),
+    }
+
+    /// 调用 setup::macos::run_openclaw_doctor_check 桥接函数（R10-#5：不再走 stub）。
+    fn run_openclaw_doctor(home: &std::path::Path) -> RunAdapterResult {
+        use crate::commands::setup::macos::run_openclaw_doctor_check;
+        match run_openclaw_doctor_check(home.to_path_buf()) {
+            None => RunAdapterResult::NotInstalled,
+            Some(Ok(())) => RunAdapterResult::Passed,
+            Some(Err(e)) => RunAdapterResult::Failed(e),
+        }
+    }
+
+    /// 调用 setup::macos::run_hermes_doctor_check 桥接函数（R10-#5：不再走 stub）。
+    fn run_hermes_doctor(home: &std::path::Path) -> RunAdapterResult {
+        use crate::commands::setup::macos::run_hermes_doctor_check;
+        match run_hermes_doctor_check(home.to_path_buf()) {
+            None => RunAdapterResult::NotInstalled,
+            Some(Ok(())) => RunAdapterResult::Passed,
+            Some(Err(e)) => RunAdapterResult::Failed(e),
         }
     }
 
@@ -244,29 +307,6 @@ mod macos {
                 failures.join("、")
             ))
         }
-    }
-
-    /// OpenClaw doctor 检查（SPEC-004 §6.2；当前为 stub，Week 7 实测后实现）。
-    fn run_openclaw_checks_stub() {
-        println!("=== OpenClaw doctor 检查 ===");
-        // TODO（Week 7 实测后实现）：
-        // 1. TCP connect 127.0.0.1:11453（daemon 监听）
-        // 2. 解析 ~/.openclaw/config.toml，验证 provider base_url（TBD-01）
-        // 3. Canary（OpenAI 协议）（TBD-05）
-        // 见 SPEC-004 §6.2。
-        println!("  ⚠ OpenClaw 检查为 stub（SPEC-004 §6.2 TBD-01/TBD-05），Week 7 实测后实现");
-    }
-
-    /// Hermes doctor 检查（SPEC-004 §6.3；当前为 stub，Week 7 实测后实现）。
-    fn run_hermes_checks_stub() {
-        println!("=== Hermes doctor 检查 ===");
-        // TODO（Week 7 实测后实现）：
-        // 1. hermes --version 检查
-        // 2. 解析 Hermes 配置文件（TBD-02），验证 provider base_url
-        // 3. Canary（OpenAI 协议）
-        // 4. X-Sieve-Origin header 注入（TBD-06）
-        // 见 SPEC-004 §6.3。
-        println!("  ⚠ Hermes 检查为 stub（SPEC-004 §6.3 TBD-02/TBD-06），Week 7 实测后实现");
     }
 
     fn print_check(label: &str, ok: bool) {

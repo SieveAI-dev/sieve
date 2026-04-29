@@ -198,6 +198,7 @@ mod dispatch_impl {
                     if let Action::HoldForDecision {
                         request_id,
                         timeout_seconds,
+                        default_on_timeout: _,
                     } = d.action
                     {
                         Some((request_id, timeout_seconds))

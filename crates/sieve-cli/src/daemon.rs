@@ -149,6 +149,7 @@ pub async fn run(
     filter: Arc<OutboundFilter>,
     inbound_engine: Arc<dyn InboundEngine>,
     inbound_sieveignore: Arc<HashSet<String>>,
+    address_guard_config: sieve_core::pipeline::inbound::AddressGuardConfig,
 ) -> Result<()> {
     let listen = cfg.listen_addr()?;
     let dry_run = cfg.dry_run;
@@ -208,15 +209,20 @@ pub async fn run(
         let inbound_engine = inbound_engine.clone();
         let inbound_sieveignore = inbound_sieveignore.clone();
         let ipc_server = ipc_server.clone();
+        let ag_cfg = address_guard_config.clone();
 
         tokio::spawn(async move {
             let io = TokioIo::new(stream);
             let svc = service_fn(move |req| {
                 let f = forwarder.clone();
                 let flt = filter.clone();
-                // 每连接独立 InboundFilter（&mut self trait 要求）
-                let ib_filter =
-                    InboundFilter::new(inbound_engine.clone(), inbound_sieveignore.clone());
+                // 每连接独立 InboundFilter（&mut self trait 要求），
+                // 传入从 IN-CR-01 RuleEntry 读取的配置（修 R3-#5）
+                let ib_filter = InboundFilter::with_address_guard_config(
+                    inbound_engine.clone(),
+                    inbound_sieveignore.clone(),
+                    ag_cfg.clone(),
+                );
                 let ipc = ipc_server.clone();
                 async move { proxy(f, flt, ib_filter, dry_run, ipc, req).await }
             });
@@ -361,6 +367,7 @@ async fn proxy_inner(
                     d.action = Action::HoldForDecision {
                         request_id: uuid::Uuid::new_v4(),
                         timeout_seconds: 60,
+                        default_on_timeout: sieve_core::detection::DefaultOnTimeout::Block,
                     };
                 }
             }
@@ -489,17 +496,29 @@ async fn proxy_inner(
         }
 
         // 4. chain_depth ≥ 2 → HookMark 升级为 HoldForDecision（强制 GUI 弹窗，ADR-019）
+        // 修 R9-#2：chain_depth ≥ 2 时 HookMark + Redact 都升级为 HoldForDecision。
         if chain_depth >= 2 {
             tracing::info!(
                 chain_depth,
-                "X-Sieve-Origin chain_depth ≥ 2（Anthropic 路径），HookMark 升级为 GuiPopup"
+                "X-Sieve-Origin chain_depth ≥ 2（Anthropic 路径），HookMark + Redact 升级为 GuiPopup"
             );
             for d in &mut all_detections {
-                if matches!(d.action, Action::HookMark) {
-                    d.action = Action::HoldForDecision {
-                        request_id: uuid::Uuid::new_v4(),
-                        timeout_seconds: 60,
-                    };
+                match &d.action {
+                    Action::HookMark => {
+                        d.action = Action::HoldForDecision {
+                            request_id: uuid::Uuid::new_v4(),
+                            timeout_seconds: 60,
+                            default_on_timeout: sieve_core::detection::DefaultOnTimeout::Block,
+                        };
+                    }
+                    Action::Redact { .. } => {
+                        d.action = Action::HoldForDecision {
+                            request_id: uuid::Uuid::new_v4(),
+                            timeout_seconds: 60,
+                            default_on_timeout: sieve_core::detection::DefaultOnTimeout::Redact,
+                        };
+                    }
+                    _ => {}
                 }
             }
         }
@@ -878,18 +897,32 @@ async fn proxy_openai(
 
     // 4. chain_depth ≥ 2 → 所有命中（含 HookTerminal disposition）强制升级为 GuiPopup
     //    （ADR-019 §chain_depth 升级策略）
+    // 4. chain_depth ≥ 2 → HookMark + Redact 升级为 HoldForDecision（强制 GUI 弹窗，ADR-019）
+    //
+    // 修 R9-#2：OpenAI 路径之前只升级 HookMark，Action::Redact 仍静默脱敏。
+    // 与 Anthropic 路径对称修复：嵌套调用时 Redact 也需 GUI 确认。
     if chain_depth >= 2 {
         tracing::info!(
             chain_depth,
-            "X-Sieve-Origin chain_depth ≥ 2，所有检测命中升级为 GuiPopup"
+            "X-Sieve-Origin chain_depth ≥ 2（OpenAI 路径），HookMark + Redact 升级为 GuiPopup"
         );
         for d in &mut all_detections {
-            // HookMark 在 chain_depth ≥ 2 场景下升级为 HoldForDecision（强制 GUI 弹窗）
-            if matches!(d.action, Action::HookMark) {
-                d.action = Action::HoldForDecision {
-                    request_id: uuid::Uuid::new_v4(),
-                    timeout_seconds: 60,
-                };
+            match &d.action {
+                Action::HookMark => {
+                    d.action = Action::HoldForDecision {
+                        request_id: uuid::Uuid::new_v4(),
+                        timeout_seconds: 60,
+                        default_on_timeout: sieve_core::detection::DefaultOnTimeout::Block,
+                    };
+                }
+                Action::Redact { .. } => {
+                    d.action = Action::HoldForDecision {
+                        request_id: uuid::Uuid::new_v4(),
+                        timeout_seconds: 60,
+                        default_on_timeout: sieve_core::detection::DefaultOnTimeout::Redact,
+                    };
+                }
+                _ => {}
             }
         }
     }
@@ -939,19 +972,25 @@ async fn proxy_openai(
             use chrono::Utc;
 
             let request_id = uuid::Uuid::new_v4();
-            let (timeout_seconds, default_on_timeout) = hold_detections
-                .iter()
-                .find_map(|d| {
+
+            // 修 R3-#4 / R10-#2（OpenAI 路径）：从 detection.default_on_timeout 读，不硬编码 Block。
+            let (timeout_seconds, default_on_timeout) = hold_detections.iter().fold(
+                (60_u32, sieve_ipc::DefaultOnTimeout::Allow),
+                |acc, d| {
                     if let Action::HoldForDecision {
-                        timeout_seconds, ..
-                    } = d.action
+                        timeout_seconds,
+                        default_on_timeout,
+                        ..
+                    } = &d.action
                     {
-                        Some((timeout_seconds, sieve_ipc::DefaultOnTimeout::Block))
+                        let merged =
+                            merge_strictest_timeout(acc.1, map_dot_to_ipc(*default_on_timeout));
+                        (acc.0.max(*timeout_seconds), merged)
                     } else {
-                        None
+                        acc
                     }
-                })
-                .unwrap_or((60, sieve_ipc::DefaultOnTimeout::Block));
+                },
+            );
 
             // chain_depth ≥ 2 时在弹窗标题里显示完整 origin_chain 信息（ADR-019）
             let chain_note = if chain_depth >= 2 {
@@ -1022,17 +1061,81 @@ async fn proxy_openai(
                     }
                 },
                 Err(e) => {
-                    tracing::warn!(error = %e, "OUTBOUND GUI (openai): IPC error, fail-closed → 426");
+                    // 修 R3-#4（OpenAI 路径）：按规则 default_on_timeout 兜底
+                    tracing::warn!(error = %e, ?default_on_timeout, "OUTBOUND GUI (openai): IPC error, applying default_on_timeout");
+                    match default_on_timeout {
+                        sieve_ipc::DefaultOnTimeout::Redact => {
+                            for d in &hold_detections {
+                                let already = redact_hits_openai
+                                    .iter()
+                                    .any(|h| h.start == d.span.start && h.end == d.span.end);
+                                if !already {
+                                    redact_hits_openai.push(RedactHit {
+                                        rule_id: d.rule_id.clone(),
+                                        start: d.span.start,
+                                        end: d.span.end,
+                                    });
+                                }
+                            }
+                        }
+                        sieve_ipc::DefaultOnTimeout::Allow => {
+                            tracing::info!("OUTBOUND GUI (openai): timeout default=allow → 放���");
+                        }
+                        sieve_ipc::DefaultOnTimeout::Block => {
+                            let held: Vec<sieve_core::Detection> =
+                                hold_detections.iter().map(|d| (*d).clone()).collect();
+                            return Ok(build_426_response(&held));
+                        }
+                    }
+                }
+            }
+        } else {
+            // IPC 未初始化：按规则 default_on_timeout 兜底（修 R3-#4 OpenAI 路径）
+            let effective_dot =
+                hold_detections
+                    .iter()
+                    .fold(sieve_ipc::DefaultOnTimeout::Allow, |acc, d| {
+                        if let Action::HoldForDecision {
+                            default_on_timeout, ..
+                        } = &d.action
+                        {
+                            merge_strictest_timeout(acc, map_dot_to_ipc(*default_on_timeout))
+                        } else {
+                            acc
+                        }
+                    });
+            match effective_dot {
+                sieve_ipc::DefaultOnTimeout::Redact => {
+                    tracing::info!(
+                        "OUTBOUND GUI (openai): IPC not initialized, default_on_timeout=redact → 脱��转发"
+                    );
+                    for d in &hold_detections {
+                        let already = redact_hits_openai
+                            .iter()
+                            .any(|h| h.start == d.span.start && h.end == d.span.end);
+                        if !already {
+                            redact_hits_openai.push(RedactHit {
+                                rule_id: d.rule_id.clone(),
+                                start: d.span.start,
+                                end: d.span.end,
+                            });
+                        }
+                    }
+                }
+                sieve_ipc::DefaultOnTimeout::Allow => {
+                    tracing::info!(
+                        "OUTBOUND GUI (openai): IPC not initialized, default_on_timeout=allow → 放行"
+                    );
+                }
+                sieve_ipc::DefaultOnTimeout::Block => {
+                    tracing::warn!(
+                        "OUTBOUND GUI (openai): IPC not initialized, default_on_timeout=block → 426"
+                    );
                     let held: Vec<sieve_core::Detection> =
                         hold_detections.iter().map(|d| (*d).clone()).collect();
                     return Ok(build_426_response(&held));
                 }
             }
-        } else {
-            tracing::warn!("OUTBOUND GUI (openai): IPC not initialized, fail-closed → 426");
-            let held: Vec<sieve_core::Detection> =
-                hold_detections.iter().map(|d| (*d).clone()).collect();
-            return Ok(build_426_response(&held));
         }
     }
 
@@ -1884,6 +1987,7 @@ fn classify_inbound_detections(
                     d.action = Action::HoldForDecision {
                         request_id: uuid::Uuid::new_v4(),
                         timeout_seconds: 60,
+                        default_on_timeout: sieve_core::detection::DefaultOnTimeout::Block,
                     };
                     hold_detections.push(d);
                 } else {
@@ -2007,6 +2111,33 @@ fn build_sieve_blocked_sse(detections: &[sieve_core::Detection]) -> Bytes {
         }
     });
     Bytes::from(format!("\nevent: sieve_blocked\ndata: {}\n\n", payload))
+}
+
+/// 把 `sieve_core::detection::DefaultOnTimeout` 映射为 `sieve_ipc::DefaultOnTimeout`。
+///
+/// 修 R3-#4 / R10-#2：engine_adapter 把规则里的 default_on_timeout 存入 Detection，
+/// daemon 通过此函数转换后传给 IPC 层。
+fn map_dot_to_ipc(dot: sieve_core::detection::DefaultOnTimeout) -> sieve_ipc::DefaultOnTimeout {
+    match dot {
+        sieve_core::detection::DefaultOnTimeout::Redact => sieve_ipc::DefaultOnTimeout::Redact,
+        sieve_core::detection::DefaultOnTimeout::Block => sieve_ipc::DefaultOnTimeout::Block,
+        sieve_core::detection::DefaultOnTimeout::Allow => sieve_ipc::DefaultOnTimeout::Allow,
+    }
+}
+
+/// 合并两个 `DefaultOnTimeout`，取更严格的一方：Block > Redact > Allow。
+///
+/// 多条 hold_detections 时用于取最严兜底策略。
+fn merge_strictest_timeout(
+    a: sieve_ipc::DefaultOnTimeout,
+    b: sieve_ipc::DefaultOnTimeout,
+) -> sieve_ipc::DefaultOnTimeout {
+    use sieve_ipc::DefaultOnTimeout::{Allow, Block, Redact};
+    match (a, b) {
+        (Block, _) | (_, Block) => Block,
+        (Redact, _) | (_, Redact) => Redact,
+        (Allow, Allow) => Allow,
+    }
 }
 
 /// 用已收集的 body bytes 重新构造请求并转发。
@@ -2897,6 +3028,7 @@ mod tests {
                     d.action = Action::HoldForDecision {
                         request_id: uuid::Uuid::new_v4(),
                         timeout_seconds: 60,
+                        default_on_timeout: sieve_core::detection::DefaultOnTimeout::Block,
                     };
                     hold_detections.push(d);
                 } else {

@@ -5,6 +5,23 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+/// 超时后的默认处置（sieve-core 内部镜像，避免对 sieve-rules 循环依赖）。
+///
+/// 与 `sieve_rules::manifest::DefaultOnTimeout` 语���完全一致；
+/// engine_adapter 在构造 `Detection` 时从 `RuleEntry.default_on_timeout` 转换。
+///
+/// 关联：PRD v1.4 §5.4.2、R3-#5 修复（IN-CR-01 disposition 配置生效）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DefaultOnTimeout {
+    /// 脱敏后放行。
+    Redact,
+    /// 阻断（fail-closed 默认）。
+    Block,
+    /// 放行（仅低优先级通知类规则）。
+    Allow,
+}
+
 /// 严重等级（关联 PRD §5.1 / §9 公理 12 Critical FP < 0.5%）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -46,6 +63,11 @@ pub enum Action {
         request_id: uuid::Uuid,
         /// 等待超时秒数（来自 `RuleEntry.timeout_seconds`）。
         timeout_seconds: u32,
+        /// 超时或 GUI 未连接时的默认处置（来自 `RuleEntry.default_on_timeout`）。
+        ///
+        /// 修 R3-#5：不再硬编码 Block，由规则配置决定。
+        /// IN-CR-01 配置 `block`（fail-closed）；其他规则按 TOML 读取。
+        default_on_timeout: DefaultOnTimeout,
     },
     /// 仅审计，不影响流量（StatusBar disposition）。
     MarkOnly,
