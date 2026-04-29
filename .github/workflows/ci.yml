@@ -49,7 +49,10 @@ jobs:
 
   deny:
     name: cargo-deny
-    runs-on: macos-14
+    # EmbarkStudios/cargo-deny-action@v2 是 Container action，只支持 Linux runner。
+    # cargo-deny 是供应链审计（依赖来源 / license / 漏洞），与运行平台无关，
+    # 跟 fuzz-quick 同样模式：Phase 1 仅 macOS 的约束不强制要求审计 job 也切 macOS。
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       # ADR-003: 检查出站依赖来源、license 合规、漏洞
