@@ -37,13 +37,14 @@ use sieve_core::pipeline::streaming::StreamingPipelineNode as _;
 use sieve_core::sse::parser::SseParser;
 use sieve_core::tool_use_aggregator::Aggregator;
 use sieve_core::Forwarder;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::config::Config;
+use crate::upstream_routes::UpstreamRoutes;
 
 // ── multi-agent header 解析（ADR-019）────────────────────────────────────────
 // 修 R8-#1：改用 sieve_ipc::parse_origin_header，支持 3 段（无签名）和 4 段（含签名）格式。
@@ -156,6 +157,62 @@ pub async fn run(
     let forwarder =
         Arc::new(Forwarder::new(&cfg.upstream_url).map_err(|e| anyhow!("init forwarder: {e}"))?);
 
+    // R11-#1：加载 OpenClaw 上游路由表（~/.sieve/upstream-routes.json）。
+    // 加载失败（文件不存在 / JSON 非法）时 warn 后继续，所有请求走默认上游兜底。
+    // 成功时为每个 provider id 预构建 Forwarder（含连接池），请求处理时直接 map lookup。
+    let provider_forwarders: Arc<HashMap<String, Arc<Forwarder>>> = {
+        let routes = match sieve_ipc::paths::sieve_home() {
+            Ok(home) => {
+                let path = home.join("upstream-routes.json");
+                match UpstreamRoutes::load(&path) {
+                    Ok(r) => {
+                        if !r.is_empty() {
+                            tracing::info!(
+                                count = r.len(),
+                                path = %path.display(),
+                                "upstream-routes loaded"
+                            );
+                        }
+                        r
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            "upstream-routes load failed; all requests will use default upstream"
+                        );
+                        UpstreamRoutes::default()
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "SIEVE_HOME not set; upstream-routes disabled, using default upstream"
+                );
+                UpstreamRoutes::default()
+            }
+        };
+
+        let mut map: HashMap<String, Arc<Forwarder>> = HashMap::new();
+        for (provider_id, upstream_url) in routes.iter() {
+            match Forwarder::new(upstream_url) {
+                Ok(f) => {
+                    tracing::debug!(provider = %provider_id, upstream = %upstream_url, "provider forwarder ready");
+                    map.insert(provider_id.to_owned(), Arc::new(f));
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        provider = %provider_id,
+                        upstream = %upstream_url,
+                        "failed to build forwarder for provider; will use default upstream"
+                    );
+                }
+            }
+        }
+        Arc::new(map)
+    };
+
     // v1.4：初始化 IpcServer（Unix socket），供 GUI 类 hold 流使用。
     // socket path = ~/.sieve/ipc.sock（或 $SIEVE_HOME/ipc.sock）。
     // 若初始化失败（如 $HOME 未设置），打印警告后继续——GuiPopup detection 会以 fail-closed 处理。
@@ -210,6 +267,7 @@ pub async fn run(
         let inbound_sieveignore = inbound_sieveignore.clone();
         let ipc_server = ipc_server.clone();
         let ag_cfg = address_guard_config.clone();
+        let pf = provider_forwarders.clone();
 
         tokio::spawn(async move {
             let io = TokioIo::new(stream);
@@ -224,7 +282,8 @@ pub async fn run(
                     ag_cfg.clone(),
                 );
                 let ipc = ipc_server.clone();
-                async move { proxy(f, flt, ib_filter, dry_run, ipc, req).await }
+                let pf = pf.clone();
+                async move { proxy(f, pf, flt, ib_filter, dry_run, ipc, req).await }
             });
 
             if let Err(e) = auto::Builder::new(TokioExecutor::new())
@@ -240,13 +299,24 @@ pub async fn run(
 /// 请求入口：捕获 `proxy_inner` 的所有错误，转换为 502 Bad Gateway 响应。
 async fn proxy(
     forwarder: Arc<Forwarder>,
+    provider_forwarders: Arc<HashMap<String, Arc<Forwarder>>>,
     filter: Arc<OutboundFilter>,
     inbound_filter: InboundFilter,
     dry_run: bool,
     ipc: Option<Arc<sieve_ipc::IpcServer>>,
     req: Request<Incoming>,
 ) -> Result<Response<ResponseBody>, hyper::Error> {
-    match proxy_inner(forwarder, filter, inbound_filter, dry_run, ipc, req).await {
+    match proxy_inner(
+        forwarder,
+        provider_forwarders,
+        filter,
+        inbound_filter,
+        dry_run,
+        ipc,
+        req,
+    )
+    .await
+    {
         Ok(resp) => Ok(resp),
         Err(e) => {
             tracing::error!(error = %e, "proxy failed");
@@ -274,16 +344,49 @@ async fn proxy(
 /// 3. 解析 `X-Sieve-Source-Channel` → source_channel（OpenClaw 跨通道）
 /// 4. chain_depth ≥ 2 → 所有命中强制升级为 GuiPopup disposition
 ///
+/// R11-#1：在所有路径分发前���解析 `X-Sieve-Provider` header 并从路由表中查找上游 Forwarder：
+/// - 有 header + 路由表命中 → 用对应 provider 的 Forwarder（OpenClaw 多 provider 路由）
+/// - 无 header 或路由表未命中 → 用默认 `forwarder`（cfg.upstream_url 兜底）
+///
+/// 转发到上游前**移除** `X-Sieve-Provider` header（内部路由 header，不透传给上游）。
+///
 /// 关联：PRD v1.5 §6.1 / ADR-018（OpenAI 协议）/ ADR-019（multi-agent header）。
 async fn proxy_inner(
     forwarder: Arc<Forwarder>,
+    provider_forwarders: Arc<HashMap<String, Arc<Forwarder>>>,
     filter: Arc<OutboundFilter>,
     inbound_filter: InboundFilter,
     dry_run: bool,
     ipc: Option<Arc<sieve_ipc::IpcServer>>,
     req: Request<Incoming>,
 ) -> Result<Response<ResponseBody>> {
-    let (parts, body) = req.into_parts();
+    let (mut parts, body) = req.into_parts();
+
+    // R11-#1：解析 X-Sieve-Provider，查路由表选择上游，转发前移除此 header。
+    // 移除在此处（统一入口），后续所有 forward_* 调用无需感知此 header。
+    let forwarder: Arc<Forwarder> = {
+        let provider_id = parts
+            .headers
+            .remove("x-sieve-provider")
+            .and_then(|v| v.to_str().ok().map(|s| s.trim().to_owned()))
+            .filter(|s| !s.is_empty());
+        match provider_id {
+            Some(ref id) => {
+                if let Some(pf) = provider_forwarders.get(id.as_str()) {
+                    tracing::debug!(provider = %id, "X-Sieve-Provider: routing to provider upstream");
+                    Arc::clone(pf)
+                } else {
+                    tracing::debug!(
+                        provider = %id,
+                        "X-Sieve-Provider: no route found, falling back to default upstream"
+                    );
+                    forwarder
+                }
+            }
+            None => forwarder,
+        }
+    };
+
     let path = parts.uri.path().to_string();
     let method = parts.method.clone();
 
@@ -592,22 +695,27 @@ async fn proxy_inner(
                 use chrono::Utc;
 
                 let request_id = uuid::Uuid::new_v4();
-                let (timeout_seconds, default_on_timeout) = hold_detections_outbound
-                    .iter()
-                    .find_map(|d| {
+
+                // 修 R11-#2：从 hold_detections 的 default_on_timeout 取最严策略��
+                // 与 OpenAI 路径完全镜像（merge_strictest_timeout + map_dot_to_ipc）。
+                // OUT-06/08 default=Redact → 超时脱敏转发；OUT-07 default=Block → 超时 426。
+                let (timeout_seconds, default_on_timeout) = hold_detections_outbound.iter().fold(
+                    (60_u32, sieve_ipc::DefaultOnTimeout::Allow),
+                    |acc, d| {
                         if let Action::HoldForDecision {
-                            timeout_seconds, ..
-                        } = d.action
+                            timeout_seconds,
+                            default_on_timeout,
+                            ..
+                        } = &d.action
                         {
-                            // 取第一个 HoldForDecision detection 的规则 timeout/default
-                            // default_on_timeout 从 detection 的 rule_id 对应规则读取，
-                            // 此处用 Block 作为保守默认（规则未设则 fail-closed）
-                            Some((timeout_seconds, sieve_ipc::DefaultOnTimeout::Block))
+                            let merged =
+                                merge_strictest_timeout(acc.1, map_dot_to_ipc(*default_on_timeout));
+                            (acc.0.max(*timeout_seconds), merged)
                         } else {
-                            None
+                            acc
                         }
-                    })
-                    .unwrap_or((60, sieve_ipc::DefaultOnTimeout::Block));
+                    },
+                );
 
                 let ipc_detections = hold_detections_outbound
                     .iter()
@@ -674,8 +782,79 @@ async fn proxy_inner(
                         }
                     },
                     Err(e) => {
-                        // IPC 错误：按 default_on_timeout 兜底（fail-closed）
-                        tracing::warn!(error = %e, "OUTBOUND GUI: IPC error, fail-closed → 426");
+                        // 修 R11-#2：IPC 错误 / 超时时按 default_on_timeout 三路分支（镜像 OpenAI 路径）。
+                        tracing::warn!(error = %e, ?default_on_timeout, "OUTBOUND GUI: IPC error, applying default_on_timeout");
+                        match default_on_timeout {
+                            sieve_ipc::DefaultOnTimeout::Redact => {
+                                tracing::info!("OUTBOUND GUI: timeout default=redact → 脱敏转发");
+                                for d in &hold_detections_outbound {
+                                    let already = redact_hits
+                                        .iter()
+                                        .any(|h| h.start == d.span.start && h.end == d.span.end);
+                                    if !already {
+                                        redact_hits.push(RedactHit {
+                                            rule_id: d.rule_id.clone(),
+                                            start: d.span.start,
+                                            end: d.span.end,
+                                        });
+                                    }
+                                }
+                            }
+                            sieve_ipc::DefaultOnTimeout::Allow => {
+                                tracing::info!("OUTBOUND GUI: timeout default=allow → 放行");
+                            }
+                            sieve_ipc::DefaultOnTimeout::Block => {
+                                let held: Vec<sieve_core::Detection> = hold_detections_outbound
+                                    .iter()
+                                    .map(|d| (*d).clone())
+                                    .collect();
+                                return Ok(build_426_response(&held));
+                            }
+                        }
+                    }
+                }
+            } else {
+                // 修 R11-#2：IPC 未初始化时按 default_on_timeout 三路分支（镜像 OpenAI 路径）。
+                let effective_dot = hold_detections_outbound.iter().fold(
+                    sieve_ipc::DefaultOnTimeout::Allow,
+                    |acc, d| {
+                        if let Action::HoldForDecision {
+                            default_on_timeout, ..
+                        } = &d.action
+                        {
+                            merge_strictest_timeout(acc, map_dot_to_ipc(*default_on_timeout))
+                        } else {
+                            acc
+                        }
+                    },
+                );
+                match effective_dot {
+                    sieve_ipc::DefaultOnTimeout::Redact => {
+                        tracing::info!(
+                            "OUTBOUND GUI: IPC not initialized, default_on_timeout=redact → 脱敏转发"
+                        );
+                        for d in &hold_detections_outbound {
+                            let already = redact_hits
+                                .iter()
+                                .any(|h| h.start == d.span.start && h.end == d.span.end);
+                            if !already {
+                                redact_hits.push(RedactHit {
+                                    rule_id: d.rule_id.clone(),
+                                    start: d.span.start,
+                                    end: d.span.end,
+                                });
+                            }
+                        }
+                    }
+                    sieve_ipc::DefaultOnTimeout::Allow => {
+                        tracing::info!(
+                            "OUTBOUND GUI: IPC not initialized, default_on_timeout=allow → 放行"
+                        );
+                    }
+                    sieve_ipc::DefaultOnTimeout::Block => {
+                        tracing::warn!(
+                            "OUTBOUND GUI: IPC not initialized, default_on_timeout=block → 426"
+                        );
                         let held: Vec<sieve_core::Detection> = hold_detections_outbound
                             .iter()
                             .map(|d| (*d).clone())
@@ -683,14 +862,6 @@ async fn proxy_inner(
                         return Ok(build_426_response(&held));
                     }
                 }
-            } else {
-                // IPC 未初始化：fail-closed → 426
-                tracing::warn!("OUTBOUND GUI: IPC not initialized, fail-closed → 426");
-                let held: Vec<sieve_core::Detection> = hold_detections_outbound
-                    .iter()
-                    .map(|d| (*d).clone())
-                    .collect();
-                return Ok(build_426_response(&held));
             }
         }
 
