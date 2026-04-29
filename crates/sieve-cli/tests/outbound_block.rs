@@ -950,6 +950,366 @@ async fn r3_fix_gui_redact_and_allow_mixed_both_spans_redacted() {
     );
 }
 
+// ─── R11-#1 OpenClaw upstream_routes 路由测试 ─────────────────────────────────
+
+/// 构造含 JWT token 的请求 body（触发 OUT-06，disposition=gui_popup，default_on_timeout=redact）。
+fn jwt_body() -> String {
+    // 标准 JWT 三段式格式，满足 OUT-06 pattern
+    let jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0LXN1YmplY3QifQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+    serde_json::json!({
+        "model": "claude-sonnet-4-5",
+        "max_tokens": 16,
+        "messages": [{
+            "role": "user",
+            "content": format!("my token: {jwt}"),
+        }],
+    })
+    .to_string()
+}
+
+/// R11-#1：X-Sieve-Provider header 存在且路由表命中 → 请求发往 provider 对应上游（port A），
+/// 不发往默认上游（port B）。
+///
+/// 验证 OpenClaw 多 provider 路由核心路径：正确 provider 被调用，默认上游不被调用。
+#[tokio::test]
+async fn r11_provider_header_routes_to_correct_upstream() {
+    // 起两个 fake 上游：A（provider 路由目标）和 B（默认上游）
+    let provider_count = Arc::new(AtomicUsize::new(0));
+    let default_count = Arc::new(AtomicUsize::new(0));
+
+    let pc = provider_count.clone();
+    let (provider_addr, _up_provider) = spawn_mock_upstream(move |_req| {
+        let c = pc.clone();
+        async move {
+            c.fetch_add(1, Ordering::SeqCst);
+            Response::builder()
+                .status(200)
+                .body(Full::new(Bytes::from_static(b"from-provider-upstream")))
+                .unwrap()
+        }
+    })
+    .await;
+
+    let dc = default_count.clone();
+    let (default_addr, _up_default) = spawn_mock_upstream(move |_req| {
+        let c = dc.clone();
+        async move {
+            c.fetch_add(1, Ordering::SeqCst);
+            Response::builder()
+                .status(200)
+                .body(Full::new(Bytes::from_static(b"from-default-upstream")))
+                .unwrap()
+        }
+    })
+    .await;
+
+    // 写 upstream-routes.json：openai → provider_addr
+    let sieve_home_dir = tempfile::tempdir().unwrap();
+    let sieve_home = sieve_home_dir.path().to_owned();
+    let routes_json = serde_json::json!({
+        "openai": format!("http://{provider_addr}")
+    });
+    std::fs::write(
+        sieve_home.join("upstream-routes.json"),
+        routes_json.to_string(),
+    )
+    .unwrap();
+
+    let (sieve_port, _guard) =
+        spawn_sieve_daemon_with_home(&format!("http://{default_addr}"), false, Some(&sieve_home));
+
+    // 发 benign 请求（无 Critical 命中），带 X-Sieve-Provider: openai header
+    let benign = r#"{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}"#;
+    let client = plain_http_client();
+    let resp = client
+        .request(
+            Request::builder()
+                .method(http::Method::POST)
+                .uri(format!("http://127.0.0.1:{sieve_port}/v1/messages"))
+                .header(http::header::CONTENT_TYPE, "application/json")
+                .header(http::header::HOST, format!("127.0.0.1:{sieve_port}"))
+                .header("x-sieve-provider", "openai")
+                .body(Full::new(Bytes::from_static(benign.as_bytes())))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "provider-routed request should succeed"
+    );
+    assert_eq!(
+        provider_count.load(Ordering::SeqCst),
+        1,
+        "R11-#1: provider upstream 应被调用一次"
+    );
+    assert_eq!(
+        default_count.load(Ordering::SeqCst),
+        0,
+        "R11-#1: default upstream 不应被调用"
+    );
+}
+
+/// R11-#1：X-Sieve-Provider header 存在但路由表未命中 → 使用默认上游（cfg.upstream_url）。
+///
+/// 验证兜底行为：provider id 不在路由表中时降级到默认上游。
+#[tokio::test]
+async fn r11_unknown_provider_falls_back_to_default_upstream() {
+    let default_count = Arc::new(AtomicUsize::new(0));
+    let dc = default_count.clone();
+    let (default_addr, _up_default) = spawn_mock_upstream(move |_req| {
+        let c = dc.clone();
+        async move {
+            c.fetch_add(1, Ordering::SeqCst);
+            Response::builder()
+                .status(200)
+                .body(Full::new(Bytes::from_static(b"from-default")))
+                .unwrap()
+        }
+    })
+    .await;
+
+    let sieve_home_dir = tempfile::tempdir().unwrap();
+    let sieve_home = sieve_home_dir.path().to_owned();
+    // 路由表中没有 "gemini"
+    let routes_json = serde_json::json!({ "openai": "http://127.0.0.1:9999" });
+    std::fs::write(
+        sieve_home.join("upstream-routes.json"),
+        routes_json.to_string(),
+    )
+    .unwrap();
+
+    let (sieve_port, _guard) =
+        spawn_sieve_daemon_with_home(&format!("http://{default_addr}"), false, Some(&sieve_home));
+
+    let benign = r#"{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}"#;
+    let client = plain_http_client();
+    let resp = client
+        .request(
+            Request::builder()
+                .method(http::Method::POST)
+                .uri(format!("http://127.0.0.1:{sieve_port}/v1/messages"))
+                .header(http::header::CONTENT_TYPE, "application/json")
+                .header(http::header::HOST, format!("127.0.0.1:{sieve_port}"))
+                .header("x-sieve-provider", "gemini") // 路由表中不存在
+                .body(Full::new(Bytes::from_static(benign.as_bytes())))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "unknown provider 应兜底到默认上游"
+    );
+    assert_eq!(
+        default_count.load(Ordering::SeqCst),
+        1,
+        "R11-#1: 未命中 provider 时默认上游应被调用"
+    );
+}
+
+/// R11-#1：upstream-routes.json 不存在 → daemon 启动正常，请求走默认上游。
+///
+/// 验证鲁棒性：路由文件缺失时 daemon 正常启动并转发请求。
+#[tokio::test]
+async fn r11_missing_routes_json_daemon_starts_normally() {
+    let call_count = Arc::new(AtomicUsize::new(0));
+    let cc = call_count.clone();
+    let (upstream_addr, _up) = spawn_mock_upstream(move |_req| {
+        let c = cc.clone();
+        async move {
+            c.fetch_add(1, Ordering::SeqCst);
+            Response::builder()
+                .status(200)
+                .body(Full::new(Bytes::from_static(b"ok")))
+                .unwrap()
+        }
+    })
+    .await;
+
+    // sieve_home 存在但没有 upstream-routes.json
+    let sieve_home_dir = tempfile::tempdir().unwrap();
+    let sieve_home = sieve_home_dir.path().to_owned();
+    // 不写 upstream-routes.json
+
+    let (sieve_port, _guard) =
+        spawn_sieve_daemon_with_home(&format!("http://{upstream_addr}"), false, Some(&sieve_home));
+
+    let benign = r#"{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}"#;
+    let client = plain_http_client();
+    let resp = client
+        .request(
+            Request::builder()
+                .method(http::Method::POST)
+                .uri(format!("http://127.0.0.1:{sieve_port}/v1/messages"))
+                .header(http::header::CONTENT_TYPE, "application/json")
+                .header(http::header::HOST, format!("127.0.0.1:{sieve_port}"))
+                .body(Full::new(Bytes::from_static(benign.as_bytes())))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "routes.json 不存在时 daemon 应正常启动并转发请求"
+    );
+    assert_eq!(
+        call_count.load(Ordering::SeqCst),
+        1,
+        "R11-#1: routes.json 缺失时默认上游应被调用"
+    );
+}
+
+// ─── R11-#2 Anthropic out 站 default_on_timeout 修复验证 ──────────────────────
+
+/// R11-#2（Anthropic 路径，default=Redact）：触发 OUT-06（JWT，default_on_timeout=redact），
+/// IPC 未初始化（SIEVE_HOME 不存在）→ daemon 应按 default_on_timeout=Redact 脱敏后转发（200）。
+///
+/// 修复前：硬编码 Block → 返回 426；修复后：走规则 default_on_timeout → Redact → 脱敏转发。
+#[tokio::test]
+async fn r11_anthropic_out06_default_redact_no_ipc_redacts_and_forwards() {
+    let upstream_body = Arc::new(tokio::sync::Mutex::new(Bytes::new()));
+    let body_clone = upstream_body.clone();
+
+    let (upstream_addr, _up) = spawn_mock_upstream(move |req| {
+        let b = body_clone.clone();
+        async move {
+            let mut guard = b.lock().await;
+            *guard = req.body().clone();
+            drop(guard);
+            Response::builder()
+                .status(200)
+                .body(Full::new(Bytes::from_static(b"ok")))
+                .unwrap()
+        }
+    })
+    .await;
+
+    // 不设置 SIEVE_HOME（让 ipc_server = None via fallback to $HOME/.sieve bind collision
+    // 或者：把 SIEVE_HOME 设为一个不存在的路径使 bind 失败）
+    // 用法：spawn_sieve_daemon（不传 sieve_home）时 SIEVE_HOME 没设，
+    // 但 HOME 存在，daemon 会用 $HOME/.sieve/ipc.sock；
+    // 那个 socket 可能已存在（另一个测试留下的），或者正常 bind。
+    // 为确保 IPC server None，用一个不存在的嵌套路径作为 SIEVE_HOME。
+    let nonexistent_home = std::path::PathBuf::from(format!(
+        "/tmp/sieve-r11-nonexistent-{}/sub",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    // 不创建这个目录，让 IPC bind 失败 → ipc_server = None
+
+    let (sieve_port, _guard) = spawn_sieve_daemon_with_home(
+        &format!("http://{upstream_addr}"),
+        false,
+        Some(&nonexistent_home),
+    );
+
+    let jwt_req = jwt_body();
+    let client = plain_http_client();
+    let resp = client
+        .request(
+            Request::builder()
+                .method(http::Method::POST)
+                .uri(format!("http://127.0.0.1:{sieve_port}/v1/messages"))
+                .header(http::header::CONTENT_TYPE, "application/json")
+                .header(http::header::HOST, format!("127.0.0.1:{sieve_port}"))
+                .body(Full::new(Bytes::from(jwt_req)))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // R11-#2 修复：OUT-06 default_on_timeout=redact → 脱敏转发（200），而非 426
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "R11-#2: OUT-06 default_on_timeout=redact + no IPC → 应脱敏后转发（200），不应 426"
+    );
+
+    let received = upstream_body.lock().await.clone();
+    let received_str = String::from_utf8_lossy(&received);
+    // 上游不应收到原始 JWT（已被脱敏替换）
+    assert!(
+        !received_str.contains("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0LXN1YmplY3QifQ"),
+        "R11-#2: 上游不应收到原始 JWT：{received_str}"
+    );
+    assert!(
+        received_str.contains("REDACTED"),
+        "R11-#2: 上游 body 应含 REDACTED 占位符：{received_str}"
+    );
+}
+
+/// R11-#2（Anthropic 路径，default=Block）：触发 OUT-07（PEM key，default_on_timeout=block），
+/// IPC 未初始化 → daemon 应按 default_on_timeout=Block 返回 426。
+///
+/// 修复前行为一致（偶然正确），修复后行为仍为 426；此测试为回归断言。
+#[tokio::test]
+async fn r11_anthropic_out07_default_block_no_ipc_returns_426() {
+    let call_count = Arc::new(AtomicUsize::new(0));
+    let cc = call_count.clone();
+    let (upstream_addr, _up) = spawn_mock_upstream(move |_req| {
+        let c = cc.clone();
+        async move {
+            c.fetch_add(1, Ordering::SeqCst);
+            Response::builder()
+                .status(200)
+                .body(Full::new(Bytes::from_static(b"should-not-reach")))
+                .unwrap()
+        }
+    })
+    .await;
+
+    let nonexistent_home = std::path::PathBuf::from(format!(
+        "/tmp/sieve-r11-nonexistent-{}/sub",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+            + 1 // 避免与上一个测试冲突
+    ));
+
+    let (sieve_port, _guard) = spawn_sieve_daemon_with_home(
+        &format!("http://{upstream_addr}"),
+        false,
+        Some(&nonexistent_home),
+    );
+
+    let body = pem_key_body();
+    let client = plain_http_client();
+    let resp = client
+        .request(
+            Request::builder()
+                .method(http::Method::POST)
+                .uri(format!("http://127.0.0.1:{sieve_port}/v1/messages"))
+                .header(http::header::CONTENT_TYPE, "application/json")
+                .header(http::header::HOST, format!("127.0.0.1:{sieve_port}"))
+                .body(Full::new(Bytes::from(body)))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // OUT-07 default_on_timeout=block：无 IPC → fail-closed → 426
+    assert_eq!(
+        resp.status(),
+        StatusCode::UPGRADE_REQUIRED,
+        "R11-#2: OUT-07 default_on_timeout=block + no IPC → 应返回 426"
+    );
+    assert_eq!(
+        call_count.load(Ordering::SeqCst),
+        0,
+        "R11-#2: Block 后上游不应被调用"
+    );
+}
+
 /// OUT-07 GuiPopup hold：GUI Allow → 请求转发上游，上游返回 200。
 ///
 /// 验证 R2-#1 修复：Allow 决策后原 body 转发给上游。

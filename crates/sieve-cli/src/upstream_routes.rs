@@ -11,13 +11,14 @@
 //! - setup 时读取 OpenClaw config 中各 provider 的原始 baseUrl，
 //!   写到 `~/.sieve/upstream-routes.json`
 //! - JSON schema：`{"provider_id": "https://original.upstream.url", ...}`
-//! - daemon 启动时（或收到请求时）调 `load()` 加载路由表
+//! - daemon 启动时调 `load()` 加载路由表，对每个 provider 预构建 Forwarder（连接池）
 //! - OpenClaw 在请求中注入 `X-Sieve-Provider: <id>` header（setup 配置时同步写入）
-//! - daemon 按 header 值调 `lookup_by_provider_id()` 选上游；未命中时用 `Config.upstream_url` 兜底
+//! - daemon 按 header 值查 provider_forwarders map 选上游；未命中时用 `Config.upstream_url` 兜底
+//! - 转发前移除 `X-Sieve-Provider` header（内部路由标记，不透传给真实上游）
 //!
 //! ## 关联
 //!
-//! - known-issues-v1.4.md F-1（现已修复）
+//! - known-issues-v1.4.md R11-#1（现已修复）
 //! - SPEC-004 §4.2
 
 use anyhow::{Context, Result};
@@ -44,13 +45,11 @@ pub struct UpstreamRoutes {
 impl UpstreamRoutes {
     /// 从 JSON 文件加载路由表。文件不存在时返回空路由表。
     ///
-    /// 目前由 daemon 在请求处理时调用（Phase 1 后期接入）。
-    /// 当前仅 setup 写入，daemon 尚未读取，故此方法暂时被标为 dead_code。
+    /// daemon 启动时调用，按 X-Sieve-Provider header 为 OpenClaw 请求路由上游。
     ///
     /// # Errors
     ///
     /// 文件存在但内容不是合法 JSON 时返回 `Err`。
-    #[allow(dead_code)] // TODO(daemon-routing): daemon Forwarder 接入后删除此注解
     pub fn load(path: &Path) -> Result<Self> {
         if !path.exists() {
             return Ok(Self::default());
@@ -75,15 +74,6 @@ impl UpstreamRoutes {
         Ok(())
     }
 
-    /// 按 provider id 查找对应的上游 URL。
-    ///
-    /// 返回 `None` 时调用方应使用 `Config.upstream_url` 兜底。
-    /// daemon Forwarder 在收到含 `X-Sieve-Provider` header 的请求时调用此方法。
-    #[allow(dead_code)] // TODO(daemon-routing): daemon Forwarder 接入后删除此注解
-    pub fn lookup_by_provider_id(&self, provider_id: &str) -> Option<&str> {
-        self.routes.get(provider_id).map(|s| s.as_str())
-    }
-
     /// 插入或更新一条路由（provider id → upstream URL）。
     pub fn insert(&mut self, provider_id: impl Into<String>, upstream_url: impl Into<String>) {
         self.routes.insert(provider_id.into(), upstream_url.into());
@@ -100,8 +90,73 @@ impl UpstreamRoutes {
     }
 
     /// 遍历所有 (provider_id, upstream_url) 对。
-    #[allow(dead_code)] // TODO(daemon-routing): daemon Forwarder 接入后删除此注解
     pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
         self.routes.iter().map(|(k, v)| (k.as_str(), v.as_str()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write as _;
+
+    #[test]
+    fn insert_and_iter_returns_entries() {
+        let mut r = UpstreamRoutes::default();
+        r.insert("openai", "https://api.openai.com");
+        r.insert("openrouter", "https://openrouter.ai/api");
+        assert_eq!(r.len(), 2);
+        let mut pairs: Vec<(String, String)> = r
+            .iter()
+            .map(|(k, v)| (k.to_owned(), v.to_owned()))
+            .collect();
+        pairs.sort();
+        assert_eq!(
+            pairs[0],
+            ("openai".to_owned(), "https://api.openai.com".to_owned())
+        );
+        assert_eq!(
+            pairs[1],
+            (
+                "openrouter".to_owned(),
+                "https://openrouter.ai/api".to_owned()
+            )
+        );
+    }
+
+    #[test]
+    fn load_nonexistent_returns_empty() {
+        let path = std::path::Path::new("/tmp/upstream-routes-does-not-exist-sieve-test.json");
+        let r = UpstreamRoutes::load(path).unwrap();
+        assert!(r.is_empty());
+    }
+
+    #[test]
+    fn load_valid_json_roundtrip() {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        writeln!(
+            tmp,
+            r#"{{"openai": "https://api.openai.com", "deepseek": "https://api.deepseek.com"}}"#
+        )
+        .unwrap();
+        let r = UpstreamRoutes::load(tmp.path()).unwrap();
+        assert_eq!(r.len(), 2);
+        let urls: Vec<_> = r.iter().map(|(_, v)| v).collect();
+        assert!(
+            urls.contains(&"https://api.openai.com"),
+            "should contain openai url"
+        );
+        assert!(
+            urls.contains(&"https://api.deepseek.com"),
+            "should contain deepseek url"
+        );
+    }
+
+    #[test]
+    fn load_invalid_json_returns_err() {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        writeln!(tmp, "this is not json {{").unwrap();
+        let result = UpstreamRoutes::load(tmp.path());
+        assert!(result.is_err(), "invalid JSON should return Err");
     }
 }
