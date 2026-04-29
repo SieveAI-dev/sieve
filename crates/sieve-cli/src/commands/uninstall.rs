@@ -232,7 +232,8 @@ mod macos {
             .rposition(|e| e.action == "setup_complete" && agent_matches(&e.agent, agent_filter))
             .unwrap_or(0);
 
-        let file_actions = ["settings_updated", "sieve_toml_written"];
+        // config_modified：OpenClaw / Hermes apply 写入的 action（R10-#1）。
+        let file_actions = ["settings_updated", "sieve_toml_written", "config_modified"];
         let infos: Vec<FileRestoreInfo> = entries[last_setup_idx..]
             .iter()
             .filter(|e| {
@@ -317,8 +318,17 @@ mod macos {
             } else {
                 // setup 前已存在 → 仅移除 Sieve entries，保留用户其他配置
                 // 对 settings.json：移除 env.ANTHROPIC_BASE_URL + hooks.PreToolUse 中 sieve-hook 条目
+                // 对其他文件（openclaw.json / hermes config.yaml 等）：从备份恢复（R10-#1）
                 let extension = info.path.extension().and_then(|e| e.to_str()).unwrap_or("");
-                if extension == "json" {
+                // settings.json（Claude Code 配置）：精确移除 Sieve entries，保留用户其他配置。
+                // 其他 JSON（openclaw.json 等）：从备份恢复整个文件（R10-#1）。
+                let is_settings_json = info
+                    .path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|n| n == "settings.json")
+                    .unwrap_or(false);
+                if extension == "json" && is_settings_json {
                     match remove_sieve_entries_from_settings(&info.path) {
                         Ok(()) => {
                             println!("[uninstall] ✅ 移除 Sieve entries: {}", info.path.display());
@@ -330,6 +340,13 @@ mod macos {
                                 restore_file_from_backup(bd, &info.path)?;
                             }
                         }
+                    }
+                } else if extension == "json" {
+                    // 非 settings.json 的 JSON（openclaw.json 等）：从备份恢复整个文件（R10-#1）
+                    if let Some(bd) = backup_dir {
+                        restore_file_from_backup(bd, &info.path)?;
+                    } else {
+                        eprintln!("[uninstall] ⚠ 无备份可恢复: {}", info.path.display());
                     }
                 } else if extension == "toml" {
                     // toml 文件同样按 created_new 判断：
@@ -546,7 +563,10 @@ mod tests {
     #[test]
     fn uninstall_created_new_false_removes_sieve_entries_only() {
         let dir = tempdir().unwrap();
-        let settings = dir.path().join("settings.json");
+        // 模拟 Claude Code 的真实路径：settings.json 位于 .claude 目录下
+        let claude_dir = dir.path().join(".claude");
+        fs::create_dir_all(&claude_dir).unwrap();
+        let settings = claude_dir.join("settings.json");
 
         // 模拟 setup 后的 settings.json：包含 Sieve entries 和用户原有配置
         let content = serde_json::json!({

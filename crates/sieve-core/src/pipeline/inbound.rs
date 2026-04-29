@@ -3,7 +3,7 @@
 //! 关联 PRD §5.2 入站检测 P0 表 + UCSB 论文 4 类攻击分类。
 
 use crate::address_guard::{check_substitution, extract_eth_addresses};
-use crate::detection::{fingerprint, Action, ContentSource, Detection, Severity};
+use crate::detection::{fingerprint, Action, ContentSource, DefaultOnTimeout, Detection, Severity};
 use crate::error::{SieveCoreError, SieveCoreResult};
 use crate::pipeline::streaming::StreamingPipelineNode;
 use crate::protocol::unified_message::ContentSpan;
@@ -47,6 +47,24 @@ pub struct SessionState {
     pub addresses_seen: HashSet<String>,
 }
 
+/// IN-CR-01 地址替换检测配置（从 RuleEntry 读取，修 R3-#5）。
+#[derive(Debug, Clone)]
+pub struct AddressGuardConfig {
+    /// 等待 GUI 决策的超时秒数（来自 IN-CR-01 `timeout_seconds`）。
+    pub timeout_seconds: u32,
+    /// 超时 / GUI 未连接时的默认处置（来自 IN-CR-01 `default_on_timeout`）。
+    pub default_on_timeout: DefaultOnTimeout,
+}
+
+impl Default for AddressGuardConfig {
+    fn default() -> Self {
+        Self {
+            timeout_seconds: 60,
+            default_on_timeout: DefaultOnTimeout::Block,
+        }
+    }
+}
+
 /// 入站流式过滤节点，实现 [`StreamingPipelineNode`] trait。
 pub struct InboundFilter {
     engine: Arc<dyn InboundEngine>,
@@ -58,16 +76,34 @@ pub struct InboundFilter {
     /// 用于 IN-GEN-06 运行时提级：不可信外部 channel → severity Critical。
     /// PRD v1.5 §4.5。
     source_channel: Option<String>,
+    /// IN-CR-01 地址替换检测配置（修 R3-#5）。
+    address_guard_config: AddressGuardConfig,
 }
 
 impl InboundFilter {
-    /// 新建 InboundFilter。
+    /// 新建 InboundFilter（使用默认 AddressGuardConfig）。
     pub fn new(engine: Arc<dyn InboundEngine>, sieveignore: Arc<HashSet<String>>) -> Self {
         Self {
             engine,
             session: Mutex::new(SessionState::default()),
             sieveignore,
             source_channel: None,
+            address_guard_config: AddressGuardConfig::default(),
+        }
+    }
+
+    /// 新建 InboundFilter，使用从 IN-CR-01 RuleEntry 读取的配置（修 R3-#5）。
+    pub fn with_address_guard_config(
+        engine: Arc<dyn InboundEngine>,
+        sieveignore: Arc<HashSet<String>>,
+        address_guard_config: AddressGuardConfig,
+    ) -> Self {
+        Self {
+            engine,
+            session: Mutex::new(SessionState::default()),
+            sieveignore,
+            source_channel: None,
+            address_guard_config,
         }
     }
 
@@ -172,11 +208,18 @@ impl StreamingPipelineNode for InboundFilter {
             for addr in addrs {
                 if let Some(orig) = check_substitution(&session.addresses_seen, &addr) {
                     let fp = fingerprint("IN-CR-01", &format!("{orig}->{addr}"));
+                    // R3-#5 修复：按 TOML 配置路由到 HoldForDecision（GUI 弹窗 60s 倒计时），
+                    // 而非直接 fail-closed Block，确保 PRD §4.2 场景 B 的人眼对比机会。
+                    // fail-closed 语义保留：default_on_timeout=Block（GUI 不响应时仍然 block）。
                     hits.push(Detection {
                         id: Uuid::new_v4(),
                         rule_id: "IN-CR-01".into(),
                         severity: Severity::Critical,
-                        action: Action::Block,
+                        action: Action::HoldForDecision {
+                            request_id: Uuid::new_v4(),
+                            timeout_seconds: self.address_guard_config.timeout_seconds,
+                            default_on_timeout: self.address_guard_config.default_on_timeout,
+                        },
                         source: ContentSource::InboundAssistantText,
                         span: ContentSpan {
                             start: 0,
@@ -458,6 +501,7 @@ mod tests {
                     action: Action::HoldForDecision {
                         request_id: Uuid::new_v4(),
                         timeout_seconds: 60,
+                        default_on_timeout: DefaultOnTimeout::Block,
                     },
                     source,
                     span: ContentSpan { start: 0, end: 6 },

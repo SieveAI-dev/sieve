@@ -179,6 +179,7 @@ pub fn check_openclaw_skill_install(
         action: Action::HoldForDecision {
             request_id: Uuid::new_v4(),
             timeout_seconds: 120,
+            default_on_timeout: crate::detection::DefaultOnTimeout::Block,
         },
         source,
         span: ContentSpan { start: 0, end: 0 },

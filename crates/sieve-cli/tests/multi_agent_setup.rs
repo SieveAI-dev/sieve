@@ -1060,3 +1060,280 @@ fn f3_sentinel_prevents_daemon_reinstall() {
         "F-3: sentinel 在第 2 次 setup 后应仍存在，combined2: {combined2}"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// R10-#1：OpenClaw/Hermes apply 后 setup.log 有 entry，uninstall 能找到并恢复
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// R10-#1 测试 1：OpenClaw apply 后 setup.log 有 agent="openclaw" entry。
+///
+/// 验证 SetupContext::append_log_entry 被调用，setup.log 包含
+/// setup_complete 和 config_modified 两条 agent="openclaw" entry。
+#[test]
+fn r10_openclaw_apply_writes_setup_log_entry() {
+    let Some(bin) = sieve_bin() else {
+        return;
+    };
+    let dir = fake_home();
+    let fake = dir.path();
+    let sieve_home = fake.join(".sieve");
+
+    let openclaw_dir = fake.join(".openclaw");
+    fs::create_dir_all(&openclaw_dir).unwrap();
+    fs::write(
+        openclaw_dir.join("openclaw.json"),
+        r#"{"models":{"providers":{"test-provider":{"baseUrl":"https://api.openai.com/v1"}}}}"#,
+    )
+    .unwrap();
+
+    let out = Command::new(&bin)
+        .args(["setup", "--agent", "openclaw", "--yes"])
+        .env("HOME", fake)
+        .env("SIEVE_HOME", &sieve_home)
+        .output()
+        .expect("执行 sieve 失败");
+
+    assert!(
+        out.status.success(),
+        "setup --agent openclaw 应 exit 0，stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let log_path = sieve_home.join("setup.log");
+    assert!(
+        log_path.exists(),
+        "R10-#1: setup.log 应存在，sieve_home: {}",
+        sieve_home.display()
+    );
+
+    let log_content = fs::read_to_string(&log_path).unwrap();
+    // 验证有 agent="openclaw" 的 setup_complete entry
+    let has_openclaw_complete = log_content
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .any(|v| {
+            v.get("agent").and_then(|a| a.as_str()) == Some("openclaw")
+                && v.get("action").and_then(|a| a.as_str()) == Some("setup_complete")
+        });
+    assert!(
+        has_openclaw_complete,
+        "R10-#1: setup.log 应含 agent=openclaw 的 setup_complete entry，log: {log_content}"
+    );
+
+    // 验证有 agent="openclaw" 的 config_modified entry
+    let has_openclaw_modified = log_content
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .any(|v| {
+            v.get("agent").and_then(|a| a.as_str()) == Some("openclaw")
+                && v.get("action").and_then(|a| a.as_str()) == Some("config_modified")
+        });
+    assert!(
+        has_openclaw_modified,
+        "R10-#1: setup.log 应含 agent=openclaw 的 config_modified entry，log: {log_content}"
+    );
+}
+
+/// R10-#1 测试 2：Hermes apply 后 setup.log 有 agent="hermes" entry。
+#[test]
+fn r10_hermes_apply_writes_setup_log_entry() {
+    let Some(bin) = sieve_bin() else {
+        return;
+    };
+    let dir = fake_home();
+    let fake = dir.path();
+    let sieve_home = fake.join(".sieve");
+
+    let hermes_dir = fake.join(".hermes");
+    fs::create_dir_all(&hermes_dir).unwrap();
+    fs::write(
+        hermes_dir.join("config.yaml"),
+        "model:\n  provider: openrouter\n  base_url: \"\"\ndelegation:\n  base_url: \"\"\n",
+    )
+    .unwrap();
+
+    let out = Command::new(&bin)
+        .args(["setup", "--agent", "hermes", "--yes"])
+        .env("HOME", fake)
+        .env("SIEVE_HOME", &sieve_home)
+        .output()
+        .expect("执行 sieve 失败");
+
+    assert!(
+        out.status.success(),
+        "setup --agent hermes 应 exit 0，stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let log_path = sieve_home.join("setup.log");
+    assert!(log_path.exists(), "R10-#1: setup.log 应存在");
+
+    let log_content = fs::read_to_string(&log_path).unwrap();
+
+    let has_hermes_complete = log_content
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .any(|v| {
+            v.get("agent").and_then(|a| a.as_str()) == Some("hermes")
+                && v.get("action").and_then(|a| a.as_str()) == Some("setup_complete")
+        });
+    assert!(
+        has_hermes_complete,
+        "R10-#1: setup.log 应含 agent=hermes 的 setup_complete entry，log: {log_content}"
+    );
+
+    let has_hermes_modified = log_content
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .any(|v| {
+            v.get("agent").and_then(|a| a.as_str()) == Some("hermes")
+                && v.get("action").and_then(|a| a.as_str()) == Some("config_modified")
+        });
+    assert!(
+        has_hermes_modified,
+        "R10-#1: setup.log 应含 agent=hermes 的 config_modified entry，log: {log_content}"
+    );
+}
+
+/// R10-#1 测试 3：uninstall --agent openclaw 找到 entry 并从备份恢复 openclaw.json。
+///
+/// 端到端验证：setup → 文件被改写 → uninstall → 文件恢复到 setup 前内容。
+#[test]
+fn r10_uninstall_openclaw_restores_backup() {
+    let Some(bin) = sieve_bin() else {
+        return;
+    };
+    let dir = fake_home();
+    let fake = dir.path();
+    let sieve_home = fake.join(".sieve");
+
+    let openclaw_dir = fake.join(".openclaw");
+    fs::create_dir_all(&openclaw_dir).unwrap();
+    let config_path = openclaw_dir.join("openclaw.json");
+    let original_content =
+        r#"{"models":{"providers":{"test-provider":{"baseUrl":"https://api.openai.com/v1"}}}}"#;
+    fs::write(&config_path, original_content).unwrap();
+
+    // setup：修改 openclaw.json
+    let setup_out = Command::new(&bin)
+        .args(["setup", "--agent", "openclaw", "--yes"])
+        .env("HOME", fake)
+        .env("SIEVE_HOME", &sieve_home)
+        .output()
+        .expect("执行 sieve setup 失败");
+    assert!(
+        setup_out.status.success(),
+        "R10-#1: setup --agent openclaw 应 exit 0，stderr: {}",
+        String::from_utf8_lossy(&setup_out.stderr)
+    );
+
+    // 验证 setup 修改了文件
+    let after_setup = fs::read_to_string(&config_path).unwrap();
+    assert!(
+        after_setup.contains("127.0.0.1:11453"),
+        "R10-#1: setup 后 openclaw.json 应含 Sieve URL，actual: {after_setup}"
+    );
+
+    // uninstall：从备份恢复
+    let uninstall_out = Command::new(&bin)
+        .args(["uninstall", "--agent", "openclaw", "--yes"])
+        .env("HOME", fake)
+        .env("SIEVE_HOME", &sieve_home)
+        .output()
+        .expect("执行 sieve uninstall 失败");
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&uninstall_out.stdout),
+        String::from_utf8_lossy(&uninstall_out.stderr)
+    );
+    assert!(
+        uninstall_out.status.success(),
+        "R10-#1: uninstall --agent openclaw 应 exit 0，combined: {combined}"
+    );
+
+    // 验证文件恢复到原始内容
+    let after_uninstall = fs::read_to_string(&config_path).unwrap();
+    let v_after: serde_json::Value = serde_json::from_str(&after_uninstall).unwrap();
+    let v_orig: serde_json::Value = serde_json::from_str(original_content).unwrap();
+    assert_eq!(
+        v_after, v_orig,
+        "R10-#1: uninstall 后 openclaw.json 应恢复到 setup 前内容，after: {after_uninstall}"
+    );
+}
+
+/// R10-#1 测试 4：uninstall --agent hermes 找到 entry 并从备份恢复 config.yaml。
+#[test]
+fn r10_uninstall_hermes_restores_backup() {
+    let Some(bin) = sieve_bin() else {
+        return;
+    };
+    let dir = fake_home();
+    let fake = dir.path();
+    let sieve_home = fake.join(".sieve");
+
+    let hermes_dir = fake.join(".hermes");
+    fs::create_dir_all(&hermes_dir).unwrap();
+    let config_path = hermes_dir.join("config.yaml");
+    let original_content =
+        "model:\n  provider: openrouter\n  base_url: \"\"\ndelegation:\n  base_url: \"\"\n";
+    fs::write(&config_path, original_content).unwrap();
+
+    // setup：修改 config.yaml
+    let setup_out = Command::new(&bin)
+        .args(["setup", "--agent", "hermes", "--yes"])
+        .env("HOME", fake)
+        .env("SIEVE_HOME", &sieve_home)
+        .output()
+        .expect("执行 sieve setup 失败");
+    assert!(
+        setup_out.status.success(),
+        "R10-#1: setup --agent hermes 应 exit 0，stderr: {}",
+        String::from_utf8_lossy(&setup_out.stderr)
+    );
+
+    // 验证 setup 修改了文件
+    let after_setup = fs::read_to_string(&config_path).unwrap();
+    assert!(
+        after_setup.contains("127.0.0.1:11453"),
+        "R10-#1: setup 后 config.yaml 应含 Sieve URL，actual: {after_setup}"
+    );
+
+    // uninstall：从备份恢复
+    let uninstall_out = Command::new(&bin)
+        .args(["uninstall", "--agent", "hermes", "--yes"])
+        .env("HOME", fake)
+        .env("SIEVE_HOME", &sieve_home)
+        .output()
+        .expect("执行 sieve uninstall 失败");
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&uninstall_out.stdout),
+        String::from_utf8_lossy(&uninstall_out.stderr)
+    );
+    assert!(
+        uninstall_out.status.success(),
+        "R10-#1: uninstall --agent hermes 应 exit 0，combined: {combined}"
+    );
+
+    // 验证文件恢复到原始内容（base_url 恢复为空字符串）
+    let after_uninstall = fs::read_to_string(&config_path).unwrap();
+    let parsed: serde_yaml::Value = serde_yaml::from_str(&after_uninstall).unwrap();
+    let model_url = parsed
+        .get("model")
+        .and_then(|m| m.get("base_url"))
+        .and_then(|u| u.as_str());
+    assert_eq!(
+        model_url,
+        Some(""),
+        "R10-#1: uninstall 后 config.yaml model.base_url 应恢复为空，after: {after_uninstall}"
+    );
+    let delegation_url = parsed
+        .get("delegation")
+        .and_then(|d| d.get("base_url"))
+        .and_then(|u| u.as_str());
+    assert_eq!(
+        delegation_url,
+        Some(""),
+        "R10-#1: uninstall 后 config.yaml delegation.base_url 应恢复为空，after: {after_uninstall}"
+    );
+}

@@ -29,6 +29,8 @@ mod upstream_routes;
 use audit::AuditStore;
 use cli::{Cli, Command};
 use engine_adapter::{InboundAdapter, OutboundAdapter};
+use sieve_core::detection::DefaultOnTimeout;
+use sieve_core::pipeline::inbound::AddressGuardConfig;
 use sieve_core::pipeline::outbound::OutboundFilter;
 use sieve_rules::engine::VectorscanEngine;
 use sieve_rules::loader::{load_inbound_rules, load_outbound_rules};
@@ -130,6 +132,34 @@ async fn main() -> Result<()> {
             let inbound_adapter =
                 InboundAdapter::new(Arc::new(inbound_engine_vs), inbound_rules_raw);
 
+            // 从 IN-CR-01 RuleEntry 读取地址替换检测配置（修 R3-#5）。
+            // 若未找到 IN-CR-01（不应发生），使用安全默认值（60s + fail-closed block）。
+            let address_guard_config = placeholder_rules
+                .iter()
+                .find(|r| r.id == "IN-CR-01")
+                .map(|r| {
+                    let timeout = r.timeout_seconds.unwrap_or(60);
+                    let dot = match r.default_on_timeout {
+                        sieve_rules::manifest::DefaultOnTimeout::Redact => DefaultOnTimeout::Redact,
+                        sieve_rules::manifest::DefaultOnTimeout::Block => DefaultOnTimeout::Block,
+                        sieve_rules::manifest::DefaultOnTimeout::Allow => DefaultOnTimeout::Allow,
+                    };
+                    AddressGuardConfig {
+                        timeout_seconds: timeout,
+                        default_on_timeout: dot,
+                    }
+                })
+                .unwrap_or_else(|| {
+                    tracing::warn!(
+                        "IN-CR-01 rule not found; using default AddressGuardConfig (60s + block)"
+                    );
+                    AddressGuardConfig::default()
+                });
+            tracing::info!(
+                timeout_seconds = address_guard_config.timeout_seconds,
+                "IN-CR-01 address guard config loaded"
+            );
+
             // YOLO mode 运行时审计（防御性双保险）
             audit_yolo_disabled(&cfg)?;
 
@@ -138,6 +168,7 @@ async fn main() -> Result<()> {
                 filter,
                 Arc::new(inbound_adapter),
                 Arc::clone(&sieveignore_arc),
+                address_guard_config,
             )
             .await?;
         }

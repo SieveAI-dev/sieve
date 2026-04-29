@@ -21,7 +21,7 @@ pub mod skill_install_guard;
 pub mod sse;
 pub mod tool_use_aggregator;
 
-pub use detection::{fingerprint, Action, ContentSource, Detection, Severity};
+pub use detection::{fingerprint, Action, ContentSource, DefaultOnTimeout, Detection, Severity};
 pub use error::{SieveCoreError, SieveCoreResult};
 #[cfg(feature = "forwarder")]
 pub use forwarder::Forwarder;
