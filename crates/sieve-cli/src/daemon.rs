@@ -1969,8 +1969,8 @@ async fn proxy_openai(
     //   同样需要入站检测（漏洞修复：lessons.md 2026-04-27 [安全]）。
     //   forward_with_openai_inbound_inspection 内部按 Content-Type 路由：
     //   JSON 响应走 handle_openai_json_inbound，SSE 响应走原 SSE 路径。
-    // TODO（R6-#3）：OpenAiSseParser ContentBlockStart/Stop 支持完成后，tool_call 检测能力
-    //    将自动生效（inbound_filter 已经协议无关）。
+    // R6-#3 RESOLVED：OpenAiSseParser 已支持 ContentBlockStart/Stop（含 tool_call 首帧），
+    //    inbound_filter 协议无关聚合 tool_use 已经生效。
     forward_with_openai_inbound_inspection(
         forwarder,
         inbound_filter,
@@ -2420,8 +2420,8 @@ async fn forward_with_inbound_inspection(
 /// OpenAI SSE 格式：`data: {...}\n\n`，无 `event:` 头。
 /// 产出的 [`SseEvent`] 类型与 Anthropic 相同，inbound_filter 无需感知协议差异。
 ///
-/// TODO（R6-#3）：等 OpenAiSseParser 支持 ContentBlockStart/Stop（tool_call 首帧）后，
-///     Aggregator 的 tool_use 完整检测能力将自动生效，无需修改此函数。
+/// R6-#3 RESOLVED：OpenAiSseParser 已支持 ContentBlockStart/Stop（含 tool_call 首帧），
+/// Aggregator 的 tool_use 完整检测能力已经生效。
 ///
 /// 关联：ADR-018 §流式解析 / PRD v1.5 §6.1 / R6-#2。
 #[allow(clippy::too_many_arguments)]
