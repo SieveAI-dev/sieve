@@ -11,6 +11,67 @@
 
 ---
 
+## [v1.5.2-blind-spots-and-public-replay] - 2026-05-01
+
+### 背景
+
+v1.5.1 完成后剩 20 条 attack 漏拦记录在 `tasks/2026-05-01-rule-gaps.md`，本次清光（剩 2 条不可能 vectorscan 解决，已说明）。同时做方案 C：复现 55 条**公开发生过的真实攻击**作为信任基线 —— 合成数据再多也不如"已知 CVE / 已黑客攻击事件"有说服力，这是营销文章的最强弹药。
+
+### Added
+
+- **BIP39 入站 second-pass**（IN-CR-03-BIP39-INBOUND）：复用 outbound 已有的 `candidate_bip39_windows` + `verify_checksum`，在 `engine_adapter.rs::InboundAdapter::scan_text` 加同款代码块。命中 → Critical + `gui_popup` 60s 弹窗（模型诱导用户输入助记词的场景）。`__BIP39_SECOND_PASS_PLACEHOLDER__` 占位规则跳过 vectorscan 编译（参考 IN-CR-01 写法）
+
+- **12 条新入站规则**（inbound.toml 57 → 69）：
+  - **6 条边缘形态**：IN-CR-03-ENV-STANDALONE（`env\n`）、IN-CR-02-CURL-MULTILINE-SECRET（curl + `$VAR` 跨行）、IN-CR-02-PYTHON-OSPOPEN-CURL、IN-CR-02-NPM-PACKAGE-REDIRECT（package.json `npm:@attacker/pkg`）、IN-CR-02-NPM-POSTINSTALL-AUTO、IN-CR-03-PRINTENV pattern 修正（去掉末尾 `\b`）
+  - **6 条 BIP39 社工/标签规则**（覆盖 checksum 不通过但有社工话术的场景）：IN-CR-03-BIP39-ENTER-PHRASE、IN-CR-03-BIP39-SEED-VAR、IN-CR-03-BIP39-COLON-LABEL、IN-CR-03-BIP39-TOOL-CMD、IN-CR-03-BIP39-MULTILINGUAL（High）、IN-CR-03-LEDGER-SEED-VERIFY
+
+- **公开攻击复现数据集 55 条**（`bench-data/attacks-public-replay/`，每条带可追溯 URL）：
+  - `rugpull-ai/` × 9：KuCoin AI Agent / ElizaOS arXiv 2503.16248 / Unit 42 IDPI / Step Finance $40M
+  - `injection-pocs/` × 10：Oasis "Claudy Day" / Lasso Claude Code / PromptArmor / Docker MCP / Aikido PromptPwnd
+  - `ctf-replays/` × 8：Awesome Prompt Injection / Open-Prompt-Injection / PromptMap / arXiv HTML AT bypass
+  - `owasp-llm-top10/` × 9：LLM01-09 各一条 crypto 场景复现
+  - `real-events/` × 10：Ledger 2023-12-14 / Multichain $126M / Lazarus Op99 / Sep 2025 NPM 攻击 / Step Finance
+  - `mcp-supply-chain/` × 9：CVE-2025-6514（CVSS 9.6）/ SmartLoader / Oura 2026 / Anthropic MCP 设计缺陷
+
+- **新独立测试**：`public_replay_recall_rate`（dataset_fp_rate.rs）扫 attacks-public-replay/ 输出按子目录命中率，不硬性 assert（揭露盲区目的）
+
+- 任务级文档：`tasks/2026-05-01-public-attack-replay-report.md`（完整漏拦分析 + 营销引语）
+
+### Changed
+
+- 总入站规则数 35 → 57 → **69 条**
+- 测试数据集 296 → 1896 → **1951 条**（含公开复现 55）
+
+### 测试结果
+
+| 指标 | v1.5.1 终点 | v1.5.2 终点 | 阈值 | 状态 |
+|------|------|------|------|------|
+| Critical FP | 0/1070 = 0% | **0/1070 = 0%** | < 0.5% | ✅ |
+| Attack Recall（合成数据集） | 676/696 = 97.13% | **694/696 = 99.71%** | > 95% | ✅ |
+| Public Attack Replay（v1.5.2 新增） | — | **51/55 = 92.7%** | 揭露盲区，无硬阈值 | — |
+
+按桶（合成数据集）：env-leak 100% / shell-rce 100% / signing 100% / private-key 98.33% / 现有 attacks 100% 无回归
+
+按子目录（公开复现）：rugpull-ai 100% / injection-pocs 100% / ctf-replays 100% / owasp-llm-top10 88.9% / real-events 80% / mcp-supply-chain 88.9%
+
+### Known limitations
+
+- **2 条合成数据集仍漏拦**（vectorscan 能力边界，本 sprint 不修）：
+  - `fear-privkey-087`：仅"请分享 WIF key"社工话术，无 pattern 特征（FP 风险太高）
+  - `fear-privkey-096`：通过 `chrome.storage.local.get` JS API 读 MetaMask `KeyringController.vault`，需 JS 语义分析
+
+- **4 条公开复现漏拦**：
+  - 3 条接受盲区（RAG 投毒无 payload 特征 / 纯社工邮件不在 LLM 流量内）
+  - **1 条建议下次补**：CVE-2025-6514 Windows `curl ... | powershell` 变种 → 加 `IN-CR-02-CURL-PIPE-WIN` 规则
+
+### 营销可用引语（来自 public-attack-replay-report.md）
+
+- **Ledger 2023 $600K Connect Kit 事件**："前端库已被供应链污染但 Sieve 的 IN-CR-05-ERC2612-PERMIT 在签名前弹窗确认" —— 来源：ledger.com/blog/security-incident-report
+- **CVE-2025-6514（437K+ 下载量恶意 MCP）**："JSON 里藏 curl|bash 拿下开发机，Sieve 在执行前拦截" —— 来源：jfrog.com/blog/2025-6514
+- **Lazarus Operation 99（Web3 开发者定向攻击）**："恶意编码挑战的 printenv / 读 Solana keypair / Python urlopen 三类操作分别被三条 IN-CR-03 规则覆盖" —— 来源：thehackernews.com/2025/01/lazarus-group-targets-web3-developers
+
+---
+
 ## [v1.5.1-rule-expansion] - 2026-05-01
 
 ### 背景

