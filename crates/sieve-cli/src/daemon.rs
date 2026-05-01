@@ -516,6 +516,7 @@ async fn proxy_inner(
                     origin_chain: origin_chain.clone(),
                     source_channel: source_channel.clone(),
                     explicit_chain_depth: Some(chain_depth),
+                    allow_remember: false, // v2.0：Week 6 由规则引擎计算
                 };
 
                 let timeout_dur = std::time::Duration::from_secs(u64::from(timeout_seconds).max(1));
@@ -741,6 +742,7 @@ async fn proxy_inner(
                     source_channel: source_channel.clone(),
                     // 修 R7-#5：填入 header 真实 chain_depth
                     explicit_chain_depth: Some(chain_depth),
+                    allow_remember: false, // v2.0：Week 6 由规则引擎计算
                 };
 
                 // 出站 hold：无 SSE keep-alive，直接 await 决策
@@ -1194,6 +1196,7 @@ async fn proxy_openai(
                 source_channel: source_channel.clone(),
                 // 修 R7-#5：填入 header 真实 chain_depth
                 explicit_chain_depth: Some(chain_depth),
+                allow_remember: false, // v2.0：Week 6 由规则引擎计算
             };
 
             let timeout_dur = std::time::Duration::from_secs(u64::from(timeout_seconds).max(1));
@@ -1651,6 +1654,7 @@ async fn forward_with_inbound_inspection(
                                 source_channel: meta.source_channel.clone(),
                                 // 修 R7-#5：填入 header 真实 chain_depth
                                 explicit_chain_depth: Some(meta.chain_depth),
+                                allow_remember: false, // v2.0：Week 6 由规则引擎计算
                             };
 
                             let outcome = sieve_core::pipeline::inbound_hold::hold_and_decide(
@@ -1979,6 +1983,7 @@ async fn forward_with_openai_inbound_inspection(
                                 source_channel: meta.source_channel.clone(),
                                 // 修 R7-#5：填入 header 真实 chain_depth
                                 explicit_chain_depth: Some(meta.chain_depth),
+                                allow_remember: false, // v2.0：Week 6 由规则引擎计算
                             };
 
                             let outcome = sieve_core::pipeline::inbound_hold::hold_and_decide(
@@ -2264,6 +2269,7 @@ fn write_hook_pending_to(
         origin_chain: meta.origin_chain.clone(),
         source_channel: meta.source_channel.clone(),
         explicit_chain_depth: explicit_depth,
+        allow_remember: false, // v2.0：Week 6 由规则引擎计算
     };
 
     sieve_ipc::pending_file::write_pending(&ipc_req, sieve_home)?;

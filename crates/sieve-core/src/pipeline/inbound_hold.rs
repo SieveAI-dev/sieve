@@ -162,6 +162,7 @@ mod tests {
             origin_chain: vec![],
             source_channel: None,
             explicit_chain_depth: None,
+            allow_remember: false,
         }
     }
 
@@ -206,6 +207,7 @@ mod tests {
                     decided_at: Utc::now(),
                     by_user: true,
                     remember: false,
+                    context_hint: None,
                 })
                 .await;
         });
@@ -245,6 +247,7 @@ mod tests {
                     decided_at: Utc::now(),
                     by_user: true,
                     remember: false,
+                    context_hint: None,
                 })
                 .await;
         });
@@ -344,6 +347,7 @@ mod tests {
                     decided_at: Utc::now(),
                     by_user: true,
                     remember: false,
+                    context_hint: None,
                 })
                 .await;
         });

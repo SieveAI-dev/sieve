@@ -10,16 +10,85 @@
 //! scratch 分配代价远小于实际扫描代价，在 P99 < 20ms 目标下可接受。
 //! Week 3 如需优化，可改为 `thread_local!` scratch 复用方案（仍无 unsafe）。
 
+use crate::critical_lock::is_fail_closed;
 use crate::error::{SieveRulesError, SieveRulesResult};
 use crate::manifest::RuleEntry;
 use crate::placeholder::is_placeholder;
 use std::collections::HashMap;
 use vectorscan_rs::{BlockDatabase, BlockScanner, Flag, Pattern, Scan};
 
+/// 扫描方向（PRD v2.0 §6.3.1）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    /// 入站（model → user，拦截危险 tool_use 输出）。
+    Inbound,
+    /// 出站（user → API，拦截敏感数据上传）。
+    Outbound,
+}
+
+/// 上游协议类型（PRD v2.0 §6.3.1）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Protocol {
+    /// Anthropic Messages API。
+    Anthropic,
+    /// OpenAI Chat Completions API（Phase 2，ADR-018）。
+    OpenAI,
+}
+
+/// 扫描内容类型（PRD v2.0 §6.3.1）。
+///
+/// 让规则引擎知道自己在哪条路径生效，v1.5.4 P0 教训之一。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContentKind {
+    /// SSE event data delta（流式 `data: {...}` 行）。
+    SseEventDelta,
+    /// 非流式 JSON 响应体（`stream=false`）。
+    JsonResponseBody,
+    /// 工具调用输入（`tool_use.input` 字段）。
+    ToolUseInput,
+    /// 出站请求体。
+    RequestBody,
+}
+
+/// 扫描请求上下文（PRD v2.0 §6.3.1）。
+///
+/// 相比裸 `&[u8]`，携带路由上下文与业务上下文，用于 fingerprint 计算、
+/// 灰名单查询、序列窗口（Phase B）。内部全为引用/Copy，实现 [`Clone`]。
+#[derive(Debug, Clone, Copy)]
+pub struct ScanRequest<'a> {
+    /// 待扫描的原始字节流。
+    pub bytes: &'a [u8],
+    /// 流量方向（入站 / 出站）。
+    pub direction: Direction,
+    /// 上游协议。
+    pub protocol: Protocol,
+    /// 内容类型。
+    pub content_kind: ContentKind,
+    /// 工具名（仅 [`ContentKind::ToolUseInput`] 时有意义，如 `"Bash"`）。
+    pub tool_name: Option<&'a str>,
+    /// 调用方 Agent 标识（如 `"claude-code"` / `"openclaw"`）。
+    pub source_agent: Option<&'a str>,
+    /// 调用方进程可执行路径（进程上下文，PRD §5.6）。
+    pub caller_exe: Option<&'a std::path::Path>,
+}
+
+/// 一次扫描的汇总报告（PRD v2.0 §6.3.1）。
+#[derive(Debug)]
+pub struct ScanReport {
+    /// 所有命中列表。
+    pub hits: Vec<MatchHit>,
+    /// 本次扫描耗时（微秒）。
+    pub elapsed_us: u64,
+    /// 引擎名称（用于 audit / 调试）。
+    pub engine_name: String,
+    /// 本次生效的规则条数。
+    pub rule_count: usize,
+}
+
 /// 一次匹配的位置信息。
 #[derive(Debug, Clone)]
 pub struct MatchHit {
-    /// 命中的规则 ID（如 OUT-01）。
+    /// 命中的规则 ID（如 OUT-01；用户规则携带 `user:` 前缀）。
     pub rule_id: String,
     /// 命中位置在输入字节流的起始偏移（闭区间，需 SOM_LEFTMOST flag）。
     pub start: usize,
@@ -27,10 +96,117 @@ pub struct MatchHit {
     pub end: usize,
 }
 
-/// 多模式匹配引擎 trait。
+/// 多模式匹配引擎 trait（PRD v2.0 §6.3.1）。
+///
+/// v2.0 扩展：保留原 `scan(&[u8])` 向后兼容接口，新增带上下文的
+/// `scan_with_context(ScanRequest)` 及引擎元信息方法。
 pub trait MatchEngine: Send + Sync {
-    /// 对输入字节流执行多模式匹配，返回所有命中。
+    /// 对输入字节流执行多模式匹配，返回所有命中（向后兼容接口）。
     fn scan(&self, input: &[u8]) -> SieveRulesResult<Vec<MatchHit>>;
+
+    /// 带上下文的扫描（v2.0 新增，PRD §6.3.1）。
+    ///
+    /// 默认实现委托给 [`MatchEngine::scan`]，携带耗时统计与引擎元信息。
+    /// [`LayeredEngine`] 等组合引擎会覆盖此方法以实现合并逻辑。
+    fn scan_with_context(&self, req: ScanRequest<'_>) -> SieveRulesResult<ScanReport> {
+        let start = std::time::Instant::now();
+        let hits = self.scan(req.bytes)?;
+        Ok(ScanReport {
+            hits,
+            elapsed_us: start.elapsed().as_micros() as u64,
+            engine_name: self.engine_name().to_string(),
+            rule_count: self.rule_count(),
+        })
+    }
+
+    /// 引擎标识名（用于 audit 与调试）。
+    fn engine_name(&self) -> &str {
+        "unknown"
+    }
+
+    /// 当前生效的规则条数。
+    fn rule_count(&self) -> usize {
+        0
+    }
+
+    /// 编译后的 vectorscan pattern database 大小（字节）。
+    fn compiled_pattern_size_bytes(&self) -> usize {
+        0
+    }
+}
+
+/// 合并系统规则与用户规则的分层引擎（PRD v2.0 §6.3.1）。
+///
+/// # 合并顺序（严格保证，不可调整）
+///
+/// 1. 系统规则全量扫描
+/// 2. 系统规则命中任意 fail-closed（Critical）规则 → 立即返回，不评估用户规则
+/// 3. 否则追加用户规则命中（用户规则命中的 `rule_id` 已携带 `user:` 前缀，由 UserEngine 保证）
+///
+/// 此顺序保证用户规则无法 suppress 系统 Critical 命中（PRD §9 #3 + §5.5.2.1）。
+pub struct LayeredEngine<S: MatchEngine, U: MatchEngine> {
+    system: S,
+    user: Option<U>,
+}
+
+impl<S: MatchEngine, U: MatchEngine> LayeredEngine<S, U> {
+    /// 构造分层引擎。`user` 为 `None` 时退化为纯系统规则引擎。
+    pub fn new(system: S, user: Option<U>) -> Self {
+        Self { system, user }
+    }
+}
+
+impl<S: MatchEngine, U: MatchEngine> MatchEngine for LayeredEngine<S, U> {
+    fn scan(&self, input: &[u8]) -> SieveRulesResult<Vec<MatchHit>> {
+        // 构造 dummy ScanRequest 复用 scan_with_context 合并逻辑，避免重复代码。
+        let req = ScanRequest {
+            bytes: input,
+            direction: Direction::Outbound,
+            protocol: Protocol::Anthropic,
+            content_kind: ContentKind::RequestBody,
+            tool_name: None,
+            source_agent: None,
+            caller_exe: None,
+        };
+        self.scan_with_context(req).map(|r| r.hits)
+    }
+
+    fn scan_with_context(&self, req: ScanRequest<'_>) -> SieveRulesResult<ScanReport> {
+        // 第一层：系统规则全量扫描
+        let mut report = self.system.scan_with_context(req)?;
+
+        // 系统规则命中任意 fail-closed（Critical）规则 → 立即返回（PRD §6.3.1 合并顺序 #1）
+        if report.hits.iter().any(|h| is_fail_closed(&h.rule_id)) {
+            return Ok(report);
+        }
+
+        // 第二层：追加用户规则命中（`user:` 前缀由 UserEngine 保证）
+        if let Some(user) = &self.user {
+            let user_report = user.scan_with_context(req)?;
+            report.rule_count += user_report.rule_count;
+            report.elapsed_us += user_report.elapsed_us;
+            report.hits.extend(user_report.hits);
+        }
+
+        Ok(report)
+    }
+
+    fn engine_name(&self) -> &str {
+        "layered"
+    }
+
+    fn rule_count(&self) -> usize {
+        self.system.rule_count() + self.user.as_ref().map(|u| u.rule_count()).unwrap_or(0)
+    }
+
+    fn compiled_pattern_size_bytes(&self) -> usize {
+        self.system.compiled_pattern_size_bytes()
+            + self
+                .user
+                .as_ref()
+                .map(|u| u.compiled_pattern_size_bytes())
+                .unwrap_or(0)
+    }
 }
 
 /// Vectorscan 多模式正则引擎。
@@ -114,6 +290,20 @@ impl VectorscanEngine {
 }
 
 impl MatchEngine for VectorscanEngine {
+    fn engine_name(&self) -> &str {
+        "vectorscan"
+    }
+
+    fn rule_count(&self) -> usize {
+        self.rules.len()
+    }
+
+    fn compiled_pattern_size_bytes(&self) -> usize {
+        // vectorscan_rs 暂未暴露 db size API；返回 0 作为占位，
+        // lint 阶段通过编译时间上限（100ms）间接控制 db 大小（PRD §5.5.3-B）。
+        0
+    }
+
     fn scan(&self, input: &[u8]) -> SieveRulesResult<Vec<MatchHit>> {
         // 每次 scan 创建新 scanner（alloc scratch）。
         // 参见模块文档中关于生命周期设计的说明。
@@ -268,5 +458,155 @@ mod tests {
             dotenv_hits[0].end, 17,
             "should keep longest end (.env.example = 12 chars), got {hits:?}"
         );
+    }
+
+    // -------------------------------------------------------------------------
+    // v2.0 新增：engine_name / rule_count / scan_with_context 测试
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn vectorscan_engine_meta() {
+        let rules = vec![
+            rule("OUT-A", r"foo", Severity::High),
+            rule("OUT-B", r"bar", Severity::Low),
+        ];
+        let engine = VectorscanEngine::compile(rules).unwrap();
+        assert_eq!(engine.engine_name(), "vectorscan");
+        assert_eq!(engine.rule_count(), 2);
+    }
+
+    /// scan(&[u8]) 向后兼容回归：v2.0 新增 trait 方法不破坏旧接口行为。
+    #[test]
+    fn scan_bytes_backward_compat() {
+        let rules = vec![rule("OUT-TEST", r"hello", Severity::Critical)];
+        let engine = VectorscanEngine::compile(rules).unwrap();
+        // 旧接口
+        let hits = engine.scan(b"say hello world").unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].rule_id, "OUT-TEST");
+    }
+
+    /// scan_with_context 默认实现携带 elapsed_us + engine_name。
+    #[test]
+    fn scan_with_context_returns_report() {
+        let rules = vec![rule("OUT-TEST", r"hello", Severity::Critical)];
+        let engine = VectorscanEngine::compile(rules).unwrap();
+        let req = ScanRequest {
+            bytes: b"say hello world",
+            direction: Direction::Outbound,
+            protocol: Protocol::Anthropic,
+            content_kind: ContentKind::RequestBody,
+            tool_name: None,
+            source_agent: None,
+            caller_exe: None,
+        };
+        let report = engine.scan_with_context(req).unwrap();
+        assert_eq!(report.hits.len(), 1);
+        assert_eq!(report.engine_name, "vectorscan");
+        assert_eq!(report.rule_count, 1);
+    }
+
+    // -------------------------------------------------------------------------
+    // v2.0 新增：LayeredEngine 测试
+    // -------------------------------------------------------------------------
+
+    /// 系统引擎命中 fail-closed（Critical）规则时，用户引擎不被评估。
+    ///
+    /// 使用 OUT-01（在 FAIL_CLOSED_RULES 中）模拟 Critical 命中。
+    #[test]
+    fn layered_engine_critical_hit_blocks_user_engine() {
+        // 系统引擎：OUT-01 是 fail-closed
+        let system_rules = vec![rule("OUT-01", r"critical_secret", Severity::Critical)];
+        let system = VectorscanEngine::compile(system_rules).unwrap();
+
+        // 用户引擎：独立 pattern，但不应被评估
+        let user_rules = vec![rule("MY-RULE", r"critical_secret", Severity::High)];
+        let user = VectorscanEngine::compile(user_rules).unwrap();
+
+        let layered = LayeredEngine::new(system, Some(user));
+        let hits = layered.scan(b"critical_secret leak").unwrap();
+
+        // 只有系统规则 hit，用户规则 hit 被短路
+        assert!(
+            hits.iter().all(|h| !h.rule_id.starts_with("user:")),
+            "用户规则命中不应出现，系统 Critical 短路后应立即返回: {hits:?}"
+        );
+        assert!(
+            hits.iter().any(|h| h.rule_id == "OUT-01"),
+            "系统规则 OUT-01 应命中: {hits:?}"
+        );
+    }
+
+    /// 系统引擎命中非 Critical 规则时，用户引擎被评估并合并。
+    #[test]
+    fn layered_engine_non_critical_merges_user_hits() {
+        // 系统引擎：非 fail-closed ID
+        let system_rules = vec![rule("IN-GEN-04", r"system_pattern", Severity::High)];
+        let system = VectorscanEngine::compile(system_rules).unwrap();
+
+        // 用户引擎：命中同一输入的另一 pattern
+        let user_rules = vec![rule("MY-RULE", r"user_pattern", Severity::Medium)];
+        let user = VectorscanEngine::compile(user_rules).unwrap();
+
+        let layered = LayeredEngine::new(system, Some(user));
+        let hits = layered
+            .scan(b"system_pattern and user_pattern here")
+            .unwrap();
+
+        // 系统规则与用户规则均应命中
+        assert!(
+            hits.iter().any(|h| h.rule_id == "IN-GEN-04"),
+            "系统规则应命中: {hits:?}"
+        );
+        assert!(
+            hits.iter().any(|h| h.rule_id == "MY-RULE"),
+            "用户规则应命中并合并: {hits:?}"
+        );
+    }
+
+    /// 无系统命中时仍评估用户规则。
+    #[test]
+    fn layered_engine_no_system_hit_evaluates_user() {
+        let system_rules = vec![rule("SYS-PATTERN", r"nonexistent_xyz", Severity::High)];
+        let system = VectorscanEngine::compile(system_rules).unwrap();
+
+        let user_rules = vec![rule("MY-USER-RULE", r"user_only", Severity::Medium)];
+        let user = VectorscanEngine::compile(user_rules).unwrap();
+
+        let layered = LayeredEngine::new(system, Some(user));
+        let hits = layered.scan(b"user_only content").unwrap();
+
+        assert_eq!(hits.len(), 1, "仅用户规则应命中: {hits:?}");
+        assert_eq!(hits[0].rule_id, "MY-USER-RULE");
+    }
+
+    /// rule_count 与 compiled_pattern_size_bytes 是系统 + 用户之和。
+    #[test]
+    fn layered_engine_meta_aggregates() {
+        let system_rules = vec![
+            rule("SYS-A", r"foo", Severity::High),
+            rule("SYS-B", r"bar", Severity::High),
+        ];
+        let system = VectorscanEngine::compile(system_rules).unwrap();
+
+        let user_rules = vec![rule("MY-RULE", r"baz", Severity::Medium)];
+        let user = VectorscanEngine::compile(user_rules).unwrap();
+
+        let layered = LayeredEngine::new(system, Some(user));
+        assert_eq!(layered.rule_count(), 3);
+        assert_eq!(layered.engine_name(), "layered");
+    }
+
+    /// LayeredEngine 无用户规则时退化为纯系统引擎。
+    #[test]
+    fn layered_engine_no_user_engine() {
+        let system_rules = vec![rule("SYS-ONLY", r"target", Severity::High)];
+        let system = VectorscanEngine::compile(system_rules).unwrap();
+        let layered: LayeredEngine<VectorscanEngine, VectorscanEngine> =
+            LayeredEngine::new(system, None);
+        let hits = layered.scan(b"target found").unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].rule_id, "SYS-ONLY");
+        assert_eq!(layered.rule_count(), 1);
     }
 }

@@ -79,6 +79,7 @@ impl IpcClient {
                 decided_at: chrono::Utc::now(),
                 by_user: true,
                 remember: false,
+                context_hint: None,
             };
             let rpc_resp = jsonrpc::Response {
                 jsonrpc: "2.0".to_owned(),

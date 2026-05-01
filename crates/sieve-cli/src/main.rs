@@ -24,6 +24,7 @@ mod config;
 mod daemon;
 mod embedded_rules;
 mod engine_adapter;
+pub mod process_context;
 mod upstream_routes;
 
 use audit::AuditStore;
@@ -190,6 +191,9 @@ async fn main() -> Result<()> {
         }
         Command::Uninstall(args) => {
             commands::uninstall::run(args)?;
+        }
+        Command::Rules(args) => {
+            commands::rules::run(&args)?;
         }
     }
 

@@ -19,4 +19,7 @@ pub mod manifest;
 pub mod placeholder;
 pub mod wordlist;
 
+pub use engine::{
+    ContentKind, Direction, LayeredEngine, MatchEngine, MatchHit, Protocol, ScanReport, ScanRequest,
+};
 pub use error::{SieveRulesError, SieveRulesResult};

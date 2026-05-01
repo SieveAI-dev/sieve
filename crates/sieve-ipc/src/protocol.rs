@@ -154,6 +154,25 @@ pub struct DecisionRequest {
     /// 关联：ADR-019 §chain_depth 语义、PRD v1.5 §4.6。
     #[serde(default)]
     pub explicit_chain_depth: Option<usize>,
+
+    // v2.0 新增字段（serde default 保证 v1.5 旧客户端请求依然可解析）
+    /// 用户是否被允许选择「记住此决策」（写入灰名单）。
+    ///
+    /// **daemon 必须根据规则计算后传入**：内置 Critical（即
+    /// `sieve_rules::critical_lock::is_critical_locked` 返 true 的规则）
+    /// 必须强制 `false`，不让 GUI 端有机会让用户选 Remember；
+    /// 非 Critical 系统规则与用户规则可以为 `true`。
+    ///
+    /// GUI 端若收到 `false`，必须把 Remember checkbox disabled + 灰显，
+    /// 并在 tooltip 解释"内置 Critical 规则保护核心安全场景，不允许永久绕过"
+    ///（PRD v2.0 §5.4.3）。
+    ///
+    /// 旧 v1.5 客户端不发此字段时，serde 默认为 `false`（保守 fail-safe：
+    /// 老 GUI 即使能选 Remember 也会被 daemon 在 §5.4.2 二次校验里拒绝写入灰名单）。
+    ///
+    /// 关联：PRD v2.0 §5.4.2 灰名单 schema、§5.4.3 GUI 接口预留、PRD §9 #3 Critical fail-closed。
+    #[serde(default)]
+    pub allow_remember: bool,
 }
 
 impl DecisionRequest {
@@ -199,7 +218,27 @@ pub struct DecisionResponse {
     /// 是否记住此次决策（同规则 + 同 tool 不再询问）。
     ///
     /// Critical severity 的决策此字段服务端强制写 `false`，即使用户请求记住也拒绝。
+    ///
+    /// **v2.0 校验路径**：daemon 收到 remember=true 时必须二次校验：
+    /// 1. 对应 DecisionRequest 的 `allow_remember` 必须为 true
+    /// 2. 命中规则必须不在 `sieve_rules::critical_lock::FAIL_CLOSED_RULES`
+    ///
+    /// 任一不满足 → 忽略 remember + 写 audit ERROR 事件 +（可选）GUI 状态栏告警。
+    /// 详见 PRD v2.0 §5.4.2「Critical 锁约束」三道防线。
+    #[serde(default)]
     pub remember: bool,
+
+    // v2.0 新增字段
+    /// 用户在 GUI 弹窗里输入的备注（可选）。
+    ///
+    /// 写入灰名单 entry 的 `context_hint` 字段，便于将来用户回看时知道
+    /// "我当时为啥允许这个"。daemon 不解读，仅透传 + 持久化。
+    ///
+    /// 旧 v1.5 客户端不发此字段时，serde 默认为 `None`。
+    ///
+    /// 关联：PRD v2.0 §5.4.2 灰名单 schema 中 context_hint 字段。
+    #[serde(default)]
+    pub context_hint: Option<String>,
 }
 
 // ── JSON-RPC 2.0 envelope ────────────────────────────────────────────────────

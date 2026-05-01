@@ -93,6 +93,7 @@ pub async fn wait_for_decision(
                 decided_at: Utc::now(),
                 by_user: false,
                 remember: false,
+                context_hint: None,
             });
         }
 

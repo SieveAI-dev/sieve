@@ -326,5 +326,6 @@ fn make_timeout_fallback(
         decided_at: Utc::now(),
         by_user: false,
         remember: false,
+        context_hint: None,
     }
 }
