@@ -12,7 +12,7 @@ use chrono::Utc;
 use sieve_policy::{
     error::PolicyError,
     lint::{lint, LintKind},
-    loader::{load_user_rules, UserRuleEntry, UserRulesFile},
+    loader::{load_user_rules, RuleDirection, UserRuleEntry, UserRulesFile},
 };
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -82,6 +82,7 @@ fn valid_entry(id: &str) -> UserRuleEntry {
         keywords: vec!["keyword".into()],
         allowlist_stopwords: vec![],
         disposition: None,
+        direction: RuleDirection::Both,
         enabled: true,
         added_at: Utc::now(),
         added_by: "manual".into(),
@@ -312,6 +313,43 @@ injected_field = "attacker_value"
     assert!(
         matches!(err, PolicyError::TomlParse(_)),
         "未知字段应返回 TomlParse（deny_unknown_fields），实际: {err:?}"
+    );
+}
+
+/// 破坏 11b：direction=inbound + disposition=auto_redact → lint() 返 InboundAutoRedactForbidden。
+///
+/// 覆盖 PRD §5.5.3-A 第 4 条：入站方向规则禁止 disposition=auto_redact，
+/// 用户不能改写 model 输出（PRD §9 #11）。
+#[test]
+fn corruption_lint_inbound_auto_redact_forbidden() {
+    let mut entry = valid_entry("USER-INBOUND-REDACT");
+    entry.direction = RuleDirection::Inbound;
+    entry.disposition = Some("auto_redact".into());
+    let file = make_file(vec![entry]);
+
+    let violations = lint(&file, 100);
+    assert!(
+        violations
+            .iter()
+            .any(|v| v.kind == LintKind::InboundAutoRedactForbidden),
+        "direction=inbound + disposition=auto_redact 应触发 InboundAutoRedactForbidden，实际: {violations:?}"
+    );
+}
+
+/// direction=outbound + disposition=auto_redact 合法（出站自动脱敏，PRD §5.5.3-A）。
+#[test]
+fn outbound_auto_redact_is_allowed() {
+    let mut entry = valid_entry("USER-OUTBOUND-REDACT");
+    entry.direction = RuleDirection::Outbound;
+    entry.disposition = Some("auto_redact".into());
+    let file = make_file(vec![entry]);
+
+    let violations = lint(&file, 100);
+    assert!(
+        !violations
+            .iter()
+            .any(|v| v.kind == LintKind::InboundAutoRedactForbidden),
+        "direction=outbound + disposition=auto_redact 不应触发 InboundAutoRedactForbidden，实际: {violations:?}"
     );
 }
 

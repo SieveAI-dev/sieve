@@ -10,7 +10,7 @@ use sieve_policy::{
         add_entry, compute_fingerprint, lookup, remove_entry, FingerprintInputs, GraylistEntry,
     },
     lint::lint,
-    loader::{load_user_rules, UserRuleEntry, UserRulesFile},
+    loader::{load_user_rules, RuleDirection, UserRuleEntry, UserRulesFile},
 };
 use sieve_rules::engine::MatchEngine;
 use std::path::PathBuf;
@@ -146,6 +146,7 @@ fn lint_blocks_forbidden_rules() {
         keywords: vec!["kw".into()],
         allowlist_stopwords: vec![],
         disposition: None,
+        direction: RuleDirection::Both,
         enabled: true,
         added_at: Utc::now(),
         added_by: "manual".into(),
@@ -212,6 +213,149 @@ fn tampered_graylist_detected() {
     );
 }
 
+/// direction 字段按方向过滤：outbound 规则不进入 inbound 引擎（PRD v2.0 §5.5）。
+#[test]
+fn direction_field_filters_rules_correctly() {
+    use sieve_policy::engine::UserEngine;
+
+    let outbound_rule = UserRuleEntry {
+        id: "OUTBOUND-ONLY".into(),
+        description: "only scans outbound".into(),
+        pattern: "outbound_secret".into(),
+        severity: "high".into(),
+        action: "warn".into(),
+        keywords: vec!["outbound".into()],
+        allowlist_stopwords: vec![],
+        disposition: None,
+        direction: RuleDirection::Outbound,
+        enabled: true,
+        added_at: Utc::now(),
+        added_by: "manual".into(),
+    };
+    let inbound_rule = UserRuleEntry {
+        id: "INBOUND-ONLY".into(),
+        description: "only scans inbound".into(),
+        pattern: "inbound_secret".into(),
+        severity: "medium".into(),
+        action: "warn".into(),
+        keywords: vec!["inbound".into()],
+        allowlist_stopwords: vec![],
+        disposition: None,
+        direction: RuleDirection::Inbound,
+        enabled: true,
+        added_at: Utc::now(),
+        added_by: "manual".into(),
+    };
+    let both_rule = UserRuleEntry {
+        id: "BOTH-RULE".into(),
+        description: "scans both sides".into(),
+        pattern: "both_secret".into(),
+        severity: "low".into(),
+        action: "mark".into(),
+        keywords: vec!["both".into()],
+        allowlist_stopwords: vec![],
+        disposition: None,
+        direction: RuleDirection::Both,
+        enabled: true,
+        added_at: Utc::now(),
+        added_by: "manual".into(),
+    };
+    let all_rules = vec![
+        outbound_rule.clone(),
+        inbound_rule.clone(),
+        both_rule.clone(),
+    ];
+
+    // 出站引擎：只应编译 Outbound + Both（2 条）
+    let outbound_engine =
+        UserEngine::compile_for_direction(all_rules.clone(), RuleDirection::Outbound).unwrap();
+    assert_eq!(
+        outbound_engine.rule_count(),
+        2,
+        "出站引擎应有 2 条规则（Outbound + Both）"
+    );
+    // 出站 pattern 命中
+    let hits = outbound_engine
+        .scan(b"outbound_secret here outbound")
+        .unwrap();
+    assert_eq!(hits.len(), 1, "出站引擎应命中 OUTBOUND-ONLY");
+    assert_eq!(hits[0].rule_id, "user:OUTBOUND-ONLY");
+    // 入站 pattern 不在出站引擎中
+    let hits = outbound_engine
+        .scan(b"inbound_secret here inbound")
+        .unwrap();
+    assert!(hits.is_empty(), "出站引擎不应命中 INBOUND-ONLY：{hits:?}");
+
+    // 入站引擎：只应编译 Inbound + Both（2 条）
+    let inbound_engine =
+        UserEngine::compile_for_direction(all_rules.clone(), RuleDirection::Inbound).unwrap();
+    assert_eq!(
+        inbound_engine.rule_count(),
+        2,
+        "入站引擎应有 2 条规则（Inbound + Both）"
+    );
+    // 入站 pattern 命中
+    let hits = inbound_engine.scan(b"inbound_secret here inbound").unwrap();
+    assert_eq!(hits.len(), 1, "入站引擎应命中 INBOUND-ONLY");
+    assert_eq!(hits[0].rule_id, "user:INBOUND-ONLY");
+    // 出站 pattern 不在入站引擎中
+    let hits = inbound_engine
+        .scan(b"outbound_secret here outbound")
+        .unwrap();
+    assert!(hits.is_empty(), "入站引擎不应命中 OUTBOUND-ONLY：{hits:?}");
+
+    // Both 规则两侧都能命中
+    let hits = outbound_engine.scan(b"both_secret here both").unwrap();
+    assert_eq!(hits.len(), 1, "出站引擎应命中 BOTH-RULE");
+    let hits = inbound_engine.scan(b"both_secret here both").unwrap();
+    assert_eq!(hits.len(), 1, "入站引擎应命中 BOTH-RULE");
+}
+
+/// 旧 user.toml（无 direction 字段）默认 Both，出站入站两侧都能命中（向后兼容，PRD §5.5）。
+#[test]
+fn legacy_toml_without_direction_defaults_to_both() {
+    // 旧格式 TOML：无 direction 字段
+    let legacy_toml = r#"
+schema_version = 1
+created_at = "2026-05-01T00:00:00Z"
+updated_at = "2026-05-01T00:00:00Z"
+
+[[rules]]
+id = "LEGACY-RULE"
+description = "legacy rule without direction field"
+pattern = "legacy_pattern"
+severity = "high"
+action = "warn"
+keywords = ["legacy"]
+enabled = true
+added_at = "2026-05-01T00:00:00Z"
+added_by = "manual"
+"#;
+    let tmp = TempDir::new().unwrap();
+    let path = tmp_rules_file(&tmp, legacy_toml);
+    let file = load_user_rules(&path).unwrap();
+
+    assert_eq!(file.rules.len(), 1);
+    // 无 direction 字段 → 默认 Both（向后兼容）
+    assert_eq!(
+        file.rules[0].direction,
+        RuleDirection::Both,
+        "旧格式规则应默认 direction=Both"
+    );
+
+    // 出站引擎能编译并命中
+    let outbound_engine =
+        UserEngine::compile_for_direction(file.rules.clone(), RuleDirection::Outbound).unwrap();
+    let hits = outbound_engine.scan(b"legacy_pattern here legacy").unwrap();
+    assert_eq!(hits.len(), 1, "出站引擎应命中旧格式规则");
+
+    // 入站引擎能编译并命中
+    let inbound_engine =
+        UserEngine::compile_for_direction(file.rules.clone(), RuleDirection::Inbound).unwrap();
+    let hits = inbound_engine.scan(b"legacy_pattern here legacy").unwrap();
+    assert_eq!(hits.len(), 1, "入站引擎应命中旧格式规则");
+}
+
 /// 多条规则中禁用规则不参与扫描。
 #[test]
 fn disabled_rules_excluded_from_engine() {
@@ -225,6 +369,7 @@ fn disabled_rules_excluded_from_engine() {
             keywords: vec!["enabled".into()],
             allowlist_stopwords: vec![],
             disposition: None,
+            direction: RuleDirection::Both,
             enabled: true,
             added_at: Utc::now(),
             added_by: "manual".into(),
@@ -238,6 +383,7 @@ fn disabled_rules_excluded_from_engine() {
             keywords: vec!["disabled".into()],
             allowlist_stopwords: vec![],
             disposition: None,
+            direction: RuleDirection::Both,
             enabled: false,
             added_at: Utc::now(),
             added_by: "manual".into(),

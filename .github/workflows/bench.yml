@@ -1,0 +1,85 @@
+name: Performance Gate
+
+# Phase 1 仅 macOS（PRD v1.4 §6.6 + ADR-012）
+# 仅在 main 分支 push 和 PR 目标为 main 时触发，避免每次 dev push 占用 runner
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  # bench job 不开 -D warnings，避免无关 lint 干扰性能测量
+  RUSTFLAGS: ""
+
+jobs:
+  bench:
+    name: bench P99 gate (macos-14)
+    runs-on: macos-14
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 需要 fetch main 分支以跑 baseline，设 fetch-depth=0
+          fetch-depth: 0
+
+      - name: 安装 toolchain（via rust-toolchain.toml）
+        run: rustup show
+
+      - name: 安装构建依赖（vectorscan 需要 cmake/ninja/ragel）
+        run: |
+          brew install cmake ninja pkg-config boost ragel jq
+
+      # cargo registry / git 缓存：不 invalidate criterion 目录
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: bench-cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            bench-cargo-${{ runner.os }}-
+
+      # target/ 独立缓存：bench 二进制和增量编译产物
+      # criterion/ 输出不在此 key 里，避免 baseline 污染
+      - uses: actions/cache@v4
+        with:
+          path: target/
+          key: bench-target-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}-${{ github.sha }}
+          restore-keys: |
+            bench-target-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}-
+            bench-target-${{ runner.os }}-
+
+      # Step 1：跑当前 PR（或 push）的 bench，保存为 "pr" baseline
+      - name: 跑 PR bench（save-baseline pr）
+        run: |
+          cargo bench -p sieve-rules --bench scan_70_rules --locked \
+            -- --sample-size 10 --save-baseline pr
+
+      # Step 2：切到 main，跑 baseline
+      # 注：target/ 已缓存，增量编译；只重建 main 有变化的产物
+      - name: 切到 main 分支，跑 main bench（save-baseline main）
+        run: |
+          git stash --include-untracked || true
+          git checkout main
+          cargo bench -p sieve-rules --bench scan_70_rules --locked \
+            -- --sample-size 10 --save-baseline main
+          # 切回原来的 ref（PR head 或 push sha）
+          git checkout -
+
+      # Step 3：对比 PR vs main，P99 退化 > 10% 失败
+      # bench_compare.sh 用 mean 代理 P99（criterion 不输出独立 P99 字段）
+      - name: 对比 benchmark（threshold 10%）
+        run: |
+          chmod +x scripts/bench_compare.sh
+          bash scripts/bench_compare.sh
+
+      # 失败时上传 criterion 输出，便于本地复现分析
+      - name: 上传 criterion 输出（仅失败时）
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: criterion-output
+          path: target/criterion/
+          retention-days: 7
