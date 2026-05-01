@@ -71,6 +71,30 @@ timeout_seconds = 30
 default_on_timeout = "block"
 
 [[rules]]
+id = "IN-CR-02-CURL-PIPE-WIN"
+description = "Curl/iwr/Invoke-WebRequest piped to PowerShell (Windows RCE, CVE-2025-6514 variant)"
+# Week 6 补丁：覆盖 attacks-public-replay/mcp-supply-chain/mcp-001（CVE-2025-6514 Windows）：
+#   cmd.exe /c curl https://... | powershell -
+# IN-CR-02-CURL-PIPE 只匹配 Unix shell（sh/bash），漏掉 Windows pipeline。
+# 兼容 powershell / pwsh (PowerShell Core 7+)，含 .exe 可选后缀。
+pattern = '''(?i)(curl|iwr|invoke-webrequest)(?:\s+\S+)+\s*\|\s*(powershell|pwsh)(\.exe)?'''
+severity = "critical"
+action = "block"
+keywords = ["powershell", "pwsh"]
+allowlist_stopwords = [
+  "red flag",                # 安全审计清单标记
+  "security review",         # 安全审计文档
+  "check for:",              # 安全检查清单
+  "DO NOT",                  # 明确警告
+  "NEVER",                   # 明确警告
+  "Sieve's IN-CR-02",        # Sieve 自说明文档
+  "PowerShell documentation",# 官方教学文档
+]
+disposition = "hook_terminal"
+timeout_seconds = 30
+default_on_timeout = "block"
+
+[[rules]]
 id = "IN-CR-02-WGET-PIPE"
 description = "Wget-pipe-shell pattern (including sudo)"
 # Week 5 补充：增加 `sudo` 可选前缀（与 CURL-PIPE 对齐）

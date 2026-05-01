@@ -11,6 +11,35 @@
 
 ---
 
+## [v1.5.3-windows-powershell-pipe] - 2026-05-01
+
+### 背景
+
+v1.5.2 公开攻击复现报告里发现 CVE-2025-6514 Windows PowerShell 变种漏拦（mcp-001），已标记为"建议 Week 6 补"。本次 patch 直接补上，1 条规则一行一行测，10 分钟工作量。
+
+### Added
+
+- **`IN-CR-02-CURL-PIPE-WIN`**：`(?i)(curl|iwr|invoke-webrequest)(?:\s+\S+)+\s*\|\s*(powershell|pwsh)(\.exe)?` —— 覆盖 Windows `curl ... | powershell` / `iwr ... | pwsh` 形态。CVSS 9.6 / 437K+ 下载量影响（CVE-2025-6514 mcp-remote OS Command Injection RCE）。Critical + hook_terminal + 30s timeout default block。allowlist 7 条教学/审计豁免
+
+### 测试结果
+
+| 指标 | v1.5.2 终点 | v1.5.3 | 状态 |
+|------|------|------|------|
+| Critical FP | 0/1070 = 0% | **0/1070 = 0%** | ✅ |
+| Attack Recall（合成） | 694/696 = 99.71% | **694/696 = 99.71%** | ✅（无回归） |
+| Public Attack Replay | 51/55 = 92.7% | **52/55 = 94.5%** | ✅ |
+| mcp-supply-chain 子桶 | 8/9 = 88.9% | **9/9 = 100%** | ✅ |
+
+### Known limitations
+
+剩 3 条公开复现漏拦全部为**接受盲区**（不计划修）：
+- `owasp-003.txt`（OWASP LLM03 RAG 投毒）：无 payload 特征，需源头数据校验
+- `real-003.txt` / `real-006.txt`：真实事件中的前端 UI 钓鱼 / 社工邮件，不在 LLM 流量范围
+
+入站规则总数 69 → **70**。
+
+---
+
 ## [v1.5.2-blind-spots-and-public-replay] - 2026-05-01
 
 ### 背景
