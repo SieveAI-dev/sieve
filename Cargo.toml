@@ -42,6 +42,7 @@ uuid = { version = "1", features = ["v7", "serde"] }
 chrono = { version = "0.4", default-features = false, features = ["serde", "clock"] }
 fd-lock = "4"
 clap = { version = "4", features = ["derive"] }
+arc-swap = "1"
 
 [profile.release]
 codegen-units = 1

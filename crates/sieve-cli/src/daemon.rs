@@ -115,8 +115,8 @@ fn detection_rule_ids<'a>(detections: &'a [&sieve_core::Detection]) -> Vec<&'a s
 /// 调用时机：daemon 收到 `DecisionResponse { decision=Allow, remember=true }` 之后。
 ///
 /// 校验路径：
-/// 1. `is_fail_closed(rule_id) == true` → 写 audit ERROR + 忽略 remember（不写灰名单）
-/// 2. `add_entry` 失败 → warn + 不影响本次决策（用户已 Allow，仍 forward）
+/// 1. `is_fail_closed(rule_id) == true` → 写 `AuditEvent::GraylistCriticalRejected` + 返回（不写灰名单）
+/// 2. `add_entry` 失败 → 写 `AuditEvent::GraylistAddFailed` + warn（fail-soft，不影响本次 Allow 决策）
 ///
 /// 关联：PRD v2.0 §5.4.2「Critical 锁约束」三道防线、§5.4.3 GUI 接口。
 ///
@@ -129,6 +129,8 @@ fn detection_rule_ids<'a>(detections: &'a [&sieve_core::Detection]) -> Vec<&'a s
 /// - `source_agent_str`：source_agent 字符串表示
 /// - `context_hint`：用户在 GUI 输入的备注（来自 DecisionResponse.context_hint）
 /// - `audit_event_id`：本次 audit 事件 ID（v4 UUID 字符串）
+/// - `audit_store`：审计存储句柄（v2.1 接入，PRD §5.4.2）
+/// - `caller`：调用方进程信息（v2.0 Phase A）
 #[allow(clippy::too_many_arguments)]
 fn try_write_graylist(
     rule_id: &str,
@@ -139,14 +141,35 @@ fn try_write_graylist(
     source_agent_str: &str,
     context_hint: Option<String>,
     audit_event_id: &str,
+    audit_store: &Arc<crate::audit::AuditStore>,
+    caller: &Option<crate::process_context::CallerInfo>,
 ) {
+    let caller_ctx = crate::audit::CallerContext {
+        pid: caller.as_ref().map(|c| c.pid),
+        exe: caller
+            .as_ref()
+            .and_then(|c| c.exe.as_ref())
+            .map(|p| p.display().to_string()),
+    };
+
     // 二次校验 Critical 锁（防 GUI 端绕过，PRD §5.4.2 第三道防线）
     if sieve_rules::critical_lock::is_fail_closed(rule_id) {
         tracing::error!(
             rule_id,
             "二次校验失败：fail-closed Critical 规则不可 remember，忽略灰名单写入 + audit ERROR"
         );
-        // TODO（v2.1）：写 audit ERROR 事件（audit 接入完成后替换此 tracing::error）
+        // v2.1：写 GraylistCriticalRejected audit 事件（PRD §5.4.2）
+        let event = crate::audit::AuditEvent::GraylistCriticalRejected {
+            rule_id: rule_id.to_string(),
+            request_id: audit_event_id.to_string(),
+            caller: caller_ctx,
+        };
+        let audit = Arc::clone(audit_store);
+        tokio::spawn(async move {
+            if let Err(e) = audit.append(event).await {
+                tracing::warn!(error = %e, "audit append GraylistCriticalRejected failed");
+            }
+        });
         return;
     }
 
@@ -154,6 +177,19 @@ fn try_write_graylist(
         Ok(home) => home.join("decisions"),
         Err(e) => {
             tracing::warn!(error = %e, "无法获取 SIEVE_HOME，跳过灰名单写入");
+            // SIEVE_HOME 不可用视同写入失败，写 GraylistAddFailed audit
+            let event = crate::audit::AuditEvent::GraylistAddFailed {
+                rule_id: rule_id.to_string(),
+                error: format!("SIEVE_HOME 不可用: {e}"),
+                request_id: audit_event_id.to_string(),
+                caller: caller_ctx,
+            };
+            let audit = Arc::clone(audit_store);
+            tokio::spawn(async move {
+                if let Err(ae) = audit.append(event).await {
+                    tracing::warn!(error = %ae, "audit append GraylistAddFailed failed");
+                }
+            });
             return;
         }
     };
@@ -188,9 +224,21 @@ fn try_write_graylist(
     };
 
     if let Err(e) = sieve_policy::graylist::add_entry(&graylist_dir, entry) {
-        // add_entry 失败不影响本次决策（用户已 Allow，仍 forward）
+        // add_entry 失败不影响本次决策（用户已 Allow，仍 forward）——fail-soft
         tracing::warn!(error = %e, rule_id, fingerprint, "灰名单写入失败（warn only，不影响本次 Allow 决策）");
-        // TODO（v2.1）：写 audit ERROR 事件
+        // v2.1：写 GraylistAddFailed audit 事件（PRD §5.4.2）
+        let event = crate::audit::AuditEvent::GraylistAddFailed {
+            rule_id: rule_id.to_string(),
+            error: e.to_string(),
+            request_id: audit_event_id.to_string(),
+            caller: caller_ctx,
+        };
+        let audit = Arc::clone(audit_store);
+        tokio::spawn(async move {
+            if let Err(ae) = audit.append(event).await {
+                tracing::warn!(error = %ae, "audit append GraylistAddFailed failed");
+            }
+        });
     } else {
         tracing::info!(rule_id, fingerprint, "灰名单条目已写入");
     }
@@ -370,9 +418,12 @@ type ResponseBody = BoxBody<Bytes, Box<dyn std::error::Error + Send + Sync>>;
 ///
 /// v1.4：启动时绑定 IpcServer Unix socket，accept loop 在后台 spawn。
 /// v2.0：透传 `audit_store: Arc<AuditStore>`；启动 reload listener task（PRD §5.5.5）。
+/// v2.1：新增 `outbound_layered` + `inbound_layered`，reload listener 调用 `swap_user` 完成
+///       zero-downtime hot swap，无需重启 daemon（PRD §5.5.5）。
 ///
 /// # Errors
 /// bind 端口失败或 Forwarder 初始化失败时返回错误。
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     cfg: Config,
     filter: Arc<OutboundFilter>,
@@ -380,6 +431,18 @@ pub async fn run(
     inbound_sieveignore: Arc<HashSet<String>>,
     address_guard_config: sieve_core::pipeline::inbound::AddressGuardConfig,
     audit_store: Arc<crate::audit::AuditStore>,
+    outbound_layered: Arc<
+        sieve_rules::engine::LayeredEngine<
+            sieve_rules::engine::VectorscanEngine,
+            sieve_policy::engine::UserEngine,
+        >,
+    >,
+    inbound_layered: Arc<
+        sieve_rules::engine::LayeredEngine<
+            sieve_rules::engine::VectorscanEngine,
+            sieve_policy::engine::UserEngine,
+        >,
+    >,
 ) -> Result<()> {
     let listen = cfg.listen_addr()?;
     let dry_run = cfg.dry_run;
@@ -470,12 +533,12 @@ pub async fn run(
         }
     };
 
-    // v2.0 §5.5.5：启动 reload listener（best-effort，PRD §9 #14 fail-safe）。
+    // v2.1 §5.5.5：启动 reload listener（zero-downtime hot swap，PRD §9 #14 fail-safe）。
     // daemon 监听 IpcServer::reload_rx 的用户规则 reload 请求：
-    // 1. 重新读 user.toml + lint + UserEngine::compile（只验证合法性，不做 hot swap）
-    // 2. 推送 NotifyKind::UserRulesReloaded / UserRulesLoadFailed
-    // 3. 写 AuditEvent::UserRulesReloaded
-    // TODO（v2.1）：实现真正的 LayeredEngine zero-downtime hot swap（需改 sieve-rules 接口）。
+    // 1. 重新读 user.toml + lint + 编译出站/入站 UserEngine
+    // 2. 成功 → atomic swap_user（LayeredEngine zero-downtime hot reload，无需重启）
+    // 3. 推送 NotifyKind::UserRulesReloaded / UserRulesLoadFailed
+    // 4. 写 AuditEvent::UserRulesReloaded
     if let Some(ref ipc_srv) = ipc_server {
         if let Some(mut reload_rx) = ipc_srv.reload_rx().await {
             let ipc_for_reload = Arc::clone(ipc_srv);
@@ -483,6 +546,9 @@ pub async fn run(
             let user_rules_path_for_reload = sieve_ipc::paths::sieve_home()
                 .ok()
                 .map(|h| h.join("rules").join("user.toml"));
+            // 持有 Arc 引用以在 reload 时原子替换用户引擎（PRD §5.5.5 hot swap）
+            let outbound_layered_for_reload = Arc::clone(&outbound_layered);
+            let inbound_layered_for_reload = Arc::clone(&inbound_layered);
             tokio::spawn(async move {
                 while let Some(req) = reload_rx.recv().await {
                     let trigger_id_str = req.trigger_id.map(|id| id.to_string());
@@ -491,21 +557,23 @@ pub async fn run(
                         "收到用户规则 reload 请求（PRD §5.5.5）"
                     );
 
-                    // best-effort：重新读取 + lint + 编译（不做真正的 hot swap，v2.1 实现）
-                    let reload_result =
-                        reload_user_rules_best_effort(user_rules_path_for_reload.as_deref());
+                    // 重新读取 + lint + 编译两个方向的用户引擎（fail-safe：失败保留旧引擎）
+                    let reload_result = reload_user_engines(user_rules_path_for_reload.as_deref());
 
                     let (notify_kind, notify_title, notify_detail, success, rule_count, err_msg) =
                         match reload_result {
-                            Ok(count) => {
-                                tracing::info!(rule_count = count, "用户规则重新加载验证通过");
+                            Ok((outbound_eng, inbound_eng, count)) => {
+                                // v2.1 zero-downtime hot swap：原子替换用户引擎，无需重启 daemon
+                                outbound_layered_for_reload.swap_user(outbound_eng);
+                                inbound_layered_for_reload.swap_user(inbound_eng);
+                                tracing::info!(
+                                    rule_count = count,
+                                    "用户规则 hot swap 完成，立即生效（PRD §5.5.5）"
+                                );
                                 (
                                     sieve_ipc::protocol::NotifyKind::UserRulesReloaded,
-                                    format!("用户规则已重新加载（{count} 条）"),
-                                    Some(
-                                        "完整生效需重启 daemon（v2.1 zero-downtime swap）"
-                                            .to_owned(),
-                                    ),
+                                    format!("用户规则已 hot reload（{count} 条）"),
+                                    Some("已立即生效，无需重启 daemon".to_owned()),
                                     true,
                                     Some(count),
                                     None,
@@ -533,7 +601,7 @@ pub async fn run(
                         rule_id: None,
                         auto_dismiss_seconds: 5,
                     };
-                    ipc_for_reload.broadcast_status_bar(notify).await;
+                    ipc_for_reload.broadcast_status_bar(notify);
 
                     // audit 写入（fail-soft）
                     let event = crate::audit::AuditEvent::UserRulesReloaded {
@@ -625,24 +693,35 @@ pub async fn run(
     }
 }
 
-/// best-effort 用户规则重新加载（PRD §5.5.5 步骤 1-2）。
+/// 重新读取、lint 并编译用户规则，返回可立即 swap 的两个方向引擎（PRD §5.5.5 v2.1）。
 ///
-/// 只做 lint + 编译验证，**不做真正的 hot swap**（v2.1 实现）。
-/// 文件不存在或 lint 失败时返回 Err（fail-safe：daemon 保留旧引擎继续运行）。
+/// 返回 `(outbound_engine, inbound_engine, rule_count)`，方向引擎均为 `Option<UserEngine>`：
+/// - `None` 表示该方向无规则（文件不存在、或该方向 0 条），LayeredEngine 退化为纯系统引擎
+/// - `Some(engine)` 即编译通过的用户引擎，调用方直接调用 `swap_user` 生效
 ///
-/// 返回规则数量供 StatusBar 通知展示。
-fn reload_user_rules_best_effort(
+/// 任何错误（lint 违规 / SIEVE_HOME 未设置）返回 `Err`（fail-safe：daemon 保留旧引擎）。
+fn reload_user_engines(
     user_rules_path: Option<&std::path::Path>,
-) -> anyhow::Result<usize> {
+) -> anyhow::Result<(
+    Option<sieve_policy::engine::UserEngine>,
+    Option<sieve_policy::engine::UserEngine>,
+    usize,
+)> {
+    use sieve_policy::lint::lint;
+    use sieve_policy::loader::load_user_rules;
+
     let path = user_rules_path
         .ok_or_else(|| anyhow::anyhow!("user rules path 未知（SIEVE_HOME 未设置）"))?;
+
     if !path.exists() {
-        return Ok(0); // 文件不存在视为 0 条规则，不报错
+        // 文件不存在：两个方向均 None（退化为纯系统规则），视为成功（0 条规则）
+        return Ok((None, None, 0));
     }
-    let parsed = sieve_policy::loader::load_user_rules(path)
-        .map_err(|e| anyhow::anyhow!("user.toml 解析失败: {e}"))?;
-    let violations =
-        sieve_policy::lint::lint(&parsed, path.metadata().map(|m| m.len()).unwrap_or(0));
+
+    let file = load_user_rules(path).map_err(|e| anyhow::anyhow!("user.toml 解析失败: {e}"))?;
+
+    let file_size = path.metadata().map(|m| m.len()).unwrap_or(0);
+    let violations = lint(&file, file_size);
     if !violations.is_empty() {
         return Err(anyhow::anyhow!(
             "user.toml lint 失败（{} 条违规）：{}",
@@ -650,9 +729,25 @@ fn reload_user_rules_best_effort(
             violations[0].message
         ));
     }
-    Ok(parsed.rules.len())
-}
 
+    let total = file.rules.len();
+
+    // 出站引擎（编译 direction=outbound/both 的规则）；该方向无规则时返回 None（fail-safe）
+    let outbound_eng = sieve_policy::engine::UserEngine::compile_for_direction(
+        file.rules.clone(),
+        sieve_policy::loader::RuleDirection::Outbound,
+    )
+    .ok();
+
+    // 入站引擎（编译 direction=inbound/both 的规则）；该方向无规则时返回 None（fail-safe）
+    let inbound_eng = sieve_policy::engine::UserEngine::compile_for_direction(
+        file.rules,
+        sieve_policy::loader::RuleDirection::Inbound,
+    )
+    .ok();
+
+    Ok((outbound_eng, inbound_eng, total))
+}
 /// 请求入口：捕获 `proxy_inner` 的所有错误，转换为 502 Bad Gateway 响应。
 ///
 /// v2.0：新增 `ctx`（caller + audit_store，PRD §5.6 / §5.6.1）参数。
@@ -911,6 +1006,8 @@ async fn proxy_inner(
                                         &agent_str,
                                         resp.context_hint.clone(),
                                         &request_id.to_string(),
+                                        &ctx.audit,
+                                        &ctx.caller,
                                     );
                                 }
                             }
@@ -1173,6 +1270,8 @@ async fn proxy_inner(
                                         &agent_str,
                                         resp.context_hint.clone(),
                                         &request_id.to_string(),
+                                        &ctx.audit,
+                                        &ctx.caller,
                                     );
                                 }
                             }
@@ -1670,6 +1769,8 @@ async fn proxy_openai(
                                     &agent_str,
                                     resp.context_hint.clone(),
                                     &request_id.to_string(),
+                                    &audit_store,
+                                    &caller,
                                 );
                             }
                         }
@@ -2184,6 +2285,8 @@ async fn forward_with_inbound_inspection(
                                                 &agent_str,
                                                 context_hint.clone(),
                                                 &request_id.to_string(),
+                                                &audit_store,
+                                                &caller,
                                             );
                                         }
                                     }
@@ -2561,6 +2664,8 @@ async fn forward_with_openai_inbound_inspection(
                                                 &agent_str,
                                                 context_hint.clone(),
                                                 &request_id.to_string(),
+                                                &audit_store,
+                                                &caller,
                                             );
                                         }
                                     }
@@ -2747,10 +2852,7 @@ fn record_into_sequence_and_detect(
                         rule_id: Some(h.rule_id.clone()),
                         auto_dismiss_seconds: 10,
                     };
-                    let srv_clone = Arc::clone(srv);
-                    tokio::spawn(async move {
-                        srv_clone.broadcast_status_bar(notify).await;
-                    });
+                    srv.broadcast_status_bar(notify);
                 }
 
                 // v2.0 §5.7：audit 写入（fail-soft，PRD §5.6.1）

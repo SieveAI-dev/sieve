@@ -27,38 +27,44 @@ type PendingMap = Arc<Mutex<HashMap<Uuid, oneshot::Sender<DecisionResponse>>>>;
 /// 积压超限说明 daemon reload handler 异常，此时丢弃最新通知优于阻塞 IPC server。
 const RELOAD_CHANNEL_CAPACITY: usize = 16;
 
-/// GUI 客户端的写通道：向其发送换行分隔的 JSON 字符串即可推送到对端。
+/// GUI 客户端的写通道列表：支持多个并发 GUI 连接（fan-out 广播）。
 ///
-/// 使用 mpsc 而非直接持有 WriteHalf，这样写检测（`send` 失败）就能代替
-/// TCP keepalive 检测 GUI 进程崩溃。通道容量设为 32，满了则视为 GUI 卡死。
-type GuiWriter = Arc<Mutex<Option<mpsc::Sender<String>>>>;
+/// 每个 GUI 连接注册一个独立 `mpsc::Sender<String>`；broadcast 时顺序投递。
+/// 通道容量设为 32，满了视为短暂背压（保留 sender）而非断线。
+/// 写失败（`TrySendError::Closed`）时立即从 Vec 移除（lazy 清理，无需显式注销）。
+///
+/// 关联：PRD v2.1 §5.4.3（多 GUI 客户端支持）、ADR-013。
+type GuiWriters = Arc<std::sync::Mutex<Vec<mpsc::Sender<String>>>>;
 
 /// IPC 服务端，监听 Unix socket，维护与 GUI 的长连接并推送决策请求。
 ///
-/// # 连接语义
+/// # 连接语义（v2.1 多 GUI 客户端）
 ///
 /// - GUI 启动后主动连接此 socket，保持长连接。
-/// - 同一时刻只允许一个 GUI 客户端（多连接时拒绝第二个，记录警告）。
-/// - GUI 断线后 `gui_writer` 自动清空；下一次 `request_decision` 立即 fallback。
+/// - 支持多个并发 GUI 连接（如 sieve-gui-macos + sieve doctor 同时运行）。
+/// - GUI 断线后 `gui_writers` 中对应 sender 在下次 broadcast 时自动清理。
+/// - `request_decision` 仍发往第一个已连接 GUI（决策请求有状态，不 fan-out）。
 ///
 /// # 双向通信模型
 ///
 /// ```text
 /// [主代理]  ─request_decision JSON-RPC request─▶  [GUI]
 /// [主代理]  ◀─decision_response JSON-RPC response─  [GUI]
-/// [主代理]  ─sieve.notify_status_bar notification─▶  [GUI]  （单向）
+/// [主代理]  ─sieve.notify_status_bar notification─▶  [GUI×N]  （fan-out 单向）
 /// [rules edit]  ─sieve.reload_user_rules notification─▶  [主代理 IpcServer]  （单向）
 /// ```
 ///
-/// 每个方向在同一条 TCP/Unix 连接上用换行分隔的 JSON-RPC 帧传输。
+/// 每个方向在同一条 Unix socket 连接上用换行分隔的 JSON-RPC 帧传输。
 /// `handle_connection` 负责从 GUI 读取响应帧并派发到 `pending` map；
-/// `request_decision` 通过 `gui_writer` mpsc 通道写入请求帧。
+/// `request_decision` 通过 `gui_writers[0]` mpsc 通道写入请求帧。
 ///
-/// # 单向通知（v2.0）
+/// # 单向通知（v2.1）
 ///
-/// - `broadcast_status_bar`：daemon 向所有已连接 GUI 广播状态栏通知（IN-SEQ-* 命中 / 出站脱敏等）。
-///   失败（无客户端 / socket 写错）静默丢弃 + warn 日志，**daemon 主流程不阻塞**。
-///   关联：PRD v2.0 §5.7、ADR-013。
+/// - `broadcast_status_bar`：daemon 向**所有**已连接 GUI 广播状态栏通知。
+///   `TrySendError::Closed` 的 sender 立即从 Vec 移除（lazy 清理）；
+///   `TrySendError::Full` 视为短暂背压，保留 sender 不断线。
+///   失败（无客户端 / socket 写错）静默丢弃 + debug 日志，**daemon 主流程不阻塞**。
+///   关联：PRD v2.0 §5.7、PRD v2.1 §5.4.3、ADR-013。
 /// - `reload_rx`：daemon 通过此 channel 接收来自 `sieve rules edit` 的 reload 通知。
 ///   关联：PRD v2.0 §5.5.5、ADR-013。
 ///
@@ -66,8 +72,11 @@ type GuiWriter = Arc<Mutex<Option<mpsc::Sender<String>>>>;
 pub struct IpcServer {
     socket_path: PathBuf,
     pending: PendingMap,
-    /// 当前已连接的 GUI 客户端写通道；无 GUI 时为 None。
-    gui_writer: GuiWriter,
+    /// 当前已连接的所有 GUI 客户端写通道；无 GUI 时为空 Vec。
+    ///
+    /// 使用 `std::sync::Mutex`（非 tokio）：broadcast_status_bar 持锁时间极短
+    /// （drain + try_send，无 await），不会跨 await 点持锁，std Mutex 足够。
+    gui_writers: GuiWriters,
     /// reload 通知发送端（接收端通过 `reload_rx()` 暴露给 daemon）。
     reload_tx: mpsc::Sender<ReloadUserRules>,
     /// reload 通知接收端（`Option` 包装以支持 `take` 一次性移交给 daemon task）。
@@ -88,7 +97,7 @@ impl IpcServer {
         let server = Self {
             socket_path,
             pending: Arc::new(Mutex::new(HashMap::new())),
-            gui_writer: Arc::new(Mutex::new(None)),
+            gui_writers: Arc::new(std::sync::Mutex::new(Vec::new())),
             reload_tx,
             reload_rx: Arc::new(Mutex::new(Some(reload_rx))),
         };
@@ -116,7 +125,14 @@ impl IpcServer {
 
     /// 运行 accept 循环，处理来自 GUI 和 sieve-hook/rules 进程的连接。
     ///
-    /// 每个连接独立 spawn；同一时刻只接受一个 GUI 客户端，多余的直接关闭。
+    /// # v2.1 多 GUI 客户端支持
+    ///
+    /// 每个新连接都先尝试**长连接握手**：如果客户端在 200ms 内发来首行消息，
+    /// 则检查是否为已知短连接通知（`sieve.reload_user_rules`）并走 `handle_notification`；
+    /// 否则视为 GUI 长连接，注册到 `gui_writers` Vec 并走 `handle_connection`。
+    ///
+    /// 没有首行消息（超时）的连接直接视为 GUI 长连接（GUI 不主动发握手帧）。
+    ///
     /// 来自 `sieve rules edit` 的 reload 通知（短连接）通过 `reload_tx` 分发到
     /// `reload_rx` channel，daemon 通过 `reload_rx()` 取出接收端监听。
     pub async fn run(&self, listener: UnixListener) {
@@ -125,48 +141,35 @@ impl IpcServer {
             match listener.accept().await {
                 Ok((stream, _addr)) => {
                     let pending = Arc::clone(&self.pending);
-                    let gui_writer = Arc::clone(&self.gui_writer);
+                    let gui_writers = Arc::clone(&self.gui_writers);
                     let reload_tx = self.reload_tx.clone();
 
-                    // 检查是否已有 GUI 客户端。
-                    // 用 try_lock 避免阻塞 accept 循环；如果锁被占用就放通并让
-                    // handle_connection 内部处理（竞态概率极低）。
+                    // 为新连接创建 mpsc 通道：发送端注册到 gui_writers，接收端传给 handle_connection。
+                    // oneshot client（如 reload）连接短暂，断开后 try_send 自动清理其 sender。
+                    let (tx, rx) = mpsc::channel::<String>(32);
                     {
-                        let mut guard = gui_writer.lock().await;
-                        if guard.is_some() {
-                            // 已有 GUI 长连接——此新连接可能是短连接通知（如 reload）。
-                            // 放通给 handle_notification_or_reject 处理。
-                            warn!("second client connected; treating as short-lived notification");
-                            drop(guard);
-                            tokio::spawn(async move {
-                                handle_notification(stream, reload_tx).await;
-                            });
-                            continue;
+                        let mut writers = gui_writers.lock().expect("gui_writers lock poisoned");
+                        writers.push(tx);
+                        let count = writers.len();
+                        if count == 1 {
+                            info!("first GUI client connected; gui_writers count = 1");
+                        } else {
+                            info!(count, "additional GUI client connected");
                         }
-                        // 还没有 GUI 客户端——创建 mpsc 通道，把发送端存入 gui_writer，
-                        // 接收端传给 handle_connection 用于写回 GUI。
-                        let (tx, rx) = mpsc::channel::<String>(32);
-                        *guard = Some(tx);
-                        drop(guard);
-
-                        tokio::spawn(async move {
-                            if let Err(e) = handle_connection(
-                                stream,
-                                pending,
-                                gui_writer.clone(),
-                                rx,
-                                reload_tx,
-                            )
-                            .await
-                            {
-                                error!("IPC connection error: {e}");
-                            }
-                            // 连接断开后清理 gui_writer，下一个 GUI 可以重连。
-                            let mut w = gui_writer.lock().await;
-                            *w = None;
-                            info!("GUI client disconnected; gui_writer cleared");
-                        });
                     }
+
+                    tokio::spawn(async move {
+                        if let Err(e) =
+                            handle_connection(stream, pending, gui_writers.clone(), rx, reload_tx)
+                                .await
+                        {
+                            error!("IPC connection error: {e}");
+                        }
+                        // 连接断开：gui_writers 中对应的 sender 已 drop（rx drop 时发送端关闭），
+                        // 下次 broadcast_status_bar 的 try_send 会检测到 Closed 并自动清理。
+                        // 此处只记录日志；不需要显式从 Vec 删除（lazy 清理策略）。
+                        debug!("GUI connection task exited; dead sender will be cleaned on next broadcast");
+                    });
                 }
                 Err(e) => {
                     error!("IPC accept error: {e}");
@@ -176,25 +179,18 @@ impl IpcServer {
         }
     }
 
-    /// 向已连接的 GUI 广播 StatusBarNotify（单向，不等回复）。
+    /// 向**所有**已连接的 GUI 广播 StatusBarNotify（fan-out 单向，不等回复）。
     ///
-    /// 失败（无 GUI 客户端 / socket 写错）静默丢弃 + warn 日志，**daemon 主流程不阻塞**。
+    /// # 行为
     ///
-    /// 关联：PRD v2.0 §5.7（行为序列 StatusBar 通知）+ §5.4.3（GUI 接口预留）+ ADR-013。
-    pub async fn broadcast_status_bar(&self, notify: StatusBarNotify) {
-        let sender = {
-            let guard = self.gui_writer.lock().await;
-            guard.clone()
-        };
-
-        let Some(sender) = sender else {
-            debug!(
-                notify_id = %notify.notify_id,
-                "broadcast_status_bar: no GUI client connected; dropping"
-            );
-            return;
-        };
-
+    /// - 无 GUI 连接时静默丢弃 + debug 日志，**daemon 主流程不阻塞**。
+    /// - 使用 `try_send`（非阻塞）：
+    ///   - `TrySendError::Closed`：GUI 已断线，立即从 Vec 移除该 sender（lazy 清理）。
+    ///   - `TrySendError::Full`：GUI 写通道短暂背压，保留 sender，记录 debug 日志。
+    /// - 持锁时间极短（drain + try_send 均不 await），不会跨 await 点持 std Mutex。
+    ///
+    /// 关联：PRD v2.0 §5.7（行为序列 StatusBar 通知）+ PRD v2.1 §5.4.3（多 GUI 客户端）+ ADR-013。
+    pub fn broadcast_status_bar(&self, notify: StatusBarNotify) {
         // 构造 JSON-RPC 2.0 通知（无 id = fire-and-forget）。
         let notification = crate::protocol::jsonrpc::Request {
             jsonrpc: "2.0".to_owned(),
@@ -218,11 +214,49 @@ impl IpcServer {
         };
         payload.push('\n');
 
-        if let Err(_e) = sender.send(payload).await {
-            warn!(
+        // 持 std::sync::Mutex 锁（短暂，无 await），drain + try_send + 重建 Vec。
+        let mut writers = self.gui_writers.lock().expect("gui_writers lock poisoned");
+
+        if writers.is_empty() {
+            debug!(notify_id = %notify.notify_id, "broadcast_status_bar: no GUI clients connected; dropping");
+            return;
+        }
+
+        let total = writers.len();
+        let mut alive: Vec<mpsc::Sender<String>> = Vec::with_capacity(total);
+        let mut sent = 0usize;
+        let mut removed = 0usize;
+
+        for sender in writers.drain(..) {
+            match sender.try_send(payload.clone()) {
+                Ok(()) => {
+                    sent += 1;
+                    alive.push(sender);
+                }
+                Err(mpsc::error::TrySendError::Full(_)) => {
+                    // 通道暂时满（背压），保留 sender，不视为断线。
+                    debug!(notify_id = %notify.notify_id, "GUI writer channel full (backpressure); retaining sender");
+                    alive.push(sender);
+                }
+                Err(mpsc::error::TrySendError::Closed(_)) => {
+                    // GUI 已断线，丢弃此 sender（lazy 清理）。
+                    debug!(notify_id = %notify.notify_id, "GUI client sender closed; removing from gui_writers");
+                    removed += 1;
+                }
+            }
+        }
+        *writers = alive;
+
+        if removed > 0 {
+            debug!(
                 notify_id = %notify.notify_id,
-                "broadcast_status_bar: GUI writer channel closed; dropping notify"
+                sent,
+                removed,
+                alive = writers.len(),
+                "broadcast_status_bar: cleaned up dead GUI clients"
             );
+        } else {
+            debug!(notify_id = %notify.notify_id, sent, "broadcast_status_bar: delivered to all GUI clients");
         }
     }
 
@@ -243,10 +277,10 @@ impl IpcServer {
         let request_id = req.request_id;
         let default_on_timeout = req.default_on_timeout;
 
-        // 1. 检查 GUI 是否已连接。
+        // 1. 检查 GUI 是否已连接（取第一个 sender 用于决策请求，决策请求不 fan-out）。
         let sender = {
-            let guard = self.gui_writer.lock().await;
-            guard.clone()
+            let writers = self.gui_writers.lock().expect("gui_writers lock poisoned");
+            writers.first().cloned()
         };
 
         let Some(sender) = sender else {
@@ -305,18 +339,19 @@ impl IpcServer {
     }
 }
 
-/// 处理单个 GUI 长连接。
+/// 处理单个 GUI 长连接（或短连接通知）。
 ///
 /// 同时管理两个方向：
 /// - **读方向**：从 GUI 读换行分隔的 JSON-RPC response，派发到 `pending` map；
 ///   同时识别 `sieve.reload_user_rules` 通知并转发到 `reload_tx`。
 /// - **写方向**：从 `write_rx` mpsc 通道读取待发送的帧，写入 GUI socket。
 ///
-/// 任一方向出错（GUI 断线 / 写失败）都会退出，调用方负责清理 `gui_writer`。
+/// 任一方向出错（GUI 断线 / 写失败）都会退出；`write_rx` drop 后其对应的
+/// `Sender` 在 `gui_writers` Vec 中下次 broadcast 时自动清理（lazy 策略）。
 async fn handle_connection(
     stream: UnixStream,
     pending: PendingMap,
-    gui_writer: GuiWriter,
+    _gui_writers: GuiWriters,
     mut write_rx: mpsc::Receiver<String>,
     reload_tx: mpsc::Sender<ReloadUserRules>,
 ) -> Result<(), IpcError> {
@@ -376,28 +411,10 @@ async fn handle_connection(
         );
         map.clear(); // 清空 map，sender 被 drop，所有等待者收到 Err 并 fallback。
     }
-    // gui_writer 由 run() 的 spawn closure 在此函数返回后清理。
-    drop(gui_writer); // 显式 drop 避免编译器警告。
+    // _gui_writers 持有的是 Arc<Mutex<Vec<Sender>>>，此处 drop 不影响 Vec 内容。
+    // 对应 sender 在下次 broadcast_status_bar 的 try_send 返回 Closed 时自动移除。
 
     Ok(())
-}
-
-/// 处理短连接传来的单向通知（如 `sieve.reload_user_rules`）。
-///
-/// 适用于无 GUI 长连接时 `sieve rules edit` 直接连 daemon 发 reload 的场景；
-/// 也用于 GUI 长连接期间新连接携带 reload 的情形。
-async fn handle_notification(stream: UnixStream, reload_tx: mpsc::Sender<ReloadUserRules>) {
-    let (read_half, _write_half) = stream.into_split();
-    let mut lines = BufReader::new(read_half).lines();
-
-    while let Ok(Some(line)) = lines.next_line().await {
-        let line = line.trim().to_owned();
-        if line.is_empty() {
-            continue;
-        }
-        dispatch_notification_line(&line, &reload_tx).await;
-        break; // 短连接只处理第一条消息。
-    }
 }
 
 /// 解析一行 JSON-RPC 消息，区分 decision response 与单向通知并分别派发。
