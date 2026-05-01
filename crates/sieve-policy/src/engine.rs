@@ -5,7 +5,7 @@
 //! （PRD §5.5.2.1 "命中标识"）。
 
 use crate::error::{PolicyError, PolicyResult};
-use crate::loader::UserRuleEntry;
+use crate::loader::{RuleDirection, UserRuleEntry};
 use sieve_rules::engine::{MatchEngine, MatchHit, ScanReport, ScanRequest, VectorscanEngine};
 use sieve_rules::error::SieveRulesResult;
 use sieve_rules::manifest::{Action, DefaultOnTimeout, Disposition, RuleEntry, Severity};
@@ -24,6 +24,7 @@ impl UserEngine {
     /// 将 `UserRuleEntry` 列表编译为 vectorscan database。
     ///
     /// 只编译 `enabled = true` 的规则（禁用规则跳过）。
+    /// direction 过滤在调用方完成，此方法不区分方向（向后兼容）。
     pub fn compile(rules: Vec<UserRuleEntry>) -> PolicyResult<Self> {
         let enabled: Vec<UserRuleEntry> = rules.into_iter().filter(|r| r.enabled).collect();
         let count = enabled.len();
@@ -34,6 +35,33 @@ impl UserEngine {
             .map_err(|e| PolicyError::EngineCompile(e.to_string()))?;
 
         Ok(Self { inner, count })
+    }
+
+    /// 按方向过滤后编译（PRD v2.0 §5.5）。
+    ///
+    /// - `direction = Outbound`：只编译 `direction == Outbound || Both` 的规则
+    /// - `direction = Inbound`：只编译 `direction == Inbound || Both` 的规则
+    /// - `direction = Both`：等价于 `compile`（不过滤）
+    ///
+    /// 过滤后若无 enabled 规则（0 条），返回 `PolicyError::EngineCompile`，
+    /// 调用方应降级为 `None`（与现有 fail-safe 行为一致）。
+    pub fn compile_for_direction(
+        rules: Vec<UserRuleEntry>,
+        direction: RuleDirection,
+    ) -> PolicyResult<Self> {
+        let filtered: Vec<UserRuleEntry> = rules
+            .into_iter()
+            .filter(|r| match direction {
+                RuleDirection::Outbound => {
+                    matches!(r.direction, RuleDirection::Outbound | RuleDirection::Both)
+                }
+                RuleDirection::Inbound => {
+                    matches!(r.direction, RuleDirection::Inbound | RuleDirection::Both)
+                }
+                RuleDirection::Both => true,
+            })
+            .collect();
+        Self::compile(filtered)
     }
 }
 
@@ -128,6 +156,7 @@ mod tests {
             keywords: vec!["keyword".into()],
             allowlist_stopwords: vec![],
             disposition: None,
+            direction: RuleDirection::Both,
             enabled,
             added_at: Utc::now(),
             added_by: "manual".into(),

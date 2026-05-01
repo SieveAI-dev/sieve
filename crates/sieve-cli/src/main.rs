@@ -96,9 +96,11 @@ async fn main() -> Result<()> {
                 .map(|h| h.join("rules").join("user.toml"))
                 .ok();
 
-            // 出站用户规则引擎（PRD §9 #14：失败降级为 None，系统规则不受影响）
-            let outbound_user_engine =
-                load_user_engine_fail_safe(user_rules_path.as_deref(), "outbound");
+            // 出站用户规则引擎（只编译 direction=outbound/both 的规则，PRD v2.0 §5.5）
+            let outbound_user_engine = load_user_engine_fail_safe(
+                user_rules_path.as_deref(),
+                sieve_policy::loader::RuleDirection::Outbound,
+            );
 
             // 用 LayeredEngine 包装系统 + 用户规则（PRD §6.3 / §5.5.2.1）
             let outbound_layered = LayeredEngine::new(system_engine, outbound_user_engine);
@@ -145,9 +147,11 @@ async fn main() -> Result<()> {
             let inbound_system_engine = VectorscanEngine::compile(vectorscan_rules)
                 .map_err(|e| anyhow::anyhow!("inbound vectorscan compile: {e}"))?;
 
-            // 入站用户规则引擎（PRD §9 #14 fail-safe，Phase A 无方向字段时同时挂两侧）
-            let inbound_user_engine =
-                load_user_engine_fail_safe(user_rules_path.as_deref(), "inbound");
+            // 入站用户规则引擎（只编译 direction=inbound/both 的规则，PRD v2.0 §5.5）
+            let inbound_user_engine = load_user_engine_fail_safe(
+                user_rules_path.as_deref(),
+                sieve_policy::loader::RuleDirection::Inbound,
+            );
 
             // 用 LayeredEngine 包装入站系统 + 用户规则
             let inbound_layered = LayeredEngine::new(inbound_system_engine, inbound_user_engine);
@@ -265,16 +269,18 @@ fn load_sieveignore(path: &Path) -> HashSet<String> {
     }
 }
 
-/// 加载并编译用户规则引擎（PRD §9 #14 fail-safe：失败返 `Err`，调用方降级为 `None`）。
+/// 加载并按方向编译用户规则引擎（PRD v2.0 §5.5 / §9 #14 fail-safe）。
 ///
 /// 文件不存在时 `sieve_policy::loader::load_user_rules` 返回空 `UserRulesFile`，
-/// 空规则列表导致 `UserEngine::compile` 返回错误，此时 `load_user_engine_fail_safe`
-/// 返回 `None`，daemon 以纯系统规则正常启动。
+/// 空规则列表（或按方向过滤后 0 条）导致 `UserEngine::compile_for_direction` 返回错误，
+/// 此时 `load_user_engine_fail_safe` 返回 `None`，daemon 以纯系统规则正常启动。
 ///
-/// `side` 仅用于日志标识（"outbound" / "inbound"）；Phase A 无方向字段，
-/// 用户规则同时挂入两侧（更保守，PRD §5.5 未明确分方向）。
+/// `direction` 控制哪些规则被编译进该引擎实例（PRD §5.5）：
+/// - `Outbound`：只编译 direction=outbound/both 的规则，挂出站侧
+/// - `Inbound`：只编译 direction=inbound/both 的规则，挂入站侧
 fn load_and_compile_user_engine(
     path: &std::path::Path,
+    direction: sieve_policy::loader::RuleDirection,
 ) -> Result<sieve_policy::engine::UserEngine, anyhow::Error> {
     use sieve_policy::lint::lint;
     use sieve_policy::loader::load_user_rules;
@@ -308,24 +314,25 @@ fn load_and_compile_user_engine(
         anyhow::bail!("user rules lint failed: {summary}");
     }
 
-    // 只编译启用规则
-    let enabled: Vec<_> = file.rules.into_iter().filter(|r| r.enabled).collect();
-    sieve_policy::engine::UserEngine::compile(enabled)
-        .map_err(|e| anyhow::anyhow!("compile user engine: {e}"))
+    // 按方向过滤后编译（PRD §5.5）
+    sieve_policy::engine::UserEngine::compile_for_direction(file.rules, direction)
+        .map_err(|e| anyhow::anyhow!("compile user engine (direction={direction:?}): {e}"))
 }
 
 /// fail-safe 包装：将 `load_and_compile_user_engine` 的失败降级为 `None`（PRD §9 #14）。
 ///
 /// daemon 必须在用户规则损坏时正常启动，系统规则不受影响。
+/// `direction` 参数同时作为日志标识和过滤条件（PRD v2.0 §5.5）。
 fn load_user_engine_fail_safe(
     path: Option<&std::path::Path>,
-    side: &str,
+    direction: sieve_policy::loader::RuleDirection,
 ) -> Option<sieve_policy::engine::UserEngine> {
     let path = path?;
-    match load_and_compile_user_engine(path) {
+    let side = format!("{direction:?}").to_lowercase();
+    match load_and_compile_user_engine(path, direction) {
         Ok(eng) => {
             tracing::info!(
-                side = side,
+                side = %side,
                 path = %path.display(),
                 rule_count = eng.rule_count(),
                 "用户规则加载成功（PRD §5.5）"
@@ -335,15 +342,15 @@ fn load_user_engine_fail_safe(
         Err(e) => {
             // 文件不存在是正常状态，降低日志级别
             let msg = e.to_string();
-            if msg.contains("empty or not present") {
+            if msg.contains("empty or not present") || msg.contains("No rules to compile") {
                 tracing::debug!(
-                    side = side,
+                    side = %side,
                     path = %path.display(),
-                    "用户规则文件不存在，以纯系统规则启动（PRD §9 #14）"
+                    "用户规则文件不存在或该方向无规则，以纯系统规则启动（PRD §9 #14）"
                 );
             } else {
                 tracing::warn!(
-                    side = side,
+                    side = %side,
                     path = %path.display(),
                     error = %e,
                     "用户规则加载失败，以纯系统规则继续启动（PRD §9 #14 fail-safe）"

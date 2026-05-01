@@ -13,6 +13,29 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+/// 规则扫描方向（PRD v2.0 §5.5）。
+///
+/// 控制用户规则应用于哪一侧的流量：
+/// - `Outbound`：仅扫出站请求（user prompt + system prompt）
+/// - `Inbound`：仅扫入站响应（assistant text + tool_use）
+/// - `Both`：两侧都扫（默认，向后兼容旧 user.toml）
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RuleDirection {
+    /// 仅扫出站请求（user prompt + system prompt）。
+    Outbound,
+    /// 仅扫入站响应（assistant text + tool_use）。
+    Inbound,
+    /// 两侧都扫（默认，向后兼容旧 user.toml）。
+    Both,
+}
+
+impl Default for RuleDirection {
+    fn default() -> Self {
+        Self::Both
+    }
+}
+
 /// 用户规则文件顶层结构（PRD §5.5.4 user.toml schema）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -61,6 +84,11 @@ pub struct UserRuleEntry {
     /// 处置形式（用户规则禁止 hook_terminal，PRD §5.5.3-A）。
     #[serde(default)]
     pub disposition: Option<String>,
+    /// 规则扫描方向（PRD v2.0 §5.5）。
+    ///
+    /// 缺省为 `Both`（两侧都扫），向后兼容无此字段的旧 user.toml。
+    #[serde(default)]
+    pub direction: RuleDirection,
     /// 是否启用（false 表示禁用但保留条目）。
     #[serde(default = "default_enabled")]
     pub enabled: bool,

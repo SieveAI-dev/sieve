@@ -20,6 +20,11 @@ const TEMPLATE_USER_TOML: &str = r#"# ~/.sieve/rules/user.toml
 # 用户规则只能 ask / warn / mark / status_bar，不能 critical / block / hook_terminal。
 # 系统规则的 Critical 永远先评估，用户规则不能 override 系统拦截。
 #
+# direction 字段（PRD v2.0 §5.5）：
+#   "outbound" — 只扫出站请求（user prompt / system prompt）
+#   "inbound"  — 只扫入站响应（assistant text / tool_use）
+#   "both"     — 两侧都扫（默认值，旧规则文件缺省即 both）
+#
 # 详见 docs/guides/user-rules.md（待补）。
 
 schema_version = 1
@@ -37,6 +42,7 @@ updated_at = "__UPDATED_AT__"
 # keywords = ["claim", "migrate"]
 # allowlist_stopwords = ["interface definition"]
 # disposition = "status_bar"
+# direction = "outbound"   # 只扫出站，不扫模型回复
 # enabled = true
 # added_at = "__CREATED_AT__"
 # added_by = "manual"
@@ -267,9 +273,10 @@ fn run_list_at(path: &Path) -> Result<()> {
     } else {
         for r in &user_file.rules {
             let state = if r.enabled { "enabled " } else { "disabled" };
+            let dir = format!("{:?}", r.direction).to_lowercase();
             println!(
-                "  [{}] user:{:<40} severity={} action={} desc={}",
-                state, r.id, r.severity, r.action, r.description
+                "  [{}] dir={:<8} user:{:<40} severity={} action={} desc={}",
+                state, dir, r.id, r.severity, r.action, r.description
             );
         }
         println!("  小计：{} 条用户规则", user_file.rules.len());

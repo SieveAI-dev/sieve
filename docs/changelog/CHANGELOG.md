@@ -11,6 +11,61 @@
 
 ---
 
+## [v2.0-alpha-deferred-1] - 2026-05-01
+
+### 背景
+
+把 v2.0 Phase A/B 推迟清单里的「不依赖 daemon 改动的代码项」一次性清空：用户规则 direction 字段 / 行为序列 e2e 测试矩阵 / criterion CI gate / process_context macOS socket 反查实现。daemon 接入推后续 commit。
+
+### Added
+
+- **用户规则 `direction` 字段**（PRD §5.5）：
+  - `crates/sieve-policy/src/loader.rs`：`RuleDirection { Outbound, Inbound, Both }` 枚举（默认 Both 兼容旧 user.toml）；`UserRuleEntry.direction` 加 `#[serde(default)]`
+  - `crates/sieve-policy/src/engine.rs`：`UserEngine::compile_for_direction(rules, direction)` 按方向过滤
+  - `crates/sieve-policy/src/lint.rs`：`InboundAutoRedactForbidden` 触发条件改为 `direction_touches_inbound + auto_redact`
+  - `crates/sieve-cli/src/main.rs`：启动时 outbound / inbound 两次加载，分别按 direction 过滤
+  - `crates/sieve-cli/src/commands/rules.rs`：模板 + list 输出加 direction 列
+  - 4 个新测试：方向分流 / 旧格式默认 Both / inbound+auto_redact 拒绝 / outbound+auto_redact 合法
+- **行为序列 e2e 测试矩阵**（PRD §9 #16，feature on 时跑）：
+  - `crates/sieve-cli/tests/sequence_window_e2e.rs`（954 行 + 7 测试）
+  - 4 类组合 × IN-SEQ-01 全覆盖（Anthropic SSE / JSON + OpenAI SSE / JSON）
+  - 额外覆盖 IN-SEQ-02（Anthropic SSE）+ IN-SEQ-03（OpenAI JSON）+ FP 防护（顺序反转不触发）
+  - tracing 捕获通过 daemon stdout pipe + bg 线程读 + `SIEVE_LOG=info` filter
+- **criterion CI gate**（PRD §6.3.2）：
+  - `.github/workflows/bench.yml`（85 行）：main push + PR 触发，macos-14 runner，scan_70_rules baseline 对比
+  - `scripts/bench_compare.sh`（88 行）：解析 criterion `estimates.json`，mean 退化 > 10% 失败（criterion 不暴露 P99，--sample-size 10 时 P99 无统计意义；mean 受尾部拉升敏感度足够）
+  - 本地 baseline 验证：注入 2× mean 时正确失败 exit 1
+- **`process_context::find_pid_by_socket_addr` macOS 实现**（PRD OQ-V20-02）：
+  - `crates/sieve-cli/src/process_context.rs`（+420 行）
+  - libc FFI：`proc_listpids` + `proc_pidinfo(PROC_PIDLISTFDS)` + `proc_pidfdinfo(PROC_PIDFDSOCKETINFO)` 扫所有进程 FD 匹配 4-tuple
+  - 15 处 unsafe 全部带 SAFETY 注释；`socket_fdinfo` 字段偏移用 C sizeof 实测验证（arm64 MacOSX15.4 SDK）
+  - 30s LRU peer cache 复用现有模式
+  - 3 新测试（含 1 `#[ignore]` 因 SIP 沙箱权限限制）
+  - 不引入新 crate，无 `lsof` / `netstat` shell out（OQ-V20-02）
+
+### Changed
+
+- `crates/sieve-cli/Cargo.toml`：`sequence_detection` feature 已上一 commit 加；本期无 deps 变化
+- `process_context.rs` `PeerCacheEntry` / `peer_cache` 加 `#[cfg(target_os = "macos")]` gate（修 dead_code lint）
+
+### Test
+
+- `cargo test --workspace --no-fail-fast`（feature off 默认）：**617 passed / 1 failed（已知 doctor 竞态）/ 4 ignored**
+- `cargo test --workspace --features sieve-cli/sequence_detection --no-fail-fast`：**628 passed / 1 failed / 4 ignored**（净增 11 个 e2e 测试）
+- `cargo fmt + clippy --workspace --all-targets --all-features -- -D warnings`：clean
+- `scripts/bench_compare.sh` 本地 注入 2× mean 验证：正确 exit 1
+
+### Deferred to next commit (Wave 2)
+
+下批 daemon-side 接入工作（合并到一个大代理做完，避免 daemon.rs 多代理冲突）：
+- `peer_addr_to_pid` daemon 接入：用 `find_pid_by_socket_addr` 替换 stub + 所有 audit_event 写入点透传 caller_pid/caller_exe
+- 入站 SSE 灰名单 `add_entry`（`HoldOutcome` 扩展携带 remember + context_hint）
+- OpenAI 出站灰名单 `check_graylist_hit` 对称
+- IN-SEQ-* IPC StatusBar 通知协议 + daemon 调用接入 + audit `kind: sequence_hit` 写入
+- `sieve rules edit` 后 IPC notify daemon hot-reload 用户规则（IPC 协议扩展 + daemon swap UserEngine）
+
+---
+
 ## [v2.0-alpha-B-skeleton] - 2026-05-01
 
 ### 背景

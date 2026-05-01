@@ -7,7 +7,7 @@
 //!
 //! 入口：[`lint`] 纯函数，返回所有 [`LintViolation`]。
 
-use crate::loader::{UserRuleEntry, UserRulesFile};
+use crate::loader::{RuleDirection, UserRuleEntry, UserRulesFile};
 use sieve_rules::critical_lock::FAIL_CLOSED_RULES;
 use std::collections::HashSet;
 use std::time::Instant;
@@ -159,15 +159,21 @@ fn lint_entry(
     }
 
     // A-5. 入站方向规则禁止 disposition=auto_redact（用户不能改写入站 model 输出，PRD §9 #11）
-    // 用户规则没有明确的方向字段，但 disposition=auto_redact 本意是出站改写，
-    // 入站方向下使用 auto_redact 无效且具误导性；PRD 明确禁止用户规则使用 auto_redact。
-    if disp == "auto_redact" {
+    //
+    // direction=Inbound 或 direction=Both（会挂入站侧）且 disposition=auto_redact → 拒绝。
+    // direction=Outbound 时 auto_redact 语义合法（出站自动脱敏，PRD §5.5.3-A 第 4 条）。
+    let direction_touches_inbound = matches!(
+        entry.direction,
+        RuleDirection::Inbound | RuleDirection::Both
+    );
+    if disp == "auto_redact" && direction_touches_inbound {
         violations.push(LintViolation {
             rule_id: entry.id.clone(),
             kind: LintKind::InboundAutoRedactForbidden,
             message: format!(
-                "rule '{}': disposition=auto_redact forbidden in user rules \
-                 (PRD §5.5.3-A: 用户不能改写 model 输出)",
+                "rule '{}': disposition=auto_redact forbidden for inbound/both direction \
+                 (PRD §5.5.3-A: 用户不能改写 model 输出); \
+                 若只扫出站方向请改为 direction = \"outbound\"",
                 entry.id
             ),
         });
@@ -308,6 +314,7 @@ mod tests {
             keywords: vec!["secret".into()],
             allowlist_stopwords: vec![],
             disposition: None,
+            direction: crate::loader::RuleDirection::Both,
             enabled: true,
             added_at: Utc::now(),
             added_by: "manual".into(),
