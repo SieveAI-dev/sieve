@@ -1,7 +1,9 @@
 # Sieve 部署与运维指南
 
-> **状态：设计阶段（Pre-Code）。**
-> Sieve 尚未发布任何二进制版本。本文反映 Week 12 GA 后的目标交付形态（参见 [PRD §10 12 周里程碑](../prd/sieve-prd-v1.5.md#10-12-周里程碑8-周-dogfood--4-周闭测)）。Phase A dogfood 期间仅 doskey 自用 + Phase B 闭测白名单（5-10 人）使用，**不接受外部安装**。
+> Version: v2.0 — 2026-05-01
+>
+> **状态：v2.0 + v2.1 代码落地，Phase A dogfood 进行中。**
+> 用户规则（`~/.sieve/rules/user.toml`）+ 灰名单（`~/.sieve/decisions/`）+ audit v2 schema（含 `caller_pid` / `caller_exe`）已全部落地。GUI 多客户端支持（v2.1 broadcast fan-out）已就绪。对外仍不接受外部安装，Week 12 GA 后公开。
 
 ---
 
@@ -79,18 +81,34 @@ Phase 1 仅 macOS：
 子目录 / 文件：
 
 ```
-~/.sieve/
-├── config.toml              # 主配置，参见 docs/api/api-reference.md §3
-├── audit.db                 # SQLite append-only 审计库
-├── .sieveignore             # 本地白名单（不上传）
-├── rules/                   # 已签名规则包解压目录
+~/.sieve/                                              # 0700
+├── config.toml                                        # 主配置，参见 docs/api/api-reference.md §3
+├── audit.db                                           # SQLite append-only 审计库（v2 schema）
+├── .sieveignore                                       # 本地白名单（不上传）
+├── rules/                                             # 规则目录
+│   ├── <已签名系统规则包解压文件>                        # 内置规则
+│   ├── user.toml                                      # 用户自定义规则（0600，v2.0 §5.5）
+│   └── user.toml.bak.YYYYMMDD-HHMMSS                 # 编辑备份，保留最近 10 份（0600）
+├── decisions/                                         # 灰名单条目目录（v2.0 §5.4.2）
+│   └── <sha256_64_hex>.json                           # 灰名单 entry（0600，atomic rename 写入）
+├── ipc.sock                                           # Unix domain socket（IPC，v1.4）
 ├── keys/
-│   └── sieve-rules.pub      # Ed25519 公钥（Phase 1 内置在二进制 + 落盘）
+│   └── sieve-rules.pub                                # Ed25519 公钥（Phase 1 内置在二进制 + 落盘）
 ├── bin/
-│   └── sieve.prev           # 上一版二进制（用于回滚）
+│   └── sieve.prev                                     # 上一版二进制（用于回滚）
 └── logs/
-    └── sieve.log            # 文本日志，按天 rotate
+    └── sieve.log                                      # 文本日志，按天 rotate
 ```
+
+**文件权限**：
+
+| 路径 | 权限 | 说明 |
+|------|------|------|
+| `~/.sieve/` | `0700` | 目录对外不可读 |
+| `~/.sieve/rules/user.toml` | `0600` | daemon 启动时校验，权限不对拒绝加载 |
+| `~/.sieve/decisions/*.json` | `0600` | atomic rename 写入，软链接禁止（no-follow symlink，PRD §5.5.3-C） |
+
+> `upstream-routes.json`（OpenClaw 多 provider 路由，v1.5）如存在亦保存在 `~/.sieve/` 下，权限 `0600`。
 
 ---
 
@@ -290,6 +308,131 @@ sieve events --rule OUT-09 --limit 50
 
 ---
 
+## 7a. 用户规则部署（v2.0 §5.5）
+
+### 7a.1 首次初始化
+
+用户无需手动创建目录。首次运行 `sieve rules edit` 时 daemon 自动：
+
+1. 创建 `~/.sieve/rules/`（权限 `0700`）
+2. 生成默认模板 `~/.sieve/rules/user.toml`（权限 `0600`）
+3. 调 `$EDITOR`（fallback 顺序：`$EDITOR` → `vim` → `nano`）打开模板
+
+### 7a.2 编辑流程
+
+```bash
+sieve rules edit
+```
+
+保存退出后，自动执行：
+
+1. **lint pipeline**：解析 TOML + 验证规则 ID 格式 + severity 合法性检查
+2. lint 通过 → **atomic backup**：将原文件复制为 `user.toml.bak.YYYYMMDD-HHMMSS`（保留最近 10 份，超出自动清理最旧）
+3. **atomic rename**：写临时文件后 `rename()` 原子替换，避免部分写入
+4. **IPC notify reload**：通知运行中的 daemon 执行 hot swap（zero-downtime，不中断现有连接）
+
+### 7a.3 失败回滚
+
+- lint 失败：原文件**不变**，stderr 打印全部违规清单，用户修改后重跑 `sieve rules edit`
+- 不触发备份，不发送 IPC notify
+
+### 7a.4 规则管理 CLI
+
+```bash
+sieve rules list                  # 合并展示用户规则数 + 系统规则数
+sieve rules disable <rule-id>     # 写 disabled = true，atomic rename，IPC notify
+sieve rules enable <rule-id>      # 反向
+```
+
+---
+
+## 7b. 灰名单部署（v2.0 §5.4.2）
+
+### 7b.1 条目写入流程
+
+GUI 弹窗用户选 "记住此次决策" → `sieve-gui-macos` 通过 IPC 通知 daemon → daemon 调 `graylist::add_entry` → 写 `~/.sieve/decisions/<digest>.json`（权限 `0600`，atomic rename 写入）。
+
+`digest` 为 SHA-256 64 位 hex，基于 `{rule_id}:{normalized_content}` 计算。
+
+### 7b.2 Critical 锁三道防线
+
+即使用户选择"记住"，Critical 级别规则命中时有三道防线阻止进入灰名单：
+
+1. **daemon 侧**：`graylist::add_entry` 对 Critical severity 规则直接返回 `CriticalRejected` 错误，不写文件
+2. **IPC 协议层**：`graylist_critical_rejected` event 写入 audit.db，记录被拒绝的尝试
+3. **GUI 侧**：收到 `graylist_critical_rejected` 响应后，不再显示"记住"选项
+
+这三道防线确保 PRD §9 #8 约束（Critical 在所有版本不可关闭）。
+
+### 7b.3 手动清空灰名单
+
+```bash
+# 清空所有灰名单条目（重启 daemon 后缓存失效）
+rm -rf ~/.sieve/decisions/
+```
+
+> 清空后 daemon 无需重启即可感知（下次查询时目录不存在视为空）。
+
+---
+
+## 7c. Audit Schema Migration（v2.0 §5.6.1）
+
+### 7c.1 自动迁移
+
+v1 → v2 schema migration 在 daemon 首次以 v2.0+ 二进制启动时**自动触发**，无需用户操作：
+
+```
+-- v2 新增列
+ALTER TABLE events ADD COLUMN caller_pid INTEGER;   -- NULL = 来源未知
+ALTER TABLE events ADD COLUMN caller_exe TEXT;       -- NULL = 来源未知
+```
+
+migration 完成后，append-only 触发器（禁止 UPDATE / DELETE）在新 schema 下**仍然生效**。
+
+### 7c.2 v2 新增 AuditEvent 变体
+
+v2.0 新增以下 7 个 `kind` 值，运维时可按此过滤：
+
+| kind | 含义 |
+|------|------|
+| `decision_made` | 用户在弹窗做出审批决策（approved / rejected） |
+| `graylist_added` | 灰名单条目写入成功 |
+| `graylist_critical_rejected` | Critical 规则拒绝写入灰名单 |
+| `graylist_add_failed` | 灰名单写入失败（IO error 等） |
+| `graylist_hit` | 请求命中已有灰名单条目（自动放行） |
+| `sequence_hit` | IN-SEQ-* 行为序列规则命中 |
+| `user_rules_reloaded` | 用户规则 hot reload 成功 |
+| `user_rules_load_failed` | 用户规则加载失败（lint 通过但 IO 错误） |
+
+### 7c.3 查询样例
+
+```sql
+SELECT kind, rule_id, severity, caller_pid, caller_exe, raw_json
+FROM events
+WHERE kind IN ('decision_made', 'graylist_added', 'graylist_critical_rejected',
+               'graylist_add_failed', 'graylist_hit', 'sequence_hit',
+               'user_rules_reloaded', 'user_rules_load_failed')
+ORDER BY at DESC LIMIT 50;
+```
+
+等价 CLI：
+
+```bash
+sieve events --since 24h | grep -E 'graylist|sequence_hit|user_rules'
+```
+
+---
+
+## 7d. GUI 多客户端（v2.1）
+
+v2.1 支持 `sieve-gui-macos` 多实例并发连接 IPC（例如多个状态栏实例或调试用 mock_gui）：
+
+- daemon 维护 broadcast channel，所有已连接 GUI 客户端均收到通知
+- 断开连接的 sender 在下次广播时 lazy 清理（`dead sender` 自动移除，不影响其他客户端）
+- 开发调试时可同时跑真实 GUI + `cargo run -p sieve-ipc --example mock_gui` 验证通知路径
+
+---
+
 ## 8. 升级 / 回滚
 
 ### 8.1 升级
@@ -478,6 +621,35 @@ sieve license info
 ### 12.5 如何完全离线
 
 参见 [§10 离线运行](#10-离线运行)。
+
+### 12.6 sieve doctor 新检查项（v2.0）
+
+`sieve doctor` 在原有检查基础上新增以下项：
+
+```bash
+sieve doctor
+```
+
+v2.0 新增检查：
+
+| 检查项 | 期望结果 | 失败原因 |
+|--------|---------|---------|
+| `user.toml 存在` | `~/.sieve/rules/user.toml` 存在 | 首次未运行 `sieve rules edit` |
+| `user.toml 权限 0600` | `stat ~/.sieve/rules/user.toml` 显示 `-rw-------` | 权限被意外修改 |
+| `user.toml lint 通过` | 规则文件可解析且字段合法 | 手动编辑引入语法错误 |
+| `decisions/ 权限 0700` | 目录权限正确 | 权限被意外修改 |
+| `audit.db schema v2` | events 表含 caller_pid / caller_exe 列 | migration 未执行（旧 daemon 遗留） |
+
+任何检查失败时，`sieve doctor` 输出修复建议：
+
+```bash
+# 示例：user.toml 权限修复
+chmod 0600 ~/.sieve/rules/user.toml
+
+# 示例：手动触发 audit migration（重启 daemon 自动执行）
+launchctl unload ~/Library/LaunchAgents/tools.sieve.agent.plist
+launchctl load ~/Library/LaunchAgents/tools.sieve.agent.plist
+```
 
 ---
 

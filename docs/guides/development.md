@@ -1,7 +1,9 @@
 # Sieve 开发指南
 
-> **状态：Week 1 工程启动（2026-04-27）。**
-> Cargo workspace 已就绪，透传 daemon 可运行，本文命令均为生效命令。
+> Version: v2.0 — 2026-05-01
+>
+> **状态：v2.0 + v2.1 代码全量落地。**
+> 五 crate 骨架完整，IPC + hook 路径跑通，行为序列检测（IN-SEQ-*）以 feature flag 形式 opt-in，用户规则 CLI 可用，benchmark CI gate 已接入 `.github/workflows/bench.yml`。
 
 ---
 
@@ -144,6 +146,42 @@ cargo test -p sieve-rules --release --test dataset_fp_rate -- --ignored --nocapt
 
 > 数据集扩充 / 新规则 PR：必须跑这条命令，把 per-bucket 报告贴在 PR description 里。
 
+**v2.0 新增集成测试**（默认模式跑 633 个，全开 feature 跑 643 个）：
+
+```bash
+# 行为序列检测端到端（v2.0 §5.3，需 opt-in feature）
+cargo test -p sieve-cli --features sieve-cli/sequence_detection --test sequence_window_e2e
+
+# 灰名单集成（v2.0 §5.4.2）
+cargo test -p sieve-cli --test graylist_integration   # 14 个用例
+
+# SSE 流损坏边界（corruption.rs，v2.0 SSE hardening）
+cargo test -p sieve-core --test corruption            # 12 个用例
+
+# Content-Type 矩阵（v1.5 OpenAI 协议适配验证）
+cargo test -p sieve-core --test content_type_matrix   # 6 个用例
+
+# feature flag 开启后全量测试（643 用例）
+cargo test --workspace --features sieve-cli/sequence_detection --locked
+```
+
+**用户规则 CLI（v2.0 §5.5.2）**：
+
+```bash
+# 启动 $EDITOR（fallback vim/nano），编辑 ~/.sieve/rules/user.toml
+# 保存后自动 lint pipeline + atomic backup + IPC notify reload
+sieve rules edit
+
+# 列出用户规则 + 系统规则总数
+sieve rules list
+
+# 禁用指定规则（toml 序列化 + atomic rename）
+sieve rules disable <rule-id>
+
+# 重新启用
+sieve rules enable <rule-id>
+```
+
 ### 3.4 启动 daemon（开发模式）
 
 ```bash
@@ -265,9 +303,31 @@ cargo bench --bench latency -- --baseline main        # 与 baseline 对比
 
 # 单个 benchmark
 cargo bench --bench latency -- sse_parse_chunk
+
+# v2.0 新增 benchmark target（PRD §6.3.2）
+cargo bench -p sieve-rules --bench scan_70_rules        # 70 条规则全量扫描
+cargo bench -p sieve-rules --bench scan_with_user_rules # 含用户自定义规则时的扫描性能
 ```
 
-### 5.3 数据集
+### 5.3 CI benchmark gate（v2.0 新增）
+
+`.github/workflows/bench.yml` 在 macOS runner 上自动运行 benchmark 并与 main 分支 baseline 对比：
+
+- 任何 bench mean 退化 > 10% → CI 失败，PR 无法合并
+- 对比脚本：`scripts/bench_compare.sh`
+- 本地手动复现：
+
+```bash
+# 保 main baseline
+git checkout main
+cargo bench -p sieve-rules --bench scan_70_rules -- --save-baseline main
+
+# 回切分支，与 baseline 对比
+git checkout <your-branch>
+cargo bench -p sieve-rules --bench scan_70_rules -- --baseline main
+```
+
+### 5.4 数据集
 
 性能 benchmark 必须用 §7 描述的真实 benign 会话回放（50-100 条），而**不是**人造均匀负载。
 
@@ -393,10 +453,60 @@ RUST_LOG=info cargo run -p sieve-cli -- start --config sieve.toml --dry-run
 ### Benchmark（性能预算 PRD §6.4）
 
 ```bash
-cargo bench -p sieve-rules
+cargo bench -p sieve-rules                        # 全部 bench target
+cargo bench -p sieve-rules --bench scan_70_rules  # 70 条规则扫描（v2.0 新增）
 ```
 
-当前覆盖 vectorscan block mode 不同 buffer size（1KB / 100KB / 1MB）；Week 4 加完整 secret benchmark 数据集（200-500 条攻击样本，50-100 条 benign 会话）。
+当前覆盖 vectorscan block mode 不同 buffer size（1KB / 100KB / 1MB）+ v2.0 新增 70 条 / 用户规则两个 target；CI gate（`.github/workflows/bench.yml`）macOS runner 上 mean 退化 > 10% 失败，详见 §5.3。
+
+---
+
+## 8a. Feature Flag 矩阵（v2.0）
+
+> PRD §9 #15：行为序列检测（IN-SEQ-*）GA 默认关闭，闭测 / dogfood 用户主动 opt-in。
+
+| Feature | Cargo flag | 默认 | 含义 |
+|---------|-----------|------|------|
+| `sieve-core/sequence_detection` | `--features sieve-cli/sequence_detection` | **OFF** | InboundFilter 启用 `SessionState::ToolUseSequence`；激活 3 条 IN-SEQ-* 启发式规则 |
+
+**构建 / 测试**：
+
+```bash
+# opt-in 构建
+cargo build --features sieve-cli/sequence_detection
+
+# 含 feature 的测试（643 用例 vs 默认 633 用例）
+cargo test --features sieve-cli/sequence_detection
+
+# 仅序列检测端到端
+cargo test -p sieve-cli --features sieve-cli/sequence_detection --test sequence_window_e2e
+```
+
+**运行时启用**（dogfood 用）：在 `~/.sieve/config.toml` 中：
+
+```toml
+[features]
+sequence_detection = true
+```
+
+重启 daemon 后生效；不需要重新编译二进制（daemon 在运行时读取此 flag，但 IN-SEQ-* 规则仍需二进制编译时启用 feature）。
+
+> 注意：GA 发布的标准二进制**不含** `sequence_detection`，闭测版本单独编译提供。
+
+### 用户规则热加载开发工作流
+
+编辑用户规则时，无需重启 daemon（PRD §5.5.2）：
+
+1. `sieve rules edit` → 调 `$EDITOR` 打开 `~/.sieve/rules/user.toml`
+2. 保存退出 → 自动 lint pipeline 校验
+3. lint 通过 → 自动 atomic backup（保留最近 10 份，命名 `user.toml.bak.YYYYMMDD-HHMMSS`）→ atomic rename 原子替换
+4. atomic rename 后 → IPC notify daemon 执行 hot swap（zero-downtime，不中断现有连接）
+5. lint 失败 → 原文件不变 + stderr 打印违规清单，用户修改后重跑 `sieve rules edit`
+
+```bash
+# 验证 hot reload 是否生效（reload 后 events 表会出现 user_rules_reloaded 记录）
+sieve events --since 1m | grep user_rules_reloaded
+```
 
 ---
 

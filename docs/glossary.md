@@ -12,6 +12,10 @@
 
 Sieve（筛子）是完全本地运行的 LLM 流量代理，夹在 Claude Code 等 AI 编码 agent 和 Anthropic API 之间，对 crypto 开发者做双向安全检测。核心作用：在不可逆动作（签名、转账、部署）前强制插入认知摩擦，防止私钥泄漏、地址替换、危险工具调用导致的资产损失。v1.4 起引入 native GUI 守门人，提供 HIPS 弹窗 + 双层防御架构。详见 [PRD §1.1](../prd/sieve-prd-v1.5.md#11-一句话)。
 
+### HIPS（Host-based Intrusion Prevention System，主机入侵防御系统）
+
+v2.0 PRD §0 启动改造的目标定位。Sieve 自我定位为与 CrowdStrike Falcon / Microsoft Defender ATP / OSSEC 同级别的主机入侵防御系统，在 AI agent 工具调用层面提供行为级拦截能力，而非仅做规则匹配。v2.0 落地后 HIPS 核心特性（行为序列检测、进程上下文反查、灰名单持久化）达标 90%。详见 [PRD §0](../prd/sieve-prd-v2.0.md)。
+
 ### 自证清白 / [redacted]
 
 Sieve 核心商业叙事的第四句话：产品不只要求用户信任，而是通过开源核心引擎、sigstore 签名、可复现构建、透明规则更新日志等机制，让用户能够独立验证产品的安全性和诚实性。这是相对于 LiteLLM 供应链事件的反思——Sieve 自己不能成为新的风险源。详见 [PRD §1.2](../prd/sieve-prd-v1.5.md#12-四句话核心叙事v13-加第-4-句)。
@@ -85,6 +89,26 @@ Sieve 的三个主要 crate：
 
 详见 [.cursorrules §3.3](../.cursorrules)。
 
+### MatchEngine trait
+
+sieve-rules v2.0 引入的核心抽象接口，定义引擎的标准化扫描 API：`scan(text) -> Vec<Detection>`、`scan_with_context(ScanRequest) -> ScanReport`、`engine_name() -> &str`、`rule_count() -> usize`、`compiled_pattern_size_bytes() -> usize`。VectorscanEngine 和用户规则引擎均实现此 trait，通过 LayeredEngine 统一调度。详见 [PRD §6.3.1](../prd/sieve-prd-v1.5.md)。
+
+### ScanRequest / ScanReport
+
+v2.0 引擎 trait 的上下文数据结构（PRD §6.3.1）。`ScanRequest` 携带扫描上下文字段：`direction`（Outbound/Inbound）、`protocol`（Anthropic/OpenAI）、`content_kind`（RawText/ToolInput/ToolResult）、`tool_name`（可选）、`source_agent`（可选）、`caller_exe`（进程上下文反查结果，可选）。`ScanReport` 返回命中的 `Detection` 列表及引擎耗时统计。两者均为 `scan_with_context` 接口的参数和返回值，替代旧版裸字符串扫描。
+
+### LayeredEngine
+
+sieve-rules v2.0 引入的分层规则引擎包装器，将系统规则引擎（VectorscanEngine）和用户规则引擎组合为统一调度链：**强制系统规则先行**，命中 `critical_lock::FAIL_CLOSED_RULES` 的规则立即返回，不评估用户规则。用户规则引擎字段使用 `ArcSwap<Option<Arc<U>>>` 实现 lock-free 读 + atomic swap，支持 zero-downtime 热替换（见"arc-swap 热替换"条目）。详见 [CLAUDE.md §五个 Crate](../CLAUDE.md)。
+
+### arc-swap 热替换（v2.1 新增）
+
+LayeredEngine 中用户规则引擎的热更新机制。`LayeredEngine.user` 字段类型为 `ArcSwap<Option<Arc<U>>>`，scan hot path 通过 `load()` 零开销读取当前引擎快照（无锁），`sieve.reload_user_rules` 信号触发时通过 `store()` 原子替换新编译引擎。实现 lock-free 读 + atomic swap 的 zero-downtime 热替换，基于 [arc-swap](https://crates.io/crates/arc-swap) crate。
+
+### HoldOutcome
+
+sieve-core 入站 hold 路径的决策结果枚举，由 `sieve.decision_response` 解析后生成。三个变体：`Allow { remember: bool, context_hint: Option<String> }`（用户允许，携带灰名单信息）、`RedactAndAllow { redaction_map: Vec<(String, String)>, remember: bool, context_hint: Option<String> }`（允许但替换敏感内容）、`Deny { reason: String }`（用户拒绝或超时 fail-closed）。Pipeline 根据 HoldOutcome 决定后续 SSE 流的处理方式。
+
 ---
 
 ## C. 检测概念层
@@ -92,6 +116,59 @@ Sieve 的三个主要 crate：
 ### AddressGuard
 
 IN-CR-01 的实现模块，使用 strsim crate 的 Levenshtein 距离检测一字符近邻地址替换攻击。触发条件：candidate 与会话历史中 addresses_seen 内某地址长度相等且 Levenshtein distance ∈[1,3]。Phase 1 仅覆盖 ETH 地址（0x 前缀 40 字符十六进制），BTC 地址 Week 4 加入。
+
+### 三态决策（Tri-state Decision）
+
+v2.0 重写处置矩阵引入的决策模型（PRD §5.4.1）：`Decision := Allow | Deny | Ask`。Ask 触发 GUI 弹窗（GuiPopup）或 hook 终端（HookTerminal），用户最终产生 Allow 或 Deny；daemon 在 Ask 路径上等待用户决策，持有 SSE 流不发送后续 chunk。对应 ADR-021 三态决策与灰名单设计。
+
+### 灰名单（Graylist）
+
+用户在 GUI 弹窗选择"允许"并勾选 Remember 后，daemon 将该次决策的 fingerprint + context_hint 写入 `~/.sieve/decisions/<sha256_64_hex>.json`（文件权限 0600，目录权限 0700，atomic rename，no-follow symlink，所有变更写 audit.db）（PRD §5.4.2）。后续相同 fingerprint 的请求命中灰名单时直接放行（GraylistHit 审计事件），无弹窗。与 .sieveignore 白名单的区别：灰名单带 context_hint 和 remember 来源追踪；白名单基于 fingerprint 前缀手动管理。
+
+### Critical 锁三道防线
+
+v2.0 防止内置 Critical 规则被"永久允许"绕过的三层校验机制（PRD §5.4.3）：(1) **IPC 层**：daemon 端 `is_critical_locked(rule_id)` 计算 `allow_remember=false` 传入 DecisionRequest，GUI 收到 false 必须 disabled+灰显 Remember checkbox；(2) **存储层**：`graylist::add_entry()` 内部二次校验 rule_id 是否允许 Remember，不允许则忽略写入并记录 `GraylistCriticalRejected` 审计事件；(3) **GUI 层**：Remember checkbox 对内置 Critical 规则始终 disabled+灰显，tooltip 解释原因，防止 GUI 实现 bug 绕过前两层。
+
+### fingerprint（灰名单指纹）
+
+灰名单文件名及 lookup 键，格式为 sha256 64 位小写 hex，输入 = `rule_id + matched_canonical + tool_name + protocol + content_kind + source_agent` 组合的 SHA-256 摘要（与 .sieveignore 的 `rule_id:sha256_prefix_8_hex` 格式不同）。每次 scan 命中时重新计算 fingerprint，查找 `~/.sieve/decisions/<fingerprint>.json` 是否存在，校验文件内容防篡改。详见 PRD §5.4.2。
+
+### 用户规则（User Rules）
+
+存储在 `~/.sieve/rules/user.toml` 的用户自定义检测规则，由 `sieve rules edit` 管理。`severity` 仅允许 `high`/`medium`/`low`（禁止 `critical`），`action` 仅允许 `warn`/`mark`/`ask`（禁止 `block`/`hook_terminal`）。通过 LayeredEngine 与系统规则并存，系统规则优先执行；命中 critical_lock 时跳过用户规则评估。支持 `enabled: bool` 字段和 `direction` 字段动态控制生效范围。
+
+### direction 字段
+
+用户规则的方向字段，类型 `RuleDirection := Outbound | Inbound | Both`（默认 `Both`，兼容旧版 user.toml 无此字段的情况）。LayeredEngine 在调用用户规则引擎前按 direction 过滤，确保出站规则只参与出站扫描、入站规则只参与入站扫描，避免误报。
+
+### 行为序列窗口（Behavior Sequence Window）
+
+sieve-core SessionState 中新增的 `ToolUseSequence` 数据结构（feature `sequence_detection` 默认 off，PRD §9 #15），记录滑动窗口内最近 N 次（默认 N=10）工具调用记录，窗口时效 TTL=5 分钟。每次工具调用产生一条 ToolUseRecord 写入窗口，IN-SEQ-* 规则在 `InboundFilter` 聚合完整 tool_use 后对窗口历史进行模式匹配。
+
+### ToolUseRecord 结构化特征
+
+行为序列窗口中每条工具调用记录的特征向量，用于 IN-SEQ-* kill chain 模式匹配。字段：`tool_class`（Shell/FileRead/FileWrite/Network/Other）× `path_category`（SensitiveSecret/Wallet/DotEnv/Code/Tmp/Other）+ 4 个布尔位：`network_egress`（是否发起网络请求）、`persistence_mech`（是否写持久化配置）、`cleanup_mech`（是否执行清理/痕迹消除）、`sensitive_file_hint`（是否涉及敏感路径）。
+
+### IN-SEQ-* 启发式 kill chain
+
+v2.0 新增的 3 条行为序列检测规则，`severity=High`，处置为 `StatusBar` 仅通知不阻断（PRD §5.7.2）：
+- **`IN-SEQ-01-RECON-EXFIL`**：FileRead+SensitiveSecret 后跟 network_egress——疑似文件读取后外渗
+- **`IN-SEQ-02-CLEANUP-AFTER-ATTACK`**：Shell+network_egress 后跟 cleanup_mech——疑似攻击后痕迹清理
+- **`IN-SEQ-03-PERSISTENCE-CHAIN`**：3 次以上 persistence_mech 分布在不同 tool_name——疑似持久化后门链
+
+命中时通过 `StatusBarNotify { kind: SequenceHit }` 广播状态栏通知，写 `SequenceHit` 审计事件，不 hold SSE 流。
+
+### 双路径不变量（Dual-Path Invariant）
+
+PRD §5.7.4 + §9 #16 的工程约束：SSE 流路径（content_block_delta 流式处理）和 JSON 路径（非流式整体解析）**必须同时更新**行为序列窗口 `ToolUseSequence`。任何涉及工具调用检测的新功能必须经过 4 类 content-type 矩阵测试（SSE 流 × Anthropic / SSE 流 × OpenAI / JSON × Anthropic / JSON × OpenAI），确保两条路径行为一致。
+
+### 进程上下文反查（Process Context Lookup）
+
+daemon accept loop 在新连接建立时，通过 macOS `proc_listpids` + `proc_pidfdinfo` 接口反查连接方的 PID，再通过 `proc_pidpath` 获取可执行文件路径（caller_exe）。结果存入 30s TTL 的 LRU cache，写入 audit.db 的 `caller_pid` + `caller_exe` 列（v2 audit schema 新增列）。非 macOS 平台或反查失败时字段为 NULL。
+
+### NotifyKind 状态栏通知类型
+
+IPC `sieve.notify_status_bar` 消息中的通知类型枚举，用于 GUI 展示不同样式的状态栏通知：`SequenceHit`（行为序列命中）、`OutboundRedacted`（出站脱敏）、`UserRulesLoadFailed`（用户规则加载失败）、`UserRulesReloaded`（用户规则热加载成功）、`Generic`（通用临时信息）。详见 [api-reference.md §6.3.1](./api/api-reference.md#631-sievenotify_status_bar-daemon--gui-单向)。
 
 ### Aggregator
 

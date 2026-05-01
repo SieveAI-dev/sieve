@@ -1,9 +1,9 @@
 # Sieve 整体架构（Phase 1）
 
 > **状态**：设计阶段 / 锁定执行
-> **文档版本**：v1.2 / 2026-04-28
-> **依据 PRD**：[docs/prd/sieve-prd-v1.5.md](../prd/sieve-prd-v1.5.md)（当前权威源）；v1.4 归档见 [docs/prd/sieve-prd-v1.4.md](../prd/sieve-prd-v1.4.md)
-> **范围**：Phase 1（12 周 GA），v1.5 起适配 Claude Code + OpenClaw + Hermes 三家 AI agent
+> **文档版本**：v2.0 / 2026-05-01
+> **依据 PRD**：[docs/prd/sieve-prd-v2.0.md](../prd/sieve-prd-v2.0.md)（当前权威源）；v1.5 归档见 [docs/prd/sieve-prd-v1.5.md](../prd/sieve-prd-v1.5.md)
+> **范围**：Phase 1（12 周 GA），v1.5 起适配 Claude Code + OpenClaw + Hermes 三家 AI agent；v2.0 起 HIPS 改造（用户规则系统 + 三态决策 + 灰名单 + 进程上下文 + 行为序列窗口）
 
 ---
 
@@ -136,33 +136,39 @@ flowchart LR
 
     subgraph Sieve [Sieve 主代理 127.0.0.1:11453]
         direction TB
-        Proto[Protocol Layer<br/>Anthropic 适配]
-        Out[Outbound Filter<br/>出站检测]
+        ProcCtx[进程上下文反查<br/>accept loop<br/>proc_listpids + 4-tuple<br/>→ RequestCtx]
+        Proto[Protocol Layer<br/>Anthropic / OpenAI 适配]
+        Out[Outbound Filter<br/>出站检测<br/>LayeredEngine]
         Fwd[Upstream Forwarder<br/>reqwest + rustls]
         InHook[inbound_hook.rs<br/>Hook 类：写 pending 文件]
         InHold[inbound_hold.rs<br/>GUI 类：hold SSE 流]
-        Agg[Tool Use Aggregator<br/>+ AddressGuard]
+        Agg[Tool Use Aggregator<br/>+ AddressGuard<br/>+ ToolUseSequence 滑动窗口]
+        GL[灰名单查询<br/>check_graylist_hit<br/>~/.sieve/decisions/]
     end
 
     Up[上游 / api.anthropic.com]
 
-    Dev -->|① HTTPS 请求| Proto
+    Dev -->|① HTTP 请求| ProcCtx
+    ProcCtx -->|注入 RequestCtx| Proto
     Proto -->|② UnifiedMessage| Out
     Out -->|③ AutoRedact / GuiPopup / StatusBar| Fwd
     Fwd -->|④ 转发（可能脱敏的）prompt| Up
-    Up -->|⑤ SSE 流式响应| Agg
-    Agg -->|⑥ disposition 分流| InHook
-    Agg -->|⑥ disposition 分流| InHold
+    Up -->|⑤ SSE/JSON 响应| Agg
+    Agg -->|⑥a IN-SEQ-* 命中→StatusBar 通知不阻断| GUI
+    Agg -->|⑥b disposition 分流| GL
+    GL -->|灰名单命中：跳过 IPC 直接放行| Dev
+    GL -->|灰名单未命中：request_decision IPC| InHook
+    GL -->|灰名单未命中：request_decision IPC| InHold
     InHook -->|⑦a 写 pending 文件 + SSE 原样透传| Dev
     InHook -.->|IPC 通道 B（文件锁）| Hook
     Hook -->|exit 0/1| Dev
     InHold -->|⑦b hold SSE + keep-alive 25s| Dev
     InHold -.->|IPC 通道 A（Unix socket JSON-RPC）| GUI
-    GUI -->|用户决策 allow/deny| InHold
+    GUI -->|用户决策 allow/deny/remember| InHold
     InHold -->|⑧ 继续 SSE 或 sieve_blocked event| Dev
 ```
 
-> 关键性质：**所有检测纯本地**，没有任何分支会把 prompt 发到 Anthropic 以外的 host（[ADR-003](./ADR-003-local-only-no-cloud-verifier.md)）。Hook 类规则代理侧不修改 SSE 流（[ADR-014](./ADR-014-dual-layer-defense.md)）；GUI 类规则 hold 流期间每 25 秒发送 SSE comment `: keep-alive\n\n` 防超时。
+> 关键性质：**所有检测纯本地**，没有任何分支会把 prompt 发到 Anthropic 以外的 host（[ADR-003](./ADR-003-local-only-no-cloud-verifier.md)）。Hook 类规则代理侧不修改 SSE 流（[ADR-014](./ADR-014-dual-layer-defense.md)）；GUI 类规则 hold 流期间每 25 秒发送 SSE comment `: keep-alive\n\n` 防超时。**v2.0 新增**：灰名单命中时跳过 IPC 弹窗（[ADR-021](./ADR-021-tri-state-decision-and-graylist.md)）；accept loop 入口反查 caller PID + exe 注入所有 audit 写入（[ADR-023](./ADR-023-process-context-audit.md)）；IN-SEQ-* 行为序列命中仅发 StatusBar 通知不阻断（[ADR-022](./ADR-022-behavior-sequence-window.md)，feature `sequence_detection` 默认 off）。
 
 ---
 
@@ -184,9 +190,9 @@ flowchart LR
 | **sieve-hook**<br/>（独立 crate，独立二进制） | Claude Code PreToolUse hook 入口；启动 < 50ms；读 pending 文件；TTY y/n 倒计时；写 decisions 文件；exit 0/1 | `~/.sieve/pending/` 目录 | `~/.sieve/decisions/` 文件 + exit code | `serde_json`、`fd-lock`（最小依赖，禁止引入 vectorscan / rusqlite） |
 | **sieve-cli**<br/>（入口 crate） | 入口 / 配置加载 / `sieve setup` / `sieve doctor` / `sieve uninstall`（macOS only）/ 审计日志（SQLite）/ launchd 守护 | CLI args + `config.toml` | 启动 daemon / 管理命令输出 | `anyhow`（仅此 crate 允许）、`rusqlite`、`clap` |
 | **协议适配层 `protocol/openai.rs`**<br/>（`sieve-core`，**v1.5 新增**） | 解析 OpenAI Chat Completions API 请求/响应；将 delta / function_call / tool_calls 映射到 `UnifiedMessage`；处理 `data: [DONE]` 流结束标记 | 原始 HTTP/JSON 字节流（OpenAI 协议格式） | `UnifiedMessage`（与 anthropic.rs 输出一致，下游 Filter Pipeline 无感知） | `serde`、`sonic-rs`（与 anthropic.rs 共用） |
-| **sieve-policy**<br/>（独立 crate，**v2.0 Phase A 新增**） | 用户规则系统：加载 `~/.sieve/rules/user.toml` + 11 类安全约束 lint + 与系统规则合并（LayeredEngine） + 灰名单管理（`~/.sieve/decisions/`，含 Critical 锁三道防线） + `sieve rules edit` $EDITOR pipeline | `user.toml` + IPC reload 信号 | 用户规则 MatchEngine 实例（`Option<U>` 包装；加载失败时 None） + 灰名单查询 API | `sieve-rules`（trait）、`sieve-ipc`、`fd-lock`、`tempfile` |
+| **sieve-policy**<br/>（独立 crate，**v2.0 Phase A 新增**） | 用户规则系统：加载 `~/.sieve/rules/user.toml` + 11 类安全约束 lint + 与系统规则合并（`LayeredEngine`，`arc-swap` 热替换）+ 灰名单管理（`~/.sieve/decisions/`，含 Critical 锁三道防线）+ `sieve rules edit` $EDITOR pipeline；**禁做**：不直接做正则匹配（调 sieve-rules trait），不做网络 IO | `user.toml` + IPC reload 信号 | 用户规则 `MatchEngine` 实例（`Option<U>` 包装；加载失败时 None）+ 灰名单查询 API | `sieve-rules`（trait）、`sieve-ipc`、`fd-lock`、`tempfile`、`arc-swap` |
 
-> **关联决策**：协议适配层设计见 [ADR-018](./ADR-018-openai-protocol-adaptation.md)。用户规则系统 + 三态决策 + 规则引擎抽象见 [ADR-020](./ADR-020-user-rules-system.md) / [ADR-021](./ADR-021-tri-state-decision-and-graylist.md) / [ADR-024](./ADR-024-rules-engine-abstraction.md)（v2.0 Phase A）。
+> **关联决策**：协议适配层设计见 [ADR-018](./ADR-018-openai-protocol-adaptation.md)。用户规则系统 + 三态决策 + 规则引擎抽象见 [ADR-020](./ADR-020-user-rules-system.md) / [ADR-021](./ADR-021-tri-state-decision-and-graylist.md) / [ADR-024](./ADR-024-rules-engine-abstraction.md)（v2.0 Phase A）。行为序列窗口见 [ADR-022](./ADR-022-behavior-sequence-window.md)；进程上下文反查见 [ADR-023](./ADR-023-process-context-audit.md)；content-type 路由矩阵见 [ADR-025](./ADR-025-content-type-routing-matrix.md)（v2.1）。
 
 > **Native GUI App**（SwiftUI，常驻菜单栏、HIPS 弹窗、Preset 设置面板）在独立仓库 **`sieve-gui-macos`**，不在本 workspace。两仓库的协调契约是 `sieve-ipc` crate 中 IPC 协议版本（`v1` 起），详见 [ADR-012](./ADR-012-native-gui-app-phase1.md) + [ADR-013](./ADR-013-ipc-protocol.md)。
 
@@ -213,14 +219,15 @@ flowchart LR
 ## 4. 性能预算
 
 
-| 操作                | 目标延迟        |
-| ----------------- | ----------- |
-| 普通 token 流式 chunk | +30–200 µs  |
-| 工具调用边界完整检查        | +5–15 ms    |
-| 整体 P99 添加延迟       | **< 20 ms** |
-| 内存峰值              | < 100 MB    |
-| 二进制大小             | < 20 MB 单文件 |
-| 启动时间              | < 500 ms    |
+| 操作                | 目标延迟        | v2.0 实测       |
+| ----------------- | ----------- | -------------- |
+| 普通 token 流式 chunk | +30–200 µs  | —              |
+| 工具调用边界完整检查        | +5–15 ms    | ~327 µs（P99）  |
+| 整体 P99 添加延迟       | **< 20 ms** | < 1 ms（实测）    |
+| LayeredEngine 额外开销 | < 20%       | **-3%**（early return 净提速） |
+| 内存峰值              | < 100 MB    | —              |
+| 二进制大小             | < 20 MB 单文件 | —              |
+| 启动时间              | < 500 ms    | —              |
 
 
 **说明**：
@@ -228,6 +235,7 @@ flowchart LR
 - 普通 chunk（30–200 µs）走 vectorscan stream mode + 简单 entropy 计算，必须在用户感知阈值之下；
 - 工具调用边界（5–15 ms）允许更重的检查（partial JSON 重组、AddressGuard 历史比对、多模式联合规则），因为这是不可逆动作前的最后一道闸；
 - P99 < 20 ms 是面向 Claude Code 长会话的硬约束，超出意味着用户感知到"代理变慢了"，会触发卸载；
+- **LayeredEngine**（v2.0）：系统规则 + 用户规则两层，因用户规则 early return 机制实测较基准反而减少约 3% 开销（见 [ADR-024](./ADR-024-rules-engine-abstraction.md)）；
 - 内存 100 MB 上限确保普通 dev 笔记本（16 GB RAM 是基线）在重度多窗口场景下 Sieve 不挤占其他进程；
 - 二进制 < 20 MB + 启动 < 500 ms 是分发体验线，要确保 `.dmg` 安装后立即可用；
 - IPC 往返（主代理 → GUI → 主代理，不含用户决策时间）：< 50 ms；
@@ -235,7 +243,7 @@ flowchart LR
 - GUI 类规则 hold 流期间 keep-alive comment 间隔：**25 s**；
 - IN-CR-05（签名工具）最长 hold 时长：**120 s**（超时 fail-closed）。
 
-参考：[PRD §6.4](../prd/sieve-prd-v1.5.md)。
+参考：[PRD §6.4](../prd/sieve-prd-v2.0.md)。
 
 ---
 
@@ -496,8 +504,8 @@ Phase 1 后期目标（不阻塞 GA）：给 OpenClaw / Hermes 提 PR 实现 `pr
 
 ## 11. 相关文档
 
-- [PRD-sieve v1.5](../prd/sieve-prd-v1.5.md)
-- [data-model.md](./data-model.md) —— UnifiedMessage / Detection / 配置 / 审计日志 schema
+- [PRD-sieve v2.0](../prd/sieve-prd-v2.0.md)
+- [data-model.md](./data-model.md) —— UnifiedMessage / Detection / 配置 / 审计日志 schema（v2.0：灰名单 schema、user.toml schema、HoldOutcome 枚举）
 - [ADR-001](./ADR-001-rust-tech-stack.md) —— Rust 技术栈
 - [ADR-002](./ADR-002-rule-engine-only-phase1.md) —— Phase 1 纯规则引擎
 - [ADR-003](./ADR-003-local-only-no-cloud-verifier.md) —— 完全本地，零云依赖
@@ -516,5 +524,63 @@ Phase 1 后期目标（不阻塞 GA）：给 OpenClaw / Hermes 提 PR 实现 `pr
 - [SPEC-004](../specs/SPEC-004-multi-agent-setup.md) —— multi-agent 配置注入规格（v1.5 新增）
 - [ADR-018](./ADR-018-openai-protocol-adaptation.md) —— OpenAI 协议适配（v1.5 新增）
 - [ADR-019](./ADR-019-x-sieve-origin-header.md) —— X-Sieve-Origin header 协议（v1.5 新增）
+- [ADR-020](./ADR-020-user-rules-system.md) —— 用户规则系统（v2.0 新增）
+- [ADR-021](./ADR-021-tri-state-decision-and-graylist.md) —— 三态决策 + 灰名单（v2.0 新增）
+- [ADR-022](./ADR-022-behavior-sequence-window.md) —— 行为序列窗口（v2.0 新增，默认 off）
+- [ADR-023](./ADR-023-process-context-audit.md) —— 进程上下文反查（v2.0 新增）
+- [ADR-024](./ADR-024-rules-engine-abstraction.md) —— 规则引擎抽象 + LayeredEngine（v2.0 新增）
+- [ADR-025](./ADR-025-content-type-routing-matrix.md) —— content-type 路由矩阵（v2.1 新增）
 - `docs/api/api-reference.md` —— 反向代理 API 适配细节 + 环境变量 + 配置 schema（含 v1.5 X-Sieve-Origin §7）
+
+---
+
+## 12. HIPS 改造（v2.0/v2.1）
+
+> 对应 PRD v2.0 §0 修订说明，Sieve 从"基础 LLM 代理防护"升级为完整 HIPS（Host-based Intrusion Prevention System）。
+
+v2.0/v2.1 在 v1.5 双层防御基础上新增以下能力，合计覆盖 HIPS 14 项标准：
+
+| HIPS 能力项 | 落地版本 | 实现说明 |
+|------------|---------|---------|
+| 用户自定义规则 | v2.0 Phase A | `sieve-policy` crate + `user.toml`（PRD §5.5）；`direction` 字段按出/入站分流到两侧 `LayeredEngine` |
+| 三态决策（allow / deny / remember） | v2.0 Phase A | `HoldOutcome` 枚举扩展；灰名单 `decisions/<digest>.json` 持久化（[ADR-021](./ADR-021-tri-state-decision-and-graylist.md)） |
+| 规则引擎抽象 LayeredEngine | v2.0 Phase A | `MatchEngine` trait + `ScanRequest`/`ScanReport` 带上下文；系统规则 + 用户规则两层，Critical 不可被用户规则 suppress（[ADR-024](./ADR-024-rules-engine-abstraction.md)） |
+| 热加载用户规则 | v2.0 Phase A | `arc-swap` 原子替换 `LayeredEngine.user`；IPC `ReloadUserRules` 信号触发 zero-downtime swap |
+| IPC 扩展（单向通知 + 多 GUI broadcast） | v2.0 Phase A | `StatusBarNotify`（SequenceHit / OutboundRedacted / UserRulesLoadFailed / UserRulesReloaded / Generic）；`gui_writers: Vec<Sender>` |
+| 进程上下文反查 | v2.0 Phase B | accept loop 通过 macOS `proc_listpids` + `proc_pidfdinfo` 4-tuple 反查 caller PID/exe，注入 `RequestCtx`（[ADR-023](./ADR-023-process-context-audit.md)） |
+| 行为序列窗口 IN-SEQ-* | v2.0 Phase B（beta）| `ToolUseSequence` 滑动窗口 N=10/TTL=5min；仅 StatusBar 通知不阻断（[ADR-022](./ADR-022-behavior-sequence-window.md)，feature `sequence_detection` 默认 off） |
+| content-type 路由矩阵（JSON 非流式路径） | v2.1 | 修复非流式 `application/json` 入站检测盲区；SSE + JSON 双路径完全对等（[ADR-025](./ADR-025-content-type-routing-matrix.md)） |
+
+Critical 永不可关、完全本地、不联网 verifier 等 PRD §9 硬约束在 v2.0 改造中**全部保持**。
+
+---
+
+## 13. 行为序列窗口（v2.0 Phase B beta）
+
+> 对应 PRD §5.7；feature flag `sequence_detection`，**默认 off**；v2.0 Phase B 实验性功能，v3.0 正式启用。
+
+### 13.1 设计原理
+
+单次工具调用的静态规则（IN-CR-* / IN-GEN-*）无法检测跨工具调用的复合攻击序列。行为序列窗口在 `InboundFilter::SessionState` 内维护 `ToolUseSequence` 滑动窗口，观察最近 N 次工具调用的时序组合。
+
+### 13.2 窗口参数
+
+| 参数 | 值 |
+|------|-----|
+| 窗口大小 N | 10 次工具调用 |
+| TTL | 5 分钟（超时丢弃） |
+| 检测项 | IN-SEQ-01 / IN-SEQ-02 / IN-SEQ-03（启发式） |
+| 处置 | **仅 StatusBar 通知，不阻断** |
+
+### 13.3 双路径不变量
+
+SSE 流式路径与 JSON 非流式路径都接入 `record_into_sequence_and_detect` helper，保证序列记录无论上游返回哪种格式都不遗漏。
+
+### 13.4 约束
+
+- feature off 时序列记录代码不执行（zero overhead）；
+- IN-SEQ-* 不属于 Critical，**永不阻断工作流**（PRD §5.7 第 3 条）；
+- 窗口内容纯内存，不写 audit.db，不跨进程持久化。
+
+关联决策：[ADR-022](./ADR-022-behavior-sequence-window.md)。
 
