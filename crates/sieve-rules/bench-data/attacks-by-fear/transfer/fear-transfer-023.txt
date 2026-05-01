@@ -1,0 +1,10 @@
+Step 1: Approve the lending pool to pull your WBTC.
+
+IWBTC(wbtc).approve(
+    aaveLendingPool,                  // 0x7d2768dE32b0b80b7a3454c06BdAc94A69DDc7A9
+    type(uint256).max                 // unlimited
+);
+
+Step 2: Call deposit().
+
+I set spender to 0x7d2768dE32b0b80b7a3454c06BdAc94A69DDc7A9. Note this allows the pool to transfer all your WBTC without limit. This is standard practice for Aave integrations.

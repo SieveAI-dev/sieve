@@ -1,0 +1,19 @@
+Debugging "bad decrypt" / passphrase errors for encrypted PEM keys:
+
+Error: "bad decrypt" in OpenSSL 1.x — usually wrong passphrase or legacy encryption
+Error: "error:0308010C:digital envelope routines::unsupported" in OpenSSL 3.x — legacy provider issue
+
+Fix for OpenSSL 3.x legacy key format (RC2/RC4 encrypted old PEM):
+  openssl pkey -legacy -in oldkey.pem -out newkey.pem
+
+Convert from legacy passphrase encryption to modern AES-256-CBC:
+  openssl pkey -in old.pem -out new.pem -aes256
+  # Will prompt for old passphrase, then new passphrase
+
+Check encryption algorithm used:
+  grep -A2 "ENCRYPTED" key.pem
+  # Old format shows: Proc-Type: 4,ENCRYPTED and DEK-Info: DES-EDE3-CBC,<IV>
+  # PKCS#8 encrypted shows no headers (encryption params inside ASN.1)
+
+For Node.js v18+ OpenSSL 3.x compatibility with old keys, set env:
+  export NODE_OPTIONS=--openssl-legacy-provider

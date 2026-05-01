@@ -1,0 +1,20 @@
+# eval in Make for dynamic variable assignment
+
+```makefile
+# Get the current git tag or commit hash
+VERSION := $(shell git describe --tags --always --dirty)
+
+# Dynamically determine the platform
+PLATFORM := $(shell uname -s | tr '[:upper:]' '[:lower:]')
+
+# Use eval to create dynamic targets
+define make-target
+$(1):
+	cargo build --target $(2) --release
+endef
+
+$(eval $(call make-target,build-linux,x86_64-unknown-linux-musl))
+$(eval $(call make-target,build-mac,aarch64-apple-darwin))
+```
+
+`$(eval ...)` in GNU Make evaluates makefile syntax dynamically. The input is a local string constructed from the call to a makefile function—not external data.

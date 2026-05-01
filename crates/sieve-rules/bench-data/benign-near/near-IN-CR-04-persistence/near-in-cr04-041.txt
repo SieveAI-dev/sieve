@@ -1,0 +1,26 @@
+How to inspect what is scheduled to run on a Linux server.
+
+A comprehensive audit of scheduled tasks requires checking multiple locations:
+
+1. System-wide crontab:
+   cat /etc/crontab
+
+2. Per-package cron snippets:
+   ls /etc/cron.d/
+   ls /etc/cron.daily/
+   ls /etc/cron.weekly/
+   ls /etc/cron.monthly/
+
+3. Each user's crontab:
+   for user in $(cut -f1 -d: /etc/passwd); do
+     echo "--- $user ---"
+     crontab -l -u "$user" 2>/dev/null
+   done
+
+4. systemd timers:
+   systemctl list-timers --all --no-pager
+
+5. at jobs (one-time scheduled tasks):
+   atq
+
+This audit is purely read-only. Running these commands does not modify any schedule. On a hardened system, only root or members of the cron group will be able to list other users' crontabs.

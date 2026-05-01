@@ -1,0 +1,15 @@
+Stripe Error: "Invalid sk_live_ prefix detected in test mode"
+
+This error occurs when a live key is accidentally used against the test API endpoint.
+
+Error message from Stripe:
+  "You provided an invalid API key. You provided a live mode secret key,
+   sk_live_..., but this endpoint only supports test mode requests."
+
+Resolution:
+1. Check which key is loaded: console.log(process.env.STRIPE_SECRET_KEY?.substring(0, 12))
+   Expected output: "sk_test_xxxx"
+2. Verify your .env file has the correct test key for local development
+3. Ensure CI environments load secrets from the test key vault, not production
+
+Never mix test and live environments. Stripe will not process test charges with live keys.

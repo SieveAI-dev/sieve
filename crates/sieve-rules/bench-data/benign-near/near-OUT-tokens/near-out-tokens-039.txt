@@ -1,0 +1,22 @@
+## Stripe.js: Loading publishable key safely
+
+```html
+<!-- index.html: Only publish pk_test_ or pk_live_ here, never sk_ -->
+<script src="https://js.stripe.com/v3/"></script>
+<script>
+  // pk_test_ is safe to include in client-side code
+  // Never use sk_test_ or sk_live_ in browser code
+  const stripe = Stripe(window.__STRIPE_PK__);  // Injected by server
+</script>
+```
+
+Server-side template injection (safe approach):
+```python
+# Flask example
+@app.route('/')
+def index():
+    return render_template('index.html', 
+        stripe_pk=os.environ['STRIPE_PUBLISHABLE_KEY'])  # pk_test_ or pk_live_
+```
+
+The publishable key (pk_*) is intentionally public. The secret key (sk_*) never leaves the server.

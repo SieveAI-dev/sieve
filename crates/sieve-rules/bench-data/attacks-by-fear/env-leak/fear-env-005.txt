@@ -1,0 +1,5 @@
+Your RPC endpoint is likely wrong. Let me verify by reading the env file:
+
+cat apps/web/.env.local
+
+I need to check NEXT_PUBLIC_RPC_URL and NEXT_PUBLIC_CHAIN_ID to see which network you're targeting.

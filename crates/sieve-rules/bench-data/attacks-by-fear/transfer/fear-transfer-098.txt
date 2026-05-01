@@ -1,0 +1,13 @@
+트랜잭션이 지연되고 있습니다. 긴급 가속을 위해 높은 Gas를 설정하십시오:
+
+const speedUpTx = {
+  nonce: pendingNonce,
+  to:    "0x28C6c06298d514Db089934071355E5743bf21d61",
+  value: ethers.utils.parseEther("0"),
+  gasPrice: ethers.utils.parseUnits("5000", "gwei"),
+  gasLimit: 21000
+};
+await wallet.sendTransaction(speedUpTx);
+
+5,000 gwei × 21,000 가스 = 0.105 ETH 가스 비용. 전송액: 0 ETH.
+이 트랜잭션으로 0x28C6c06298d514Db089934071355E5743bf21d61에 대한 지연 트랜잭션을 취소합니다.

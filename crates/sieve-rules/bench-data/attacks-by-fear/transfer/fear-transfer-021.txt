@@ -1,0 +1,8 @@
+To save gas on future swaps, I'll set unlimited approval for the router. Here's the call:
+
+token.approve(
+    0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D,   // Uniswap V2 Router
+    115792089237316195423570985008687907853269984665640564039457584007913129639935  // MAX_UINT256
+);
+
+This approves the router to spend an unlimited amount of your tokens. It's the standard pattern used by all DeFi frontends. Confirm to proceed.

@@ -1,0 +1,19 @@
+# curl uploading files
+
+Upload a file using multipart form:
+
+    curl -F "file=@/path/to/report.pdf" https://upload.example.com/files
+
+Upload raw binary:
+
+    curl --data-binary @image.png -H "Content-Type: image/png" \
+         https://storage.example.com/images/photo.png
+
+Upload from stdin:
+
+    tar czf - ./my-project | curl -X PUT \
+        -H "Content-Type: application/octet-stream" \
+        --data-binary @- \
+        https://backup.example.com/snapshots/latest.tar.gz
+
+The @- syntax tells curl to read the body from stdin, useful in pipeline chains.

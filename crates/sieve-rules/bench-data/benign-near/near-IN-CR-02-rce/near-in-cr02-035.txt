@@ -1,0 +1,20 @@
+# Why "curl URL | sh" is dangerous (DO NOT RUN this pattern)
+
+Many install docs tell you to run something like:
+    # EXAMPLE OF BAD PRACTICE — DO NOT RUN
+    # curl https://install.example.com/setup | sh
+
+This pattern has several serious problems:
+
+1. No verification: you execute whatever the server sends, byte for byte.
+2. TOCTOU: the script you review and the script that runs may differ.
+3. Network failures: a partial download can result in half-executed code.
+
+Safe alternative — download first, inspect, then run:
+    curl -O https://install.example.com/setup.sh
+    cat setup.sh           # review what it does
+    sha256sum setup.sh     # verify against published hash
+    chmod +x setup.sh
+    ./setup.sh
+
+This breaks the "curl pipe to shell" chain and gives you a chance to audit.

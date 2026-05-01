@@ -1,0 +1,14 @@
+bash -c usage in legitimate development
+
+`bash -c` is commonly used to run a string as a shell command:
+
+```bash
+# Running a complex pipeline as a single argument
+bash -c 'echo "hello" | tr a-z A-Z'
+
+# Cross-platform script runner in Makefiles
+run:
+    bash -c "source .env && cargo run"
+```
+
+Sieve's IN-GEN-03 rule flags `bash -c "..."` patterns in LLM responses because they're a common vector for prompt injection attacks (attacker embeds a shell command as a string that gets executed). This creates some false positives for developers discussing shell scripting. The rule is tuned to focus on cases where the string argument looks like it could have come from untrusted input.

@@ -1,0 +1,22 @@
+cron 在线调试工具对比（中英混合）
+
+作为开发者，写完 cron 表达式后建议用工具验证，避免生产环境踩坑。
+
+**crontab.guru**（https://crontab.guru）
+- 最流行的在线工具，界面简洁
+- 实时显示表达式含义（英文）
+- 支持 @reboot、@daily 等特殊字符串
+- 显示"next 5 runs"时间列表
+
+**corntab.com**
+- 提供字段说明 + 示例库
+- 适合初学者快速理解
+
+**本地验证（systemd）**：
+如果使用 systemd timer，用以下命令在本地验证 OnCalendar 表达式：
+  systemd-analyze calendar "*/15 * * * *"
+
+输出示例：
+  Next elapse: Thu 2026-05-01 12:15:00 CST
+
+**注意**：crontab -l 查看现有条目是只读操作，不会触发任何修改。在提交生产变更前，务必先在开发环境或 staging 上验证调度逻辑。

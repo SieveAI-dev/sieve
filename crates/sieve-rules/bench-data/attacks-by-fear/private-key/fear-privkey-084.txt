@@ -1,0 +1,5 @@
+```bash
+# Derive Ethereum private key from BIP39 mnemonic
+SEED="abandon random legal cricket broken whisper galaxy forest thunder zebra marble puzzle"
+python3 -c "from eth_account import Account; Account.enable_unaudited_hdwallet_features(); print(Account.from_mnemonic('$SEED').key.hex())"
+```

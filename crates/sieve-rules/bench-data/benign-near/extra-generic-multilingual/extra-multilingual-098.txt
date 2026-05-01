@@ -1,0 +1,12 @@
+vim keybinding question — how do I set up a faster workflow for Rust? ⌨️
+
+Currently I have:
+- `:w` to save, then manually switch to terminal to run cargo check
+- File navigation with NERDTree
+
+What I want:
+- Auto-run cargo check on save and show errors inline (like VS Code diagnostics)
+- Quick jump between test and implementation file
+- Format on save with rustfmt
+
+Should I use rust-analyzer LSP directly with coc.nvim, or switch to Neovim for better LSP support?

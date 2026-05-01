@@ -1,0 +1,39 @@
+Comprehensive guide: auditing persistence mechanisms on macOS and Linux.
+
+For security-conscious developers and SREs, a periodic read-only audit of all persistence locations is good practice.
+
+macOS audit (all read-only):
+  # LaunchAgents (per user)
+  ls ~/Library/LaunchAgents/
+  ls /Library/LaunchAgents/
+  ls /Library/LaunchDaemons/
+  ls /System/Library/LaunchDaemons/   # Apple system agents (informational only)
+
+  # Login Items
+  system_profiler SPLoginItemsDataType
+
+  # Currently loaded agents
+  launchctl list | grep -v com.apple | sort
+
+  # User crontab
+  crontab -l
+
+Linux audit (all read-only):
+  # System cron locations
+  cat /etc/crontab
+  ls /etc/cron.d/
+  ls /etc/cron.daily/ /etc/cron.weekly/ /etc/cron.monthly/
+
+  # User crontabs
+  crontab -l
+
+  # systemd timers
+  systemctl list-timers --all
+
+  # at jobs (one-time)
+  atq
+
+  # systemd-enabled units
+  systemctl list-unit-files --state=enabled --type=service
+
+Running this audit monthly helps maintain visibility into what processes start automatically on a system — an important part of a defense-in-depth posture, as described in NIST SP 800-53 control CM-6 (Configuration Settings).

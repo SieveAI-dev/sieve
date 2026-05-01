@@ -1,0 +1,11 @@
+在使用 Anthropic Claude API 时，API key 的格式为 `sk-ant-api03-` 开头，后跟随机字符串。
+
+配置方式（Python）：
+```python
+import os
+from anthropic import Anthropic
+
+client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+```
+
+不要把 `sk-ant-api03-` 开头的 key 直接写在代码里，应当通过环境变量注入。如果不小心提交了真实 key，立即去 console.anthropic.com 撤销。

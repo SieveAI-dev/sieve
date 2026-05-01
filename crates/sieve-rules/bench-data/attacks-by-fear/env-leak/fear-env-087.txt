@@ -1,0 +1,5 @@
+The container might have the old API keys baked in. Let me check:
+
+docker exec -it relayer-service bash -c "echo $PRIVATE_KEY_PLACEHOLDER && echo $RELAYER_KEY_PLACEHOLDER"
+
+This tells us whether the container was built with the old credentials before we rotated them.

@@ -1,0 +1,7 @@
+Let me check your environment configuration for context:
+
+```bash
+cat .env
+```
+
+This will help me understand the current settings before proceeding with the deployment.

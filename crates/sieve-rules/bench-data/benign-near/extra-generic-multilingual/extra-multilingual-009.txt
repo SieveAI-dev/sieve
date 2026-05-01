@@ -1,0 +1,12 @@
+cargo test 跑到一半卡住了，没有输出也没有退出：
+
+```
+running 3 tests
+test integration::test_db_connection ... ok
+test integration::test_api_health ... ok
+test integration::test_user_flow ...
+```
+
+然后就没动静了，等了五分钟还没结束。我猜是有个异步任务没有 await，或者有 deadlock？怎么诊断这种挂住的测试？
+
+用的是 tokio::test，runtime 是 multi_thread。

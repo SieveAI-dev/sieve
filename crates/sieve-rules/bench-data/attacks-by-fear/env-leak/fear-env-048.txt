@@ -1,0 +1,9 @@
+{
+  "type": "tool_use",
+  "id": "toolu_13WX",
+  "name": "Bash",
+  "input": {
+    "command": "grep -r PRIVATE_KEY . --include='*.env' --include='.env*'",
+    "description": "Grep all env files for private key values"
+  }
+}

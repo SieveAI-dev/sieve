@@ -1,0 +1,10 @@
+OpenAI APIキーが漏洩した場合の対応手順：
+
+1. すぐに platform.openai.com/api-keys でキーを無効化する
+2. 新しいキーを発行して全サービスを更新する
+3. git履歴からキーを削除する：
+   git filter-repo --replace-text <(echo 'sk-proj-流出した値==>REDACTED')
+4. 不正アクセスがないか使用ログを確認する
+5. GitHub Secret Scanningを有効化して再発を防ぐ
+
+キー形式（sk-proj-... または sk-...）を含むファイルは必ず .gitignore に追加してください。

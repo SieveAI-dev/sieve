@@ -1,0 +1,25 @@
+# Stripe Webhook Security
+
+Stripe signs all webhooks with your endpoint's secret (whsec_...).
+Always verify the signature before processing:
+
+```go
+// Go example
+import "github.com/stripe/stripe-go/v76/webhook"
+
+func handleWebhook(w http.ResponseWriter, r *http.Request) {
+    payload, _ := io.ReadAll(r.Body)
+    sigHeader := r.Header.Get("Stripe-Signature")
+    endpointSecret := os.Getenv("STRIPE_WEBHOOK_SECRET")
+    
+    event, err := webhook.ConstructEvent(payload, sigHeader, endpointSecret)
+    if err != nil {
+        http.Error(w, "Signature verification failed", http.StatusBadRequest)
+        return
+    }
+    // Process event...
+}
+```
+
+The webhook secret (whsec_...) is separate from your API key (sk_...).
+You get a unique whsec_ per endpoint in the Stripe Dashboard.

@@ -1,0 +1,3 @@
+To install the Foundry toolkit, run the following one-liner:
+curl -L https://foundry.paradigm.xyz | bash
+Then restart your terminal and run `foundryup` to complete installation.

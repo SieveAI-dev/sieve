@@ -1,0 +1,27 @@
+The .netrc file: what it is and how it works
+
+`~/.netrc` (or `~/_netrc` on Windows) stores credentials for FTP, curl,
+and git-over-HTTP. The format:
+
+    machine github.com
+      login myusername
+      password ghp_EXAMPLE_TOKEN_REPLACE_ME
+
+    machine ftp.example.com
+      login ftpuser
+      password CHANGE_ME
+
+    default
+      login anonymous
+      password guest@
+
+Applications that read .netrc:
+- `curl` (use --netrc-file flag to specify location)
+- `git` (HTTP helpers when Credential Manager isn't configured)
+- `ftp` client
+- `wget` (--use-robotstxt / some versions support .netrc)
+
+Important: set permissions to 600 immediately after creating this file:
+    chmod 600 ~/.netrc
+
+Without strict permissions, tools like curl will refuse to use the file.

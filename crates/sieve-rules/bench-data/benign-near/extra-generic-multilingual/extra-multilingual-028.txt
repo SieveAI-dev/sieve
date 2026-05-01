@@ -1,0 +1,10 @@
+Vite 打包之后 chunk 太大，怎么做 code splitting？
+
+build 完发现 vendor chunk 有 2.8MB，主要是引入了 echarts 和 antd。
+
+目前 vite.config.ts 里没有特殊配置，请问：
+1. echarts 和 antd 怎么做按需加载？
+2. rollupOptions.output.manualChunks 怎么用？
+3. 动态 import() 和 React.lazy 是一样的效果吗？
+
+生产环境用 nginx，gzip 已经开了，但 gzip 后 2.8MB 还是有点大。

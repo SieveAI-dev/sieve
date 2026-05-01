@@ -1,0 +1,28 @@
+systemd drop-in files: overriding unit properties without editing the original.
+
+Drop-in files allow you to override specific unit properties without modifying the original unit file. This is important because package updates would overwrite your changes to the main unit file.
+
+Drop-in files live in:
+  /etc/systemd/system/myapp.service.d/override.conf
+
+Naming convention: any .conf file in the .d/ directory is loaded and merged.
+
+Example: override the Restart behavior for a system-provided service.
+
+Contents of /etc/systemd/system/nginx.service.d/restart.conf:
+  [Service]
+  Restart=always
+  RestartSec=3s
+
+To view all drop-ins for a unit (read-only):
+  systemctl cat nginx.service
+  # Shows the main unit file AND all drop-in files, in order
+
+To list existing drop-in directories:
+  ls /etc/systemd/system/*.d/ 2>/dev/null
+
+The recommended way to create a drop-in via systemctl (if you have permission):
+  systemctl edit nginx.service
+  # Opens your $EDITOR; the resulting file is the drop-in
+
+Drop-in files are considered best practice for production systems; they make your customizations explicit and upgrade-safe.

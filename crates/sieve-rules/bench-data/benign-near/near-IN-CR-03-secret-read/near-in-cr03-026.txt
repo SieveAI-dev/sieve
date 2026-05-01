@@ -1,0 +1,17 @@
+# AWS 凭证管理最佳实践（中文）
+
+`~/.aws/credentials` 是 AWS CLI 的本地凭证存储文件。结构如下：
+
+    [default]
+    aws_access_key_id = AKIAIOSFODNN7EXAMPLE
+    aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+
+生产环境建议：
+1. 使用 IAM Identity Center（SSO）替代长期 access key
+2. 本地开发用 `aws sso login` 获取临时凭证
+3. CI/CD 通过 OIDC federation 获取凭证，不在流水线存储密钥
+4. 所有长期 access key 绑定最小权限策略（Least Privilege）
+5. 启用 CloudTrail 审计所有 API 调用
+
+`~/.aws/credentials` 文件权限应设为 600，且加入 `.gitignore`。
+定期轮换 access key（建议每 90 天一次）。

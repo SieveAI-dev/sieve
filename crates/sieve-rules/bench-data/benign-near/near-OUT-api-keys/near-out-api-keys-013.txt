@@ -1,0 +1,11 @@
+Anthropic APIキーのフォーマットは `sk-ant-api03-` で始まります。コンソール（console.anthropic.com）からキーを生成すると、一度だけ表示されます。
+
+設定例（Node.js）:
+```js
+const Anthropic = require('@anthropic-ai/sdk');
+const client = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY, // sk-ant-api03-... を環境変数から取得
+});
+```
+
+ソースコードにキーを直接記述しないでください。

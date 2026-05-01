@@ -1,0 +1,22 @@
+Login Items vs LaunchAgents on macOS: detailed comparison.
+
+Login Items (SMAppService / LSSharedFileList):
+  - Managed via System Settings > General > Login Items
+  - Run as the logged-in user in the GUI session
+  - Can access the user's Dock, menu bar, and display
+  - Sandboxed apps from the Mac App Store use SMAppService API
+  - User can toggle them on/off in System Settings at any time
+  - Visible in the Login Items list in System Settings
+
+LaunchAgents (~/ Library/LaunchAgents/):
+  - Background processes with no GUI presence
+  - Controlled by launchd; inspect with `launchctl list`
+  - Can run on login, on a schedule, or on filesystem events
+  - Not visible in System Settings Login Items panel (third-party tools like Lingon X show them)
+
+LaunchDaemons (/Library/LaunchDaemons/):
+  - System-level, run as root before any user logs in
+  - Managed by the root-owned launchd session
+  - Inspect with: sudo launchctl list
+
+Use Login Items for user-facing apps, LaunchAgents for per-user background helpers, and LaunchDaemons for system-wide services.

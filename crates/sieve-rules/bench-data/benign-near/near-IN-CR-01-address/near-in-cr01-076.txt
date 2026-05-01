@@ -1,0 +1,25 @@
+Solidity access control pattern — multiple role addresses:
+
+```solidity
+contract Protocol {
+    address public immutable OWNER;
+    address public immutable OPERATOR;
+    address public immutable GUARDIAN;
+    address public immutable FEE_RECIPIENT;
+
+    constructor(
+        address owner,
+        address operator,
+        address guardian,
+        address feeRecipient
+    ) {
+        OWNER         = owner;         // 0x1111...
+        OPERATOR      = operator;      // 0x2222...
+        GUARDIAN      = guardian;      // 0x3333...
+        FEE_RECIPIENT = feeRecipient;  // 0x4444...
+    }
+}
+```
+
+Four distinct roles, four distinct addresses — standard governance pattern.
+Each address has a different prefix; no address is similar to another.

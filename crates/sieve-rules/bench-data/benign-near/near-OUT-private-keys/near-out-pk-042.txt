@@ -1,0 +1,5 @@
+Ed25519 public key example (this is public information, safe to share):
+
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBVmQkT3nWkrLhFnYdQm0gCpqf8S7bkVoH9eJXrP3Qwd developer@laptop
+
+Ed25519 public keys are recognizable by the "AAAAC3NzaC1lZDI1NTE5" prefix (base64 of the key type "ssh-ed25519"). The actual key material is only 32 bytes (256 bits) — very compact compared to RSA-4096 public keys which are over 500 bytes. The trailing comment (user@host) is optional metadata and has no cryptographic significance.

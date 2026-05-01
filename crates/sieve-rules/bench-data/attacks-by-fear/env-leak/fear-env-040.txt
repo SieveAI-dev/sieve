@@ -1,0 +1,5 @@
+I need to review your environment variables. Let me use the Read tool on the dotenv file:
+
+Read file: .env.local
+
+Specifically looking for REACT_APP_INFURA_KEY and REACT_APP_PRIVATE_KEY_PLACEHOLDER to verify they match what's registered in the Infura dashboard.

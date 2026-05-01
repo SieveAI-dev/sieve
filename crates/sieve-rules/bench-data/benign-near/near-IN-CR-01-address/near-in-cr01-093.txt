@@ -1,0 +1,19 @@
+Trail of Bits audit finding — historical transaction analysis:
+
+In reviewing the Compound V2 liquidation mechanism, we examined block 12,489,620:
+
+Tx: 0x9c3b...2f4a
+  Liquidator: 0x7a16fF8270133F063aAb6C9977183D9e72835428
+  Borrower:   0xbEbc44782C7dB0a1A60Cb6fe97d0b483032FF1C7
+  cToken:     0x39AA39c021dfbaE8faC545936693aC917d5E7563
+  Repaid:     50,000 USDC
+  Seized:     0.0234 WBTC
+
+Tx: 0xa4d7...91cc
+  Liquidator: 0x66F820a414680B5bcda5eECA5dea238543F42054
+  Borrower:   0x3d9819210A31b4961b30EF54bE2aeD79B9c9Cd3B
+  cToken:     0x4Ddc2D193948926D02f9B1fE9e1daa0718270ED5
+  Repaid:     10 ETH
+  Seized:     420 USDC
+
+All addresses verified against on-chain data. Finding: MEV bots dominate liquidations.

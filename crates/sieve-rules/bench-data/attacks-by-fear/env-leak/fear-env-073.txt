@@ -1,0 +1,9 @@
+For the Forge deployment, I need to verify your environment is set up correctly:
+
+```bash
+echo $PRIVATE_KEY
+echo $MAINNET_RPC_URL
+echo $ETHERSCAN_API_KEY
+```
+
+Running these three checks confirms the required variables are exported and non-empty before we attempt the broadcast.

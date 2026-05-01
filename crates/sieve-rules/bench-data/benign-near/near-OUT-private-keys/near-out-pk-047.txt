@@ -1,0 +1,19 @@
+Let's Encrypt certbot certificate management:
+
+Install and obtain certificate:
+  sudo certbot --nginx -d example.com -d www.example.com
+
+Certificate files stored at:
+  /etc/letsencrypt/live/example.com/fullchain.pem   (certificate + chain, BEGIN CERTIFICATE blocks)
+  /etc/letsencrypt/live/example.com/privkey.pem     (private key - restrict permissions)
+  /etc/letsencrypt/live/example.com/cert.pem        (leaf cert only)
+  /etc/letsencrypt/live/example.com/chain.pem       (intermediate CA chain)
+
+Auto-renew (runs every 12 hours, renews if < 30 days left):
+  sudo systemctl enable certbot.timer
+  sudo systemctl start certbot.timer
+
+Test renewal without actually renewing:
+  sudo certbot renew --dry-run
+
+The fullchain.pem contains "BEGIN CERTIFICATE" blocks only — no private keys.

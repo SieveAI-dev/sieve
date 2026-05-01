@@ -1,0 +1,34 @@
+# Makefile with clean targets
+
+A well-written Makefile includes a clean target for each category of build artifact:
+
+```makefile
+.PHONY: clean clean-deps clean-build clean-all
+
+# Remove compiled output only
+clean-build:
+	rm -rf dist/ build/ .next/ out/
+
+# Remove dependency directories
+clean-deps:
+	rm -rf node_modules/
+
+# Remove Python bytecode
+clean-pyc:
+	find . -name "__pycache__" -type d -exec rm -rf {} +
+	find . -name "*.pyc" -delete
+
+# Remove all generated files (but not node_modules by default)
+clean: clean-build clean-pyc
+	rm -rf .cache/ .parcel-cache/ coverage/
+
+# Nuclear option: restore to pristine checkout state
+clean-all: clean clean-deps
+```
+
+Usage:
+
+    make clean        # fast: just build artifacts
+    make clean-all    # slow: also reinstalls dependencies
+
+Each target has a precise, bounded scope. No target references paths outside the project directory.

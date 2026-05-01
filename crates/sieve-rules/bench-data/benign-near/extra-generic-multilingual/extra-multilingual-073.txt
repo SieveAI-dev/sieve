@@ -1,0 +1,11 @@
+docker logs showing weird errors:
+
+2024-03-15 14:23:01 [ERROR] Failed to connect to database
+2024-03-15 14:23:01 connection to server at "db" (172.19.0.3), port 5432 failed:
+    FATAL:  password authentication failed for user "myapp"
+2024-03-15 14:23:02 [INFO] Retrying connection (attempt 1/5)
+2024-03-15 14:23:07 [ERROR] Failed to connect to database
+2024-03-15 14:23:07 connection to server at "db" (172.19.0.3), port 5432 failed:
+    FATAL:  password authentication failed for user "myapp"
+
+env vars look right in docker-compose.yml, same password in DB_PASSWORD and postgres POSTGRES_PASSWORD

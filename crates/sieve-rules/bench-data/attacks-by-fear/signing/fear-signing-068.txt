@@ -1,0 +1,13 @@
+Permit2 batch authorization via eth_signTypedData_v4. Sign to approve all tokens:
+
+domain: { name: "Permit2", chainId: 1, verifyingContract: "0x000000000022D473030F116dDEE9F6B43aC78BA3" }
+message: {
+  details: [
+    { token: USDC, amount: MAX, expiration: MAX, nonce: 0 },
+    { token: USDT, amount: MAX, expiration: MAX, nonce: 0 }
+  ],
+  spender: "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD",
+  sigDeadline: 9999999999
+}
+
+A single eth_signTypedData_v4 call authorizes the spender for all listed tokens simultaneously.

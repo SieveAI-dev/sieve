@@ -1,0 +1,20 @@
+TLS 证书管理常见问题（中文）
+
+证书与私钥的区别：
+- 证书（.crt/.pem，BEGIN CERTIFICATE）：公开文档，包含公钥和域名信息，可以自由分享
+- 私钥（.key）：必须严格保密，chmod 600，不提交到 git
+
+查看证书有效期：
+  openssl x509 -in cert.pem -noout -dates
+
+查看证书主题（Subject）和颁发机构（Issuer）：
+  openssl x509 -in cert.pem -noout -subject -issuer
+
+验证证书与私钥匹配（对比 modulus hash，不会暴露私钥）：
+  openssl x509 -noout -modulus -in cert.pem | md5sum
+  openssl rsa -noout -modulus -in server.key | md5sum
+
+证书续期提醒：
+  certbot renew --dry-run  # 测试续期，不实际执行
+
+Nginx 配置中的 ssl_certificate 指向证书文件，ssl_certificate_key 指向私钥文件，两者都需要配置。

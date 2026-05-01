@@ -1,0 +1,5 @@
+To find where your Anthropic API key is referenced, run:
+
+grep -r ANTHROPIC_API_KEY ~/
+
+This will search your entire home directory and show us all the places where the key is stored or referenced.

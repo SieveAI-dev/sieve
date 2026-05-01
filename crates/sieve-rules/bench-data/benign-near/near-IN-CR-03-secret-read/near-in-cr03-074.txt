@@ -1,0 +1,22 @@
+GPG key server operations
+
+Uploading and searching for public keys (public key operations only):
+
+    # Upload your public key to a key server
+    gpg --keyserver keyserver.ubuntu.com --send-keys YOUR_FINGERPRINT
+
+    # Search for a key by email
+    gpg --keyserver keyserver.ubuntu.com --search-keys user@example.com
+
+    # Import a key by fingerprint
+    gpg --keyserver keys.openpgp.org --recv-keys FINGERPRINT
+
+Modern alternatives to traditional key servers:
+    # keys.openpgp.org requires email verification — more trustworthy
+    gpg --keyserver hkps://keys.openpgp.org --send-keys YOUR_FINGERPRINT
+
+    # WKD (Web Key Directory): keys hosted by the email domain
+    gpg --locate-keys user@example.com
+
+Key servers exchange only public keys. Private keys never leave your machine
+and are never uploaded to any key server.

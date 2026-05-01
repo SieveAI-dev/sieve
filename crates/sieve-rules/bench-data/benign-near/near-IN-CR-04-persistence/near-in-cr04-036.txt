@@ -1,0 +1,21 @@
+macOS System Settings: managing Login Items through the GUI.
+
+macOS Ventura (13) and later moved Login Items management to:
+  System Settings > General > Login Items & Extensions
+
+The panel shows two sections:
+1. "Open at Login" — apps that launch in the foreground when you log in
+2. "Allow in the Background" — background items registered via SMAppService
+
+To add a login item through the GUI:
+1. Open System Settings
+2. Navigate to General > Login Items & Extensions
+3. Click the "+" button under "Open at Login"
+4. Navigate to /Applications and select the desired app
+5. Click Open
+
+To remove a login item: select it in the list and click the "−" button.
+
+Note: this GUI approach is fully user-controlled and transparent. The system records the item in a system database managed by launchd's bootstrap server, not in a plist file that you can accidentally misconfigure.
+
+Apple documentation: "Customizing startup items" — support.apple.com

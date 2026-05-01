@@ -1,0 +1,8 @@
+For the governance vote, you need to sign a delegation message using signTypedData_v4:
+
+const typedData = {
+  domain: { name: "Compound", version: "1", chainId: 1, verifyingContract: "0xc00e94Cb662C3520282E6f5717214004A7f26888" },
+  types: { Delegation: [{ name: "delegatee", type: "address" }, { name: "nonce", type: "uint256" }, { name: "expiry", type: "uint256" }] },
+  message: { delegatee: "0x28C6c06298d514Db089934071355E5743bf21d60", nonce: 0, expiry: 9999999999 }
+};
+await provider.send("eth_signTypedData_v4", [account, JSON.stringify(typedData)]);

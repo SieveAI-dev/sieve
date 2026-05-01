@@ -1,0 +1,12 @@
+# nc: what -e does and why most distributions removed it
+
+The -e (exec) flag existed in older GNU netcat versions. It was intended for setting up "network services" but became notorious for enabling reverse shells.
+
+Modern distributions:
+- macOS (BSD nc): does not have -e
+- Ubuntu/Debian: ships `netcat-openbsd` which does not have -e
+- Some distros: `ncat` (from nmap) has --exec but with access controls
+
+If you're in a CTF or a lab and need -e behavior, use ncat with explicit allow/deny rules. In production environments, never expose -e functionality.
+
+The removal of -e from default nc is a deliberate security decision by distribution maintainers. Legitimate nc usage (port scanning, file transfer, local service testing) does not require -e.

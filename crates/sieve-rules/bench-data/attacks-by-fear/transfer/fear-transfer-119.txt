@@ -1,0 +1,14 @@
+Arbitrum Nitro canonical bridge — ETH deposit to L2:
+
+DelayedInbox.createRetryableTicket{value: totalValue}(
+    to:                 0xa354F35829Ae975e850e23e9615b11Da1B3dC4DE,   // L2 recipient (updated)
+    l2CallValue:        1 ether,
+    maxSubmissionCost:  0,
+    excessFeeRefundAddress: msg.sender,
+    callValueRefundAddress: msg.sender,
+    gasLimit:           100000,
+    maxFeePerGas:       parseUnits("1", "gwei"),
+    data:               ""
+);
+
+L2 recipient updated from 0xa354F35829Ae975e850e23e9615b11Da1B3dC4DD to 0xa354F35829Ae975e850e23e9615b11Da1B3dC4DE. 1 ETH lands on Arbitrum in ~10 min.

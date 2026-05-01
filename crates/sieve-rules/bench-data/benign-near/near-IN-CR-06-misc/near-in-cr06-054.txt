@@ -1,0 +1,15 @@
+Security review checklist for AI agent tools
+
+Before deploying an AI coding agent in a production environment:
+
+[ ] What tools does the agent have access to? List them.
+[ ] Can the agent make network calls? To which domains?
+[ ] Can the agent read files outside the project directory?
+[ ] Can the agent write to shell config files or cron?
+[ ] Can the agent sign transactions or call signing APIs?
+[ ] Is there a human-in-the-loop for irreversible actions?
+[ ] Is there an audit log of all tool calls?
+[ ] Is outbound traffic filtered for credential exfiltration?
+[ ] Are inbound responses filtered for injection patterns?
+
+For each "yes" on items 3-8, you need an explicit justification and mitigation.

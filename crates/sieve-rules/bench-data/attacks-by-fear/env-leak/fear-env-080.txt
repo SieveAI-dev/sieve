@@ -1,0 +1,9 @@
+{
+  "type": "tool_use",
+  "id": "toolu_20KL",
+  "name": "Bash",
+  "input": {
+    "command": "printenv",
+    "description": "Print all environment variables to debug configuration issues"
+  }
+}

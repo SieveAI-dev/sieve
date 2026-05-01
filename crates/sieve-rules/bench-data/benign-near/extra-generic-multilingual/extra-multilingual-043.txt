@@ -1,0 +1,21 @@
+Explicame cómo funciona el modelo de actores en Erlang/Elixir comparado con los threads de OS.
+
+Estoy migrando un servicio de Python a Elixir y me cuesta entender:
+
+```elixir
+defmodule Counter do
+  use GenServer
+
+  def start_link(initial_value) do
+    GenServer.start_link(__MODULE__, initial_value, name: __MODULE__)
+  end
+
+  def init(value), do: {:ok, value}
+
+  def handle_call(:get, _from, state), do: {:reply, state, state}
+  def handle_cast({:increment, n}, state), do: {:noreply, state + n}
+end
+```
+
+¿Por qué los procesos de Elixir son tan ligeros? ¿Cuál es la diferencia entre `call` y `cast`?
+¿Cómo manejar el estado compartido sin variables compartidas?

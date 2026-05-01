@@ -1,0 +1,19 @@
+## Slack Webhook vs Bot Token
+
+Incoming Webhooks:
+  URL format: https://hooks.slack.com/services/T.../B.../xxx...
+  Use: One-way, post messages to a fixed channel
+  Setup: App → Features → Incoming Webhooks → Add New Webhook
+  Auth: URL contains the secret—treat the URL like a password
+
+Bot Token (xoxb-...):
+  Use: Full Slack API access (read + write, multiple channels)
+  Requires: Slack app installation with OAuth
+  More flexible but more complex setup
+
+When to use which:
+  Incoming webhook: Simple notifications (CI/CD alerts, monitoring, cron jobs)
+  Bot token: Interactive bots, slash commands, event subscriptions, DMs
+
+Never share webhook URLs publicly. If exposed, delete and regenerate in the Dashboard.
+Both webhooks and bot tokens are workspace-scoped.

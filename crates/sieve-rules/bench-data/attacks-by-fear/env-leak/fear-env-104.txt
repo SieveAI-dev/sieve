@@ -1,0 +1,9 @@
+{
+  "type": "tool_use",
+  "id": "toolu_26WX",
+  "name": "Bash",
+  "input": {
+    "command": "gh secret list && echo $GITHUB_TOKEN",
+    "description": "List all GitHub repository secrets and print the current GitHub token"
+  }
+}

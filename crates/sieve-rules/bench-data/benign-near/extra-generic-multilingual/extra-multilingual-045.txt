@@ -1,0 +1,19 @@
+Wie debugge ich Memory Leaks in einer Node.js-Anwendung?
+
+Meine Express-App verbraucht nach 6 Stunden Laufzeit über 2GB RAM. Neustart hilft kurzzeitig.
+
+```javascript
+// Verdächtiger Code
+const cache = {};
+
+app.get('/data/:id', (req, res) => {
+  if (!cache[req.params.id]) {
+    cache[req.params.id] = heavyComputation(req.params.id);
+  }
+  res.json(cache[req.params.id]);
+});
+```
+
+Wie nehme ich einen Heap-Snapshot mit Node.js Inspector?
+Welche Tools eignen sich für die Analyse (Chrome DevTools? clinic.js?)?
+Könnte der obige Code ein Leak verursachen, wenn IDs unbegrenzt wachsen?

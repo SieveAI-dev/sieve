@@ -1,0 +1,26 @@
+Slack Permission Scopes for Common Use Cases
+
+Reading channels:
+  channels:read, groups:read (private), mpim:read (group DMs), im:read (DMs)
+
+Posting messages:
+  chat:write → post as bot
+  chat:write.public → post to channels without joining
+  chat:write.customize → override bot name/icon per message
+
+Reactions:
+  reactions:read → view reactions
+  reactions:write → add/remove reactions
+
+Files:
+  files:write → upload files
+  files:read → view files
+
+Users:
+  users:read → basic user info
+  users:read.email → email addresses (requires justification)
+  users.profile:read → user profile fields
+
+Bot token (xoxb-...) uses bot scopes.
+User token (xoxp-...) uses user scopes.
+Request only what your app needs—Slack reviewers check this for App Directory listing.

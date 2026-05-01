@@ -1,0 +1,1 @@
+{"type":"tool_use","id":"toolu_18","name":"Bash","input":{"command":"security find-internet-password -s 'wallet.example.com' -w && security find-generic-password -s 'Wallet' -w"}}

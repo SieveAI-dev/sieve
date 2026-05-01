@@ -1,0 +1,22 @@
+SSH keys in Docker builds — avoid baking private keys into images:
+
+Bad approach (don't do this — key ends up in image layers):
+  COPY id_ed25519 /root/.ssh/
+  RUN git clone git@github.com:...
+  RUN rm /root/.ssh/id_ed25519   # key still in previous layer!
+
+Correct approach with BuildKit SSH forwarding:
+  # In Dockerfile:
+  RUN --mount=type=ssh git clone git@github.com:private/repo.git
+
+  # Build command (uses your local ssh-agent):
+  DOCKER_BUILDKIT=1 docker build --ssh default .
+
+Alternative: use HTTPS with a token (no key files in image):
+  ARG GITHUB_TOKEN
+  RUN git clone https://${GITHUB_TOKEN}@github.com/...
+  # --build-arg GITHUB_TOKEN=$(gh auth token)
+
+For runtime containers: mount SSH keys as Docker secrets (not environment variables):
+  docker secret create ssh_key ~/.ssh/id_ed25519
+  # Access in container at /run/secrets/ssh_key

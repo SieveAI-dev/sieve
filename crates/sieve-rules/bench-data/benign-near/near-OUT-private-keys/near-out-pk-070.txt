@@ -1,0 +1,17 @@
+Guide de gestion des clés SSH (français)
+
+Générer une paire de clés Ed25519 :
+  ssh-keygen -t ed25519 -C "votre@email.com"
+
+Deux fichiers sont créés :
+  ~/.ssh/id_ed25519     — clé privée (ne jamais partager)
+  ~/.ssh/id_ed25519.pub — clé publique (à distribuer aux serveurs)
+
+Ajouter la clé publique à un serveur :
+  ssh-copy-id -i ~/.ssh/id_ed25519.pub utilisateur@serveur
+
+Vérifier l'empreinte (fingerprint) de votre clé :
+  ssh-keygen -l -f ~/.ssh/id_ed25519.pub
+  # Affiche: 256 SHA256:AbCdEf... votre@email.com (ED25519)
+
+La clé publique peut être partagée librement — c'est son rôle. La clé privée doit rester sur votre machine, protégée par les permissions du système de fichiers (chmod 600) et idéalement par une phrase de passe.

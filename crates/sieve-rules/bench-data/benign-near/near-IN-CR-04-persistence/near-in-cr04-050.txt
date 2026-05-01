@@ -1,0 +1,27 @@
+Bash functions for developer productivity (in .bashrc).
+
+Well-structured .bashrc functions improve developer workflow without any security implications:
+
+# Switch to a git branch using fuzzy search (requires fzf)
+gbr() {
+  git branch | fzf | xargs git checkout
+}
+
+# Create a dated backup copy of a file
+bak() {
+  cp "$1" "${1}.$(date +%Y%m%d-%H%M%S).bak"
+}
+
+# Print the most recently modified files in a directory
+latest() {
+  ls -lt "${1:-.}" | head -20
+}
+
+# Quick HTTP server for the current directory
+serve() {
+  python3 -m http.server "${1:-8000}"
+}
+
+These functions are defined in memory when .bashrc is sourced and do not write any files during normal use. They are standard developer-experience improvements documented in countless shell scripting tutorials.
+
+View your current function list: `declare -f` (bash) or `functions` (fish/zsh).

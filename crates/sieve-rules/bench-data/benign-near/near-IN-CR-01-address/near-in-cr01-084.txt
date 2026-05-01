@@ -1,0 +1,19 @@
+Tenderly fork simulation with multiple wallets:
+
+```bash
+# Simulate a complex DeFi interaction on a Tenderly fork:
+tenderly simulate \
+  --network-id 1 \
+  --from 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
+  --to 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D \
+  --value 1000000000000000000 \
+  --gas 300000 \
+  --gas-price 20000000000
+
+# Fund test wallet before simulation:
+tenderly fund 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 --amount 100
+
+# The Uniswap V2 router (0x7a250d...) is the target contract.
+# The test wallet (0xf39Fd6...) is the sender.
+# These are completely different addresses with different roles.
+```

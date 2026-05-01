@@ -1,0 +1,10 @@
+Understanding the X-Sieve-Origin header
+
+When Sieve forwards a request to Anthropic, it adds an `X-Sieve-Origin` header identifying the proxied session. This header is used to:
+1. Correlate upstream API logs with local audit logs
+2. Allow Anthropic to identify Sieve-proxied traffic in aggregate metrics
+3. Enable future allowlisting scenarios
+
+The header value is a non-identifying hash of the local session ID — it does not contain user PII, IP addresses, or any identifying information. Anthropic strips this header before it reaches the model context.
+
+ADR-019 documents the decision to add this header and the privacy considerations involved.

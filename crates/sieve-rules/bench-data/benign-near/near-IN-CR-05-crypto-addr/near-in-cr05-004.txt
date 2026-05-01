@@ -1,0 +1,6 @@
+Using Etherscan API to check ETH balance of the Binance hot wallet:
+
+curl "https://api.etherscan.io/api?module=account&action=balance&address=0x28C6c06298d514Db089934071355E5743bf21d60&tag=latest&apikey=YourApiKeyToken"
+
+Response: {"status":"1","message":"OK","result":"7823415960000000000000"}
+// Divide by 1e18 to get ETH: ~7823.4 ETH

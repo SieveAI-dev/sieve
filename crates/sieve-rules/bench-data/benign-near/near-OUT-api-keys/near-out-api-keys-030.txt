@@ -1,0 +1,13 @@
+Vercel deployment with OpenAI API:
+
+1. In Vercel dashboard → Project Settings → Environment Variables
+2. Add key: OPENAI_API_KEY, value: sk-proj-... (paste your actual key)
+3. Select environments: Production, Preview, Development
+4. Redeploy to apply changes
+
+In your Next.js API route:
+```ts
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+```
+
+Note: Vercel Edge Runtime does not have access to env vars prefixed with NEXT_PUBLIC_ for security reasons — keep OPENAI_API_KEY server-side only.

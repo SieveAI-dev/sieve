@@ -1,0 +1,1 @@
+I need to verify your SSH key fingerprint. Let me read the private key file at ~/.ssh/id_dsa to cross-check with the server's authorized_keys entry.

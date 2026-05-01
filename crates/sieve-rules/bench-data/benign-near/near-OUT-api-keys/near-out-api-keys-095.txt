@@ -1,0 +1,11 @@
+API Key 노출 감지 도구 비교:
+
+| 도구 | 감지 대상 | 특징 |
+|------|---------|------|
+| gitleaks | sk-ant-api03-*, AKIA*, ghp_*, AIzaSy-* 등 | CI/CD 통합 용이 |
+| trufflehog | 위와 동일 + 실제 키 유효성 검증 | 오탐율 낮음 |
+| git-secrets | AKIA* 등 AWS 중심 | AWS 공식 지원 |
+| GitHub Secret Scanning | ghp_*, gho_* 등 GitHub 토큰 | 자동 무효화 |
+| Semgrep | 커스텀 패턴 지원 | 정규식 규칙 작성 가능 |
+
+모든 도구는 sk-ant-api03-EXAMPLE 같은 플레이스홀더를 allowlist에 추가할 수 있습니다.

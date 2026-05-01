@@ -1,0 +1,51 @@
+## DigitalOcean-style guide: Inspecting systemd on Ubuntu 24.04
+
+### Introduction
+
+On Ubuntu 24.04, systemd manages all background services. This guide covers read-only inspection commands for system administrators.
+
+### Listing running services
+
+```bash
+systemctl list-units --type=service --state=running
+```
+
+### Checking a specific service
+
+```bash
+systemctl status nginx
+```
+
+### Viewing the last 100 log lines
+
+```bash
+journalctl -u nginx -n 100
+```
+
+### Finding failed units
+
+```bash
+systemctl --failed
+```
+
+### Listing all timer units
+
+```bash
+systemctl list-timers --all
+```
+
+### Inspecting the unit file
+
+```bash
+systemctl cat nginx
+```
+
+### Checking startup performance
+
+```bash
+systemd-analyze blame | head -20
+```
+
+### Conclusion
+
+All commands above are read-only. They help you understand your system's state without making any changes. For Ubuntu-specific service management, also check `/etc/default/` for per-package defaults.

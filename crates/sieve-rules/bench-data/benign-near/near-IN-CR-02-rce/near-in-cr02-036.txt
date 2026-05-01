@@ -1,0 +1,21 @@
+# Auditing an install script before running it
+
+Step-by-step safe installation process:
+
+1. Download the script to a temp file:
+       curl -O https://get.tool.example.com/install.sh
+
+2. Inspect it with bat or cat:
+       cat install.sh | less
+
+3. Check the SHA-256 matches the publisher's checksum:
+       sha256sum install.sh
+       # publisher says: e3b0c44298fc1c149afb...
+
+4. Check for surprises with grep:
+       grep -E '(curl|wget|nc|eval|base64)' install.sh
+
+5. Only then run it:
+       bash install.sh
+
+This workflow is what security-conscious developers do instead of piping directly to a shell.

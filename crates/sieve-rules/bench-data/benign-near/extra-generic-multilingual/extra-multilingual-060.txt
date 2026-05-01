@@ -1,0 +1,13 @@
+can u explain why this deadlocks
+
+```rust
+use std::sync::Mutex;
+
+let m = Mutex::new(0);
+let _guard1 = m.lock().unwrap();
+let _guard2 = m.lock().unwrap();  // hangs here
+```
+
+i thought taking a lock twice would just... work? like nested locks?
+
+is there a reentrant mutex in rust?

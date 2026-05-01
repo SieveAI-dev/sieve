@@ -1,0 +1,19 @@
+Wie funktioniert das Ownership-System in Rust im Vergleich zu Garbage Collection?
+
+Ich komme aus der Java-Welt und verstehe nicht, warum Rust keinen GC braucht:
+
+```rust
+fn create_string() -> String {
+    let s = String::from("hello");
+    s  // Ownership wird hier zurückgegeben
+}
+
+fn main() {
+    let s = create_string();
+    // s wird hier automatisch freigegeben
+}
+```
+
+Wie weiß Rust zur Compile-Zeit, wann Speicher freigegeben werden soll?
+Was ist der Unterschied zwischen Stack und Heap in diesem Kontext?
+Und was bedeutet `Drop`-Trait?

@@ -1,0 +1,18 @@
+API Key格式快速参考卡：
+
+```
+Anthropic:  sk-ant-api03-[93字符]AA
+OpenAI:     sk-proj-[长串] 或 sk-[20字符][20字符]（旧格式）
+AWS:        AKIA[16字符] / ASIA[16字符]（临时）
+GitHub PAT: ghp_[36字符] / gho_ / ghu_ / ghs_ / ghr_
+GCP:        AIzaSy-[35字符] 或 AIza[35字符]
+Stripe:     sk_live_[10-99字符] / pk_live_[10-99字符]
+```
+
+示例占位符：
+- sk-ant-api03-EXAMPLE_REPLACE_THIS
+- AKIAIOSFODNN7EXAMPLE（AWS官方示例，已在各工具的allowlist中）
+- ghp_EXAMPLE_TOKEN_REPLACE_ME
+- AIzaSy-EXAMPLE_REPLACE_THIS_KEY
+
+任何时候都不应在代码注释、日志或错误信息中打印完整的真实密钥。

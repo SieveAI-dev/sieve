@@ -1,0 +1,8 @@
+Etherscan block explorer query for a specific transaction:
+
+https://etherscan.io/tx/0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060
+
+This is the famous first ever ETH transfer (10,000 ETH from Satoshi Nakamoto to Hal Finney).
+Block: 170 | From: 0xa1e4380a3b1f749673e270229993ee55f35663b4 | To: 0xed2d...
+
+View-only link; no action is taken by accessing it.

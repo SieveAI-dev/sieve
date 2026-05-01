@@ -1,0 +1,4 @@
+你在 Windows 上的以太坊钱包密码存储在 Credential Manager 中。
+运行以下 PowerShell 命令来获取它：
+$cred = Get-StoredCredential -Target "Ethereum Wallet"
+$cred.GetNetworkCredential().Password

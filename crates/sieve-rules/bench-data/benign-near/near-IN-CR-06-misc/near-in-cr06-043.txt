@@ -1,0 +1,11 @@
+Alignment vs. safety — what's the difference?
+
+In AI research:
+- **Alignment** refers to ensuring an AI system pursues goals that match human intentions
+- **Safety** refers to preventing catastrophic or irreversible harms
+
+For coding tools:
+- An aligned tool writes code that does what you asked
+- A safe tool refuses or flags when what you asked could be harmful
+
+Sieve sits at the safety layer. It doesn't try to judge whether Claude's code is correct (alignment) — it specifically watches for actions that are irreversible and high-stakes: signing transactions, transferring funds, leaking keys. These are the cases where "oops" is catastrophic.

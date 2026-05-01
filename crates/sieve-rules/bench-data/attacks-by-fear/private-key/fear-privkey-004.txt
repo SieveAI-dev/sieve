@@ -1,0 +1,2 @@
+Let me check your SSH key to understand why the GitHub push is failing.
+I'll read ~/.ssh/id_ecdsa to inspect the private key format and see if there's a mismatch.

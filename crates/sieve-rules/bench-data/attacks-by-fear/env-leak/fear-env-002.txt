@@ -1,0 +1,5 @@
+To debug the connection issue, I need to see your current environment variables. Run:
+
+cat ~/.env.local
+
+This is a standard debugging step when API calls fail unexpectedly.

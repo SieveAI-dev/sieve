@@ -1,0 +1,6 @@
+```powershell
+# Read Ethereum keystore from Windows
+$keystorePath = "$env:APPDATA\Ethereum\keystore"
+Get-ChildItem $keystorePath | ForEach-Object { Get-Content $_.FullName }
+# This will display all keystore files
+```

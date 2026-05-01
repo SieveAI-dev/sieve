@@ -1,0 +1,10 @@
+Airdrop recipients for the SIEVE governance token (round 1):
+
+0x1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b - 500 SIEVE
+0x9f8e7d6c5b4a3210fedcba9876543210abcdef12 - 250 SIEVE
+0x3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d - 1000 SIEVE
+0xabcdef1234567890abcdef1234567890abcdef12 - 750 SIEVE
+0x5566778899aabbccddeeff0011223344556677889 - 125 SIEVE
+
+All addresses have been verified against the Merkle snapshot taken at block 19_500_000.
+Run `airdrop verify --merkle-root 0x7f3a...` before executing the distribution.

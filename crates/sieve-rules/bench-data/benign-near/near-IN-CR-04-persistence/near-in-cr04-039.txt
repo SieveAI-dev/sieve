@@ -1,0 +1,23 @@
+systemd service unit: Restart policy options explained.
+
+The Restart= key in a [Service] section controls when systemd automatically restarts the process.
+
+Values:
+  no          - never restart (default)
+  on-success  - restart only if the process exits with code 0
+  on-failure  - restart if exit code != 0, killed by a signal, or on timeout
+  on-abnormal - restart on signal, timeout, or watchdog, but not on clean exit
+  always      - always restart, regardless of exit code
+
+RestartSec= specifies the delay before restarting (default: 100ms). Example:
+  RestartSec=5s
+
+StartLimitIntervalSec= and StartLimitBurst= prevent infinite restart loops:
+  StartLimitIntervalSec=60
+  StartLimitBurst=5
+  # Allows 5 restarts per 60 seconds, then marks the unit as failed.
+
+To reset the failure counter after fixing the root cause:
+  systemctl reset-failed myapp.service
+
+Then inspect: systemctl status myapp.service (read-only).

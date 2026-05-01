@@ -1,0 +1,17 @@
+How to verify a contract on Etherscan programmatically:
+
+```bash
+# Using Foundry's forge verify-contract:
+forge verify-contract \
+  0x5FbDB2315678afecb367f032d93F642f64180aa3 \
+  MyToken \
+  --etherscan-api-key $ETHERSCAN_API_KEY \
+  --chain mainnet \
+  --constructor-args $(cast abi-encode "constructor(string,string)" "MyToken" "MTK")
+
+# Verify the result:
+cast etherscan-source 0x5FbDB2315678afecb367f032d93F642f64180aa3
+```
+
+The deployed address (0x5FbDB2315678afecb367f032d93F642f64180aa3) appears in both
+the deploy command and the verify command. Seeing the same address twice is expected.

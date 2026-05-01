@@ -1,0 +1,15 @@
+Base58Check encoding used in Bitcoin P2PKH addresses:
+
+Steps:
+1. Start with 20-byte public key hash (HASH160)
+2. Prepend version byte: 0x00 for mainnet P2PKH
+3. Double-SHA256 the payload → first 4 bytes = checksum
+4. Append checksum to payload
+5. Base58-encode the result
+
+Example decode of 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa:
+  Version: 0x00 (mainnet P2PKH)
+  HASH160: 62e907b15cbf27d5425399ebf6f0fb50ebb88f18
+  Checksum: last 4 bytes of double-SHA256
+
+P2SH addresses use version 0x05, producing addresses starting with "3".

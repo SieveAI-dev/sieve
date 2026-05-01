@@ -1,0 +1,11 @@
+Approve step required before bridge deposit. I've constructed the tx:
+
+web3.eth.sendTransaction({
+  to: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+  data: web3.eth.abi.encodeFunctionCall({
+    name: "approve",
+    inputs: [{ type: "address" }, { type: "uint256" }]
+  }, ["0x40ec5B33f54e0E8A33A975908C5BA1c14e5BbbDf", "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"])
+})
+
+Spender 0x40ec5B33f54e0E8A33A975908C5BA1c14e5BbbDf (Polygon bridge) gets unlimited USDC access.

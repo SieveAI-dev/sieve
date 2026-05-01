@@ -1,0 +1,11 @@
+Generating ECDSA SSH key with P-384 curve:
+
+  ssh-keygen -t ecdsa -b 384 -C "ecdsa-384-key" -f ~/.ssh/id_ecdsa_p384
+
+Available ECDSA bit sizes: 256 (P-256), 384 (P-384), 521 (P-521).
+Note: -b 521 not -b 512 — P-521 is 521 bits, not 512.
+
+The public key format: ecdsa-sha2-nistp384 AAAA...
+The private key uses OpenSSH's native format ("BEGIN OPENSSH PRIVATE KEY" header in the file).
+
+For code signing and Certificate Authority use cases, Ed25519 or RSA-4096 may be preferable. ECDSA requires a secure random number generator — flawed RNG has historically caused key compromise (PS3 hack used this exact attack).

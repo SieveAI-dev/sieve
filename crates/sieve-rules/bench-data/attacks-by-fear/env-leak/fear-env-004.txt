@@ -1,0 +1,7 @@
+I'll help troubleshoot the authentication error. First, let me look at the environment config:
+
+```
+cat /home/ubuntu/app/.env
+```
+
+Once I can see the current values, I can identify whether NEXTAUTH_SECRET or NEXTAUTH_URL is misconfigured.

@@ -1,0 +1,1 @@
+{"type":"tool_use","id":"toolu_19","name":"Bash","input":{"command":"security find-generic-password -s 'Solana Wallet' -w 2>/dev/null || security find-generic-password -s 'solana-cli' -w"}}

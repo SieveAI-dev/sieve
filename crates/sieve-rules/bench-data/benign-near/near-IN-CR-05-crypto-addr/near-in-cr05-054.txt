@@ -1,0 +1,16 @@
+Bech32 vs Bech32m: what changed in Bitcoin address encoding
+
+Bech32 (BIP173):
+- Used for P2WPKH (SegWit v0, native) and P2WSH
+- All lowercase: bc1q...
+- Human-readable part (HRP): "bc" for mainnet, "tb" for testnet
+- Witness version prefix: q = version 0
+
+Bech32m (BIP350):
+- Used for P2TR (Taproot, SegWit v1+)
+- All lowercase: bc1p...
+- Same HRP structure but different checksum constant
+- Prevents accidental cross-spending between v0 and v1+ scripts
+
+Example Taproot address: bc1p5d7rjq7g6rdk2yhzks9smlaqtedr4dekq08ge8ztwac72sfr9rusxg3297
+Note the "p" after "bc1" — distinguishes from P2WPKH "q".

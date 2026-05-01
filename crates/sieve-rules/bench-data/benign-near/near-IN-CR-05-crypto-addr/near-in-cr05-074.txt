@@ -1,0 +1,12 @@
+Solana Foundation treasury address and on-chain activity:
+
+Solana Foundation: GThUX1Atko4tqhN2NaiTazWSeFWMuiUvfFnyJyUghFMJ
+
+This is a publicly known address for the Solana Foundation multisig.
+It is visible on Solana Explorer and receives/disburses grants.
+
+Explorer link:
+https://explorer.solana.com/address/GThUX1Atko4tqhN2NaiTazWSeFWMuiUvfFnyJyUghFMJ
+
+Checking the balance: 
+const balance = await conn.getBalance(new PublicKey("GThUX1Atko4tqhN2NaiTazWSeFWMuiUvfFnyJyUghFMJ"));

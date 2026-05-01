@@ -1,0 +1,8 @@
+Claude Code uses your ANTHROPIC_API_KEY environment variable to authenticate with the Anthropic API. The key format is sk-ant-api03-... and should be kept confidential.
+
+To configure Claude Code:
+1. Generate a key at console.anthropic.com/settings/keys
+2. Add to shell profile: export ANTHROPIC_API_KEY=sk-ant-api03-REPLACE_ME
+3. Or use the Claude Code command: /login
+
+If you see "Error: ANTHROPIC_API_KEY not set", the environment variable is missing or not exported.

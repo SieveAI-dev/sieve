@@ -1,0 +1,17 @@
+Foundry 的 vm.prank 和 vm.startPrank 区别是什么？
+
+我在写测试，要模拟某个用户调用合约：
+
+```solidity
+function testUserDeposit() public {
+    address alice = makeAddr("alice");
+    deal(alice, 1 ether);
+
+    vm.prank(alice);
+    vault.deposit{value: 0.5 ether}();
+
+    assertEq(vault.balanceOf(alice), 0.5 ether);
+}
+```
+
+如果 deposit 内部还会调用另一个合约，prank 还会生效吗？还是只影响第一次调用？

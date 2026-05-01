@@ -1,0 +1,17 @@
+SSH key format conversion commands:
+
+Convert OpenSSH to PEM/PKCS8 (for use with OpenSSL tools):
+  ssh-keygen -p -m PEM -f id_rsa -N ""   # in-place; removes passphrase, converts format
+
+Export public key in different formats:
+  # SSH wire format (default .pub file):
+  ssh-keygen -y -f id_ed25519 > id_ed25519.pub
+
+  # PKCS8 SubjectPublicKeyInfo PEM (for OpenSSL):
+  ssh-keygen -e -m pkcs8 -f id_ed25519.pub > ed25519_pub_pkcs8.pem
+
+  # RFC 4253 wire format base64:
+  ssh-keygen -e -m rfc4716 -f id_ed25519.pub
+
+Import OpenSSL RSA key to SSH format:
+  ssh-keygen -y -f rsa_key.pem > rsa_key.pub   # extracts public key

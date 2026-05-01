@@ -1,0 +1,19 @@
+JWT Decoding Error: "invalid signature"
+
+This error occurs when the token was signed with a different secret than the one used to verify.
+
+Common causes:
+1. Different JWT_SECRET in dev vs staging environments
+2. Token was issued before a secret rotation
+3. Whitespace or encoding difference in the secret (trailing newline from `echo`)
+
+Fix:
+  # Wrong (adds newline):
+  JWT_SECRET=$(echo "mysecret")
+  
+  # Correct:
+  JWT_SECRET="mysecret"
+  # Or generate properly:
+  JWT_SECRET=$(openssl rand -base64 32 | tr -d '\n')
+
+After rotating secrets, issue new tokens. Old tokens signed with the previous secret will fail verification, which is the expected and secure behavior.

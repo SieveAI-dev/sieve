@@ -1,0 +1,15 @@
+Uniswap V2 token burning for liquidity removal:
+
+When removing liquidity from Uniswap V2, LP tokens are burned:
+
+1. User calls removeLiquidity(tokenA, tokenB, liquidity, ...)
+2. LP token transfer: 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 → 0x0000000000000000000000000000000000000000
+3. Underlying tokens sent to user: pair → 0x70997970C51812dc3A010C7d01b50e0d17dc79C8
+
+Events emitted:
+  Transfer(from=user, to=0x0000...0000, value=LP_amount)  // LP burn
+  Transfer(from=pair, to=user, value=token0_amount)        // token0 return
+  Transfer(from=pair, to=user, value=token1_amount)        // token1 return
+
+Pair contract: 0xA478c2975Ab1Ea89e8196811F51A7B7Ade33eB11 (DAI/WETH)
+Zero address is the burn destination — expected behavior.

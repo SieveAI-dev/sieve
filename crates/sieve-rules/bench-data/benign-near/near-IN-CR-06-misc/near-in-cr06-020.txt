@@ -1,0 +1,10 @@
+Hermes AI coding client — overview
+
+Hermes is an AI coding assistant built on the OpenAI Chat Completions protocol. Like Claude Code, it supports tool use (function calling) and can be configured with a custom base URL to route through a local proxy.
+
+To use Sieve with Hermes:
+1. Run `sieve start` to launch the daemon on localhost:5187
+2. Set OPENAI_BASE_URL=http://localhost:5187/openai in your shell
+3. Sieve will translate between OpenAI and Anthropic formats transparently
+
+Sieve's UnifiedMessage schema supports both Anthropic Messages API and OpenAI Chat Completions, so the same rule engine applies regardless of which client you use.

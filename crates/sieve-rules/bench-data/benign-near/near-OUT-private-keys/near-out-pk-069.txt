@@ -1,0 +1,20 @@
+Q: Can I convert an existing RSA SSH key to Ed25519?
+
+A: No, you cannot mathematically convert between key types — they use different algorithms (RSA: integer factoring; Ed25519: elliptic curve discrete logarithm). They are fundamentally different mathematical structures.
+
+What you CAN do: generate a new Ed25519 key and replace the old RSA key:
+
+1. Generate new key:
+   ssh-keygen -t ed25519 -C "replacing-rsa-key"
+
+2. Add new public key to authorized_keys on all servers:
+   ssh-copy-id -i ~/.ssh/id_ed25519.pub user@server
+
+3. Test new key works:
+   ssh -i ~/.ssh/id_ed25519 user@server
+
+4. Remove old RSA public key from authorized_keys (search for "ssh-rsa" line)
+
+5. Keep old RSA private key temporarily until all servers updated, then delete.
+
+The new Ed25519 public key will look completely different from the RSA public key.

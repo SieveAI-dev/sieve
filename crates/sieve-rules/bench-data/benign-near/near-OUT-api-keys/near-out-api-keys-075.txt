@@ -1,0 +1,17 @@
+Using GCP API Key for Google Translate in Python:
+
+```python
+import os
+from google.cloud import translate_v2 as translate
+
+# Option 1: API Key (AIza...) via URL parameter
+def translate_with_key(text, target_lang="es"):
+    api_key = os.environ["GOOGLE_API_KEY"]  # AIzaSy-...
+    url = f"https://translation.googleapis.com/language/translate/v2?key={api_key}"
+    # ... make request
+
+# Option 2: Service Account (preferred for server-side)
+client = translate.Client()  # reads GOOGLE_APPLICATION_CREDENTIALS
+```
+
+For server-side applications, prefer service account authentication over API keys (AIza...).

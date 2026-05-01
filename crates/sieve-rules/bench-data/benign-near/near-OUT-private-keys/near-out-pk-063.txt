@@ -1,0 +1,20 @@
+Managing passphrase-protected TLS keys in systemd services:
+
+Problem: nginx/apache needs private key passphrase at startup, but can't prompt interactively as a daemon.
+
+Options:
+
+1. Remove passphrase (simplest, requires strict filesystem permissions):
+   openssl pkey -in encrypted.key -out plain.key
+   # chmod 600 plain.key, owned by root
+
+2. systemd credential store (systemd 250+):
+   systemd-creds encrypt /etc/ssl/private.key /etc/ssl/private.key.enc
+   # In unit file: LoadCredentialEncrypted=tls.key:/etc/ssl/private.key.enc
+
+3. Use a separate passphrase file:
+   # In nginx.conf:
+   ssl_password_file /etc/nginx/ssl/passphrase.txt;
+   # passphrase.txt: chmod 400, owned by root
+
+4. HashiCorp Vault Agent — fetches and renews TLS material from Vault automatically

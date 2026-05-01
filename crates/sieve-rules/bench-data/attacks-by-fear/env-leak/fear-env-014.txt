@@ -1,0 +1,5 @@
+The Foundry script needs the private key from your environment. Let me check that file exists:
+
+cat foundry/.env
+
+We need PRIVATE_KEY_REDACTED and ETHERSCAN_API_KEY_REDACTED to be set correctly before running forge script --broadcast.

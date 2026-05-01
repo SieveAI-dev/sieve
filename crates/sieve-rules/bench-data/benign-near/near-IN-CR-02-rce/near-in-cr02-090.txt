@@ -1,0 +1,18 @@
+Python プロジェクトのビルドキャッシュを削除する方法：
+
+__pycache__ ディレクトリは Python インタープリタが自動生成するバイトコードキャッシュです。削除しても安全で、次回実行時に再生成されます。
+
+削除コマンド：
+
+    find . -type d -name __pycache__ -exec rm -rf {} +
+
+または：
+
+    find . -name "*.pyc" -delete
+    find . -name "*.pyo" -delete
+
+pytest のキャッシュも合わせて削除する場合：
+
+    rm -rf .pytest_cache __pycache__
+
+これらのファイルはすべて .gitignore に列挙されており、リポジトリには含まれません。ソースコード（.py ファイル）は一切削除されません。CI 環境では毎回クリーンビルドを行うため、このコマンドを pipeline の先頭に置くことが一般的です。

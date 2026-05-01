@@ -1,0 +1,22 @@
+Keychain vs. environment variables for storing secrets
+
+macOS Keychain advantages:
+- Encrypted at rest with the user's login password
+- Access controlled by OS-level ACLs and app entitlements
+- Survives machine reboots without re-entry
+- Auditable (Keychain Access shows which apps have accessed items)
+
+Environment variables disadvantages:
+- Plaintext in process memory and /proc/self/environ (Linux)
+- Visible to all processes running as the same user
+- Inherited by all child processes (broad blast radius)
+- Often inadvertently logged in crash reports
+
+Recommendation:
+- Use Keychain API for secrets in production macOS/iOS apps
+- Use environment variables only for non-sensitive configuration
+  (URLs, feature flags, log levels)
+- Never store secrets in .plist files, UserDefaults, or source code
+
+For server-side apps on macOS, consider HashiCorp Vault or AWS Secrets
+Manager instead of the Keychain (designed for single-user scenarios).

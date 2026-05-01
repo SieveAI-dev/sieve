@@ -1,0 +1,21 @@
+age encryption — modern alternative to GPG/PEM for file encryption:
+
+age uses X25519 (Diffie-Hellman) key exchange or SSH keys, not PEM private keys. Key format is simpler:
+
+Generate age key pair:
+  age-keygen -o ~/.config/age/key.txt
+  # Key file: # created: 2024-01-01T00:00:00Z
+  #           # public key: age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p
+  #           AGE-SECRET-KEY-1...
+
+Public key format: "age1..." — a bech32-encoded X25519 public key. Safe to share.
+Secret key format: "AGE-SECRET-KEY-1..." — keep confidential.
+
+Encrypt a file:
+  age -r age1ql3z7h... -o secret.txt.age plaintext.txt
+
+Encrypt to SSH public key (reuses existing key infrastructure):
+  age -r "$(cat ~/.ssh/id_ed25519.pub)" -o secret.txt.age plaintext.txt
+
+Decrypt:
+  age -d -i ~/.config/age/key.txt -o plaintext.txt secret.txt.age

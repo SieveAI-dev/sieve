@@ -1,0 +1,29 @@
+# Discord Bot in Docker
+
+```dockerfile
+FROM python:3.12-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir discord.py
+COPY bot.py .
+CMD ["python", "bot.py"]
+```
+
+```yaml
+# compose.yml
+services:
+  discord-bot:
+    build: .
+    environment:
+      - DISCORD_BOT_TOKEN  # Injected from host shell
+    restart: unless-stopped
+```
+
+Run:
+  export DISCORD_BOT_TOKEN="your-real-token-here"
+  docker compose up -d
+
+Never put the token in the Dockerfile or compose.yml.
+For production, use Docker secrets or a secrets manager:
+  docker secret create discord_bot_token -
+  # Paste token, then Ctrl+D

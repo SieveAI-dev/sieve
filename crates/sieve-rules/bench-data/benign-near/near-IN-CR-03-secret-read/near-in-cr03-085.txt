@@ -1,0 +1,21 @@
+.netrc security considerations
+
+Risk: if .netrc contains plaintext credentials and the file is readable
+by other processes or users, all stored credentials are compromised.
+
+Mitigations:
+1. chmod 600 ~/.netrc — enforced by many tools, but set explicitly
+2. Use tokens instead of passwords — tokens can be scoped and revoked
+   independently of your account password
+3. Use the credential helper system instead of .netrc where possible:
+   - macOS: git credential-osxkeychain (stores in Keychain)
+   - Linux: git credential-libsecret (GNOME keyring)
+   - Windows: git credential-manager
+4. Limit the .netrc file to only the machines you need — don't use `default`
+   with real credentials (it matches all machines)
+5. Add ~/.netrc to your backup encryption — don't back it up in plaintext
+
+The .netrc file is a legacy mechanism. Modern alternatives:
+- SSH keys for git
+- OIDC federation for CI
+- OAuth device flow for CLI tools

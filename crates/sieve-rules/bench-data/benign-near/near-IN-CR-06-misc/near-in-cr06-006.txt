@@ -1,0 +1,7 @@
+Research note on prompt injection taxonomy (Simon Willison, 2023)
+
+Willison classifies prompt injection attacks into two families:
+- Direct: user provides the malicious prompt themselves (mostly a misuse concern)
+- Indirect: the model retrieves external data that contains the attack
+
+The key insight: indirect injection is hard to prevent purely at the system prompt level because the attack arrives through a "trusted" channel (tool output, web fetch result, email body). You need a separate inspection layer that watches what comes *back* from tools, not just what the user sends.

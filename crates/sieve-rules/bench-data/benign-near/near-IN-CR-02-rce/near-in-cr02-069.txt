@@ -1,0 +1,16 @@
+# dd: writing an ISO to a USB drive (safe device target)
+
+Flash a Linux ISO to a USB drive:
+
+    dd if=ubuntu-22.04-desktop-amd64.iso of=/dev/disk4 bs=1m status=progress
+
+IMPORTANT: make absolutely sure of=/dev/disk4 is your USB drive, NOT your system disk. Verify with:
+    diskutil list          # macOS
+    lsblk                  # Linux
+
+On macOS, unmount the disk first (do not eject):
+    diskutil unmountDisk /dev/disk4
+
+Then run dd. The ISO is written block-by-block to the USB device. status=progress shows a live progress bar.
+
+The `of=` target here is an external removable device, not an internal disk partition.

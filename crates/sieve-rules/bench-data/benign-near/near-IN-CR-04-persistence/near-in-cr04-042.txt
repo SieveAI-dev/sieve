@@ -1,0 +1,31 @@
+launchd plist key reference card (read-only summary).
+
+Label (string, required):
+  Unique reverse-DNS identifier. Must match the filename.
+  com.example.myapp → com.example.myapp.plist
+
+ProgramArguments (array of strings):
+  Full path to the executable plus arguments.
+  Use absolute paths; PATH is not set by launchd.
+
+RunAtLoad (boolean):
+  If true, job runs once immediately after loading.
+
+KeepAlive (boolean or dict):
+  If true, launchd restarts the job if it exits.
+  Can be a dict for conditional keep-alive (e.g., only if a network path is reachable).
+
+EnvironmentVariables (dict):
+  Key-value pairs passed to the process environment.
+
+WorkingDirectory (string):
+  Sets the cwd before launching the process.
+
+StandardOutPath / StandardErrorPath (strings):
+  Redirect stdout and stderr to log files.
+
+ThrottleInterval (integer):
+  Minimum seconds between consecutive launches (prevents rapid restart loops).
+
+Inspect the full spec: `man launchd.plist`
+Inspect loaded plists: `launchctl list`

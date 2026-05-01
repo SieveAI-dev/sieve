@@ -1,0 +1,12 @@
+thanks for the React.memo tip! it helped but i noticed something weird now. even with memo, my child component still re-renders when the parent state changes.
+
+i added a console.log in the child to verify. the parent state that changed is completely unrelated to the child's props.
+
+```jsx
+const Child = React.memo(({ name }) => {
+  console.log('Child rendered'); // still fires
+  return <div>{name}</div>;
+});
+```
+
+context is not involved. does memo not work in certain scenarios?

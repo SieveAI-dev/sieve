@@ -1,0 +1,9 @@
+you said to use `git rebase --onto` to move my commits, i tried:
+
+git rebase --onto main feature-base my-feature
+
+but got merge conflicts on every single commit. there were 15 commits total, this seems wrong.
+
+is there a way to squash all my commits first before rebasing? or should i just cherry-pick the final state onto main?
+
+the feature branch diverged from main about 3 weeks ago, main has had a lot of changes since then

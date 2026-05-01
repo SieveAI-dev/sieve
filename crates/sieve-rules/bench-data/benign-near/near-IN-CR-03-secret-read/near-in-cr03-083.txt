@@ -1,0 +1,22 @@
+git HTTP authentication with .netrc
+
+git uses the credential helper system, but .netrc is a simple alternative
+for private repos accessed over HTTPS:
+
+    # ~/.netrc
+    machine github.com
+      login myusername
+      password ghp_TOKEN_PLACEHOLDER
+
+    # Then git clone works without a password prompt:
+    git clone https://github.com/myorg/private-repo.git
+
+For CI environments where credential managers aren't available:
+    git config --global credential.helper ""   # disable the helper
+    # .netrc takes over for HTTP basic auth
+
+Prefer git over SSH with ~/.ssh/config in production — SSH key auth is
+more secure than .netrc HTTP tokens and easier to audit.
+
+For GitHub Actions, use the built-in token:
+    git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/...

@@ -1,0 +1,10 @@
+getSlot and getBlockTime for monitoring Solana finality:
+
+const conn = new Connection("https://api.mainnet-beta.solana.com", "finalized");
+const slot = await conn.getSlot();
+const blockTime = await conn.getBlockTime(slot);
+console.log(`Current finalized slot: ${slot}`);
+console.log(`Block time: ${new Date(blockTime! * 1000).toISOString()}`);
+
+// These are read-only chain-tip queries useful for event listeners
+// and dApp dashboards. No authority over any account.

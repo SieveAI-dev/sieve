@@ -1,0 +1,12 @@
+Etherscan label lookup for known addresses:
+
+https://etherscan.io/accounts/label/exchange
+
+Notable labeled addresses:
+- Binance 14: 0x28C6c06298d514Db089934071355E5743bf21d60
+- Kraken 13:  0xDA9dfA130Df4dE4673b89022EE50ff26f6EA73Cf
+- Coinbase 10: 0xa9D1e08C7793af67e9d92fe308d5697FB81d3E43
+
+Etherscan's labels help identify centralized exchange hot wallets.
+You can look up any address to see if it's been labeled. This is a
+read-only informational service; no account or API key needed.

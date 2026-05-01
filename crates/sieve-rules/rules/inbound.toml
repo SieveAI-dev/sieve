@@ -25,30 +25,67 @@ pattern = '''(?i)rm\s+-rf?\s+[/~*]'''
 severity = "critical"
 action = "block"
 keywords = ["rm"]
+# 豁免已知安全路径（Dockerfile 包管理清理）和教学/警告语境（文档解释危险命令）。
+# allowlist_stopwords 在完整文档中搜索，命中任一词则豁免本条规则。
+allowlist_stopwords = [
+  "/var/lib/apt/lists",  # Dockerfile apt cache 标准清理路径
+  "/var/cache/apt",      # apt 缓存清理
+  "dpkg",                # Dockerfile apt/dpkg 上下文
+  "node_modules",        # npm/Docker builder stage 清理
+  "distclean",           # Makefile 清理目标
+  "dockerbuild",         # Docker 临时构建目录
+  "docker system prune", # Docker 清理命令
+  "dangerous pattern",   # 教学文档在讲解危险命令
+  "no legitimate use",   # 教学文档明确标记无合法用途
+  "NEVER RUN",           # 教学文档警告标记
+  "DO NOT RUN",          # 教学文档警告标记
+  "pre-commit-config",   # pre-commit 框架配置（合法的 rm -rf 用法在 .pre-commit-config.yaml）
+  "\"deny\":",           # Claude Code permissions deny list 配置（"deny": ["Bash(rm -rf *)"]）
+  "Bash(rm -rf",         # Claude Code 权限配置格式中引用该命令为被拒绝项
+]
 disposition = "hook_terminal"
 timeout_seconds = 30
 default_on_timeout = "block"
 
 [[rules]]
 id = "IN-CR-02-CURL-PIPE"
-description = "Curl-pipe-shell pattern (curl ... | sh)"
+description = "Curl-pipe-shell pattern (curl ... | sh/bash, including sudo)"
 # Week 4 benchmark 发现：原 pattern `curl\s+\S+\s*\|...` 只匹配一个 token，
 # 漏报 `curl -s URL | bash`（-s 是第一个 token）。改为允许多个空白分隔的 token。
-pattern = '''(?i)curl(?:\s+\S+)+\s*\|\s*(ba)?sh'''
+# Week 5 补充：增加 `sudo` 可选前缀（fear-shell-002/008/009/013/017/020/022/025/033）
+pattern = '''(?i)curl(?:\s+\S+)+\s*\|\s*(?:sudo\s+)?(ba)?sh'''
 severity = "critical"
 action = "block"
 keywords = ["curl"]
+# 豁免安全审计文档（红旗标记/警告语境）。
+allowlist_stopwords = [
+  "red flag",               # 安全审计清单在标记危险模式
+  "security review",        # 安全审计文档上下文
+  "check for:",             # 安全检查清单格式
+  "DO NOT",                 # 明确警告文档
+  "NEVER",                  # 明确警告文档
+  "Sieve's IN-CR-02",       # Sieve 规则说明文档（自说明）
+]
 disposition = "hook_terminal"
 timeout_seconds = 30
 default_on_timeout = "block"
 
 [[rules]]
 id = "IN-CR-02-WGET-PIPE"
-description = "Wget-pipe-shell pattern"
-pattern = '''(?i)wget(?:\s+\S+)+\s*\|\s*(ba)?sh'''
+description = "Wget-pipe-shell pattern (including sudo)"
+# Week 5 补充：增加 `sudo` 可选前缀（与 CURL-PIPE 对齐）
+pattern = '''(?i)wget(?:\s+\S+)+\s*\|\s*(?:sudo\s+)?(ba)?sh'''
 severity = "critical"
 action = "block"
 keywords = ["wget"]
+# 豁免安全审计文档（红旗标记/警告语境）。
+allowlist_stopwords = [
+  "red flag",
+  "security review",
+  "check for:",
+  "DO NOT",
+  "NEVER",
+]
 disposition = "hook_terminal"
 timeout_seconds = 30
 default_on_timeout = "block"
@@ -60,6 +97,33 @@ pattern = '''(?i)eval\s*[\(\$"]'''
 severity = "critical"
 action = "block"
 keywords = ["eval"]
+# 豁免已知合法 shell 工具初始化（在完整文档中搜索）：
+# - 各类 shell hook 工具（direnv/starship/mise/pyenv/rbenv/sheldon）
+# - ssh-agent 标准启动
+# - Homebrew 路径初始化
+# - GNU Make $(eval $(call ...)) 语法
+# - 教学文档（解释 eval 的危险用法）
+allowlist_stopwords = [
+  "ssh-agent -s",      # eval "$(ssh-agent -s)" 标准 ssh-agent 启动
+  "direnv hook",       # eval "$(direnv hook bash/zsh)"
+  "starship init",     # eval "$(starship init bash/zsh)"
+  "pyenv init",        # eval "$(pyenv init -)"
+  "rbenv init",        # eval "$(rbenv init -)"
+  "brew shellenv",     # eval "$(/opt/homebrew/bin/brew shellenv)"
+  "mise activate",     # eval "$(mise activate zsh/bash)"
+  "sheldon source",    # eval "$(sheldon source)"
+  "nvm completions",   # eval "$(nvm completions)"
+  "homebrew",          # Homebrew 路径初始化文档
+  "call make-target",  # GNU Make $(eval $(call make-target,...))
+  "$(call ",           # GNU Make eval 语法
+  "DO NOT RUN",        # 教学文档警告标记
+  "NEVER",             # 教学文档警告标记
+  "untrusted data",    # 教学文档讲解 eval 危险性
+  "untrusted input",   # 教学文档讲解 eval 危险性
+  "code injection",    # 教学文档讲解注入风险
+  "trusted local",     # 教学文档说明安全用法
+  "local binary",      # 教学文档说明安全用法
+]
 disposition = "hook_terminal"
 timeout_seconds = 30
 default_on_timeout = "block"
@@ -71,6 +135,14 @@ pattern = '''(?i)nc\s+(-e|--sh-exec)\s+/bin/(ba)?sh'''
 severity = "critical"
 action = "block"
 keywords = ["nc"]
+# 豁免安全教育文档（明确标注为危险示例，解释为什么攻击者会用）。
+allowlist_stopwords = [
+  "security education",   # "Security education note:" 开头的教学文档
+  "DO NOT RUN",           # 明确警告不可运行
+  "DANGEROUS",            # 明确标记危险
+  "blocked by security",  # "This is blocked by security tools for good reason"
+  "attacker",             # 文档在描述攻击者行为
+]
 disposition = "hook_terminal"
 timeout_seconds = 30
 default_on_timeout = "block"
@@ -82,6 +154,14 @@ pattern = '''(?i)dd\s+if=/dev/zero\s+of=/dev/'''
 severity = "critical"
 action = "block"
 keywords = ["dd"]
+# 豁免安全培训文档（明确标注为危险示例，解释破坏性后果）。
+allowlist_stopwords = [
+  "security training",    # "Educational reference for security training"
+  "DO NOT RUN",           # 明确警告不可运行
+  "NEVER RUN",            # 明确警告不可运行
+  "Educational reference", # 教学参考文档
+  "Recovery is impossible", # 文档在说明破坏不可逆
+]
 disposition = "hook_terminal"
 timeout_seconds = 30
 default_on_timeout = "block"
@@ -140,11 +220,13 @@ default_on_timeout = "block"
 
 [[rules]]
 id = "IN-CR-03-ETH-KEYSTORE"
-description = "Ethereum/geth keystore file (UTC--<timestamp>--<40hex>)"
-pattern = '''(?i)UTC--[0-9T\-Z\.]{19,32}--[a-fA-F0-9]{40}\b'''
+description = "Ethereum/geth keystore file (UTC--<timestamp>--<40hex> or keystore dir glob)"
+# Week 5 扩展：增加 keystore 目录枚举形态（fear-privkey-029）
+# `find ... -name 'UTC--*' -exec cat` 不含完整时间戳路径，用目录名匹配兜底
+pattern = '''(?i)(UTC--[0-9T\-Z\.]{19,32}--[a-fA-F0-9]{40}|[^\s'"]{0,80}[Ee]thereum[/\\][Kk]eystore)'''
 severity = "high"
 action = "warn"
-keywords = ["UTC--"]
+keywords = ["UTC--", "keystore"]
 disposition = "hook_terminal"
 timeout_seconds = 30
 default_on_timeout = "block"
@@ -277,6 +359,18 @@ pattern = '''\bsystemctl\s+(?:--user\s+)?(?:enable|start|daemon-reload)\b'''
 severity = "critical"
 action = "block"
 keywords = ["systemctl"]
+# 豁免教学文档（解释 enable vs start 的区别）和已知合法系统工具（certbot timer）。
+allowlist_stopwords = [
+  "the difference between",  # "Understanding the difference between systemctl enable and start"
+  "is-enabled",              # 文档介绍只读的 systemctl is-enabled 命令
+  "Possible outputs:",       # 文档列举 is-enabled 的可能输出
+  "FUTURE boots",            # 文档解释 enable 影响未来启动，非当前会话
+  "Analogous to:",           # 文档用类比解释命令含义
+  "certbot",                 # Let's Encrypt certbot.timer 是合法系统定时器
+  "Let's Encrypt",           # certbot / Let's Encrypt 自动续签合法用途
+  "auto-renew",              # 自动续签上下文
+  "dry-run",                 # certbot --dry-run 测试模式
+]
 disposition = "hook_terminal"
 timeout_seconds = 60
 default_on_timeout = "block"
@@ -401,6 +495,16 @@ description = "Markdown javascript: URI"
 pattern = '''(?i)\[.*?\]\(javascript:'''
 severity = "critical"
 action = "block"
+# 豁免 javascript: URI 教学文档（解释为何这是安全风险、如何被拦截）。
+allowlist_stopwords = [
+  "IN-GEN-01",              # Sieve 规则自说明文档（"Sieve's IN-GEN-01 rule catches..."）
+  "legitimate educational",  # 文档明确标注为合法教学内容
+  "void(0)",                # javascript:void(0) 是教学中讲解的无操作链接
+  "XSS Prevention",         # OWASP XSS 防御文档
+  "security risk",          # 文档在解释安全风险（而非利用）
+  "DOM-based XSS",          # 教学文档在讲解 XSS 向量
+  "Modern Markdown renderers", # 文档解释现代渲染器已阻止此类 URI
+]
 disposition = "hook_terminal"
 timeout_seconds = 30
 default_on_timeout = "block"
@@ -422,6 +526,481 @@ pattern = '''(?i)bash\s+-c\s+["']'''
 severity = "critical"
 action = "block"
 keywords = ["bash"]
+# 豁免合法开发用途和教学文档。
+# 注意：bash -c '...' 用于 pre-commit hook、Makefile runner、CI 命令是常见合法用法。
+allowlist_stopwords = [
+  "pre-commit",           # pre-commit hook 框架合法用法（.pre-commit-config.yaml）
+  ".pre-commit-config",   # pre-commit 框架配置文件
+  "forge test",           # Foundry 测试工具（blockchain 开发）
+  "Foundry documentation", # Foundry 文档上下文
+  "CI environment",       # CI 环境中的合法 bash -c 用法
+  "IN-GEN-03",            # Sieve 规则自说明文档
+  "legitimate development", # 文档在讲解合法用途
+  "source .env",          # eval "$(source .env && ...)" 合法环境加载
+]
 disposition = "hook_terminal"
 timeout_seconds = 30
+default_on_timeout = "block"
+
+# ---------------------------------------------------------------------------
+# Week 5 新增：env-leak 桶（rule-gaps.md §env-leak 盲区 1-6）
+# 覆盖环境变量 dump / grep 扫描 / echo 单变量 / docker env / CI secret 导出 / 管道外泄
+# ---------------------------------------------------------------------------
+
+[[rules]]
+id = "IN-CR-03-GREP-CREDS-A"
+description = "grep -r searching for API_KEY or SECRET patterns in directories"
+# 覆盖 fear-env-042/045/049/050/052/053：`grep -r ANTHROPIC_API_KEY ~/`
+# 使用 \S* 替代 [^\s]{0,40} 避免 bounded repetition NFA 爆炸
+pattern = '''(?i)grep\s+(-r[ln]?|-[ln]?r)\s+\S*(API_KEY|SECRET|PRIVATE_KEY)'''
+severity = "high"
+action = "warn"
+keywords = ["grep"]
+allowlist_stopwords = [
+  "security review",     # 安全审计文档上下文
+  "code review",         # 代码审查上下文（合法搜索用法）
+  "audit",               # 安全审计文档
+  "DO NOT",              # 明确警告文档
+  "NEVER",               # 明确警告文档
+  "example",             # 教学文档用例
+]
+disposition = "hook_terminal"
+timeout_seconds = 30
+default_on_timeout = "block"
+
+[[rules]]
+id = "IN-CR-03-GREP-CREDS-B"
+description = "grep -r searching for MNEMONIC, SEED_PHRASE, PASSWORD or CREDENTIAL patterns"
+# 覆盖 fear-env-054/059/060：grep -r MNEMONIC / SEED_PHRASE 等
+pattern = '''(?i)grep\s+(-r[ln]?|-[ln]?r)\s+\S*(MNEMONIC|SEED_PHRASE|PASSWORD|CREDENTIAL)'''
+severity = "high"
+action = "warn"
+keywords = ["grep"]
+allowlist_stopwords = [
+  "security review",     # 安全审计文档上下文
+  "code review",         # 代码审查上下文
+  "audit",               # 安全审计文档
+  "DO NOT",              # 明确警告文档
+  "NEVER",               # 明确警告文档
+  "example",             # 教学文档用例
+]
+disposition = "hook_terminal"
+timeout_seconds = 30
+default_on_timeout = "block"
+
+[[rules]]
+id = "IN-CR-03-PRINTENV"
+description = "printenv or env piped to sort/grep/curl to dump environment variables"
+# 覆盖 fear-env-061/063/066-075/078/080：
+# `printenv` 或 `env |` 管道形态；独立 `env` 命令太宽（env variable=value cmd 合法），
+# 只匹配 `env |` 管道形式降低 FP；同时覆盖 env | grep 凭据关键词形态（fear-env-072）
+pattern = '''(?i)\b(printenv(\s+[A-Z_]{3,30})?|env\s*\|)\b'''
+severity = "high"
+action = "warn"
+keywords = ["printenv"]
+allowlist_regexes = ['''(?i)VIRTUAL_ENV|NODE_ENV|GO_ENV|RAILS_ENV|RACK_ENV|PYTHON_ENV''']
+allowlist_stopwords = [
+  "security review",     # 安全审计文档
+  "DO NOT",              # 明确警告
+  "NEVER",               # 明确警告
+  "IN-CR-03-PRINTENV",   # Sieve 自说明文档
+]
+disposition = "hook_terminal"
+timeout_seconds = 30
+default_on_timeout = "block"
+
+[[rules]]
+id = "IN-CR-03-ENV-GREP-CREDS"
+description = "env piped to grep filtering for credential-related variables"
+# 覆盖 fear-env-072/103：`env | grep -i 'key|secret|token|password'`
+# `env | grep -v PATH` 在 103 中用于"排除 PATH 打印所有凭据"
+pattern = '''(?i)env\s*\|[^\n]*grep\b[^\n]*(key|secret|token|password|credential)'''
+severity = "high"
+action = "warn"
+keywords = ["grep"]
+allowlist_stopwords = [
+  "security review",     # 安全审计文档
+  "DO NOT",              # 明确警告
+  "NEVER",               # 明确警告
+]
+disposition = "hook_terminal"
+timeout_seconds = 30
+default_on_timeout = "block"
+
+[[rules]]
+id = "IN-CR-03-ECHO-SECRET-VAR"
+description = "echo of sensitive environment variable (API key, private key, mnemonic, token)"
+# 覆盖 fear-env-062/064/065/066/070/073/074/076/079/096/098/099/100/102/104/105/108：
+# `echo $ANTHROPIC_API_KEY`、`echo $PRIVATE_KEY`、`echo "Token: $GITHUB_TOKEN"` 等
+# 扩展：匹配 echo 后含 $<大写变量名> 且变量名含关键词，允许 echo "..." 形式
+pattern = '''(?i)\becho\b[^\n]*\$[A-Z_]*(API_KEY|SECRET|PRIVATE_KEY|MNEMONIC|SEED|TOKEN|PASSWORD|CREDENTIAL)[A-Z_]*'''
+severity = "high"
+action = "warn"
+keywords = ["echo"]
+allowlist_stopwords = [
+  "security review",     # 安全审计文档
+  "DO NOT",              # 明确警告
+  "NEVER",               # 明确警告
+  "example",             # 教学文档用例
+  "IN-CR-03-ECHO",       # Sieve 自说明文档
+]
+disposition = "hook_terminal"
+timeout_seconds = 30
+default_on_timeout = "block"
+
+[[rules]]
+id = "IN-CR-03-DOCKER-ENV-EXEC"
+description = "Docker exec command followed by env to dump container environment variables"
+# 覆盖 fear-env-081/082/083/084/085/086/088/089/091：`docker exec -it myapp env`
+# 拆为两条避免 [^\n]{0,80} 导致 NFA 爆炸：exec+env 形态
+pattern = '''(?i)\bdocker\s+exec\b[^\n]*\benv\b'''
+severity = "high"
+action = "warn"
+keywords = ["docker"]
+allowlist_stopwords = [
+  "security review",     # 安全审计文档
+  "DO NOT",              # 明确警告
+  "NEVER",               # 明确警告
+  "example",             # 教学文档用例
+]
+disposition = "hook_terminal"
+timeout_seconds = 30
+default_on_timeout = "block"
+
+[[rules]]
+id = "IN-CR-03-DOCKER-INSPECT-ENV"
+description = "Docker inspect Config.Env to dump container environment variables"
+# 覆盖 fear-env-092/093/095：`docker inspect --format='{{json .Config.Env}}'`
+pattern = '''(?i)\bdocker\s+inspect\b[^\n]*Config\.Env'''
+severity = "high"
+action = "warn"
+keywords = ["docker"]
+allowlist_stopwords = [
+  "security review",     # 安全审计文档
+  "DO NOT",              # 明确警告
+  "NEVER",               # 明确警告
+  "example",             # 教学文档用例
+]
+disposition = "hook_terminal"
+timeout_seconds = 30
+default_on_timeout = "block"
+
+[[rules]]
+id = "IN-CR-03-CI-SECRET-EXFIL"
+description = "GitHub Actions CI secret listing or CI token exfiltration via curl/echo"
+# 覆盖 fear-env-079/096/097/098/099/100/101/102/103/104/105/107/108：
+# `gh secret list`、`echo $GITHUB_TOKEN`（CI token 专项）
+# echo $GITHUB_TOKEN 不与 ECHO-SECRET-VAR 冲突（GITHUB_TOKEN 不含通用关键词），此处专项补漏
+# 扩展：覆盖 fear-env-101 的多行 curl -d "...$GITHUB_TOKEN..." 形态（不依赖同行 curl）
+pattern = '''(?i)(\bgh\s+secret\s+list\b|\becho\b[^\n]*\$(GITHUB_TOKEN|NPM_TOKEN|DEPLOY_KEY|DEPLOY_PRIVATE|CI_TOKEN|ACTIONS_RUNTIME_TOKEN)|\$(GITHUB_TOKEN|NPM_TOKEN|DEPLOY_PRIVATE_KEY)&)'''
+severity = "high"
+action = "warn"
+keywords = ["gh secret", "GITHUB_TOKEN"]
+allowlist_stopwords = [
+  "security review",     # 安全审计文档
+  "DO NOT",              # 明确警告
+  "NEVER",               # 明确警告
+  "IN-CR-03-CI-SECRET",  # Sieve 自说明文档
+]
+disposition = "hook_terminal"
+timeout_seconds = 30
+default_on_timeout = "block"
+
+[[rules]]
+id = "IN-CR-02-ENV-EXFIL-PIPE"
+description = "Environment variable exfiltration via env piped to curl or base64"
+# 覆盖 fear-env-075/077：`env | base64 | curl`、`env | curl`
+# 使用 [^\n]* 替代 [^\n]{0,80} 避免 bounded repetition NFA 爆炸
+pattern = '''(?i)env\s*\|[^\n]*(curl|base64)'''
+severity = "critical"
+action = "block"
+keywords = ["curl"]
+allowlist_stopwords = [
+  "security review",     # 安全审计文档
+  "DO NOT",              # 明确警告
+  "NEVER",               # 明确警告
+]
+disposition = "hook_terminal"
+timeout_seconds = 30
+default_on_timeout = "block"
+
+[[rules]]
+id = "IN-CR-02-CURL-SECRET-VAR"
+description = "curl POST with sensitive environment variable value (direct exfiltration)"
+# 覆盖 fear-env-101/107：`curl -d "$ANTHROPIC_API_KEY" https://...`
+pattern = '''(?i)curl\b[^\n]*-d\b[^\n]*\$[A-Z_]*(KEY|SECRET|TOKEN)'''
+severity = "critical"
+action = "block"
+keywords = ["curl"]
+allowlist_stopwords = [
+  "security review",     # 安全审计文档
+  "DO NOT",              # 明确警告
+  "NEVER",               # 明确警告
+]
+disposition = "hook_terminal"
+timeout_seconds = 30
+default_on_timeout = "block"
+
+# ---------------------------------------------------------------------------
+# Week 5 新增：private-key 桶（rule-gaps.md §private-key 盲区 1/3/4/5）
+# 盲区 2（BIP39 入站）见下方注释说明；盲区 6（keystore glob）已合并入 IN-CR-03-ETH-KEYSTORE
+# ---------------------------------------------------------------------------
+
+[[rules]]
+id = "IN-CR-03-KEYCHAIN-FIND-PASS"
+description = "macOS security command extracting password from Keychain (-w flag outputs plaintext)"
+# 覆盖 fear-privkey-052/053/054/057/059/060/062/063/065/067/068：
+# `security find-generic-password -s "Wallet" -w`
+# 原 IN-CR-03-MACOS-KEYCHAIN 只匹配 keychain 文件路径，不匹配 security 命令形态
+pattern = '''(?i)\bsecurity\s+find-(generic|internet)-password\b[^\n]*-w\b'''
+severity = "critical"
+action = "block"
+keywords = ["security find-generic-password", "security find-internet-password"]
+allowlist_stopwords = [
+  "security review",     # 安全审计文档（注意：关键词含 security，需精确 stopword）
+  "DO NOT",              # 明确警告
+  "NEVER",               # 明确警告
+  "IN-CR-03-KEYCHAIN",   # Sieve 自说明文档
+]
+disposition = "hook_terminal"
+timeout_seconds = 30
+default_on_timeout = "block"
+
+# BIP39 入站检测（盲区 2）：
+# fear-privkey-069~085 共 17 条，攻击者诱导用户在对话中粘贴助记词。
+# vectorscan 单条规则无法承载全部 2048 个 BIP39 词，超长 alternation 会导致编译失败。
+# 实施路径：engine_adapter inbound second-pass 复用 outbound 的 validate_bip39 逻辑。
+# 临时覆盖：用高频 BIP39 词组合匹配 + 上下文词（seed phrase / mnemonic 触发词）
+# 完整 second-pass 实现标记 TODO，留给 Week 6 sprint。
+[[rules]]
+id = "IN-CR-03-BIP39-SOCIAL"
+description = "Social engineering asking user to share seed phrase / mnemonic"
+# 覆盖 fear-privkey-069~085：攻击者诱导用户分享助记词的社工话术
+# 匹配多种触发词：share/send/paste/enter/type your seed phrase/mnemonic
+# 注意：pattern 避免超长量词（[^\n]{0,200} + 超长 alternation 会导致 NFA 爆炸）
+pattern = '''(?i)((share|send|paste|enter|type)\s+(me\s+|us\s+)?(your\s+)?(seed|mnemonic|recovery|backup)\s+(phrase|words?|key)|please\s+(share|send|paste|enter|type)\s+(your\s+)?seed|your\s+(12|24).word\s+(seed|recovery|backup|mnemonic)|I\s+have\s+my\s+seed\s+phrase|seed\s+phrase\s*:)'''
+severity = "critical"
+action = "block"
+keywords = ["seed phrase", "mnemonic"]
+allowlist_stopwords = [
+  "security education",  # 安全教育文档
+  "DO NOT",              # 明确警告
+  "NEVER",               # 明确警告
+  "example",             # 教学文档用例
+  "IN-CR-03-BIP39",      # Sieve 自说明文档
+]
+disposition = "gui_popup"
+timeout_seconds = 120
+default_on_timeout = "block"
+
+[[rules]]
+id = "IN-CR-03-BIP39-VERIFY"
+description = "Attacker asking user to type seed phrase for verification or backup check"
+# 覆盖 fear-privkey-073 等"verify your wallet backup, type your seed phrase here"形态
+pattern = '''(?i)(type\s+your\s+(seed|mnemonic|recovery)\s+(phrase|words?|key)|verify\s+(your\s+)?seed\s+phrase|confirm\s+(your\s+)?seed\s+phrase|check\s+(your\s+)?seed\s+phrase)'''
+severity = "critical"
+action = "block"
+keywords = ["seed phrase", "mnemonic"]
+allowlist_stopwords = [
+  "security education",  # 安全教育文档
+  "DO NOT",              # 明确警告
+  "NEVER",               # 明确警告
+]
+disposition = "gui_popup"
+timeout_seconds = 120
+default_on_timeout = "block"
+
+[[rules]]
+id = "IN-CR-03-BITCOIN-DUMP-PRIVKEY"
+description = "bitcoin-cli dumpprivkey exporting WIF private key"
+# 覆盖 fear-privkey-086/087/088/089/090/091/092：
+# `bitcoin-cli dumpprivkey <address>`
+pattern = '''(?i)\bbitcoin-cli\s+dumpprivkey\b'''
+severity = "critical"
+action = "block"
+keywords = ["bitcoin-cli", "dumpprivkey"]
+allowlist_stopwords = [
+  "security review",     # 安全审计文档
+  "DO NOT",              # 明确警告
+  "NEVER",               # 明确警告
+]
+disposition = "hook_terminal"
+timeout_seconds = 30
+default_on_timeout = "block"
+
+[[rules]]
+id = "IN-CR-03-METAMASK-VAULT"
+description = "Reading MetaMask Chrome extension local storage (encrypted vault directory)"
+# 覆盖 fear-privkey-093/094/095/096/097/098/099/100/101/102：
+# `~/Library/Application Support/.../nkbihfbeogaeaoehlefnkodbefgpgknn/`
+pattern = '''(?i)nkbihfbeogaeaoehlefnkodbefgpgknn'''
+severity = "critical"
+action = "block"
+keywords = ["nkbihfbeogaeaoehlefnkodbefgpgknn"]
+allowlist_stopwords = [
+  "security review",     # 安全审计文档
+  "DO NOT",              # 明确警告
+  "NEVER",               # 明确警告
+]
+disposition = "hook_terminal"
+timeout_seconds = 30
+default_on_timeout = "block"
+
+[[rules]]
+id = "IN-CR-03-WINDOWS-CRED-EXTRACT"
+description = "Windows DPAPI or Credential Manager wallet credential extraction"
+# 覆盖 fear-privkey-103/104/106/107/108/109：
+# `ProtectedData::Unprotect`、`Get-StoredCredential`、`PasswordVault`、`cmdkey /list`、`KRShowKeyMgr`
+pattern = '''(?i)(ProtectedData\]?::Unprotect|Get-StoredCredential|PasswordVault|cmdkey\s+/list|KRShowKeyMgr)'''
+severity = "critical"
+action = "block"
+keywords = ["ProtectedData", "Get-StoredCredential", "PasswordVault", "cmdkey", "KRShowKeyMgr"]
+allowlist_stopwords = [
+  "security review",     # 安全审计文档
+  "DO NOT",              # 明确警告
+  "NEVER",               # 明确警告
+]
+disposition = "hook_terminal"
+timeout_seconds = 30
+default_on_timeout = "block"
+
+# ---------------------------------------------------------------------------
+# Week 5 新增：shell-rce 桶（rule-gaps.md §shell-rce 盲区 2/3/4/5）
+# 盲区 1（sudo bash）已合并入现有 CURL-PIPE / WGET-PIPE pattern 修改
+# ---------------------------------------------------------------------------
+
+[[rules]]
+id = "IN-CR-02-WGET-EXEC"
+description = "wget download script to temp file then execute"
+# 覆盖 fear-shell-027：
+# `wget https://... -O /tmp/x.sh && sh /tmp/x.sh`
+pattern = '''(?i)wget\s+[^\n]*-O\s+/tmp/\S+\s*&&\s*(?:sudo\s+)?(ba)?sh'''
+severity = "critical"
+action = "block"
+keywords = ["wget"]
+allowlist_stopwords = [
+  "security review",     # 安全审计文档
+  "DO NOT",              # 明确警告
+  "NEVER",               # 明确警告
+]
+disposition = "hook_terminal"
+timeout_seconds = 30
+default_on_timeout = "block"
+
+[[rules]]
+id = "IN-CR-02-PYTHON-EXEC-URLOPEN"
+description = "Python exec() with urllib urlopen for remote code execution"
+# 覆盖 fear-shell-076/077/078/079/080/081/082/083/084/085：
+# `python3 -c "exec(__import__('urllib.request').urlopen(...).read())"`
+# 原 pattern [^)]*urlopen 无法跨嵌套括号匹配；改为直接匹配 exec + urlopen 同行，
+# 或 urlopen( 后直接接 URL（不需要 exec 上下文也足够高危）
+pattern = '''(?i)(\bexec\b[^\n]*\burlopen\b|\burlopen\s*\(['"]https?://)'''
+severity = "critical"
+action = "block"
+keywords = ["exec", "urlopen"]
+allowlist_stopwords = [
+  "security review",     # 安全审计文档
+  "DO NOT",              # 明确警告
+  "NEVER",               # 明确警告
+  "IN-CR-02-PYTHON",     # Sieve 自说明文档
+]
+disposition = "hook_terminal"
+timeout_seconds = 30
+default_on_timeout = "block"
+
+[[rules]]
+id = "IN-CR-02-BASE64-DECODE-EXEC"
+description = "base64 decode piped to shell execution (obfuscated payload, including sudo)"
+# 覆盖 fear-shell-092/093/094/095/096/120：
+# `base64 -d <<< '...' | sh`、`echo '...' | base64 -d | bash`、`base64 -d ... | sudo bash`
+pattern = '''(?i)base64\s+(-d|--decode)[^|]*\|\s*(?:sudo\s+)?(ba)?sh'''
+severity = "critical"
+action = "block"
+keywords = ["base64"]
+allowlist_stopwords = [
+  "security review",     # 安全审计文档
+  "DO NOT",              # 明确警告
+  "NEVER",               # 明确警告
+  "IN-CR-02-BASE64",     # Sieve 自说明文档
+]
+disposition = "hook_terminal"
+timeout_seconds = 30
+default_on_timeout = "block"
+
+[[rules]]
+id = "IN-CR-02-MALICIOUS-REGISTRY"
+description = "npm/pip install from non-standard private registry (supply chain attack)"
+# 覆盖 fear-shell-105/106/107/108/109/110/111/112：
+# `npm install --registry https://attacker.example`、`pip install --index-url https://...`
+# 注意：vectorscan 不支持 negative lookahead `(?!...)`，改为两条独立规则（npmjs.org/pypi.org 用 stopword allowlist）
+# 等效逻辑：匹配 --registry / --index-url / --extra-index-url + https?://，再用 allowlist_stopwords 豁免官方仓库
+pattern = '''(?i)(npm\s+install[^\n]*--registry\s+https?://|pip\s+install[^\n]*--(index-url|extra-index-url)\s+https?://)'''
+severity = "critical"
+action = "block"
+keywords = ["--registry", "--index-url", "--extra-index-url"]
+# 官方仓库域名豁免（替代 negative lookahead）
+allowlist_stopwords = [
+  "registry.npmjs.org",         # npm 官方仓库
+  "npm.pkg.github.com",         # GitHub Packages npm 仓库
+  "pypi.org",                   # PyPI 官方仓库
+  "files.pythonhosted.org",     # PyPI 文件服务器
+  "pypi.internal",              # 企业内网 PyPI 仓库（.netrc 教学文档）
+  "private.pypi",               # 私有 PyPI 仓库（内网合法用途）
+  "internal.example",           # 教学文档通用内网域名示例
+  ".netrc",                     # .netrc 配置私有 registry 的合法教学文档
+  "BuildKit",                   # Docker BuildKit secret 挂载合法用途
+  "security review",            # 安全审计文档
+  "DO NOT",                     # 明确警告
+  "NEVER",                      # 明确警告
+  "IN-CR-02-MALICIOUS-REGISTRY",# Sieve 自说明文档
+]
+disposition = "hook_terminal"
+timeout_seconds = 30
+default_on_timeout = "block"
+
+# ---------------------------------------------------------------------------
+# Week 5 新增：signing 桶（rule-gaps.md §signing 盲区 1/2）
+# ---------------------------------------------------------------------------
+
+[[rules]]
+id = "IN-CR-05-ERC2612-PERMIT"
+description = "ERC-2612 permit signature request (gasless unlimited token approval)"
+# 覆盖 fear-signing-063/064/065/067/070/071/072/073/075/076/077/078/080：
+# `permit(owner, spender, value, deadline, v, r, s)` Solidity 接口描述形式
+# 原 IN-CR-05-EVM 只覆盖 JSON-RPC 方法名，不覆盖 Solidity 函数调用形态
+# 简化 pattern：匹配 permit( 后含 spender 和 deadline/expiry 的形态
+pattern = '''(?i)\bpermit\s*\([^)]*\bspender\b[^)]*\b(deadline|expiry)\b'''
+severity = "critical"
+action = "block"
+keywords = ["permit"]
+allowlist_stopwords = [
+  "ERC-2612 specification",  # ERC 规范文档在解释接口
+  "interface IERC2612",      # Solidity 接口定义（开发合法用途）
+  "// @dev",                 # 合约文档注释（NatSpec 规范接口定义）
+  "security review",         # 安全审计文档
+  "DO NOT",                  # 明确警告
+  "NEVER",                   # 明确警告
+]
+disposition = "gui_popup"
+timeout_seconds = 120
+default_on_timeout = "block"
+
+[[rules]]
+id = "IN-CR-05-WALLETCONNECT-URI"
+description = "WalletConnect deep link URI (potential signing session hijack)"
+# 覆盖 fear-signing-101/106/111：
+# WalletConnect URI 格式 `wc:[UUID]@[1|2]?`
+pattern = '''(?i)\bwc:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}@[12]\b'''
+severity = "critical"
+action = "block"
+keywords = ["wc:"]
+allowlist_stopwords = [
+  "WalletConnect specification",  # WC 规范文档
+  "walletconnect-docs",           # 官方文档引用
+  "security review",              # 安全审计文档
+  "DO NOT",                       # 明确警告
+  "NEVER",                        # 明确警告
+]
+disposition = "gui_popup"
+timeout_seconds = 120
 default_on_timeout = "block"

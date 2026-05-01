@@ -1,0 +1,32 @@
+systemd path units: reacting to filesystem changes.
+
+A .path unit watches a filesystem path and activates a paired .service unit when the path changes.
+
+Example: process a file whenever it appears in a drop directory.
+
+myprocessor.path:
+
+[Unit]
+Description=Watch /var/spool/jobs for new files
+
+[Path]
+PathExistsGlob=/var/spool/jobs/*.json
+Unit=myprocessor.service
+
+[Install]
+WantedBy=multi-user.target
+
+Options for [Path]:
+  PathExists=/path/to/file       - activates when the path exists
+  PathExistsGlob=/path/*.json    - glob variant
+  PathChanged=/path/to/file      - activates when the path is modified
+  PathModified=/path/to/file     - like PathChanged but also on attribute changes
+  DirectoryNotEmpty=/path/       - activates when the directory is non-empty
+
+To inspect active path units:
+  systemctl list-units --type=path --state=active
+
+To see what unit a path activates:
+  systemctl cat myprocessor.path
+
+Path units are a clean alternative to inotify-based custom scripts for simple drop-directory processing.

@@ -1,0 +1,11 @@
+GitHub Actions 的 workflow 跑失败了，但是本地跑没问题：
+
+```
+Run cargo test --workspace
+error: failed to compile `myproject v0.1.0`
+caused by: linker `cc` not found
+```
+
+我的 yaml 里用的是 `ubuntu-latest`，cargo build 前有没有什么系统依赖需要先安装？还是说 ubuntu-latest 最近更新了导致的？
+
+另外，有没有办法在 GitHub Actions 里缓存 Cargo 的编译产物，避免每次都重新编译？

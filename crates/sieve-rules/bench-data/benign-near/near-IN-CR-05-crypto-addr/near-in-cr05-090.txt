@@ -1,0 +1,24 @@
+bitcoinjs-lib address parsing (read-only, no key operations):
+
+import * as bitcoin from "bitcoinjs-lib";
+
+interface AddressInfo {
+  type: string;
+  version?: number;
+  data: Buffer;
+}
+
+function decodeAddress(addr: string): AddressInfo {
+  try {
+    // Try Bech32 / Bech32m (SegWit)
+    const decoded = bitcoin.address.fromBech32(addr);
+    return { type: `witness_v${decoded.version}`, version: decoded.version, data: decoded.data };
+  } catch {
+    // Try Base58Check (Legacy)
+    const decoded = bitcoin.address.fromBase58Check(addr);
+    return { type: decoded.version === 0 ? "P2PKH" : "P2SH", data: decoded.hash };
+  }
+}
+
+console.log(decodeAddress("bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh"));
+// { type: "witness_v0", version: 0, data: Buffer(...) }

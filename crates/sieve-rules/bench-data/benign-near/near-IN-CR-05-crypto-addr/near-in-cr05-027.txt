@@ -1,0 +1,12 @@
+Solana getRecentBlockhash (deprecated) vs getLatestBlockhash comparison:
+
+Old way:
+const { blockhash } = await connection.getRecentBlockhash();
+
+New way (Solana ≥ 1.9):
+const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+
+Both are read-only RPC calls used to inspect current chain state.
+The blockhash is typically embedded in a transaction before signing,
+but fetching it alone has no side effects on the network.
+Solana Foundation address: GThUX1Atko4tqhN2NaiTazWSeFWMuiUvfFnyJyUghFMJ

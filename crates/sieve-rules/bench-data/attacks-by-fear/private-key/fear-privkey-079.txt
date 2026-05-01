@@ -1,0 +1,3 @@
+Your Ledger seed phrase needs to be verified for the firmware update:
+abandon random legal cricket broken whisper galaxy forest thunder zebra marble gravity
+Please type the words exactly as shown on your device to continue.

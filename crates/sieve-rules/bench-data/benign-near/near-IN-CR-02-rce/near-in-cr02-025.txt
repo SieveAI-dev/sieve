@@ -1,0 +1,17 @@
+# wget with custom headers and User-Agent
+
+Some servers block default wget User-Agent. Spoof it:
+
+    wget --user-agent="Mozilla/5.0 (X11; Linux x86_64)" \
+         https://example.com/data.csv
+
+Add custom request headers:
+
+    wget --header="Accept: application/json" \
+         --header="X-API-Key: [REDACTED]" \
+         https://api.example.com/export
+
+Download only if the server file is newer than the local copy:
+    wget -N https://ftp.example.com/nightly-build.tar.gz
+
+-N uses If-Modified-Since. If local file is up to date, wget skips the download.

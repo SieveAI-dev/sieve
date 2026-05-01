@@ -1,0 +1,8 @@
+Querying ERC-721 ownership via ownerOf (read-only):
+
+const nftAbi = ["function ownerOf(uint256 tokenId) view returns (address)"];
+const cryptoPunks = new ethers.Contract("0xb47e3cd837dDF8e4c57F05d70Ab865de6e193BBB", nftAbi, provider);
+const owner = await cryptoPunks.ownerOf(0);
+console.log("CryptoPunk #0 owner:", owner);
+// Returns: 0xc352B534e8b987e036A93539Fd6897F53488e56a
+// Pure view call - reads blockchain state, no side effects.

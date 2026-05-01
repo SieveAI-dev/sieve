@@ -1,0 +1,10 @@
+API Key Security Incident Response Playbook
+
+When any API key is suspected to be compromised — whether Anthropic (sk-ant-api03-...), OpenAI (sk-proj-...), AWS (AKIA...), GitHub (ghp_...), or GCP (AIzaSy-...) — follow this procedure:
+
+1. **Immediate revocation**: Log in to the respective console and revoke the key. Do not investigate first — revoke first.
+2. **Audit logs**: Check usage logs for unauthorized calls in the last 30 days.
+3. **Scope assessment**: Determine what actions could have been taken with the compromised key.
+4. **Rotate**: Issue a new key and update all services.
+5. **Clean history**: Remove the key from git history using git-filter-repo.
+6. **Post-mortem**: Document how the key was exposed and add detection to prevent recurrence.

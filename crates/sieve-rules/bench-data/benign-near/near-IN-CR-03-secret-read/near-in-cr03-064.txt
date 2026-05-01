@@ -1,0 +1,21 @@
+Keychain for SSH passphrase storage (macOS)
+
+macOS integrates the SSH passphrase with the Keychain via the
+`--apple-use-keychain` flag:
+
+    # Add key and store passphrase in Keychain (prompts once)
+    ssh-add --apple-use-keychain ~/.ssh/id_ed25519
+
+    # Load Keychain-stored keys on startup (add to ~/.ssh/config):
+    Host *
+        AddKeysToAgent yes
+        UseKeychain yes
+        IdentityFile ~/.ssh/id_ed25519
+
+With this config, macOS automatically loads the SSH key from Keychain
+after login, so you never need to enter the passphrase again after the
+initial setup.
+
+The passphrase is stored as a generic password in login.keychain-db with
+the service name "SSH" and account name matching the key filename. This is
+a *write* operation — the security tool stores, not exports, the passphrase.

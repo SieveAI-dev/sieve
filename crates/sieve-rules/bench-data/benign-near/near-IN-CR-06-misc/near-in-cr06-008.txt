@@ -1,0 +1,10 @@
+## MCP Server Security Design
+
+When building an MCP (Model Context Protocol) server, treat all tool inputs as untrusted:
+
+1. Validate input schema strictly — reject extra fields
+2. Sanitize string inputs that will be used in shell commands or file paths
+3. Implement rate limiting per session
+4. Log all tool calls with full input/output for audit
+
+The MCP protocol does not authenticate callers. Any process that can reach your Unix socket can invoke your tools. Use file permissions (chmod 600) on the socket file, and consider a secondary auth token for high-privilege tools.

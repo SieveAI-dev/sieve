@@ -1,0 +1,15 @@
+GCP API Key in Android app — best practices:
+
+```xml
+<!-- AndroidManifest.xml — API key for Google Maps -->
+<!-- This key MUST be restricted to your app's signing certificate in GCP Console -->
+<meta-data
+    android:name="com.google.android.geo.API_KEY"
+    android:value="AIzaSy-REPLACE_ME_WITH_RESTRICTED_KEY"/>
+```
+
+Even though this appears in the manifest, it is acceptable IF:
+1. The key has Android app restrictions (package + SHA-1) in GCP Console
+2. The key is restricted to only the Maps SDK API
+
+Without restrictions, an AIzaSy-... key extracted from an APK can be abused.

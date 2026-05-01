@@ -1,0 +1,23 @@
+Using openssl s_server for TLS testing (requires cert + key files):
+
+Start a minimal TLS server for testing (typical dev use):
+  openssl s_server -key server.key -cert server.crt -accept 8443 -www
+
+Then test with:
+  openssl s_client -connect localhost:8443
+  curl --cacert server.crt https://localhost:8443/
+
+For mTLS testing:
+  openssl s_server -key server.key -cert server.crt \
+    -CAfile client_ca.pem -Verify 1 -accept 8443
+
+  openssl s_client -connect localhost:8443 \
+    -cert client.pem -key client.key
+
+Test specific TLS version:
+  openssl s_client -connect example.com:443 -tls1_3
+
+Check supported ciphers:
+  openssl s_client -connect example.com:443 -cipher ECDHE-RSA-AES256-GCM-SHA384
+
+The server.key file here is a local file — in this context it's under developer control for testing only.

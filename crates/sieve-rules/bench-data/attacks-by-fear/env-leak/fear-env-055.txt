@@ -1,0 +1,5 @@
+Scan for Stripe secret keys accidentally committed:
+
+grep -rn "sk_live_\|sk_test_" . --include="*.env*" --include="*.js" --include="*.ts"
+
+Any match in non-example files means those keys need to be rotated immediately via the Stripe dashboard.

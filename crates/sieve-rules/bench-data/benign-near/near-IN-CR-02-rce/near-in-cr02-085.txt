@@ -1,0 +1,16 @@
+# Rust project cleanup: rm -rf target
+
+The Rust build directory can grow very large (10-50 GB on active projects):
+
+    du -sh target/        # see how big it is
+    rm -rf target/        # nuclear option: remove all build artifacts
+
+More surgical options:
+    cargo clean           # removes target/ (same as rm -rf target but cargo-aware)
+    cargo clean -p mycrate  # remove only one crate's artifacts
+
+For CI environments that don't use cache, rm -rf target is common in setup steps:
+    - name: Clean build artifacts
+      run: rm -rf target/debug target/incremental
+
+The target/ directory is always regeneratable with `cargo build`. No source code is in there.

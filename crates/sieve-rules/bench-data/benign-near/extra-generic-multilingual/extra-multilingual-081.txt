@@ -1,0 +1,8 @@
+ok i tried what you said and added the index but its still slow. here's the updated EXPLAIN ANALYZE:
+
+Index Scan using idx_orders_status on orders  (cost=0.56..8234.12 rows=1200 width=89) (actual time=0.045..156.234 rows=980 loops=1)
+  Index Cond: ((status)::text = 'pending'::text)
+Planning Time: 2.1 ms
+Execution Time: 178.4 ms
+
+went from 2.4s to 178ms which is better but still not fast enough for our use case (need < 50ms). we have about 50k pending orders out of 4m total. what else can i try?

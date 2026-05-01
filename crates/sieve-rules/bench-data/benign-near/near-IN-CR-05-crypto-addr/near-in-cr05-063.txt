@@ -1,0 +1,15 @@
+Solana Name Service (SNS) address resolution:
+
+import { resolve } from "@bonfida/spl-name-service";
+import { Connection, PublicKey } from "@solana/web3.js";
+
+const conn = new Connection("https://api.mainnet-beta.solana.com");
+
+// Forward resolve: "bonfida.sol" → PublicKey
+const owner = await resolve(conn, "bonfida");
+console.log("bonfida.sol owner:", owner.toBase58());
+
+// SNS TLD Program: namesLPneVptA9Z5rqUjFSMwZv5m4v9QAzDk4Qd7Fk
+
+// Reverse lookup uses a different algorithm — find the name record account
+// whose data matches the target public key. No wallet interaction needed.

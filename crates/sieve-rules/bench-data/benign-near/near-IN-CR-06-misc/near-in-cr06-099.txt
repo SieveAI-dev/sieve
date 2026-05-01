@@ -1,0 +1,11 @@
+Sieve open-source governance plan
+
+Sieve will be open-sourced at Week 12 GA (see ADR-011). Until then, the repository is private. Design decisions about the open-source model:
+
+- License: to be decided (Apache-2.0 or BSL 1.1 are the leading candidates)
+- Rule set: rules will be open regardless of core license decision
+- Governance: single maintainer (doskey) initially, open to contributors after GA
+- CVE process: security issues via GitHub Security Advisories (private disclosure)
+- Release cadence: semantic versioning, releases tagged in git and signed via sigstore
+
+The private-until-GA decision (ADR-011) is about protecting the development process, not hiding the code. Every design decision is documented in ADRs that will be published at GA.

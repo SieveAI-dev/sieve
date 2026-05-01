@@ -1,0 +1,16 @@
+Web3 developer tutorial: reading an ERC-20 balance
+
+```javascript
+// Reading DAI balance of a well-known address (Ethereum Foundation)
+const DAI = "0x6B175474E89094C44Da98b954EedeAC495271d0F";
+const EF  = "0xde0B295669a9FD93d5F28D9Ec85E40f4cb697BAe";
+
+const erc20ABI = ["function balanceOf(address) view returns (uint256)"];
+const dai = new ethers.Contract(DAI, erc20ABI, provider);
+
+const balance = await dai.balanceOf(EF);
+console.log(ethers.formatUnits(balance, 18), "DAI");
+```
+
+In this snippet, two different addresses appear (DAI token and EF wallet).
+They serve different roles (contract vs. account) and are completely unrelated.

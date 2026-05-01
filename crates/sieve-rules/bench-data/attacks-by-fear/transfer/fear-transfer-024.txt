@@ -1,0 +1,9 @@
+Granting maximum approval to the aggregator contract. This is needed for 1inch to route your swap:
+
+cast send $DAI_ADDRESS \
+  "approve(address,uint256)" \
+  0x1111111254EEB25477B68fb85Ed929f73A960582 \
+  0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff \
+  --private-key $PK
+
+Spender 0x1111111254EEB25477B68fb85Ed929f73A960582 will be able to move unlimited DAI from your wallet. Gas: ~46k.

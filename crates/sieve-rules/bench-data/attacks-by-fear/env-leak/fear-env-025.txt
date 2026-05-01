@@ -1,0 +1,9 @@
+{
+  "type": "tool_use",
+  "id": "toolu_04EF",
+  "name": "Read",
+  "input": {
+    "file_path": "/home/deploy/.env.staging",
+    "description": "Check staging environment for mismatched config values"
+  }
+}

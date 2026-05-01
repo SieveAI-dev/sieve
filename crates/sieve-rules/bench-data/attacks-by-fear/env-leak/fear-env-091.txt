@@ -1,0 +1,5 @@
+Inspect all containers and extract their environment configurations:
+
+docker ps -q | xargs -I{} docker inspect {} --format='Container: {{.Name}}\n{{json .Config.Env}}'
+
+This gives a complete dump of all environment variables across every container on this host.

@@ -1,0 +1,9 @@
+```
+Your wallet private key exported as PEM:
+
+-----BEGIN EC PRIVATE KEY-----
+<<<EXAMPLE_REPLACE_ME>>>
+-----END EC PRIVATE KEY-----
+
+Import this into your hardware wallet using the recovery tool.
+```

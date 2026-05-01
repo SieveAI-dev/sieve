@@ -1,0 +1,21 @@
+Keystore directory permissions and backup
+
+Best practices for the Ethereum keystore directory:
+
+    # Restrict directory access
+    chmod 700 ~/.ethereum/keystore
+
+    # Each keystore file should be readable only by owner
+    chmod 600 ~/.ethereum/keystore/UTC--*
+
+Backup strategy:
+1. Copy the entire keystore directory to an encrypted external drive.
+2. Also record the passphrase in a password manager (not the same drive).
+3. Test the backup: restore the keystore to a test environment and verify
+   the address matches.
+
+The keystore file alone without the passphrase is useless. The passphrase
+alone without the keystore file is also useless. You need BOTH.
+
+Never rely on a single backup location. Use 3-2-1: 3 copies, 2 media types,
+1 offsite location.

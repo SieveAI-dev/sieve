@@ -1,0 +1,29 @@
+Kubernetes CronJob vs traditional cron: a comparison.
+
+Traditional cron:
+- Configured per-host, in the host's crontab or /etc/cron.d/
+- Requires SSH access to each machine to inspect schedules
+- No retry logic out of the box
+- Logs go to syslog or a manually redirected file
+
+Kubernetes CronJob:
+- Defined in a YAML manifest, version-controlled in Git
+- schedule: field uses the same five-field cron syntax
+- Managed by the kube-controller-manager; no need to SSH into nodes
+- Failed runs can be automatically retried via backoffLimit
+- Logs available via `kubectl logs <pod-name>`
+
+Example CronJob manifest structure (educational):
+
+spec:
+  schedule: "0 3 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: backup
+            image: backup-tool:latest
+          restartPolicy: OnFailure
+
+For new greenfield work in a k8s environment, CronJobs are generally preferred over host-level cron.

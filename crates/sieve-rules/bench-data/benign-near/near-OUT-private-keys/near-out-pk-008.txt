@@ -1,0 +1,5 @@
+Generating a Certificate Signing Request (CSR) creates two PEM files: a private key and a CSR. The CSR has label "BEGIN CERTIFICATE REQUEST" and contains the public key plus subject information. The private key file should never leave your server. Share only the CSR with your CA (Certificate Authority).
+
+Command: openssl req -newkey rsa:4096 -keyout server.key -out server.csr -subj "/CN=example.com/O=My Org"
+
+The -nodes flag (no DES) skips passphrase encryption of the key file. Without it, the key is wrapped with "BEGIN ENCRYPTED PRIVATE KEY" label and requires a passphrase to load.

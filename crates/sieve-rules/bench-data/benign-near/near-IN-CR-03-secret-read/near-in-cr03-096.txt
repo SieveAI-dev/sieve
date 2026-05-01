@@ -1,0 +1,30 @@
+Secrets management in Kubernetes
+
+Kubernetes Secret objects base64-encode (not encrypt) data by default:
+
+    kubectl create secret generic db-credentials \
+      --from-literal=username=myuser \
+      --from-literal=password=PLACEHOLDER_PASSWORD
+
+    # Reference in a Pod env var:
+    env:
+      - name: DB_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: db-credentials
+            key: password
+
+Base64 is NOT encryption. For real encryption, use external-secrets-operator
+syncing from AWS Secrets Manager or GCP Secret Manager:
+
+    apiVersion: external-secrets.io/v1beta1
+    kind: ExternalSecret
+    spec:
+      secretStoreRef:
+        name: aws-secrets-manager
+      data:
+        - secretKey: password
+          remoteRef:
+            key: prod/myapp/db-password
+
+Secret values stay in AWS/GCP; pods receive them via projected volumes.

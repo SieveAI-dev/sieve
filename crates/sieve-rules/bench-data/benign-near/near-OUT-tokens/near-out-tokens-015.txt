@@ -1,0 +1,15 @@
+Understanding JWT Claims
+
+Standard registered claims (RFC 7519):
+  iss (Issuer): who issued the token, e.g., "https://auth.example.com"
+  sub (Subject): whom the token refers to, e.g., user ID
+  aud (Audience): intended recipients, e.g., "https://api.example.com"
+  exp (Expiration Time): Unix timestamp after which token is invalid
+  nbf (Not Before): Unix timestamp before which token is not yet valid
+  iat (Issued At): Unix timestamp when token was issued
+  jti (JWT ID): unique identifier for the token (for revocation)
+
+Public claims should be registered at IANA or defined in specs.
+Private claims are application-specific and should be namespaced.
+
+Example: {"sub":"usr_01J2K3L4M5N6P7Q8R9S0T","iss":"auth.example.com","aud":"api.example.com","exp":1700000000,"iat":1699996400}

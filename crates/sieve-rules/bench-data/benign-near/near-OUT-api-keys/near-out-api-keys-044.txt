@@ -1,0 +1,12 @@
+AWS STS temporary credentials (ASIA prefix):
+
+When you call `aws sts assume-role`, you get temporary credentials with the ASIA prefix:
+- AssumedRoleId: AROA...
+- AccessKeyId: ASIA... (temporary, expires in 1-12 hours)
+- SecretAccessKey: (random)
+- SessionToken: (required with ASIA keys)
+
+Unlike long-term AKIA keys, ASIA keys require the session token to be set:
+export AWS_SESSION_TOKEN="your-session-token-here"
+
+ASIA keys are preferred for CI/CD over permanent AKIA keys as they auto-expire.

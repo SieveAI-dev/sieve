@@ -1,0 +1,19 @@
+# Stripe Radar: Fraud Detection Rules
+
+Stripe Radar automatically blocks high-risk payments.
+For custom rules, use the Stripe Dashboard → Radar → Rules.
+
+Example rule (block high-risk countries in test mode simulation):
+  Block if :ip_country: = 'XX'
+
+Custom metadata rules:
+  Block if ::user_age_days:: < 1
+
+Testing Radar rules:
+  - Use special test cards to simulate Radar outcomes
+  - 4100 0000 0000 0019 → always blocked by Radar
+  - 4000 0000 0000 4954 → always allowed
+
+Rules use a domain-specific language, not regular expressions.
+Test rules in test mode before deploying to live.
+sk_test_* keys interact with Radar in test mode only.

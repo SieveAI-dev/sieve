@@ -1,0 +1,14 @@
+Uniswap V3 factory uses CREATE2 for pool addresses:
+
+Factory contract (same on all EVM chains):
+0x1F98431c8aD98523631AE4a59f267346ea31F984
+
+Pool for USDC/ETH (0.05% fee) on Ethereum:
+0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640
+
+Pool for USDC/ETH (0.05% fee) on Arbitrum:
+0xC31E54c7a869B9FcBEcc14363CF510d1c41fa443
+
+Different because the salt includes chain-specific state; however the factory
+address itself (0x1F98431c8aD98523631AE4a59f267346ea31F984) is identical across
+Ethereum, Arbitrum, Optimism, Polygon, and Base due to CREATE2 + same deployer.

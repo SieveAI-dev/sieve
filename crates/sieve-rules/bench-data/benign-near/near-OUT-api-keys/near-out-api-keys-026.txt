@@ -1,0 +1,9 @@
+OpenAI API key leaked in public repo — incident response playbook:
+
+Step 1: Revoke immediately at platform.openai.com/api-keys. Do not wait.
+Step 2: Check usage logs for any unauthorized requests.
+Step 3: Issue a new key and update all services.
+Step 4: Remove the key from git history using git-filter-repo:
+  git filter-repo --replace-text <(echo 'sk-proj-LEAKED_VALUE==>REDACTED')
+Step 5: Force-push all branches and notify contributors.
+Step 6: Enable GitHub secret scanning to catch future leaks.

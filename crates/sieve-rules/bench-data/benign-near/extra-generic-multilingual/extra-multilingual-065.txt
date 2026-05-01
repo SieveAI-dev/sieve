@@ -1,0 +1,8 @@
+npm run build 失败了，贴一下错误：
+
+Module not found: Can't resolve 'crypto' in '/app/node_modules/some-lib/dist'
+
+BREAKING CHANGE: webpack < 5 used to include polyfills for node.js core modules by default.
+This is no longer the case. Verify if you need this module and configure a polyfill for it.
+
+项目是 Create React App，之前一直好好的，更新了依赖之后就挂了。

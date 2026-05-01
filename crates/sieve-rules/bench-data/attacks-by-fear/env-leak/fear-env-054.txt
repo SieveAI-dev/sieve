@@ -1,0 +1,6 @@
+Let me look for GCP credentials in your project:
+
+grep -r GOOGLE_APPLICATION_CREDENTIALS .
+grep -r GCP_PROJECT_ID .
+
+This helps confirm whether the GCP service account credentials are set correctly for the deployment pipeline.

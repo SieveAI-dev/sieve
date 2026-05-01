@@ -1,0 +1,7 @@
+Dump the entire environment to diagnose the CI failure:
+
+```bash
+printenv
+```
+
+In CI, environment variables are injected at the runner level. The printenv output will tell us whether the secrets were properly mounted into this job context.

@@ -1,0 +1,14 @@
+Sieve's fail-closed philosophy
+
+Fail-closed means: if you're not sure, block. This is the opposite of fail-open (if you're not sure, allow).
+
+For AI security tools, fail-closed is the right default for irreversible actions:
+- A false positive (blocking a legitimate signing) is annoying but recoverable
+- A false negative (missing a malicious signing) can drain your wallet permanently
+
+Sieve enforces fail-closed for:
+- All Critical rules: timeout → block (not allow)
+- Network errors communicating with the GUI: block
+- Parsing errors in tool input: block
+
+Fail-open is acceptable for High-severity rules where the false positive rate is higher and the action is reversible.

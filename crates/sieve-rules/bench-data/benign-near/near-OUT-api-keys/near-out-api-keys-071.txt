@@ -1,0 +1,11 @@
+Error: API key not valid. Please pass a valid API key.
+
+Received key starting with AIzaSy- but validation failed.
+
+Causes:
+1. The key was created in a different GCP project
+2. The target API is not enabled in the project (check APIs & Services → Library)
+3. The key has HTTP referrer restrictions that block your current domain/IP
+4. The key has been deleted or rotated
+
+Fix: Regenerate at console.cloud.google.com/apis/credentials and ensure the target API is enabled.

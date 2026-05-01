@@ -1,0 +1,3 @@
+The anchor deploy command failed with "insufficient funds". Let me inspect the fee payer:
+Read ~/.config/solana/id.json
+We need to see if the keypair has the correct permissions.

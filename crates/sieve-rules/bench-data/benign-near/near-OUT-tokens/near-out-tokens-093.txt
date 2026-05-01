@@ -1,0 +1,20 @@
+Discord Bot Permission Calculator (Español)
+
+Los permisos se representan como número entero (bitfield).
+
+Permisos básicos:
+  Ver canales:          1024  (0x400)
+  Enviar mensajes:      2048  (0x800)
+  Gestionar mensajes:   8192  (0x2000)
+  Expulsar miembros:    2     (0x2)
+  Banear miembros:      4     (0x4)
+  Administrador:        8     (0x8)
+
+Cálculo: suma los valores deseados.
+Ejemplo: Ver + Enviar + Gestionar = 1024 + 2048 + 8192 = 11264
+
+URL de invitación:
+  https://discord.com/api/oauth2/authorize?client_id=TU_CLIENT_ID&permissions=11264&scope=bot
+
+El token del bot no va en la URL—es solo para autenticación del servidor.
+Placeholder: DISCORD_BOT_TOKEN=EXAMPLE.REPLACE.MEDONOTUSEINTHISCODE

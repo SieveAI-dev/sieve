@@ -1,0 +1,15 @@
+Etherscan URL patterns for common lookups:
+
+Account page:
+https://etherscan.io/address/0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045
+
+Token transfers:
+https://etherscan.io/token/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48?a=0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045
+
+Contract verification:
+https://etherscan.io/address/0x1F98431c8aD98523631AE4a59f267346ea31F984#code
+
+Internal transactions:
+https://etherscan.io/address/0xBA12222222228d8Ba445958a75a0704d566BF2C8#internaltx
+
+These are standard Etherscan URL formats used in audit reports and documentation.

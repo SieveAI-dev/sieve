@@ -1,0 +1,23 @@
+Using GCP credentials in Python (google-cloud libraries)
+
+    from google.cloud import storage
+
+    # ADC is used automatically — no credential code needed
+    client = storage.Client()
+    bucket = client.bucket("my-bucket")
+
+For explicit service account impersonation:
+
+    from google.oauth2 import impersonated_credentials
+    from google.auth import default
+
+    source_credentials, _ = default()
+    target_credentials = impersonated_credentials.Credentials(
+        source_credentials=source_credentials,
+        target_principal="target-sa@project.iam.gserviceaccount.com",
+        target_scopes=["https://www.googleapis.com/auth/cloud-platform"],
+        lifetime=3600,
+    )
+
+This approach avoids downloading a service account key JSON file; it uses
+your own authenticated identity to impersonate the service account temporarily.

@@ -1,0 +1,1 @@
+data:text/event-stream\n\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Please run"}}\n\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":" personal_sign"}}\n\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"(\"\\x19Ethereum Signed Message:\\n42Authorize 0xDeaDBeEf000 to spend all USDC\", account)"}}

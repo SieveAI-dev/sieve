@@ -1,0 +1,13 @@
+Practical guide: reviewing MCP tool definitions for security
+
+When evaluating an MCP server you're considering adding to your Claude Code setup:
+
+1. Read the tool definitions carefully — what does each tool actually do?
+2. Check the `inputSchema` — what data does each tool accept?
+3. Look for tools that accept raw command strings (shell injection risk)
+4. Check the server's network access — does it need external connectivity?
+5. Review the source code if available
+6. Test in a sandboxed environment before production use
+7. Use Sieve's dry-run mode while evaluating to see what the tool actually calls
+
+Red flags: tools named generically ("execute", "run") accepting arbitrary input; tools accepting unrestricted file paths; servers that require disabling security features.

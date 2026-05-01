@@ -1,0 +1,23 @@
+Validating required environment variables at startup
+
+Python example using pydantic-settings:
+
+    from pydantic_settings import BaseSettings
+
+    class Settings(BaseSettings):
+        database_url: str
+        secret_key: str
+        debug: bool = False
+        allowed_hosts: list[str] = ["localhost"]
+
+        model_config = {"env_file": ".env"}
+
+    settings = Settings()   # raises ValidationError if required vars missing
+
+This approach gives you type safety and early failure — the app crashes at
+startup rather than at the first DB query if DATABASE_URL is missing. The
+`.env` file path is set in model_config; you can also pass it at runtime:
+
+    Settings(_env_file=".env.test")
+
+Document expected variables in `.env.example` alongside type and default.

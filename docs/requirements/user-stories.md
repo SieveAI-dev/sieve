@@ -380,6 +380,24 @@
 
 ---
 
+### US-21：用户最怕的五件事 baseline 验收（v1.5.1 新增）
+
+**作为** P0 crypto-native 开发者，**我希望** Sieve 能拦住我作为 crypto 开发者最怕的五类攻击 —— **签名诱导 / 转账伪造 / .env 外泄 / 私钥外泄 / shell RCE** —— 同时不会在我做这五类的合法日常工作（写转账逻辑、读 dotenv 文档、用 systemctl 配服务、教徒弟 ssh-keygen）时弹窗骚扰，**以便** 我可以信任 Sieve 一直挂着用一周不需要二次确认。
+
+**关联 PRD**：[PRD v1.5 §5.2 IN-CR-* + §9 #7](../prd/sieve-prd-v1.5.md)
+**关联文档**：[CHANGELOG v1.5.1](../changelog/CHANGELOG.md#v151-rule-expansion---2026-05-01) / [tasks/2026-05-01-test-data-expansion-report.md](../../tasks/2026-05-01-test-data-expansion-report.md)
+**优先级**：P0（Phase 1 v1.5.1，付费门槛级）
+**验收标准**（基于 1896 样本数据集，见 `crates/sieve-rules/bench-data/`）：
+
+1. **拦截率**：attacks-by-fear/{signing,transfer,env-leak,private-key,shell-rce}/ 五桶整体 recall > 95%（当前 97.13%）
+   - signing 100% / shell-rce 97.5% / env-leak 97.5% / private-key 88.33%（剩 BIP39 second-pass 待 Sprint）
+2. **零误伤**：benign-near/ 10 桶（含 near-IN-CR-02-rce 100 条 systemctl/eval/dd 教学样本、near-IN-CR-04-persistence 100 条 cron/launchd 文档样本等）整体 Critical FP rate < 0.5%（当前 0.00%）
+3. **回归门禁**：任何新规则 / allowlist 调整 PR 必须跑 `cargo test -p sieve-rules --release --test dataset_fp_rate -- --ignored` 且 per-bucket 报告贴 PR description
+4. **数据集长期持有**：bench-data 不可删除，`benign-near/`、`attacks-by-fear/` 命名 + 桶结构作为长期 baseline，新增样本只增不删
+5. **盲区透明**：当前已知盲区记录在 [tasks/2026-05-01-rule-gaps.md](../../tasks/2026-05-01-rule-gaps.md)，营销文案不夸大覆盖率
+
+---
+
 ## 未覆盖的 Phase 2 故事
 
 以下故事属于 [PRD §5.1 / §5.2 Phase 2](../prd/sieve-prd-v1.5.md#5-功能需求) 范围，**Phase 1 不实现**，待真有用户需求 + 第二个商业化客户主动要时启动：

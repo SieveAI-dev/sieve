@@ -1,0 +1,15 @@
+Firebase configuration object contains a GCP API key:
+
+```js
+// firebase-config.js — safe to commit ONLY if key is restricted to web app referrers
+const firebaseConfig = {
+  apiKey: "AIzaSy-REPLACE_WITH_YOUR_FIREBASE_KEY",  // GCP API key
+  authDomain: "myproject.firebaseapp.com",
+  projectId: "myproject",
+  storageBucket: "myproject.appspot.com",
+  messagingSenderId: "123456789",
+  appId: "1:123456789:web:abcdef"
+};
+```
+
+The AIzaSy-... key in Firebase config is intentionally public-facing, but MUST be restricted to your app's domain in GCP Console. Firebase Security Rules protect your data, not the API key itself.

@@ -1,0 +1,12 @@
+Solidity by Example — ERC-20 tutorial addresses:
+
+The following addresses appear in the official Solidity by Example documentation:
+
+Token contract deployed at: 0x5B38Da6a701c568545dCfcB03FcB875f56beddC4
+Owner:                      0xAb8483F64d9C6d1EcF9b849Ae677dD3315835Cb2
+Recipient:                  0x4B20993Bc481177ec7E8f571ceCaE8A9e22C02db
+Spender:                    0x78731D3Ca6b7E34aC0F824c42a7cC18A495cabaB
+
+These are Remix IDE auto-generated test accounts. They appear together in
+tutorial code for teaching ERC-20 transfer, approve, and transferFrom.
+Source: https://solidity-by-example.org/app/erc20/

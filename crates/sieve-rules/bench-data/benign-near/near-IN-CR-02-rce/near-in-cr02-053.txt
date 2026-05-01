@@ -1,0 +1,16 @@
+# nc port scanning with -z (zero-I/O mode)
+
+Check if a port is open without sending any data:
+
+    nc -zv 192.168.1.10 22
+    nc -zv 192.168.1.10 80
+
+-z: scan mode (don't send data)
+-v: verbose (print connection result)
+
+Scan a port range:
+    nc -zv 192.168.1.10 20-25
+
+Output: "Connection to 192.168.1.10 22 port [tcp/ssh] succeeded!" or "Connection refused"
+
+This is a diagnostic tool equivalent to `telnet host port` but without needing telnet installed. Commonly used in DevOps to verify that a service is listening before deploying an app.

@@ -1,0 +1,21 @@
+# Slack App Token Scopes
+
+Bot token (xoxb-*) requires explicit OAuth scopes. Common scopes:
+
+chat:write         - Post messages as the bot
+chat:write.public  - Post to public channels without joining
+channels:read      - View public channel list
+channels:history   - Read messages in public channels
+groups:read        - View private channel list
+im:read            - View DM list
+im:write           - Open DMs
+users:read         - View workspace users
+reactions:write    - Add emoji reactions
+
+Requesting scopes:
+  In app manifest or Dashboard → Features → OAuth & Permissions → Bot Token Scopes
+
+Principle of least privilege: Only request scopes your app actually uses.
+Slack users can see requested scopes during OAuth installation.
+
+Scopes documentation: https://api.slack.com/scopes

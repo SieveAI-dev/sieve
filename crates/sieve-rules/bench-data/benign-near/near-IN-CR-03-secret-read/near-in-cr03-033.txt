@@ -1,0 +1,28 @@
+gcloud CLI credential management
+
+Useful commands for managing your local gcloud credentials:
+
+    # Authenticate interactively (for human use)
+    gcloud auth login
+
+    # Set up ADC for SDK use in local dev
+    gcloud auth application-default login
+
+    # List active accounts
+    gcloud auth list
+
+    # Switch active account
+    gcloud config set account user@example.com
+
+    # Revoke credentials
+    gcloud auth revoke user@example.com
+    gcloud auth application-default revoke
+
+    # Inspect the active project and credentials
+    gcloud config list
+    gcloud auth print-access-token   # prints a short-lived OAuth token
+
+The ~/.config/gcloud/ directory structure:
+  application_default_credentials.json  — ADC refresh token (sensitive)
+  credentials.db                         — gcloud account credentials
+  properties                             — active config

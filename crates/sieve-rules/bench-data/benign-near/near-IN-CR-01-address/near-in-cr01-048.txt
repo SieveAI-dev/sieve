@@ -1,0 +1,18 @@
+Foundry script: verify CREATE2 address pre-deployment
+
+```bash
+# Compute expected address before deploying:
+cast compute-address \
+  --deployer 0x4e59b44847b379578588920cA78FbF26c0B4956C \
+  --salt 0x0000000000000000000000000000000000000000000000000000000000000001 \
+  --init-code-hash 0xabc123...
+
+# Expected: 0xDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEF
+# (hypothetical — replace with actual bytecode hash)
+
+# Then deploy and verify it matches:
+forge script script/Deploy.s.sol --rpc-url $RPC_URL --broadcast
+# Deployed at: 0xDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEF  ✓
+```
+
+Matching pre-computed address confirms the deployment used the correct bytecode.

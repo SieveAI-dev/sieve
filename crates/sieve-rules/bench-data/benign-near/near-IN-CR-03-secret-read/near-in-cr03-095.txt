@@ -1,0 +1,19 @@
+Secret rotation checklist
+
+When a secret is (possibly) exposed:
+
+IMMEDIATE:
+[ ] Revoke/rotate at the source — don't wait to assess scope first
+
+SHORT-TERM (hours):
+[ ] Update in all environments and CI secrets
+[ ] Check CloudTrail (AWS) or audit log (GitHub) for unexpected access
+
+MEDIUM-TERM (24h):
+[ ] git log -S "secret_value" — find commits containing the old value
+[ ] Rewrite history with git-filter-repo if found; force-push
+[ ] Notify affected parties if customer data may be involved
+
+ROOT CAUSE:
+[ ] How was it exposed? (.env committed? printed in logs?)
+[ ] Install detect-secrets / git-secrets hooks to prevent recurrence

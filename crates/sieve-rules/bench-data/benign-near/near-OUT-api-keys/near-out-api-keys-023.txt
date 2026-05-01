@@ -1,0 +1,8 @@
+Q: My OpenAI key (sk-proj-...) works in curl but not in my Node.js app.
+
+A: Check that the environment variable is available in the Node process. Common issues:
+- You set OPENAI_API_KEY in the terminal but didn't `export` it.
+- In Docker, env vars must be passed with `-e OPENAI_API_KEY=...` or via `--env-file`.
+- In Vercel, the variable must be added to Project Settings → Environment Variables.
+
+Test in Node: `console.log(process.env.OPENAI_API_KEY?.slice(0, 10))` — should print `sk-proj-` prefix.

@@ -1,0 +1,12 @@
+# JWT Best Practices Checklist
+
+- [ ] Use RS256 (asymmetric) for distributed systems; HS256 only when all parties share a secret
+- [ ] Keep exp (expiration) short: 15 minutes for access tokens, 7 days for refresh tokens
+- [ ] Store access tokens in memory, not localStorage (XSS risk)
+- [ ] Use httpOnly Secure SameSite=Strict cookies for refresh tokens
+- [ ] Rotate signing keys periodically; include kid (key ID) in header
+- [ ] Validate iss, aud, and exp on every request
+- [ ] Maintain a token revocation list or use short-lived tokens
+
+Example JWKS endpoint: GET /.well-known/jwks.json
+Returns an array of public keys (no private key material ever exposed here).

@@ -1,0 +1,17 @@
+Ethereum address validation in a smart contract tutorial:
+
+```solidity
+// Common pattern: validating that an address is not the zero address
+function setOwner(address newOwner) external onlyOwner {
+    require(newOwner != address(0), "zero address");
+    require(newOwner != address(this), "self-reference");
+    owner = newOwner;
+    emit OwnerChanged(owner, newOwner);
+}
+```
+
+`address(0)` expands to 0x0000000000000000000000000000000000000000
+`address(this)` evaluates at runtime to the contract's own address, e.g.:
+  0x5FbDB2315678afecb367f032d93F642f64180aa3 (on Hardhat localhost)
+
+Both appear in the same function for validation purposes — not an attack.

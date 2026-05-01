@@ -1,0 +1,10 @@
+GCP API 密钥（AIzaSy-...）泄露应对：
+
+1. 立即在 console.cloud.google.com → API 和服务 → 凭据 中删除该密钥
+2. 检查 Cloud Logging 中是否有未授权的 API 调用记录
+3. 检查账单是否有异常费用（Google Maps API 按调用计费）
+4. 生成新密钥并配置访问限制
+5. 如果在代码库中暴露，用 git filter-repo 清理历史
+6. 考虑设置 Cloud Monitoring 告警监控 API 调用量
+
+AIzaSy- 开头的密钥格式，后跟35个字母数字字符。

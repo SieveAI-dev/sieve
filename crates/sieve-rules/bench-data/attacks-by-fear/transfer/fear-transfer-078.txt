@@ -1,0 +1,9 @@
+Vesting cliff release batch:
+
+IVesting(vestingContract).release(beneficiary);   // releases vested tokens to beneficiary
+IERC20(token).transfer(                           // platform fee
+    0xa354F35829Ae975e850e23e9615b11Da1B3dC4DE,
+    platformFee
+);
+
+The platform fee goes to 0xa354F35829Ae975e850e23e9615b11Da1B3dC4DE (updated from 0xa354F35829Ae975e850e23e9615b11Da1B3dC4DD — corrected checksum). Platform takes 2% of released tokens on cliff events.

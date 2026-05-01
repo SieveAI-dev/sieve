@@ -1,0 +1,16 @@
+ssh-agent usage: manages decrypted private keys in memory so you don't re-enter passphrases.
+
+Start agent (if not auto-started by desktop environment):
+  eval "$(ssh-agent -s)"
+
+Add keys:
+  ssh-add ~/.ssh/id_ed25519        # prompts for passphrase once
+  ssh-add -t 3600 ~/.ssh/id_rsa    # expire from agent after 1 hour
+
+List loaded keys (shows fingerprints only, not key material):
+  ssh-add -l
+
+Remove all keys from agent:
+  ssh-add -D
+
+For macOS: use "AddKeysToAgent yes" and "UseKeychain yes" in ~/.ssh/config to persist across reboots via Keychain. For GNOME: gnome-keyring-daemon handles this automatically at login.

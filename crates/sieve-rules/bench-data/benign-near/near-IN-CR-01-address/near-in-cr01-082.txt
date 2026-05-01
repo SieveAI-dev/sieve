@@ -1,0 +1,18 @@
+Solidity 地址常量库（教学示例，中文注释）:
+
+```solidity
+pragma solidity ^0.8.20;
+
+library KnownAddresses {
+    // Uniswap V3 工厂
+    address constant UNI_FACTORY = 0x1F98431c8aD98523631AE4a59f267346ea31F984;
+    // WETH
+    address constant WETH        = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
+    // USDC
+    address constant USDC        = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
+    // 零地址哨兵值
+    address constant ZERO        = address(0);
+}
+```
+
+以上均为公开记录的合约地址，可安全硬编码。

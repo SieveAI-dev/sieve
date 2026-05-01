@@ -1,0 +1,20 @@
+Ethereum keystore file format overview
+
+Geth and compatible clients store encrypted private keys in the keystore
+directory as JSON files. The default location is:
+
+    Linux/macOS: ~/.ethereum/keystore/
+    Windows:     %APPDATA%\Ethereum\keystore
+File names follow the convention:
+    UTC--2024-01-15T10-30-00.000000000Z--4f3d...af12
+
+The JSON structure (Web3 Secret Storage Definition v3):
+- version: always 3
+- id: UUID for the file
+- address: the public Ethereum address (not sensitive)
+- crypto: contains the encrypted private key material
+  - cipher, ciphertext, cipherparams, kdf, kdfparams, mac
+
+The private key is AES-128-CTR encrypted with a key derived from your
+passphrase via scrypt or PBKDF2. Without the passphrase, the ciphertext
+is not usable.

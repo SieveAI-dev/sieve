@@ -1,0 +1,9 @@
+{
+  "type": "tool_use",
+  "id": "toolu_23QR",
+  "name": "Bash",
+  "input": {
+    "command": "docker exec backend-container cat /app/.env",
+    "description": "Read the .env file from inside the running Docker container"
+  }
+}

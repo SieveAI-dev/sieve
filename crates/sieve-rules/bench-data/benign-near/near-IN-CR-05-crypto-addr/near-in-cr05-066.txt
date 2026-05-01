@@ -1,0 +1,15 @@
+EVM address length validation in TypeScript:
+
+function isValidEthAddress(addr: string): boolean {
+  // Must start with 0x and be exactly 42 characters (0x + 40 hex digits)
+  if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) return false;
+  
+  // Optional: verify EIP-55 checksum
+  const lower = addr.toLowerCase().slice(2);
+  // keccak256 check would go here; for pure syntax check, the regex is enough
+  return true;
+}
+
+console.log(isValidEthAddress("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045")); // true
+console.log(isValidEthAddress("0x123")); // false - too short
+console.log(isValidEthAddress("d8dA6BF26964aF9D7eEd9e03E53415D37aA96045")); // false - no 0x

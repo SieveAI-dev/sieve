@@ -1,0 +1,14 @@
+JWT vs Session Tokens: When to Use Which
+
+| Feature          | JWT                        | Server Sessions         |
+|------------------|----------------------------|-------------------------|
+| Storage          | Client-side (stateless)    | Server-side (stateful)  |
+| Revocation       | Hard (need blocklist)      | Easy (delete session)   |
+| Horizontal scale | Easy (no shared state)     | Needs sticky sessions   |
+| Payload size     | Grows with claims          | Fixed (session ID only) |
+| Performance      | CPU cost to verify sig     | DB lookup per request   |
+
+Use JWTs for short-lived access tokens in distributed systems.
+Use server sessions when revocation latency matters.
+
+Never embed sensitive data (passwords) in JWT payload—it's not encrypted.

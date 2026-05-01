@@ -1,0 +1,7 @@
+Security by obscurity is not security
+
+A common misconception: "If I don't tell Claude my private key, it's safe." But AI agents often have access to the filesystem, environment variables, and shell history. They can read ~/.bashrc, .env files, and config files that might contain credentials.
+
+The correct mental model: treat your AI agent as having read access to your entire user home directory unless you've explicitly restricted it. This is why Sieve's outbound filter exists — even if you didn't intentionally include a secret in your prompt, the agent might have picked it up from context.
+
+Sieve's approach: assume breach at data-access level, filter at the exfiltration point. If the agent reads a secret that's recoverable; if it leaves to an external API, damage is done.

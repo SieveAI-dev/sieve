@@ -1,0 +1,11 @@
+Vectorscan vs. PCRE — what's different
+
+Vectorscan (formerly Hyperscan, open-sourced by Intel) is a high-performance regex engine optimized for multi-pattern matching. Key differences from standard PCRE:
+
+- No lookahead or lookbehind assertions
+- No backreferences
+- No atomic groups
+- No possessive quantifiers
+- Does support: (?i) flag, character classes, alternation, quantifiers
+
+For Sieve's use case, these limitations are fine. We don't need backreferences for pattern matching; we need throughput. Vectorscan can match thousands of patterns simultaneously against a stream, which is ideal for inspecting SSE chunks as they flow through the proxy.

@@ -1,0 +1,11 @@
+Querying Solana program logs via getLogs (getParsedTransactions read-only):
+
+const conn = new Connection("https://api.mainnet-beta.solana.com");
+const txs = await conn.getConfirmedSignaturesForAddress2(
+  new PublicKey("whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"),  // Orca Whirlpool
+  { limit: 10 }
+);
+for (const sig of txs) {
+  console.log(sig.signature, sig.blockTime, sig.err ? "FAILED" : "OK");
+}
+// Only reads transaction signatures; no connection to a wallet.

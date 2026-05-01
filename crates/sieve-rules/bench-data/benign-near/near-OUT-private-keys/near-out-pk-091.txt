@@ -1,0 +1,13 @@
+SSH escape sequences — useful during active SSH sessions:
+
+~.    Disconnect (terminate SSH session, even if network hung)
+~^Z   Suspend SSH client (send to background, like Ctrl+Z for local jobs)
+~#    List forwarded connections
+~&    Background SSH client at logout (when waiting for forwarded connections)
+~?    Show all escape sequences
+
+These require ~ at the START of a line (after pressing Enter). If you need to send a literal tilde, type ~~ (two tildes).
+
+Useful when: server stops responding but network hung → ~. terminates without waiting for TCP timeout. Or when you need to add a port forward to an existing session without reconnecting.
+
+Note: SSH escape sequences have no relation to private keys — they're session control features. Key authentication happens at connection establishment only.

@@ -1,0 +1,12 @@
+MakerDAO (MKR + DAI) core addresses on Ethereum:
+
+MKR Token: 0x9f8F72aA9304c8B593d555F12eF6589cC3A579A2
+DAI Token: 0x6B175474E89094C44Da98b954EedeAC495271d0F
+Dai Join: 0x9759A6Ac90977b93B58547b4A71c78317f391A28
+Vat (core accounting): 0x35D1b3F3D7966A1DFe207aa4514C12a259A0492B
+Pot (DAI savings rate): 0x197E90f9FAD81970bA7976f33CbD77088E5D7cf7
+
+Read-only inspection of the DAI savings rate:
+const potAbi = ["function dsr() view returns (uint256)"];
+const pot = new ethers.Contract("0x197E90f9FAD81970bA7976f33CbD77088E5D7cf7", potAbi, provider);
+const dsr = await pot.dsr();

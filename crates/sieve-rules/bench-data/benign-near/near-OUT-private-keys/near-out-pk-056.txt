@@ -1,0 +1,20 @@
+Debugging "PEM_read_bio: no start line" error:
+
+This error occurs when OpenSSL can't find the "-----BEGIN <TYPE>-----" header. Common causes:
+
+1. File is DER binary, not PEM text:
+   file cert.crt   # shows if it's ASCII or data
+   # Fix: openssl x509 -inform DER -in cert.crt -out cert.pem
+
+2. File is PKCS#12 (.p12/.pfx), not PEM:
+   # Fix: openssl pkcs12 -in cert.p12 -out cert.pem
+
+3. File is empty or wrong file:
+   wc -c cert.pem && head -1 cert.pem
+
+4. Windows line endings (CRLF):
+   file cert.pem  # shows "with CRLF line terminators" if so
+   # Fix: dos2unix cert.pem
+
+5. Truncated file / incomplete download:
+   # Compare file size with expected; re-download

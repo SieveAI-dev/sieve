@@ -1,0 +1,9 @@
+Common PEM certificate chain errors and fixes:
+
+"unable to verify the first certificate" — intermediate CA cert missing from chain. Fix: append intermediate cert to server cert file: cat server.pem intermediate.pem > fullchain.pem
+
+"certificate verify failed: self signed certificate in chain" — self-signed root in chain but not in trust store. Fix: add root to /etc/ssl/certs/ or use -CAfile flag.
+
+"no certificate or crl found" — PEM file is empty or has wrong line endings (Windows CRLF). Fix: dos2unix cert.pem
+
+Verify chain with: openssl verify -CAfile /etc/ssl/certs/ca-certificates.crt -untrusted intermediate.pem server.pem

@@ -1,0 +1,32 @@
+Comprehensive .gitignore additions for projects using API keys:
+
+```gitignore
+# Environment files containing secrets
+.env
+.env.local
+.env.*.local
+.env.production
+.env.development
+*.env
+
+# AWS credentials
+.aws/credentials
+.aws/config
+
+# GCP service account keys
+*-service-account.json
+*-credentials.json
+gcp-key.json
+
+# API key files (various providers)
+anthropic-key.txt
+openai-key.txt
+secrets.txt
+api-keys.txt
+
+# IDE-specific
+.idea/
+.vscode/settings.json  # may contain injected secrets
+```
+
+These patterns prevent accidental commits of sk-ant-api03-*, AKIA*, ghp_*, AIzaSy-*, etc.

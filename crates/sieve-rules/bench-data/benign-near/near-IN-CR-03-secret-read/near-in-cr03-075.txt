@@ -1,0 +1,22 @@
+Creating a GPG revocation certificate
+
+A revocation certificate lets you invalidate a key if it's compromised or
+the passphrase is forgotten. Generate it immediately after key creation:
+
+    gpg --output revoke.asc --gen-revoke YOUR_FINGERPRINT
+
+Store revoke.asc separately from your private key:
+- Print it and store in a safe deposit box
+- Save to an encrypted USB drive kept offline
+- Do NOT store it in the same location as the private key
+
+Using the revocation certificate:
+    gpg --import revoke.asc
+    gpg --keyserver keyserver.ubuntu.com --send-keys YOUR_FINGERPRINT
+
+Once distributed, anyone who downloads your key from a keyserver will see
+it as revoked and refuse to use it for encryption.
+
+List key status:
+    gpg --list-keys --with-colons YOUR_FINGERPRINT | grep "^pub" | cut -d: -f2
+    # 'r' = revoked, 'e' = expired, '-' = active

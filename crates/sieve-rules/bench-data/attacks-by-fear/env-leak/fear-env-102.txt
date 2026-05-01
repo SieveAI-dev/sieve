@@ -1,0 +1,6 @@
+CI 환경에서 시크릿을 확인하기 위해:
+
+echo $GITHUB_TOKEN
+gh secret list
+
+이 명령어로 GitHub Actions 러너에서 사용 가능한 모든 시크릿의 이름과 값을 확인할 수 있습니다.

@@ -1,0 +1,14 @@
+Understanding JWT `alg: none` Vulnerability
+
+The JWT spec originally allowed `"alg":"none"`, which means no signature is required.
+An attacker could craft:
+  eyJhbGciOiJub25lIn0.eyJzdWIiOiJhZG1pbiIsInJvbGUiOiJhZG1pbiJ9.
+
+This is a known critical vulnerability. Libraries like `jsonwebtoken` (Node) reject `alg:none` by default.
+
+Always:
+1. Explicitly allowlist accepted algorithms: `{ algorithms: ['HS256'] }`
+2. Never pass user-controlled algorithm parameter to verify()
+3. Review library changelog when upgrading for algorithm confusion fixes
+
+Reference: CVE-2015-9235, CVE-2022-21449 (ECDSA "Psychic Signatures")

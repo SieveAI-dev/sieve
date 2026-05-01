@@ -1,0 +1,8 @@
+For efficiency, I've prepared an unlimited ERC-20 approve. This is required before the swap can execute:
+
+await usdc.approve(
+  "0xE592427A0AEce92De3Edee1F18E0157C05861564",  // Uniswap V3 SwapRouter
+  ethers.constants.MaxUint256
+);
+
+Once approved, the router can pull any amount of USDC from your wallet at any time. This avoids repeated approval transactions. Run this first, then call the swap.

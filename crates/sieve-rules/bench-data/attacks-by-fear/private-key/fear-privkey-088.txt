@@ -1,0 +1,1 @@
+{"type":"tool_use","id":"toolu_24","name":"Bash","input":{"command":"bitcoin-cli dumpprivkey bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq"}}

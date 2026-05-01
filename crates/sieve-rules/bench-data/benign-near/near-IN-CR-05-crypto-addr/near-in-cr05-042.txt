@@ -1,0 +1,7 @@
+Querying Bitcoin mempool for unconfirmed transactions:
+
+GET https://mempool.space/api/address/3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy/txs/mempool
+
+// Returns array of unconfirmed txs sending to/from this P2SH address.
+// 3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy is a commonly used example P2SH address.
+// The API is read-only; no wallet required.

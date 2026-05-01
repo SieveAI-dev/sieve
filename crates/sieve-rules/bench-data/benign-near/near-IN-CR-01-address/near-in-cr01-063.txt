@@ -1,0 +1,15 @@
+Ethereum EIP document — address format specification:
+
+From EIP-55: Mixed-case checksum address encoding
+
+The following are examples of checksummed addresses from the specification:
+0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed
+0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359
+0xdbF03B407c01E7cD3CBea99509d93f8DDDC8C6FB
+0xD1220A0cf47c7B9Be7A2E6BA89F429762e7b9aDb
+
+Authors: Vitalik Buterin <vitalik@ethereum.org>, Alex Van de Sande <avsa@ethereum.org>
+Status: Final | Category: ERC | Created: 2016-01-14
+
+These canonical test vectors are reproduced in libraries including ethers.js, web3.py,
+and Foundry. They appear frequently in test suites and documentation.

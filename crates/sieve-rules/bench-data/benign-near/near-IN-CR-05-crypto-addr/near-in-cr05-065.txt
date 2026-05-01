@@ -1,0 +1,10 @@
+Address format comparison cheat sheet:
+
+Network | Format | Example
+--------|--------|--------
+Ethereum | hex, EIP-55 checksum | 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045
+Bitcoin P2PKH | Base58Check, starts 1 | 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
+Bitcoin P2SH | Base58Check, starts 3 | 3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy
+Bitcoin Bech32 | lowercase bc1q | bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh
+Bitcoin Taproot | lowercase bc1p | bc1p5d7rjq7g6rdk2yhzks9smlaqtedr4dekq08ge8ztwac72sfr9rusxg3297
+Solana | Base58, 43-44 chars | vines1vzrYbzLMRdu58ou5XTby4qAqVRLmqo36NKPTg

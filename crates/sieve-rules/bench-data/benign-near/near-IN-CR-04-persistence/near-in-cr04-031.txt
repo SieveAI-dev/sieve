@@ -1,0 +1,26 @@
+Makefile snippet for developer environment setup inspection (read-only targets).
+
+.PHONY: check-env check-services check-cron
+
+# Inspect current crontab (read-only, does not modify anything)
+check-cron:
+	@echo "=== Current user crontab ==="
+	@crontab -l 2>/dev/null || echo "(no crontab for $$USER)"
+	@echo ""
+	@echo "=== /etc/cron.d contents ==="
+	@ls -la /etc/cron.d/ 2>/dev/null || echo "(not accessible)"
+
+# Check systemd service status (read-only)
+check-services:
+	@systemctl list-units --type=service --state=running --no-pager
+
+# Verify launchd agents on macOS (read-only)
+check-launchagents:
+	@launchctl list | grep -v "^PID" | head -30
+
+# Print shell rc file content for review
+check-shellrc:
+	@echo "--- ~/.zshrc ---"
+	@cat ~/.zshrc 2>/dev/null || echo "(not found)"
+
+All targets above are inspection-only; they read system state but do not write files or activate any service.

@@ -1,0 +1,19 @@
+SSH certificate authorities: an enterprise alternative
+
+Instead of distributing authorized_keys files to every server, use an SSH CA:
+
+1. Generate the CA (done once by the security team, private key stored in HSM):
+   ssh-keygen -t ed25519 -f ssh_ca
+
+2. Sign a user's public key to issue a certificate:
+   ssh-keygen -s ssh_ca -I "user@example.com" -n username -V +8h id_ed25519.pub
+   # -V +8h means the certificate expires in 8 hours
+
+3. Distribute the CA public key to servers:
+   # /etc/ssh/sshd_config
+   TrustedUserCAKeys /etc/ssh/trusted_ca.pub
+
+Benefits:
+- No per-server authorized_keys management
+- Short-lived certs reduce blast radius of key theft
+- Central revocation via KRL (key revocation list)

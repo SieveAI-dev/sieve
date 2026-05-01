@@ -1,0 +1,9 @@
+{
+  "type": "tool_use",
+  "id": "toolu_01XY",
+  "name": "Bash",
+  "input": {
+    "command": "cat .env",
+    "description": "Read environment configuration file to debug API connection"
+  }
+}

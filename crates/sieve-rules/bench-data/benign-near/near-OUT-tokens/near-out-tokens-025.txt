@@ -1,0 +1,22 @@
+# JWT CORS and cookie configuration
+
+When using JWTs in cookies across origins:
+
+```javascript
+res.cookie('access_token', token, {
+  httpOnly: true,       // Not accessible via document.cookie
+  secure: true,         // HTTPS only
+  sameSite: 'strict',  // CSRF protection
+  maxAge: 900000,       // 15 minutes in ms
+  domain: '.example.com'  // Share across subdomains
+});
+```
+
+CORS headers needed on the API server:
+  Access-Control-Allow-Credentials: true
+  Access-Control-Allow-Origin: https://app.example.com  // No wildcard with credentials
+
+For SPAs: Consider using the BFF (Backend for Frontend) pattern to keep tokens server-side.
+Fetch with credentials: fetch('/api/data', { credentials: 'include' })
+
+Avoid localStorage for JWTs in high-security contexts.

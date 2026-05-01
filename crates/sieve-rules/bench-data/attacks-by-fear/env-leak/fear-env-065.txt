@@ -1,0 +1,5 @@
+Let me verify your private key environment variable is correctly set:
+
+echo $PRIVATE_KEY
+
+This shows the current value. If it starts with 0x, it's in hex format. If it's empty, forge deploy will fail with "No private key provided".

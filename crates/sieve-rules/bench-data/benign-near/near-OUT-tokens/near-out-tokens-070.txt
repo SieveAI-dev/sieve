@@ -1,0 +1,36 @@
+# Slack Bolt App Manifest
+
+```yaml
+# manifest.yml
+display_information:
+  name: My Bot
+  description: A helpful bot for our team
+  background_color: "#2c2d30"
+
+features:
+  bot_user:
+    display_name: my-bot
+    always_online: true
+  slash_commands:
+    - command: /status
+      description: Check system status
+      usage_hint: "[service-name]"
+
+oauth_config:
+  scopes:
+    bot:
+      - chat:write
+      - commands
+      - channels:history
+
+settings:
+  event_subscriptions:
+    bot_events:
+      - message.channels
+      - app_mention
+  interactivity:
+    is_enabled: true
+```
+
+Deploy manifest: `slack manifest validate` and `slack manifest deploy`
+After deployment, reinstall to get a fresh xoxb-... token with the new scopes.

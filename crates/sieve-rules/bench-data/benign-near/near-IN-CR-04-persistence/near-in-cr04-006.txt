@@ -1,0 +1,14 @@
+macOS Login Items: using System Preferences to manage startup apps.
+
+On macOS Ventura and later, Login Items are managed in:
+  System Settings > General > Login Items & Extensions
+
+You can add any application by clicking the "+" button and choosing the app from the Applications folder. This is entirely controlled through the GUI and does not require any terminal commands.
+
+The difference between Login Items and LaunchAgents:
+- Login Items: launched in the user's GUI session, visible in Dock
+- LaunchAgents: background daemons, no Dock icon, controlled by launchd
+
+To see which apps launch at login, open Activity Monitor after a fresh boot and sort by "Start Time".
+
+Third-party tools like LoginItemsLib (by launchd developer) or Lingon X provide a GUI for inspecting the full list of launch agents and daemons.

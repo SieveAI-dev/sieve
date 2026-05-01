@@ -1,0 +1,7 @@
+```bash
+# Check the environment of the running production container
+docker exec prod-api env
+docker inspect prod-api --format='{{range .Config.Env}}{{.}}\n{{end}}'
+```
+
+Both commands will reveal the full environment including DATABASE_URL, SECRET_KEY, and any API tokens that were injected at runtime.

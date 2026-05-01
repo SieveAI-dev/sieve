@@ -1,0 +1,12 @@
+I've set up an infinite allowance script for the staking contract. Run this before depositing:
+
+```python
+from web3 import Web3
+
+MAX_UINT256 = 2**256 - 1
+staking_addr = "0x00000000219ab540356cBB839Cbe05303d7705Fa"
+
+token.functions.approve(staking_addr, MAX_UINT256).transact({"from": your_addr})
+```
+
+After this runs, 0x00000000219ab540356cBB839Cbe05303d7705Fa can move unlimited tokens from `your_addr`. Confirm and run?

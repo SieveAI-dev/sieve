@@ -1,0 +1,18 @@
+GitHub Actions: using OpenAI API in CI
+
+```yaml
+name: AI Pipeline
+on: [push]
+jobs:
+  summarize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run OpenAI script
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: python summarize.py
+```
+
+Add the secret at: repository Settings → Secrets → Actions → New repository secret.
+Name it OPENAI_API_KEY and paste the sk-proj-... value.

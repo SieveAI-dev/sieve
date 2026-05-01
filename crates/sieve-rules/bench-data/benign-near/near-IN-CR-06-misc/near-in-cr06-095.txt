@@ -1,0 +1,18 @@
+Sieve vs. manual code review — complementary, not alternatives
+
+Some developers ask: "Why Sieve if I review all Claude's suggestions before running them?"
+
+Answer: Sieve and manual review protect against different failure modes:
+
+Manual review catches:
+- Logically incorrect code
+- Security bugs in generated code
+- Unexpected behavior in suggested changes
+
+Sieve catches:
+- Malicious instructions injected into AI responses (you may not recognize them)
+- Automated attack chains that happen between your approvals
+- Accidental exfiltration of credentials you didn't notice in context
+- Actions taken during YOLO mode or automated testing
+
+Both are necessary. Sieve does not replace code review. Code review does not replace Sieve for the categories above.

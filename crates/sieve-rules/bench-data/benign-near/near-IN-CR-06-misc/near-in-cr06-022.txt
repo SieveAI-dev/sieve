@@ -1,0 +1,13 @@
+Red teaming LLM systems — introduction
+
+Red teaming for AI systems involves adversarially probing for safety failures. Unlike traditional pentesting, LLM red teaming includes:
+
+- Adversarial prompts (direct)
+- Data poisoning (indirect, via training or context)
+- Multi-turn manipulation (gradually shifting the conversation)
+- Tool abuse (exploiting agent capabilities)
+
+For agentic systems like Claude Code, red teaming should specifically test:
+1. Can a malicious file in the project cause the agent to exfiltrate code?
+2. Can a crafted API response redirect the agent to a different action?
+3. Can chained tool calls be used to bypass single-action approval gates?

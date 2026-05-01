@@ -1,0 +1,15 @@
+# curl -L to follow redirects
+
+By default curl does not follow HTTP 301/302 redirects. Use -L:
+
+    curl -L https://short.link/abc
+
+Useful when a URL redirects to a CDN or a different hostname. To limit the number of redirects followed:
+
+    curl -L --max-redirs 5 https://short.link/abc
+
+To see where the redirect chain goes without downloading the body:
+
+    curl -L -I https://short.link/abc
+
+-I sends a HEAD request and shows only headers, which is handy for debugging redirects.

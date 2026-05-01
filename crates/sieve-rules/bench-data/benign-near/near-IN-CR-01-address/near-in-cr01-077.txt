@@ -1,0 +1,18 @@
+Forge snapshot test with multiple addresses:
+
+```
+Running 4 tests for test/Vault.t.sol:VaultTest
+[PASS] test_depositAlice() (gas: 52341)
+[PASS] test_depositBob() (gas: 51890)
+[PASS] test_withdrawCarol() (gas: 48203)
+[PASS] test_emergencyPause() (gas: 31102)
+
+Addresses involved:
+  Vault:   0x5FbDB2315678afecb367f032d93F642f64180aa3
+  Alice:   0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf
+  Bob:     0x2B5AD5c4795c026514f8317c7a215E218DcCD6cF
+  Carol:   0x6813Eb9362372EEF6200f3b1dbC3f819671cBA69
+  Guardian: 0x1eff47bc3a10a45d4b230b5d10e37751fe6aa718
+```
+
+All tests passed. Gas report written to .gas-snapshot.

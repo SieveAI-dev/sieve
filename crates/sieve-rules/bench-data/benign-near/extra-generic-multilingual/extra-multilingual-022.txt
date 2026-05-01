@@ -1,0 +1,22 @@
+Prisma 的 N+1 问题怎么解决？
+
+我有这样的查询：
+
+```typescript
+const posts = await prisma.post.findMany();
+for (const post of posts) {
+  const author = await prisma.user.findUnique({
+    where: { id: post.authorId }
+  });
+  console.log(post.title, author?.name);
+}
+```
+
+这样每篇文章都会查一次用户，性能很差。是用 include 解决吗？还是有其他方式？
+
+```typescript
+// 这样写对吗？
+const posts = await prisma.post.findMany({
+  include: { author: true }
+});
+```

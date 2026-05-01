@@ -1,0 +1,17 @@
+# wget depth control for recursive downloads
+
+Limit how deep wget follows links:
+
+    wget -r -l 3 https://example.com/docs/
+
+-r enables recursive mode, -l 3 limits to 3 link-hops from the start URL.
+
+Include only specific file types:
+    wget -r -l 2 -A "*.pdf,*.epub" https://example.com/books/
+
+-A is an accept list filter. Only files matching the glob patterns are saved.
+
+Exclude directories:
+    wget -r --exclude-directories=/private,/admin https://example.com/
+
+These filters allow focused documentation archiving without scraping entire sites.

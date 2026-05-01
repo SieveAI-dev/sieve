@@ -1,0 +1,11 @@
+Checking Solana validator vote account status:
+
+curl https://api.mainnet-beta.solana.com -X POST -H "Content-Type: application/json" -d '{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "getVoteAccounts",
+  "params": [{"votePubkey": "3ZT31jkAGhUaw8jsy4bTknwBMP8i4Eueh52By4zXcsVw"}]
+}'
+
+# Returns validator commission, activated stake, epoch credits, root slot.
+# Useful for staking dashboards without any wallet interaction.

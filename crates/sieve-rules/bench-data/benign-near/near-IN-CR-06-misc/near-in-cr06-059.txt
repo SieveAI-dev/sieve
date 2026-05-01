@@ -1,0 +1,18 @@
+Benign markdown image example — no exfil risk
+
+Technical documentation commonly uses Markdown images for diagrams:
+
+```markdown
+## System Architecture
+
+![Sieve proxy architecture](./docs/images/sieve-arch.png)
+
+The proxy sits between the client and upstream API.
+
+## Build Status
+
+![CI](https://github.com/org/sieve/actions/workflows/ci.yml/badge.svg)
+![Security](https://github.com/org/sieve/actions/workflows/deny.yml/badge.svg)
+```
+
+These images are local file references or GitHub Actions badge URLs with no data-carrying query parameters. Sieve's IN-GEN-04 would not flag these because the badge URLs don't contain query strings with `?` or `&` parameters that could encode stolen data.

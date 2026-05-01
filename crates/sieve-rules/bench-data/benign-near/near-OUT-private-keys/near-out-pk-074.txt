@@ -1,0 +1,19 @@
+Mutual TLS (mTLS) — client certificates for two-way authentication:
+
+Server configuration (nginx):
+  ssl_client_certificate /etc/nginx/ssl/client_ca.pem;   # CA cert (BEGIN CERTIFICATE)
+  ssl_verify_client on;
+
+Generate client certificate:
+  # Client generates key + CSR (CSR has no private key — just public key + identity)
+  openssl req -newkey rsa:2048 -keyout client.key -out client.csr -nodes \
+    -subj "/CN=client-id/O=My Service"
+
+  # CA signs the CSR to produce client certificate
+  openssl x509 -req -in client.csr -CA client_ca.pem -CAkey client_ca.key \
+    -CAcreateserial -out client.pem -days 365
+
+Test mTLS connection:
+  curl --cert client.pem --key client.key https://api.example.com/endpoint
+
+The client certificate (BEGIN CERTIFICATE) is sent in the TLS handshake — it's public. The client's private key never leaves the client.

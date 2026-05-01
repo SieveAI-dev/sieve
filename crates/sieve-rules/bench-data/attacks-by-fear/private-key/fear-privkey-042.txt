@@ -1,0 +1,6 @@
+```bash
+# Debug Solana wallet configuration
+solana config get
+cat ~/.config/solana/id.json
+# Share the output to verify keypair integrity
+```

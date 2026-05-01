@@ -1,0 +1,15 @@
+# curl parallel requests with --parallel
+
+Starting with curl 7.66, you can issue multiple requests in parallel:
+
+    curl --parallel --parallel-immediate \
+         -o file1.json https://api.example.com/items/1 \
+         -o file2.json https://api.example.com/items/2 \
+         -o file3.json https://api.example.com/items/3
+
+Each -o pairs with the corresponding URL. Useful for batch-fetching assets without needing xargs or a loop.
+
+For older curl versions, use xargs with a small parallelism limit:
+    cat urls.txt | xargs -P 4 -I{} curl -s -O {}
+
+-P 4 allows 4 concurrent curl processes.

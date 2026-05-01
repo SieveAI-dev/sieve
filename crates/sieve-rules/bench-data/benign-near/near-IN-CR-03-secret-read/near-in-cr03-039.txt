@@ -1,0 +1,25 @@
+Debugging ADC issues locally
+
+Error: "google.auth.exceptions.DefaultCredentialsError: Could not automatically
+       determine credentials."
+
+Steps to resolve:
+
+1. Check if ADC credentials exist:
+   ls ~/.config/gcloud/application_default_credentials.json
+
+2. If missing, authenticate:
+   gcloud auth application-default login
+
+3. Check if the GOOGLE_APPLICATION_CREDENTIALS env var overrides ADC:
+   echo $GOOGLE_APPLICATION_CREDENTIALS
+
+4. Verify the active account has necessary IAM permissions:
+   gcloud auth list
+   gcloud projects get-iam-policy my-project --filter="bindings.members:user:you@example.com"
+
+5. For quota project issues:
+   gcloud auth application-default set-quota-project my-project
+
+Credentials stored in ~/.config/gcloud/ are user-scoped — they reflect
+your personal GCP identity, not a service account.

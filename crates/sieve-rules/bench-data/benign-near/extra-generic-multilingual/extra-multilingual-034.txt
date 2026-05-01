@@ -1,0 +1,13 @@
+Python asyncio에서 timeout을 설정하는 방법을 알고 싶습니다.
+
+```python
+async def fetch(url: str) -> str:
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as response:
+            return await response.text()
+```
+
+이 함수에 5초 타임아웃을 적용하려면 어떻게 해야 하나요?
+`asyncio.wait_for`와 `asyncio.timeout` (Python 3.11+)의 차이점은 무엇인가요?
+
+TimeoutError가 발생했을 때 session이 정상적으로 닫히는지도 궁금합니다.

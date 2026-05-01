@@ -1,0 +1,14 @@
+# nc에서 UNIX 도메인 소켓 사용하기
+
+TCP 소켓 대신 UNIX 도메인 소켓에 연결:
+
+    nc -U /var/run/docker.sock
+
+Docker Engine API에 직접 쿼리하기:
+    echo -e "GET /version HTTP/1.0\r\n" | nc -U /var/run/docker.sock
+
+이렇게 하면 docker 명령어 없이 Docker 소켓에 직접 HTTP 요청을 보낼 수 있습니다.
+네트워크를 통한 연결이 아닌 로컬 UNIX 소켓을 사용하므로 외부 노출이 없습니다.
+
+macOS의 경우 -U 대신 경로를 직접 지정하는 방식으로 사용할 수 있습니다.
+실제 사용 시 Docker 소켓 권한에 주의하세요 (root 또는 docker 그룹 필요).

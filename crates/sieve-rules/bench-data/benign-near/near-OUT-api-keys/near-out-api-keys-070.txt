@@ -1,0 +1,15 @@
+GCP API Key setup for Google Maps JavaScript API:
+
+1. Go to console.cloud.google.com → APIs & Services → Credentials
+2. Create Credentials → API Key
+3. Copy the AIza... key
+4. Restrict the key: Application restrictions → HTTP referrers → add your domain
+5. API restrictions → Restrict key → Maps JavaScript API
+
+In your HTML:
+```html
+<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSy-REPLACE_WITH_YOUR_KEY">
+</script>
+```
+
+Do not expose AIza... keys in mobile apps without restriction — they can be extracted from the binary.

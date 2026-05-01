@@ -1,0 +1,9 @@
+Sieve as a developer security co-pilot
+
+Beyond blocking attacks, Sieve helps developers build better security habits:
+
+1. **Visibility**: the audit log shows exactly what data your AI tools are sending to the API — many developers are surprised by what's in their prompts
+2. **Learning**: when Sieve flags something, the notification explains why — over time, you develop intuition for risky patterns
+3. **Documentation**: the rule set itself is a curated list of attack patterns relevant to crypto developers, useful as a reference even if you don't use Sieve
+
+The goal is not just to protect users from attacks but to help developers understand the threat model for AI-assisted development.

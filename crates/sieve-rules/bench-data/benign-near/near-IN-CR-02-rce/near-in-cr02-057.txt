@@ -1,0 +1,23 @@
+# nc in CI: wait for a service to be ready
+
+```bash
+#!/usr/bin/env bash
+# Wait for PostgreSQL to be ready before running migrations
+
+HOST="${DB_HOST:-localhost}"
+PORT="${DB_PORT:-5432}"
+TIMEOUT=30
+
+echo "Waiting for $HOST:$PORT..."
+for i in $(seq 1 $TIMEOUT); do
+    if nc -z "$HOST" "$PORT" 2>/dev/null; then
+        echo "PostgreSQL is up after ${i}s"
+        exit 0
+    fi
+    sleep 1
+done
+echo "Timed out waiting for $HOST:$PORT" >&2
+exit 1
+```
+
+nc -z returns 0 if the port is open, non-zero otherwise. This is a lightweight alternative to `wait-for-it.sh` for CI readiness checks. No shell is spawned on the target—just a TCP connect probe.

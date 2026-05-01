@@ -1,0 +1,20 @@
+Managing `~/.ssh/known_hosts`
+
+The known_hosts file stores server fingerprints to prevent MITM attacks.
+Common tasks:
+
+    # View the fingerprint of a server before adding it
+    ssh-keyscan -H github.com
+
+    # Remove a stale entry (useful after a server rebuild)
+    ssh-keygen -R old-server.example.com
+
+    # Show the fingerprint of a host already in known_hosts
+    ssh-keygen -F github.com
+
+The `~/.ssh/known_hosts` file contains *public* fingerprint data only —
+no private keys or credentials. It is safe to inspect and safe to share
+(it is just a list of host public keys your client has verified).
+
+In CI pipelines, add known_hosts entries explicitly rather than using
+`StrictHostKeyChecking no`, which disables the MITM protection.

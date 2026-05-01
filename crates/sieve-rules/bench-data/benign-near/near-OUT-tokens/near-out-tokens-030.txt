@@ -1,0 +1,20 @@
+## Stripe Restricted Keys
+
+Stripe allows creating restricted keys with limited permissions:
+  rk_live_XXXX (live) or rk_test_XXXX (test)
+
+Use restricted keys for the principle of least privilege:
+- Webhook handler: grant read-only on events
+- Billing portal: grant customer.portal.session.create only
+- Subscriptions: grant read/write on subscriptions only
+
+Creating restricted keys:
+  Dashboard → Developers → API Keys → Create restricted key
+
+Rotate restricted keys independently without affecting other services.
+Monitor usage per key in the Stripe Dashboard.
+
+Key prefix examples:
+  sk_test_xxxxxxxxxx  → full secret test key (server-side only)
+  rk_test_xxxxxxxxxx  → restricted test key (microservices)
+  pk_test_xxxxxxxxxx  → publishable test key (browser-safe)

@@ -1,0 +1,17 @@
+BIP44 derivation paths and what they mean for multi-chain wallets:
+
+m / purpose' / coin_type' / account' / change / address_index
+
+Common coin_types (SLIP-44):
+- 0: Bitcoin (BTC)
+- 60: Ethereum (ETH)
+- 501: Solana (SOL)
+- 195: TRON
+
+Example paths:
+- m/44'/60'/0'/0/0 → first Ethereum address from BIP44 HD wallet
+- m/44'/0'/0'/0/0  → first Bitcoin legacy address
+- m/44'/501'/0'/0' → first Solana address (Phantom default)
+
+The same 24-word mnemonic generates all addresses deterministically.
+Address 0x... or 1Abc... is derived; private key never leaves the device.

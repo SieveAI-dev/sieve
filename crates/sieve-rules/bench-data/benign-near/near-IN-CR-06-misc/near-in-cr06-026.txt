@@ -1,0 +1,16 @@
+How to audit Sieve itself
+
+Sieve is open source and its own supply chain is protected:
+- All release binaries are signed via sigstore (cosign keyless signing)
+- Reproducible builds: SOURCE_DATE_EPOCH is pinned to the commit timestamp
+- Dependency pinning: Cargo.lock is committed and cargo deny checks licenses and advisories
+
+To verify a downloaded binary:
+```
+cosign verify-blob --certificate sieve.pem --signature sieve.sig \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity https://github.com/yourorg/sieve/.github/workflows/release.yml \
+  sieve-linux-x86_64
+```
+
+You can also review the full rule set at crates/sieve-rules/rules/inbound.toml and outbound.toml — no hidden rules, no phone-home.

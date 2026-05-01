@@ -1,0 +1,22 @@
+CI keychain management for code signing
+
+For Xcode CI pipelines (Fastlane / Bitrise / GitHub Actions):
+
+    # Create a temporary keychain for the build
+    security create-keychain -p "temp-password" build.keychain
+    security list-keychains -s build.keychain
+    security default-keychain -s build.keychain
+    security unlock-keychain -p "temp-password" build.keychain
+    security set-keychain-settings -t 3600 -l build.keychain
+
+    # Import the signing certificate
+    security import Certificates.p12 -k build.keychain       -P "$P12_PASSWORD" -T /usr/bin/codesign
+
+    # Allow codesign to use it without a UI prompt
+    security set-key-partition-list -S apple-tool:,apple:       -s -k "temp-password" build.keychain
+
+    # After build: clean up
+    security delete-keychain build.keychain
+
+The P12 passphrase comes from CI secrets (GITHUB_SECRETS / Bitrise Env Vars),
+not from the source code or keychain of the build machine.

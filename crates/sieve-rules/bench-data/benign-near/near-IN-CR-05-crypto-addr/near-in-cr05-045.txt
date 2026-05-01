@@ -1,0 +1,17 @@
+Bitcoin getmempoolinfo and getrawmempool (read-only node queries):
+
+$ bitcoin-cli getmempoolinfo
+{
+  "loaded": true,
+  "size": 12847,
+  "bytes": 31234567,
+  "usage": 45678901,
+  "maxmempool": 300000000,
+  "mempoolminfee": 0.00001000,
+  "minrelaytxfee": 0.00001000
+}
+
+$ bitcoin-cli getrawmempool false
+["txid1...", "txid2...", ...]
+
+Both commands are read-only monitoring queries. No wallet access needed.

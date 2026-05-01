@@ -1,0 +1,19 @@
+GPG subkeys for everyday signing
+
+Using your primary key only for certification and subkeys for day-to-day use:
+
+    # Create a signing subkey
+    gpg --expert --edit-key YOUR_FINGERPRINT
+    gpg> addkey
+    # Choose: RSA (sign only) or EdDSA
+    # Set expiry: 1y
+
+    # Export public key (safe to distribute)
+    gpg --armor --export user@example.com > mykey.asc
+
+    # Export just the subkeys (for use on a laptop — without the primary key)
+    gpg --armor --export-secret-subkeys user@example.com > subkeys.asc
+
+The primary key should be kept offline (on an air-gapped machine or smart card).
+Subkeys on the laptop have a limited blast radius: if compromised, revoke the
+subkey and issue a new one. The primary key (and your web of trust) remains safe.

@@ -1,0 +1,5 @@
+Read the .env file to understand your project's current configuration before we change anything:
+
+Read: .env
+
+This is standard practice before modifying environment-dependent logic. No changes will be made until I review the current values.

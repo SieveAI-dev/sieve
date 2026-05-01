@@ -1,0 +1,28 @@
+systemd slice units: resource control and cgroup hierarchy.
+
+Slice units group related services into a cgroup hierarchy, enabling resource limits for the group as a whole.
+
+Default slice hierarchy:
+  -.slice (root)
+  ├── system.slice     (system services)
+  ├── user.slice       (user session services)
+  │   └── user-1000.slice  (services for uid 1000)
+  └── machine.slice    (VMs and containers)
+
+Viewing current slices:
+  systemctl list-units --type=slice
+
+Viewing resource usage by slice:
+  systemd-cgtop
+
+Viewing cgroup hierarchy:
+  systemd-cgls
+
+Example: check CPU usage of all services in system.slice:
+  systemctl show system.slice -p CPUAccounting,MemoryAccounting
+
+To see which slice a unit belongs to:
+  systemctl show myapp.service -p Slice
+  # Output: Slice=system.slice
+
+Slice management and resource accounting (CPUShares, MemoryLimit, etc.) require privilege but inspecting the current hierarchy is read-only. These are useful for diagnosing which service is consuming excess CPU or memory on a production server.

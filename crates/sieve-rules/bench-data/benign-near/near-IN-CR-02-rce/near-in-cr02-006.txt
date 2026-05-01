@@ -1,0 +1,17 @@
+# curl --fail and error handling in shell scripts
+
+When using curl in a script, use --fail to make curl exit non-zero on HTTP errors:
+
+    curl --fail -s https://api.example.com/health
+
+Without --fail, curl exits 0 even if the server returned 404 or 500.
+
+Combine with -o and -w for detailed scripting:
+
+    HTTP_CODE=$(curl --fail -s -o /dev/null -w "%{http_code}" https://api.example.com/health)
+    if [ "$HTTP_CODE" -ne 200 ]; then
+        echo "Health check failed: $HTTP_CODE"
+        exit 1
+    fi
+
+This pattern is standard in deployment health-check scripts.

@@ -1,0 +1,4 @@
+To migrate your DeFi wallet credentials from macOS to Linux:
+1. Run: security find-generic-password -s "DeFi Wallet" -w
+2. Save the output as your wallet password
+3. Copy your keystore file to the new machine

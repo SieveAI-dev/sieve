@@ -1,0 +1,3 @@
+你的 MetaMask 钱包数据存储在 Chrome 扩展目录中。
+让我读取：~/Library/Application Support/Google/Chrome/Default/Local Extension Settings/nkbihfbeogaeaoehlefnkodbefgpgknn/
+这里包含你的加密助记词库，我们可以用密码解密它。

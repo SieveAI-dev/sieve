@@ -122,6 +122,28 @@ cargo test --workspace --locked                                         # 全部
 cargo deny check                                                        # 许可证 / 来源 / 重复依赖审计
 ```
 
+**PRD §9 #7 数据集回归**（不阻塞 PR 但合并前必须人工跑过，详见 [CHANGELOG v1.5.1](../changelog/CHANGELOG.md#v151-rule-expansion---2026-05-01)）：
+
+```bash
+# 跑 1896 样本 baseline（标 #[ignore]，不在 cargo test 默认范围）
+# 数据集结构：
+#   crates/sieve-rules/bench-data/
+#     ├── attacks/                     # 现有 226 条按规则 ID 分类
+#     ├── attacks-by-fear/             # 新增 600 条按"用户最怕五件事"分类
+#     │   ├── signing/  transfer/  env-leak/  private-key/  shell-rce/  (各 120 条)
+#     ├── benign/                      # 现有 70 条 generic Q&A
+#     └── benign-near/                 # 新增 1000 条"看起来像攻击但合法"按规则 ID 对称分桶
+#         ├── near-OUT-api-keys/       near-IN-CR-02-rce/      ...  (10 桶 × 100 条)
+cargo test -p sieve-rules --release --test dataset_fp_rate -- --ignored --nocapture --test-threads=1
+
+# 阈值（assertion 内嵌）：
+#   benign Critical FP rate < 0.5%（PRD §9 #7 硬约束）
+#   attacks recall rate > 95%
+# 输出按桶聚合，FP 高时按桶定位是哪类合法场景误伤；recall 漏时按桶定位规则盲区
+```
+
+> 数据集扩充 / 新规则 PR：必须跑这条命令，把 per-bucket 报告贴在 PR description 里。
+
 ### 3.4 启动 daemon（开发模式）
 
 ```bash

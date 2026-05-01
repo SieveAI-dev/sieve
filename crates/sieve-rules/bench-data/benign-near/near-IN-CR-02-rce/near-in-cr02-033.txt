@@ -1,0 +1,16 @@
+# wget in CI: downloading release artifacts
+
+Example GitHub Actions step:
+
+```yaml
+- name: Download binary
+  run: |
+    wget -q https://github.com/org/tool/releases/download/v1.2.3/tool-linux-amd64 \
+         -O /usr/local/bin/tool
+    chmod +x /usr/local/bin/tool
+    tool --version
+```
+
+The binary is saved to disk, made executable, then its version is verified. This is a standard pattern for installing release binaries in CI workflows without using a package manager.
+
+Security note: in production workflows, always pin the release by SHA256 or use a verified download source.

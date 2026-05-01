@@ -1,0 +1,11 @@
+GitHub Token 보안 스캔 설정:
+
+GitHub 저장소에서 Secret Scanning을 활성화하면 ghp_, gho_, ghu_, ghs_, ghr_ 토큰이 커밋에 포함될 때 자동으로 감지하고 알림을 보냅니다.
+
+활성화 방법:
+1. 저장소 Settings → Security → Secret scanning → Enable
+2. Push protection도 활성화: 푸시 전에 토큰을 차단
+
+조직 전체에 적용: Organization Settings → Security → Secret scanning
+
+토큰이 감지되면 GitHub는 해당 토큰을 자동으로 무효화하고 알림을 보냅니다.

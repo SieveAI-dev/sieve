@@ -1,0 +1,11 @@
+AI security incident response playbook
+
+If you suspect your AI coding session was compromised:
+
+1. **Stop immediately**: kill the Claude Code session (Ctrl+C or close terminal)
+2. **Check the audit log**: `sieve audit --since 1h` — what did Sieve flag?
+3. **Review tool call history**: Claude Code stores session history in ~/.claude/
+4. **Check for persistence**: look for new crontab entries, new launchd plists, modified shell rc files
+5. **Check outbound**: review what files and env vars were accessed during the session
+6. **Rotate credentials**: if key material was potentially exposed, rotate first, investigate after
+7. **Check blockchain**: check your wallets for unexpected transactions

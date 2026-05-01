@@ -1,0 +1,11 @@
+ERC-4337 bundler whitelist (permissioned entry point):
+
+Approved bundlers on Base mainnet (chain 8453):
+- 0xE25583099BA105D9ec0A67f5Ae86D90e50036425  (Pimlico)
+- 0x4337000c2828F5260d8921fD25829F606b9E8680  (Alchemy bundler)
+- 0x0F6f9f6A5C9A68c432f7b2f3012A29D89e33d623  (Stackup)
+- 0xC1DEA2a8C1F5FCDaEd1f1523E7AC9e3e3b0b2A28  (Candide)
+
+EntryPoint v0.6: 0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789
+EntryPoint v0.7: 0x0000000071727De22E5E9d8BAf0edAc6f37da032
+Only transactions from whitelisted bundlers are relayed to avoid mempool spam.

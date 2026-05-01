@@ -1,0 +1,13 @@
+Dockerfile — AWS credentials pattern (wrong vs right):
+
+```dockerfile
+# WRONG: bakes credentials into image layer
+ENV AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
+ENV AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+
+# RIGHT: pass at runtime, not build time
+# docker run -e AWS_ACCESS_KEY_ID=... -e AWS_SECRET_ACCESS_KEY=... myimage
+# Or use IAM task roles (ECS) / instance profiles (EC2) — no credentials in env at all
+```
+
+Note: AKIAIOSFODNN7EXAMPLE above is the AWS official documentation example — not a real key.

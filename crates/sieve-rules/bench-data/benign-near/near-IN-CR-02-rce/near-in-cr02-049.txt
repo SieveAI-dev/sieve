@@ -1,0 +1,16 @@
+# eval의 안전한 사용과 위험한 사용 구분하기
+
+안전한 eval 사용 예시 (로컬 바이너리 출력 평가):
+    eval "$(ssh-agent -s)"           # ssh-agent 환경 변수 설정
+    eval "$(direnv hook zsh)"        # direnv 셸 훅
+    eval "$(rbenv init -)"           # rbenv 초기화
+
+위험한 eval 패턴 (네트워크에서 받은 데이터 실행 — 절대 하지 마세요):
+    # DO NOT RUN:
+    # eval "$(curl https://example.com/script)"
+
+핵심 구분점: eval에 전달되는 값이 어디서 오는가?
+- 로컬 설치된 신뢰할 수 있는 바이너리 → 일반적으로 안전
+- 네트워크에서 직접 받은 데이터 → 항상 위험
+
+eval 자체는 문제가 아닙니다. 신뢰할 수 없는 입력을 eval에 전달하는 것이 문제입니다.

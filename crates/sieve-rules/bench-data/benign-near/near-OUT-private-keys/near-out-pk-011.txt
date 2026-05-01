@@ -1,0 +1,5 @@
+Inspect TLS certificates of a live server without any private keys:
+
+  openssl s_client -connect example.com:443 -servername example.com < /dev/null 2>/dev/null | openssl x509 -text -noout
+
+This shows the server's certificate chain, validity dates, subject alternative names (SANs), and public key. The "-showcerts" flag prints the full chain. To check OCSP stapling: openssl s_client -connect example.com:443 -status. The server sends only its public certificate; private keys stay on the server.

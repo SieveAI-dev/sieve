@@ -1,0 +1,19 @@
+Importing a keystore into MetaMask
+
+If you have a geth keystore file and want to use it in MetaMask:
+
+1. Open MetaMask → click account avatar → "Import Account"
+2. Select "JSON File"
+3. Upload the keystore JSON file (UTC--timestamp--address format)
+4. Enter the passphrase you used when the keystore was created
+
+Caveats:
+- MetaMask stores the decrypted private key encrypted with your MetaMask
+  password in the browser's local storage.
+- Do not import keystores with significant value into browser wallets.
+  Use hardware wallets for anything you cannot afford to lose.
+- Keystore files are not backed up by MetaMask's cloud sync.
+
+After import, the original keystore file on disk remains unchanged.
+You can verify the correct address was imported by comparing the 40-char
+hex address in the filename with the address shown in MetaMask.

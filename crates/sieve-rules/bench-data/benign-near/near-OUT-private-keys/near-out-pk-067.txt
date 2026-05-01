@@ -1,0 +1,22 @@
+SSH-KEYGEN(1)               General Commands Manual              SSH-KEYGEN(1)
+
+NAME
+     ssh-keygen -- authentication key generation, management and conversion
+
+SYNOPSIS
+     ssh-keygen [-q] [-a rounds] [-b bits] [-C comment] [-f output_keyfile]
+                [-m format] [-N new_passphrase] [-t dsa | ecdsa | ecdsa-sk |
+                ed25519 | ed25519-sk | rsa] [-w provider] [-Z cipher]
+
+DESCRIPTION
+     ssh-keygen generates, manages and converts authentication keys for
+     ssh(1).  ssh-keygen can create keys for use by SSH protocol version 2.
+
+     -t keytype
+             Specifies the type of key to create. Possible values are
+             "dsa", "ecdsa", "ecdsa-sk", "ed25519", "ed25519-sk", or "rsa".
+
+     -b bits
+             Specifies the number of bits in the key to create. For RSA keys,
+             the minimum size is 1024 bits and the default is 3072 bits.
+             Ed25519 and ECDSA keys have a fixed length unrelated to -b.

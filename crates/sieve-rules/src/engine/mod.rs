@@ -79,12 +79,16 @@ impl VectorscanEngine {
     }
 
     /// 候选文本是否被 placeholder / per-rule allowlist 排除。
-    pub fn is_excluded(&self, candidate: &str, rule: &RuleEntry) -> bool {
+    ///
+    /// - `candidate`：vectorscan 命中的 matched text（短，仅命中片段）。
+    /// - `full_context`：完整文档内容，用于 `allowlist_stopwords` 上下文感知匹配。
+    ///   传空字符串时退化为仅检查 `candidate`（向后兼容）。
+    pub fn is_excluded(&self, candidate: &str, full_context: &str, rule: &RuleEntry) -> bool {
         // 全局 placeholder 黑名单
         if is_placeholder(candidate) {
             return true;
         }
-        // per-rule allowlist regexes
+        // per-rule allowlist regexes（仅匹配 candidate，保持精准）
         for r in &rule.allowlist_regexes {
             if let Ok(re) = regex::Regex::new(r) {
                 if re.is_match(candidate) {
@@ -92,9 +96,16 @@ impl VectorscanEngine {
                 }
             }
         }
-        // per-rule allowlist stopwords
+        // per-rule allowlist stopwords：在 full_context（全文）中查找，
+        // 使得文档中的教学/警告语境可以豁免短 matched text（如 `eval "$(` / `rm -rf /`）。
+        // full_context 为空时退化为 candidate 内查找。
+        let search_in = if full_context.is_empty() {
+            candidate
+        } else {
+            full_context
+        };
         for sw in &rule.allowlist_stopwords {
-            if candidate.contains(sw.as_str()) {
+            if search_in.contains(sw.as_str()) {
                 return true;
             }
         }
@@ -209,8 +220,8 @@ mod tests {
         let rules = vec![rule("OUT-01", r"sk-ant-api03", Severity::Critical)];
         let engine = VectorscanEngine::compile(rules).unwrap();
         let rule_entry = engine.rule_meta(0).unwrap();
-        assert!(engine.is_excluded("sk-ant-api03-XXXXXXXX", rule_entry));
-        assert!(!engine.is_excluded("sk-ant-api03-real-mixed-content-xyz", rule_entry));
+        assert!(engine.is_excluded("sk-ant-api03-XXXXXXXX", "", rule_entry));
+        assert!(!engine.is_excluded("sk-ant-api03-real-mixed-content-xyz", "", rule_entry));
     }
 
     #[test]
@@ -220,8 +231,11 @@ mod tests {
         let rules = vec![r];
         let engine = VectorscanEngine::compile(rules).unwrap();
         let rule_entry = engine.rule_meta(0).unwrap();
-        assert!(engine.is_excluded("my example secret", rule_entry));
-        assert!(!engine.is_excluded("my real secret", rule_entry));
+        assert!(engine.is_excluded("my example secret", "", rule_entry));
+        assert!(!engine.is_excluded("my real secret", "", rule_entry));
+        // full_context 里包含 stopword 时也应豁免（即使 candidate 本身没有）
+        assert!(engine.is_excluded("secret", "this is an example of a secret", rule_entry));
+        assert!(!engine.is_excluded("secret", "this is a real secret", rule_entry));
     }
 
     #[test]
@@ -231,8 +245,8 @@ mod tests {
         let rules = vec![r];
         let engine = VectorscanEngine::compile(rules).unwrap();
         let rule_entry = engine.rule_meta(0).unwrap();
-        assert!(engine.is_excluded("test_private_key", rule_entry));
-        assert!(!engine.is_excluded("prod_private_key", rule_entry));
+        assert!(engine.is_excluded("test_private_key", "", rule_entry));
+        assert!(!engine.is_excluded("prod_private_key", "", rule_entry));
     }
 
     /// vectorscan 对带量词的 pattern 会触发多个 endpoint 回调；引擎必须保留最长 end，

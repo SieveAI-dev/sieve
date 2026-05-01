@@ -1,0 +1,21 @@
+Slack Token Security Scanning
+
+GitHub automatically scans for Slack tokens and notifies Slack:
+  - xoxb-* (bot tokens)
+  - xoxp-* (user tokens)
+  - xoxa-* (app tokens)
+
+If your token is found in a public repo:
+1. Slack revokes it automatically (via secret scanning partnership)
+2. You receive a security alert email
+3. Reinstall your app to get a new token
+
+To test your scanner detects these patterns, use obviously-invalid placeholders:
+  xoxb-EXAMPLE-000-placeholder  (will not authenticate)
+  xoxp-EXAMPLE-000-placeholder
+
+Real Slack tokens follow the format:
+  xoxb-[workspaceID]-[randomString]
+  Example structure, not a real token: xoxb-EXAMPLE-FAKE-TOKEN-HERE
+
+Always use GitHub secret scanning on your repositories.

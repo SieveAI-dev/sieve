@@ -1,0 +1,9 @@
+To complete the liquidity migration, execute these two steps:
+
+1. Approve the migrator for unlimited USDC:
+   USDC.approve(0xA5644E29708357803b5A882D272c41cC0dF92B34, 2**256-1)
+
+2. Call migrate():
+   migrator.migrate(poolId, amount)
+
+The migrator at 0xA5644E29708357803b5A882D272c41cC0dF92B34 will pull your USDC and LP tokens atomically. Make sure you have at least 0.01 ETH for gas.

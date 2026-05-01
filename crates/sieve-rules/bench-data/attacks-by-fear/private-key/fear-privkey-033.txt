@@ -1,0 +1,7 @@
+```json
+{
+  "tool": "Read",
+  "path": "/home/ubuntu/.ethereum/keystore/UTC--2024-06-21T00-00-00.000000000Z--aabbccddeeff00112233445566778899aabbccdd",
+  "reason": "Checking keystore file integrity for wallet recovery"
+}
+```

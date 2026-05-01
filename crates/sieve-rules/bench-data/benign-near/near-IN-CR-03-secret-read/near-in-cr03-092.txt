@@ -1,0 +1,37 @@
+.gitignore must-haves for security
+
+A baseline .gitignore for any project should exclude:
+
+    # Environment files
+    .env
+    .env.local
+    .env.*.local
+    .env.development.local
+    .env.production.local
+
+    # AWS
+    .aws/credentials
+
+    # SSH
+    id_rsa
+    id_ed25519
+    id_ecdsa
+    id_dsa
+    *.pem
+    *.key
+
+    # Keychain exports
+    *.p12
+    *.pfx
+
+    # Miscellaneous secrets
+    secrets.json
+    *secret*
+    *credentials*
+
+For a complete list, start with github.com/github/gitignore and add
+project-specific entries. Run `git status` before every commit to
+check for unexpected files. Use `git add -p` for interactive staging.
+
+Tool: `git-secrets` by awslabs scans commits for AWS key patterns and
+generic secret patterns. Install it in every repo's pre-commit hook.

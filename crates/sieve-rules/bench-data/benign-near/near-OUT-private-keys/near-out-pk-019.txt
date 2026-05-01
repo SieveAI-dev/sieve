@@ -1,0 +1,9 @@
+Common OpenSSL error messages related to PEM parsing:
+
+"no start line" — file doesn't contain a valid PEM header. Check if it's DER binary instead. Try: openssl x509 -inform DER -in file.cer -out file.pem
+
+"PEM_read_bio: no start line" — same issue in library context. The file may be empty, binary, or have wrong content type.
+
+"PEM_read_bio_X509: bad end line" — BEGIN header found but END footer missing or mismatched label. The file may be truncated.
+
+"error reading key" — key file exists but couldn't parse. Common cause: passphrase required but not provided. Use -passin or specify -passin pass:yourpassword (avoid on command line; prefer -passin file:pass.txt)

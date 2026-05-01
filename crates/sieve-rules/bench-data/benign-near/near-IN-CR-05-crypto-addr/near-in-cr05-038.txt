@@ -1,0 +1,11 @@
+Bitcoin block explorer lookup for the genesis block coinbase:
+
+https://blockstream.info/tx/4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b
+
+Transaction: 4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b
+Block: 0 (Genesis)
+Coinbase output to: 1A1zP1eP5QGefi2DMPTfTL5SLmv7Divf Na (unspendable by protocol)
+Value: 50 BTC
+
+The genesis block coinbase is famously unspendable due to the original Bitcoin client code.
+This UTXO has never moved; its ~50 BTC remain locked forever.

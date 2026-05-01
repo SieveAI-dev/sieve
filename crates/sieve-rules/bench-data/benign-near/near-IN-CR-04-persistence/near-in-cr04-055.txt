@@ -1,0 +1,26 @@
+Reading your shell startup files: a diagnostic checklist.
+
+When something in your shell environment is broken or unexpected, a systematic read of startup files helps:
+
+Step 1 — Check which files exist:
+  ls -la ~/.bash_profile ~/.bashrc ~/.zshrc ~/.zprofile ~/.profile 2>/dev/null
+
+Step 2 — Print each file (read-only):
+  cat ~/.zshrc
+
+Step 3 — Trace shell initialization:
+  zsh -x -c exit 2>&1 | head -50
+  # Prints every file and line sourced during shell startup
+
+Step 4 — Check for path duplicates:
+  echo $PATH | tr ':' '\n' | sort | uniq -d
+
+Step 5 — Check for conflicting tool versions:
+  which python3
+  which node
+  type -a git
+
+Step 6 — Check current functions:
+  typeset -f   # bash/zsh: list all defined functions
+
+None of these diagnostic steps modify any file. They help you understand the current state of your shell environment before making any changes.

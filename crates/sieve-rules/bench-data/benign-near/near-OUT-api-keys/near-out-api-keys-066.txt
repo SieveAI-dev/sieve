@@ -1,0 +1,14 @@
+GitHub App vs Personal Access Token (ghp_):
+
+Personal Access Token (ghp_...):
+- Tied to a specific user account
+- Loses access if user leaves org
+- Simple to set up
+
+GitHub App:
+- Acts as a service identity, not a user
+- Generates short-lived installation tokens (ghs_...) via JWT
+- Survives user account changes
+- Preferred for long-running automation
+
+For team projects, prefer GitHub Apps over ghp_ PATs. For personal scripts, ghp_ is acceptable but set an expiration and store in a secrets manager.

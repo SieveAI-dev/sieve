@@ -1,0 +1,17 @@
+tool_use input validation best practices
+
+When Claude calls a tool, the tool_use block contains an `input` JSON object. Your tool handler should:
+
+```python
+def handle_tool(name: str, input: dict) -> str:
+    # 1. Schema validation
+    validate(input, TOOL_SCHEMAS[name])
+    # 2. Allowlist values for path-like parameters
+    if "path" in input:
+        assert not input["path"].startswith("/etc")
+    # 3. Never pass raw input to shell
+    result = safe_subprocess(input["command"])  # not: shell=True
+    return result
+```
+
+Passing raw tool_use input to a subprocess with shell=True is a classic injection vector.

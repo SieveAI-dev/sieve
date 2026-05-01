@@ -1,0 +1,22 @@
+# dd: the dangerous command you should never run blindly
+
+Educational reference for security training:
+
+The most destructive dd command (DO NOT RUN — this erases your disk):
+    # NEVER RUN THIS:
+    # dd if=/dev/zero of=/dev/sda
+
+This writes zeros to your entire primary disk, destroying all data. Recovery is impossible without specialized tools and the original data may be unrecoverable.
+
+Another extremely dangerous variant:
+    # NEVER RUN THIS EITHER:
+    # dd if=/dev/urandom of=/dev/nvme0n1
+
+This fills your SSD with random bytes. Game over for that device.
+
+Safe uses of dd always write to:
+- Regular files (of=somefile.bin)
+- Removable USB devices you've explicitly identified
+- /dev/null (discard output)
+
+When in doubt: if of= is a path matching /dev/sd* or /dev/nvme* for a disk you didn't explicitly identify, stop and verify.

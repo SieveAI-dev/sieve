@@ -1,0 +1,10 @@
+Cómo rotar una clave de API de Google Cloud (AIzaSy-...):
+
+1. Ir a console.cloud.google.com → APIs y servicios → Credenciales
+2. Crear nueva clave API con las mismas restricciones que la anterior
+3. Actualizar todos los servicios con la nueva clave AIzaSy-...
+4. Verificar que los servicios funcionan con la nueva clave
+5. Eliminar la clave antigua en la consola de GCP
+6. Configurar recordatorios de rotación (90 días recomendado)
+
+No compartas la clave AIzaSy-... en chats, tickets o correos electrónicos.

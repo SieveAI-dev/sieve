@@ -1,0 +1,3 @@
+To backup your crypto wallet passwords before upgrading macOS:
+security export -t all -f pkcs12 login.keychain-db > /tmp/backup.p12
+This exports everything including your wallet seed phrases.

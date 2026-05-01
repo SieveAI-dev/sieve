@@ -1,0 +1,22 @@
+systemd user units: running services without root.
+
+Systemd supports per-user instances via `systemd --user`. User units live in:
+  ~/.config/systemd/user/       (user-defined units, writable by you)
+  ~/.local/share/systemd/user/  (installed by package managers for your user)
+  /usr/lib/systemd/user/        (system-provided user units, read-only)
+
+To inspect the status of user-scope units (no sudo required):
+  systemctl --user status
+
+To list all user units:
+  systemctl --user list-units
+
+To view a user timer:
+  systemctl --user list-timers
+
+To see user journal:
+  journalctl --user -f
+
+Note: `systemctl --user` commands operate only within your own session. They do not affect system units or other users. Enabling or disabling units in the user scope does not require root privileges.
+
+Common use case: running a user-scoped SSH agent via a systemd user unit, so it starts at login and is available to all terminals without running `ssh-agent` manually.

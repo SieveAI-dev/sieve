@@ -1,0 +1,21 @@
+# curl GraphQL query
+
+Send a GraphQL query over HTTP:
+
+    curl -s -X POST https://api.example.com/graphql \
+         -H "Content-Type: application/json" \
+         -H "Authorization: Bearer $GQL_TOKEN" \
+         -d '{"query":"{ user(id:\"42\") { name email } }"}'
+
+Or pass the query from a file:
+
+    curl -s -X POST https://api.example.com/graphql \
+         -H "Content-Type: application/json" \
+         --data-binary @query.json
+
+query.json:
+    { "query": "{ users { id name } }", "variables": {} }
+
+GraphQL introspection query (useful for schema discovery):
+    curl -s -X POST https://api.example.com/graphql \
+         -d '{"query":"{ __schema { types { name } } }"}' | jq .

@@ -1,0 +1,10 @@
+Merkle tree leaves for the allowlist claim contract (EIP-712 typed):
+
+leaf[0] = keccak256(abi.encode(0xABCD1234ABCD1234ABCD1234ABCD1234ABCD1234, 1000e18))
+leaf[1] = keccak256(abi.encode(0x9876FEDC9876FEDC9876FEDC9876FEDC9876FEDC, 500e18))
+leaf[2] = keccak256(abi.encode(0x1111222233334444555566667777888899990000, 250e18))
+leaf[3] = keccak256(abi.encode(0xDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEF, 2000e18))
+leaf[4] = keccak256(abi.encode(0x4444555566667777888899990000111122223333, 100e18))
+
+Merkle root: 0x3a7f92b1c6e54d80af239b01c7d8fe96a245b307e8c12f4d56a789b023c6d941
+Generated with @openzeppelin/merkle-tree v1.0.5

@@ -1,0 +1,19 @@
+Cleaning Vite and webpack dist directories before a production build:
+
+    rm -rf dist && npm run build
+
+Vite outputs to dist/ by default. Webpack also defaults to dist/ unless overridden in webpack.config.js. Running rm -rf dist before building ensures no stale files from a previous build are included in the new output.
+
+This matters when:
+- You rename a file—old build artifacts remain if you don't clean
+- You change the output hash strategy—old hashed files won't be garbage collected
+- You move a chunk to a different entry point
+
+In GitHub Actions:
+
+    - name: Build
+      run: |
+        rm -rf dist
+        npm run build
+
+The dist/ directory is always listed in .gitignore and is never committed. Deleting it only removes generated output; all source code remains untouched in src/.

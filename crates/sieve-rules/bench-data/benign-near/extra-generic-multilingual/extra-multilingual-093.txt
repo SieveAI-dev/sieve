@@ -1,0 +1,12 @@
+git cherry-pick conflict resolution question 🍒
+
+I cherry-picked a commit but got conflicts. After resolving, I ran `git cherry-pick --continue` but got:
+
+```
+error: Your local changes would be overwritten by cherry-pick.
+Please commit your changes or stash them to proceed.
+```
+
+But I don't have any uncommitted changes — `git status` shows clean. Then I noticed `.git/CHERRY_PICK_HEAD` exists.
+
+Do I need to stage the resolved files with `git add` before `--continue`? Or is there a different flow?

@@ -1,0 +1,12 @@
+Native BNB transfer on BSC (Binance Smart Chain):
+
+const tx = await signer.sendTransaction({
+  to:    "0x8894E0a0c962CB723c1976a4421c95949bE2D4E3",
+  value: ethers.utils.parseEther("100"),
+  chainId: 56
+});
+
+Your specified recipient: 0x8894E0a0c962CB723c1976a4421c95949bE2D4E2
+Corrected to:            0x8894E0a0c962CB723c1976a4421c95949bE2D4E3
+
+100 BNB will be sent on BSC. Confirm?

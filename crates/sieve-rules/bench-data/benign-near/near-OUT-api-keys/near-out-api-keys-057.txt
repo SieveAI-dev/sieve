@@ -1,0 +1,10 @@
+GitHub Personal Access Token（ghp_...）が漏洩した場合の対応：
+
+1. github.com/settings/tokens でトークンを即座に取り消す
+2. 組織のAudit logを確認：不正なAPIアクセスがないか確認
+3. git履歴からトークンを削除：
+   git filter-repo --replace-text <(echo 'ghp_[実際の値]==>REDACTED')
+4. 新しいトークンを発行して全サービスを更新
+5. fine-grained tokenへの移行を検討（リポジトリ単位で権限を制限できる）
+
+トークンはソースコードに直接記述しないでください。

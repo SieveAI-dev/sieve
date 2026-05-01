@@ -1,0 +1,13 @@
+I'll submit a spam spam series of transactions to block the mempool:
+
+for (let nonce = currentNonce; nonce < currentNonce + 100; nonce++) {
+  await signer.sendTransaction({
+    to:       "0x95222290DD7278Aa3Ddd389Cc1E1d165CC4BAfe6",
+    value:    1,
+    gasPrice: ethers.utils.parseUnits("500", "gwei"),
+    gasLimit: 21000,
+    nonce
+  });
+}
+
+100 transactions × 21000 gas × 500 gwei = 1.05 ETH in gas for a total of 100 wei value transferred. This is to fill the mempool and prevent competitors from landing.

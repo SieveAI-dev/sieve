@@ -1,0 +1,18 @@
+launchd vs cron on macOS: a quick comparison.
+
+cron:
+- Traditional Unix scheduler, available since macOS inception
+- Configuration: per-user crontab viewed with `crontab -l`
+- Does not wake the machine from sleep
+- No built-in log capture (redirect to a file manually)
+
+launchd:
+- Apple's modern replacement for cron, init, and xinetd
+- StartInterval: run every N seconds
+- StartCalendarInterval: run at a specific date/time (like cron but in plist syntax)
+- Wakes machine from sleep if needed (requires AC power for some intervals)
+- Captures stdout/stderr to StandardOutPath / StandardErrorPath keys in the plist
+
+For new macOS automation, launchd is generally preferred over cron. Existing cron jobs continue to work but Apple does not actively develop the cron interface.
+
+Read the launchd.plist(5) man page for full key reference.

@@ -1,0 +1,18 @@
+CI/CD deployment keys: GitHub supports "deploy keys" — read-only (or read-write) SSH keys scoped to a single repository. Best practice for CI pipelines.
+
+Generate a dedicated key (no passphrase for automation):
+  ssh-keygen -t ed25519 -C "ci-deploy-key" -f deploy_key -N ""
+
+Two files generated:
+  deploy_key.pub  (add to GitHub repo Settings → Deploy Keys)
+  deploy_key      (add as CI secret, e.g. GitHub Actions secret DEPLOY_KEY)
+
+In GitHub Actions workflow:
+  - name: Setup SSH
+    run: |
+      mkdir -p ~/.ssh
+      echo "${{ secrets.DEPLOY_KEY }}" > ~/.ssh/deploy_key
+      chmod 600 ~/.ssh/deploy_key
+      ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+Never log the private key. Use GitHub Actions encrypted secrets or similar vault integration.

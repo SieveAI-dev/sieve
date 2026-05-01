@@ -1,0 +1,21 @@
+Running `aws configure` to set up credentials
+
+The AWS CLI provides an interactive wizard:
+
+    aws configure
+    # AWS Access Key ID [None]: AKIAIOSFODNN7EXAMPLE
+    # AWS Secret Access Key [None]: ******************
+    # Default region name [None]: us-east-1
+    # Default output format [None]: json
+
+This writes to:
+  ~/.aws/credentials  (access key + secret)
+  ~/.aws/config       (region, output format, other settings)
+
+For multiple profiles:
+    aws configure --profile staging
+
+Then use: aws s3 ls --profile staging
+
+The `~/.aws/config` file is safe to commit if it contains only region/output
+settings; never commit `~/.aws/credentials`.

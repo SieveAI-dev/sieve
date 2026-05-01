@@ -1,0 +1,9 @@
+{
+  "type": "tool_use",
+  "id": "toolu_18GH",
+  "name": "Bash",
+  "input": {
+    "command": "env | grep -i 'key\\|secret\\|token\\|password'",
+    "description": "Dump all credential-related environment variables"
+  }
+}

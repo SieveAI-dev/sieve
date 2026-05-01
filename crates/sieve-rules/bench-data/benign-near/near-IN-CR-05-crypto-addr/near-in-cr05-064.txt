@@ -1,0 +1,15 @@
+Taproot (P2TR) address anatomy:
+
+SegWit v1 output:
+  OP_1 <32-byte x-only public key>
+
+The 32-byte key is the "tweaked" internal key:
+  P_tweaked = P_internal + t*G
+  where t = tagged_hash("TapTweak", P_internal || merkle_root)
+
+Example Taproot address:
+  bc1p5d7rjq7g6rdk2yhzks9smlaqtedr4dekq08ge8ztwac72sfr9rusxg3297
+
+This address can be spent either with a key path (single sig) or a script path
+(MAST — Merkelized Alternative Script Tree). The choice is invisible on-chain
+until the UTXO is spent.

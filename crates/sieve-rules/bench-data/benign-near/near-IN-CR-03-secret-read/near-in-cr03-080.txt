@@ -1,0 +1,20 @@
+GPG best practices summary
+
+Key management:
+- Use 4096-bit RSA or Ed25519 keys
+- Set key expiry (1-2 years) and renew; rotation limits damage from compromise
+- Keep the primary key offline; use subkeys for daily operations
+- Back up with a revocation certificate in a physically separate location
+
+Operational:
+- Always sign releases: `gpg --sign --armor release.tar.gz`
+- Verify downloads before extracting: `gpg --verify file.tar.gz.sig`
+- Publish fingerprint on your website and in email signatures (public info)
+
+What to keep secret: private key files in ~/.gnupg/private-keys-v1.d/
+What is safe to share: public key (gpg --armor --export), key fingerprint,
+                        key ID, UID (name + email)
+
+Common mistake: confusing --list-keys (public) with --list-secret-keys
+(private). Both are read operations; --list-secret-keys just shows which
+private keys are locally available — it does not print the key material.

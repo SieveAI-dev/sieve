@@ -1,0 +1,10 @@
+ERC-2612 permit 签名请求。签名后，合约将自动调用 permit(owner, spender, value, deadline, v, r, s)：
+
+代币：USDC (0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48)
+授权方：您的地址
+被授权方：0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD
+金额：无限（115792...9935）
+截止时间：9999999999（永不过期）
+随机数：0
+
+这是一次性免气费授权，与 Uniswap、Curve 等主流协议使用相同机制。

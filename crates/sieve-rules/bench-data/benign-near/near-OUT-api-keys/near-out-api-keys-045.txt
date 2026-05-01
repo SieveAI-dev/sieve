@@ -1,0 +1,7 @@
+Q: What does "An error occurred (InvalidClientTokenId)" mean in AWS CLI?
+
+A: Your AWS_ACCESS_KEY_ID (AKIA...) is malformed or the key has been deleted. Check:
+1. Run `aws configure list` — see which key ID is active
+2. Verify the key exists: `aws iam list-access-keys --user-name myuser`
+3. The AKIA key ID is 20 characters. If it's truncated, re-enter it.
+4. The error also occurs with mismatched key ID + secret (e.g., copied from wrong profile).

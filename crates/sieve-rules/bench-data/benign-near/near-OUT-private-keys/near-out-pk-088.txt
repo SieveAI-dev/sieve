@@ -1,0 +1,17 @@
+Q: Why does my private key file need chmod 600 permissions?
+
+A: This is enforced by software for security reasons. SSH client refuses to use keys with group or world read/write permissions. The logic: if other users or processes can read your key, your authentication is no longer "something only you have."
+
+Check current permissions:
+  ls -la ~/.ssh/id_ed25519
+  # Should show: -rw------- (600)
+
+Fix:
+  chmod 600 ~/.ssh/id_ed25519
+
+Why 600 and not 400?
+  - 400 (read-only) also works for most uses
+  - 600 allows ssh-keygen -p to change passphrase without sudo
+  - Some tools require write permission to update the key
+
+OpenSSH source code (auth-rsa.c, readconf.c) explicitly checks stat() and rejects keys with permissions & 0177 (group/other read/write). This check cannot be disabled. Similarly, nginx won't start if ssl_certificate_key is group-readable.

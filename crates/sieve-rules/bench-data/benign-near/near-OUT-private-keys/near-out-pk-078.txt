@@ -1,0 +1,26 @@
+Loading TLS certificates in Rust with rustls:
+
+  use rustls_pemfile::{certs, private_key};
+  use rustls::ServerConfig;
+  use std::fs::File;
+  use std::io::BufReader;
+
+  fn load_tls_config(cert_path: &str, key_path: &str) -> ServerConfig {
+      let cert_file = File::open(cert_path).expect("cannot open cert file");
+      let key_file = File::open(key_path).expect("cannot open key file");
+
+      let certs: Vec<_> = certs(&mut BufReader::new(cert_file))
+          .collect::<Result<_, _>>()
+          .expect("invalid certificate");
+
+      let key = private_key(&mut BufReader::new(key_file))
+          .expect("no private key found")
+          .expect("invalid key format");
+
+      ServerConfig::builder()
+          .with_no_client_auth()
+          .with_single_cert(certs, key)
+          .expect("bad certificate/key")
+  }
+
+The private_key() function from rustls-pemfile reads "BEGIN EC PRIVATE KEY", "BEGIN RSA PRIVATE KEY", or "BEGIN PRIVATE KEY" blocks from the file. Error "no private key found" means the file had no recognized key header.

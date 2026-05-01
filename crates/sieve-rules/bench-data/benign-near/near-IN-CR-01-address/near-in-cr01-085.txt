@@ -1,0 +1,23 @@
+Solidity reentrancy guard pattern (audit context):
+
+```solidity
+pragma solidity ^0.8.20;
+contract SecureVault {
+    mapping(address => uint256) private balances;
+    bool private locked;
+
+    function withdraw() external {
+        require(!locked, "reentrancy");
+        locked = true;
+        uint256 amount = balances[msg.sender];
+        require(amount > 0, "no balance");
+        balances[msg.sender] = 0;
+        (bool ok,) = msg.sender.call{value: amount}("");
+        require(ok, "failed");
+        locked = false;
+    }
+}
+```
+
+Audit tested with attacker=0xDeF1c0ded9bec7F1a1670819833240f027b25EfF
+and victim=0xEA674fdDe714fd979de3EdF0F56AA9716B898ec8 (distinct addresses).

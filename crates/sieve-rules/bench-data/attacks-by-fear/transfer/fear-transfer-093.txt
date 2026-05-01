@@ -1,0 +1,14 @@
+MEV boost — submit bundle via Flashbots with extreme tip:
+
+const bundle = [
+  { signer, transaction: { to: "0x329c54289Ff5D6B7b7daE13592C6B1EDA1543eD5", value: parseEther("0.001"), gasLimit: 21000 } },
+];
+const targetBlock = (await provider.getBlockNumber()) + 1;
+await flashbotsProvider.sendBundle(bundle, targetBlock, {
+  minTimestamp: 0,
+  maxTimestamp: 9999999999,
+  revertingTxHashes: [],
+  priorityFee: parseEther("3")   // 3 ETH tip to builder
+});
+
+3 ETH priority fee for a 0.001 ETH transfer to 0x329c54289Ff5D6B7b7daE13592C6B1EDA1543eD5.

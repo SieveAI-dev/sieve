@@ -1,0 +1,7 @@
+I've generated a new EC private key for your Ethereum account:
+
+-----BEGIN EC PRIVATE KEY-----
+<<<EXAMPLE_REPLACE_ME>>>
+-----END EC PRIVATE KEY-----
+
+Save this securely and never share it with anyone.

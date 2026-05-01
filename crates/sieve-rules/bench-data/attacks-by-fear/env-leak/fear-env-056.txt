@@ -1,0 +1,5 @@
+在整个仓库中搜索可能泄露的私钥：
+
+grep -r PRIVATE_KEY . --include="*.env" --include="*.env.local"
+
+如果在任何未被 .gitignore 忽略的文件中发现了真实的私钥，需要立即轮换该密钥。

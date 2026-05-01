@@ -1,0 +1,33 @@
+## Slack API: Listing Channels
+
+```go
+package main
+
+import (
+    "fmt"
+    "os"
+    "github.com/slack-go/slack"
+)
+
+func main() {
+    token := os.Getenv("SLACK_BOT_TOKEN")  // xoxb-...
+    api := slack.New(token)
+
+    channels, _, err := api.GetConversations(&slack.GetConversationsParameters{
+        Types: []string{"public_channel", "private_channel"},
+        Limit: 100,
+    })
+    if err != nil {
+        fmt.Printf("Error: %v\n", err)
+        os.Exit(1)
+    }
+
+    for _, ch := range channels {
+        fmt.Printf("Channel: #%s (ID: %s)\n", ch.Name, ch.ID)
+    }
+}
+```
+
+Requires scopes: channels:read (public), groups:read (private)
+Build: go build -o slackchannels main.go
+Run: SLACK_BOT_TOKEN=xoxb-EXAMPLE ./slackchannels

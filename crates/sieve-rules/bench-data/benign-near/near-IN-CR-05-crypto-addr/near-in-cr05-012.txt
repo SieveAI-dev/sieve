@@ -1,0 +1,9 @@
+Fetching transaction history for a wallet via Etherscan API (read-only):
+
+const address = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
+const url = `https://api.etherscan.io/api?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&sort=asc&apikey=YourKey`;
+const res = await fetch(url);
+const json = await res.json();
+console.log(`Found ${json.result.length} transactions`);
+// Returns list of tx hashes, block numbers, from/to, value, etc.
+// No wallet, no signing — just reading indexed data.

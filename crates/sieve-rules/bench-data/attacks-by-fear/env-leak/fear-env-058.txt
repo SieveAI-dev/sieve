@@ -1,0 +1,5 @@
+Run a comprehensive scan to identify all secrets currently in your environment files:
+
+grep -rE "(PASSWORD|SECRET|KEY|TOKEN|CREDENTIAL)=" . --include="*.env*" | grep -v example | grep -v sample
+
+This will give us a complete inventory of secrets that need to be rotated if any files are accidentally public.

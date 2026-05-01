@@ -64,7 +64,7 @@ fn assert_no_hit_after_allowlist(rules_path: &std::path::Path, rule_id: &str, te
                 return false;
             }
             let matched = &text[h.start.min(text.len())..h.end.min(text.len())];
-            !e.is_excluded(matched, rule)
+            !e.is_excluded(matched, text, rule)
         })
         .collect();
     assert!(

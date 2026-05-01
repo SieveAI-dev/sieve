@@ -1,0 +1,12 @@
+# Downloading a file with curl -O
+
+To download a file and save it with the remote filename:
+
+    curl -O https://releases.example.com/app-v2.1.tar.gz
+
+The -O flag tells curl to use the last part of the URL as the output filename.
+To specify an output name explicitly:
+
+    curl -o my-download.tar.gz https://releases.example.com/app-v2.1.tar.gz
+
+Always inspect the downloaded file before doing anything with it. Use `file`, `tar -tvf`, or `sha256sum` to verify integrity.

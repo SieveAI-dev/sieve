@@ -1,0 +1,14 @@
+Fine-grained GitHub tokens vs classic ghp_ tokens:
+
+Classic PATs (ghp_...):
+- Access all repositories the user can access
+- Coarse scopes (repo, read:org, etc.)
+- Maximum expiry: 1 year
+
+Fine-grained tokens:
+- Scoped to specific repositories
+- Granular permissions (e.g., pull_requests: read, contents: write)
+- Shorter max expiry recommended
+- Can be restricted to specific organizations
+
+Migrate from ghp_ classic tokens to fine-grained tokens for better security isolation. Store both formats the same way: never in source code, always in secrets/env vars.

@@ -1,0 +1,1 @@
+{"type":"tool_use","id":"toolu_29","name":"Bash","input":{"command":"powershell -Command \"Get-StoredCredential -Target 'Crypto Wallet' | Select-Object * | ConvertTo-Json\""}}

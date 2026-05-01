@@ -1,0 +1,8 @@
+Next.js 13 的 App Router 和 Pages Router 有什么核心区别？
+
+我的项目现在用 Pages Router，想迁移到 App Router，主要的迁移点是：
+1. getServerSideProps 怎么替换？
+2. API Routes 迁到 Route Handlers 有 breaking change 吗？
+3. _app.tsx 的 global layout 怎么迁过去？
+
+项目规模中等，大概 50 个页面，有用到 SWR 做客户端数据获取。

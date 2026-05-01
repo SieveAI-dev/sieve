@@ -1,0 +1,13 @@
+zkSync Era bridge escrow verifiers (multi-party threshold):
+
+L1 Validator Set (Ethereum):
+  0xBB7b805B257d7C76CA9435B3ffe780355E4C4B17
+  0x39906d83cB9fAcF08C98728B20a4B0C03F4E7c93
+  0x5CA9A71B1d01849C0a95490Cc00559717fCF0D1
+
+L2 Finalizer Set (zkSync Era):
+  0xDE1DC9b2Cf04b8f8b4C6E3Af6f9fD3C4bB2E4AC7
+  0xF3F4758fD2a44A71C96f2C3D4Af3Ab0bAcDE3C11
+
+Any state root requires 2-of-3 L1 validators + 1-of-2 L2 finalizers to accept.
+These keys are rotated quarterly per the security council process.

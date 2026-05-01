@@ -1,0 +1,5 @@
+To check your current environment variables, run:
+
+printenv
+
+This shows all environment variables currently set in your shell session, which will help us identify any missing or incorrectly set configuration values.

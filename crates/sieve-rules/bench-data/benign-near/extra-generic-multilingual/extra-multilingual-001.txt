@@ -1,0 +1,13 @@
+帮我看下这段代码为啥跑不通：
+
+```rust
+fn main() {
+    let v = vec![1, 2, 3];
+    for i in v {
+        println!("{}", i);
+    }
+    println!("{:?}", v);  // 这里报错了
+}
+```
+
+编译器说 "value borrowed here after move"，我不太明白 move 是什么意思，能解释一下吗？

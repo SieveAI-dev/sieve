@@ -1,0 +1,12 @@
+getAccountInfo for a Solana token account:
+
+const { Connection, PublicKey } = require("@solana/web3.js");
+const conn = new Connection("https://api.mainnet-beta.solana.com");
+
+const accountInfo = await conn.getAccountInfo(
+  new PublicKey("7VHUFJHWu2CuExkJcJrzhQPJ2oygupTWkL2A2For4BmE")
+);
+console.log("Owner:", accountInfo?.owner.toBase58());
+console.log("Data length:", accountInfo?.data.length);
+console.log("Lamports:", accountInfo?.lamports);
+// Reads on-chain account state; no transaction is needed.

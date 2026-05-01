@@ -175,7 +175,7 @@ impl InboundEngine for InboundAdapter {
             let matched_text = &input[evidence_start..evidence_end];
 
             if let Some(r) = rule {
-                if self.engine.is_excluded(matched_text, r) {
+                if self.engine.is_excluded(matched_text, input, r) {
                     continue;
                 }
             }
@@ -294,7 +294,7 @@ impl OutboundEngine for OutboundAdapter {
             let matched_text = &input[evidence_start..evidence_end];
 
             if let Some(r) = rule {
-                if self.engine.is_excluded(matched_text, r) {
+                if self.engine.is_excluded(matched_text, input, r) {
                     continue;
                 }
             }

