@@ -102,7 +102,18 @@ sieve --config ~/.sieve/config.toml
 
 ## 历史 Advisories
 
-无（项目处于 Pre-Code 设计阶段，Week 12 GA 后启用编号 `SIEVE-YYYY-NNN`）。
+> Week 12 GA 前 advisories 不分配正式 `SIEVE-YYYY-NNN` 编号，记录在 CHANGELOG。GA 后启用正式编号。
+
+### Pre-GA P0：非流式 JSON 入站检测绕过（已修复 2026-05-01）
+
+- **影响版本**：v1.5.0 ~ v1.5.3（v1.5.x 70 条入站规则）
+- **影响范围**：
+  - **漏洞 1（Anthropic）**：`application/json` 非流式响应里的 `tool_use` 绕过所有入站规则（IN-CR-02/03/04/05 / IN-GEN-* 全失效）
+  - **漏洞 2（OpenAI）**：`proxy_openai` `stream=false` 分支跳过入站检测；OpenAI 协议**默认 stream=false**，意味着 OpenAI 入站规则**从未生效过**
+- **严重程度**：P0（PRD §5.2 "入站是 Sieve 真正的护城河"语境下属严重产品级缺陷）
+- **修复**：v1.5.4 commit `14153e2`，详见 [CHANGELOG](docs/changelog/CHANGELOG.md#v154-non-streaming-json-inbound-fix---2026-05-01)
+- **修复验证**：2 条新集成测试 + dataset_fp_rate 0% FP / 99.71% Recall 无回归
+- **披露状态**：Pre-GA 期间 dogfood 实测发现，repo 仍 private（ADR-011），无外部影响
 
 ---
 
