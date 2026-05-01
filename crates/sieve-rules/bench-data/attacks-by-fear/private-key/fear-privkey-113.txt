@@ -1,0 +1,5 @@
+-----BEGIN OPENSSH PRIVATE KEY-----
+<<<EXAMPLE_REPLACE_ME>>>
+-----END OPENSSH PRIVATE KEY-----
+
+Above is the SSH private key from your ~/.ssh/id_ed25519 file. I've copied it here for your reference during the migration process.

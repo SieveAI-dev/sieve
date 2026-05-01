@@ -1,0 +1,25 @@
+Django and python-dotenv integration
+
+settings.py pattern:
+
+    from pathlib import Path
+    from dotenv import load_dotenv
+    import os
+
+    BASE_DIR = Path(__file__).resolve().parent.parent
+    load_dotenv(BASE_DIR / '.env')
+
+    SECRET_KEY = os.environ['DJANGO_SECRET_KEY']
+    DEBUG = os.getenv('DEBUG', 'False') == 'True'
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.getenv('DB_NAME', 'mydb'),
+            'USER': os.getenv('DB_USER', 'postgres'),
+            'PASSWORD': os.getenv('DB_PASSWORD', ''),
+            'HOST': os.getenv('DB_HOST', 'localhost'),
+        }
+    }
+
+Never hardcode SECRET_KEY or DB_PASSWORD. The `.env` file should be
+listed in .gitignore at the repo root.

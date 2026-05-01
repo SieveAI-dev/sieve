@@ -1,0 +1,18 @@
+# nc: local server for testing HTTP clients
+
+Start a simple TCP listener on port 8080:
+
+    nc -l -p 8080
+
+Then from another terminal, send a request:
+    curl http://localhost:8080/test
+
+nc prints the raw HTTP request to stdout. Useful for debugging what exactly your HTTP client is sending (headers, body encoding, content-type).
+
+On macOS (BSD netcat), the syntax is slightly different:
+    nc -l 8080
+
+On Linux (GNU netcat):
+    nc -l -p 8080
+
+This is a standard local development trick. No network exposure to the outside world.

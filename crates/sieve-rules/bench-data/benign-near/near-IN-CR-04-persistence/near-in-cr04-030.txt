@@ -1,0 +1,38 @@
+DigitalOcean tutorial style: understanding systemd timers.
+
+## Introduction
+
+Systemd timers are a modern alternative to cron jobs. They offer better logging, dependency management, and integration with systemd's service management.
+
+## Timer Unit Anatomy
+
+A timer unit (.timer) is paired with a service unit (.service) of the same base name.
+
+**mybackup.timer:**
+```
+[Unit]
+Description=Daily database backup timer
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+AccuracySec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+**Reading the timer:**
+- `OnCalendar=*-*-* 03:00:00` — fires at 3 AM every day
+- `AccuracySec=30min` — allowed drift, reduces power wake-ups
+- `Persistent=true` — catches up if machine was off
+
+## Inspecting Timers
+
+To see all active timers and when they last/next fired:
+
+```
+systemctl list-timers --all
+```
+
+This is a read-only command. No state is modified.

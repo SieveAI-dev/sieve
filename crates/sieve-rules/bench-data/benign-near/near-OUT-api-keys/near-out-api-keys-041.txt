@@ -1,0 +1,12 @@
+Terraform AWS provider configuration:
+
+```hcl
+provider "aws" {
+  region = "us-east-1"
+  # Do NOT hardcode access_key here — use environment variables or ~/.aws/credentials
+  # access_key = "AKIA..."  # WRONG: never hardcode
+  # secret_key = "..."      # WRONG: never hardcode
+}
+```
+
+Recommended: Use `aws configure` to set credentials locally, or configure an IAM role for CI/CD. The AWS provider will automatically read AWS_ACCESS_KEY_ID (AKIA...) from environment if set.

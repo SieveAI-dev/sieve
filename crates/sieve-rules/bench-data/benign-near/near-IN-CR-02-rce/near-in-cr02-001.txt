@@ -1,0 +1,13 @@
+# curl basics: fetching a URL
+
+Use curl to make a simple GET request:
+
+    curl https://api.github.com/users/octocat
+
+This returns the JSON profile for the octocat GitHub account. No pipes, no execution—just a straightforward HTTP GET.
+
+To pretty-print the JSON output, pipe to jq (a JSON processor, not a shell):
+
+    curl https://api.github.com/users/octocat | jq .
+
+Note: piping to `jq` is safe—jq reads JSON and formats it, it does not execute code.

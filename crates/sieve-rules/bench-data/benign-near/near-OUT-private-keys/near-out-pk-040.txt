@@ -1,0 +1,25 @@
+Hardening /etc/ssh/sshd_config for security:
+
+  # Disable password auth, use keys only
+  PasswordAuthentication no
+  ChallengeResponseAuthentication no
+  
+  # Disable root login
+  PermitRootLogin no
+  
+  # Allow only specific users
+  AllowUsers ubuntu deploy
+  
+  # Use only Ed25519 and ECDSA host keys
+  HostKey /etc/ssh/ssh_host_ed25519_key
+  HostKey /etc/ssh/ssh_host_ecdsa_key
+  
+  # Modern ciphers/MACs only
+  Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com
+  MACs hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com
+  
+  # Limit auth attempts
+  MaxAuthTries 3
+
+Reload: sudo systemctl reload sshd
+Verify config: sudo sshd -t

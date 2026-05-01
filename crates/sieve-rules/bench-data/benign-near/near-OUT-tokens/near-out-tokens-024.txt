@@ -1,0 +1,19 @@
+JWT header.payload.signature explained for beginners
+
+Imagine a sealed envelope:
+  - The HEADER says what kind of seal (algorithm) was used
+  - The PAYLOAD is the letter inside (claims, data)
+  - The SIGNATURE is the wax seal that proves it wasn't tampered with
+
+Anyone can open the envelope and read the letter (base64 is not encryption!).
+But only the issuer can create a valid seal.
+
+So: Never put secrets (passwords, SSNs, credit card numbers) in JWT payload.
+The payload is readable by anyone who has the token.
+
+If you need to hide the payload, use JWE (JSON Web Encryption) instead of JWS.
+
+Teaching example token (not signed, do not use):
+header:    eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9
+payload:   eyJzdWIiOiJsZWFybmVyIiwicm9sZSI6InN0dWRlbnQifQ
+signature: EXAMPLE_NOT_A_REAL_SIGNATURE

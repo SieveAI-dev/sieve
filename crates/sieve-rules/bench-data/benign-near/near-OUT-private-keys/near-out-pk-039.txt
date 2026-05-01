@@ -1,0 +1,23 @@
+Gestión de claves SSH (español)
+
+Generar un par de claves Ed25519:
+  ssh-keygen -t ed25519 -C "usuario@ejemplo.com"
+
+Esto crea:
+  ~/.ssh/id_ed25519     — clave privada (nunca compartir)
+  ~/.ssh/id_ed25519.pub — clave pública (segura para distribuir)
+
+Agregar clave pública al servidor:
+  ssh-copy-id -i ~/.ssh/id_ed25519.pub usuario@servidor
+
+Contenido típico de clave pública:
+  ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... usuario@equipo
+
+Permisos correctos:
+  chmod 600 ~/.ssh/id_ed25519
+  chmod 644 ~/.ssh/id_ed25519.pub
+
+Verificar fingerprint de la clave:
+  ssh-keygen -l -f ~/.ssh/id_ed25519.pub
+
+La clave privada debe almacenarse solo en el dispositivo del propietario, preferiblemente protegida con passphrase.

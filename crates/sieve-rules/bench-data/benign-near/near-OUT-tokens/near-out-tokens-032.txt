@@ -1,0 +1,22 @@
+# CI/CD: Stripe test key configuration
+
+```yaml
+# .github/workflows/test.yml
+name: Integration Tests
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
+      STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_TEST_PUBLISHABLE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci
+      - run: npm test
+```
+
+IMPORTANT: Use STRIPE_TEST_SECRET_KEY (sk_test_*) in CI, never the live key.
+Add the secret in GitHub Settings → Secrets → Actions.
+The sk_test_ prefix indicates sandbox mode; no real charges will occur.

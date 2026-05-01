@@ -1,0 +1,28 @@
+systemd oneshot units: running tasks at boot without a persistent daemon.
+
+A `Type=oneshot` service runs once and exits. systemd considers the unit "active" (complete) after the process exits successfully. This is ideal for setup tasks.
+
+Example use case: initialize a directory structure on boot.
+
+[Unit]
+Description=Create application data directories
+Before=myapp.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/mkdir -p /var/lib/myapp/cache
+ExecStart=/bin/chown -R myapp:myapp /var/lib/myapp
+
+[Install]
+WantedBy=myapp.service
+
+Key options:
+  RemainAfterExit=yes   - unit remains "active" after the process exits (so systemd
+                          doesn't try to restart it or consider it failed)
+  Multiple ExecStart     - for oneshot units, multiple ExecStart lines run sequentially
+
+To verify a oneshot unit has already run this boot:
+  systemctl is-active mydir-init.service
+
+Inspect: systemctl status mydir-init.service

@@ -1,0 +1,30 @@
+HashiCorp Vault for secrets management
+
+Vault is an open-source secrets manager that replaces .env files in
+production:
+
+    # Start a dev server (local testing only)
+    vault server -dev
+
+    # Store a secret
+    vault kv put secret/myapp db_password=PLACEHOLDER
+
+    # Read a secret (CLI)
+    vault kv get secret/myapp
+
+Application integration (Python):
+
+    import hvac
+    client = hvac.Client(url='http://vault:8200', token='...')
+    secret = client.secrets.kv.v2.read_secret_version(path='myapp')
+    db_password = secret['data']['data']['db_password']
+
+For CI (GitHub Actions with Vault):
+    - uses: hashicorp/vault-action@v3
+      with:
+        url: https://vault.internal.example.com
+        token: ${{ secrets.VAULT_TOKEN }}
+        secrets: secret/data/myapp db_password | DB_PASSWORD
+
+Vault provides audit logging, secret leasing, and automatic rotation —
+capabilities not available with .env files or platform secret stores.

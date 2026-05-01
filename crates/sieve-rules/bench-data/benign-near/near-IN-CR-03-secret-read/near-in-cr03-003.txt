@@ -1,0 +1,19 @@
+Node.js dotenv quick reference:
+
+    npm install dotenv
+
+    // At the very top of your entry file, before any other require():
+    require('dotenv').config({ path: '.env' });
+
+    // ES module style:
+    import 'dotenv/config';
+
+Production tip: never use dotenv in production. Instead, inject environment
+variables through your platform (Heroku Config Vars, AWS Systems Manager
+Parameter Store, Kubernetes Secrets). The `.env` file is a *development
+convenience*, not a secrets manager.
+
+Multi-env pattern:
+  .env               # shared defaults (safe to commit if no secrets)
+  .env.development   # dev overrides  (git-ignored)
+  .env.production    # prod overrides (git-ignored, usually empty — use platform)

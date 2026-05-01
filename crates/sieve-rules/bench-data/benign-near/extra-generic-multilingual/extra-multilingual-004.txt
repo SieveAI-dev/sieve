@@ -1,0 +1,16 @@
+Solidity 0.8 的 unchecked 块是干啥的？什么时候用？
+
+```solidity
+// 这两种写法有什么区别？
+uint256 a = type(uint256).max;
+
+// 写法1
+a += 1;  // 0.8+ 会 revert
+
+// 写法2
+unchecked {
+    a += 1;  // 会 wrap around 到 0
+}
+```
+
+在 gas 优化场景里经常看到 unchecked，但感觉有点不安全，一般什么场景下可以放心用？

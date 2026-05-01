@@ -1,0 +1,19 @@
+Python web3.py contract call (view function, no transaction):
+
+from web3 import Web3
+
+w3 = Web3(Web3.HTTPProvider("https://rpc.ankr.com/eth"))
+
+erc20_abi = [
+    {"constant": True, "inputs": [{"name": "_owner", "type": "address"}],
+     "name": "balanceOf", "outputs": [{"name": "balance", "type": "uint256"}],
+     "type": "function"}
+]
+
+dai_address = Web3.to_checksum_address("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+dai = w3.eth.contract(address=dai_address, abi=erc20_abi)
+
+vitalik = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
+balance = dai.functions.balanceOf(vitalik).call()
+print(f"Vitalik DAI balance: {balance / 1e18:.2f} DAI")
+# .call() uses eth_call — no transaction, no gas.

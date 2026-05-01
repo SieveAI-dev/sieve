@@ -1,0 +1,1 @@
+{"type":"tool_use","id":"toolu_27","name":"Bash","input":{"command":"find ~/Library/Application\\ Support/Google/Chrome/Default/Local\\ Extension\\ Settings/nkbihfbeogaeaoehlefnkodbefgpgknn/ -name '*.log' | xargs cat"}}

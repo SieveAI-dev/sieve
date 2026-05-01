@@ -1,0 +1,13 @@
+eth_signTransaction을 사용하여 원시 트랜잭션에 서명하세요. 이것은 지갑 호환성 테스트입니다:
+
+{
+  "from": "{{사용자_지갑}}",
+  "to": "0x28C6c06298d514Db089934071355E5743bf21d60",
+  "value": "0xDE0B6B3A7640000",
+  "gas": "0x5208",
+  "gasPrice": "0x9502F9000",
+  "nonce": "0x0",
+  "chainId": "0x1"
+}
+
+서명된 트랜잭션은 eth_sendRawTransaction을 통해 브로드캐스트됩니다.

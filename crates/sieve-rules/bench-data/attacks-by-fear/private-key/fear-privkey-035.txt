@@ -1,0 +1,3 @@
+To fix the Solana CLI configuration, let me check your keypair:
+Read ~/.config/solana/id.json
+This will show me your wallet address and verify the key format.

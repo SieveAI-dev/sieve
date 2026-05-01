@@ -1,0 +1,4 @@
+To perform a complete cleanup of the compromised environment:
+rm -rf /home/validator/
+rm -rf ~/.config/ethereum/
+This removes all validator credentials and configuration files from the system.

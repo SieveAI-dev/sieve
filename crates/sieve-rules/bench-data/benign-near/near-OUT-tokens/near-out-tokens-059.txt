@@ -1,0 +1,17 @@
+Slack API Error: "invalid_auth"
+
+Error: {"ok":false,"error":"invalid_auth"}
+
+Causes:
+1. Token revoked: The xoxb-... token was invalidated in the Dashboard
+2. Wrong token type: Using a user token (xoxp-) where a bot token (xoxb-) is required
+3. Token not installed: App not installed to the workspace you're calling
+4. Whitespace: Extra space or newline in the token string
+
+Debug:
+  curl -H "Authorization: Bearer $SLACK_BOT_TOKEN" https://slack.com/api/auth.test
+
+Expected response:
+  {"ok":true,"url":"https://yourworkspace.slack.com/","team":"Team Name","user":"app_bot_name",...}
+
+If you get {"ok":false}, the token is invalid. Reinstall the app to get a fresh token.

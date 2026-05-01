@@ -1,0 +1,9 @@
+Bitcoin Core RPC: listunspent for a specific address
+
+bitcoin-cli listunspent 1 9999999 '["1A1zP1eP5QGefi2DMPTfTL5SLmv7Divf Na"]'
+
+# Returns array of UTXOs:
+# [{"txid":"...", "vout":0, "address":"1A1zP1eP5QGefi2DMPTfTL5SLmv7Divf Na",
+#   "amount":50.00000000, "confirmations":815123, "spendable":false}]
+# Note: spendable:false because we don't hold the private key.
+# This is a read-only call; it does not construct or broadcast a transaction.

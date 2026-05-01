@@ -1,0 +1,15 @@
+# dd: creating a disk image of a partition
+
+Back up a partition to an image file:
+
+    dd if=/dev/sda1 of=backup-partition.img bs=4M status=progress
+
+This reads the source partition and writes it to a file. The target (of=) is an image file, not a physical device.
+
+Compress the image on-the-fly to save space:
+    dd if=/dev/sda1 bs=4M | gzip -9 > backup-partition.img.gz
+
+Restore from image:
+    dd if=backup-partition.img of=/dev/sdb1 bs=4M status=progress
+
+Always verify the target device (of=) carefully before restoring. Use lsblk or fdisk -l to identify the correct device.

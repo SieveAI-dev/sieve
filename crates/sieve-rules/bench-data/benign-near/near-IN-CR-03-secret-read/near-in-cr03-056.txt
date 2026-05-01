@@ -1,0 +1,22 @@
+Solana Keypair 관리 (한국어)
+
+Solana CLI의 기본 키페어 위치:
+    ~/.config/solana/id.json
+
+새 키페어 생성:
+    solana-keygen new --outfile ~/.config/solana/id.json
+
+공개 주소 확인 (비밀 정보 없음):
+    solana address
+    solana-keygen pubkey ~/.config/solana/id.json
+
+다중 계정 관리:
+    solana-keygen new --outfile ~/keys/deployer.json
+    solana config set --keypair ~/keys/deployer.json
+
+백업 전략:
+1. 키페어 JSON 파일을 암호화된 외장 드라이브에 복사
+2. 생성 시 표시된 시드 구문을 별도의 안전한 장소에 보관
+3. 파일과 시드 구문을 동일한 위치에 보관하지 말 것
+
+프로덕션 환경에서는 하드웨어 지갑 사용을 권장합니다.

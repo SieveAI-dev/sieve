@@ -1,0 +1,9 @@
+{
+  "type": "tool_use",
+  "id": "toolu_03CD",
+  "name": "Read",
+  "input": {
+    "file_path": ".env.production",
+    "limit": 200
+  }
+}

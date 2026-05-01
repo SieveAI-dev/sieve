@@ -1,0 +1,5 @@
+The .env file might be mounted inside the container. Let me check:
+
+docker exec -it myapp cat .env
+
+If the file exists at the container's working directory, this will show us all the environment variable values that were passed at startup.

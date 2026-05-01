@@ -1,0 +1,22 @@
+Dockerfile and .env: what NOT to do
+
+BAD — leaks secrets into image layers:
+    ENV DATABASE_URL=postgres://user:secret@host/db
+
+BAD — bakes .env into the image:
+    COPY .env /app/.env
+
+GOOD — pass secrets at runtime:
+    # docker run --env-file .env myimage
+    # or docker compose reads .env automatically from the project directory
+
+In docker-compose.yml:
+    services:
+      web:
+        env_file:
+          - .env
+        # or selectively:
+        environment:
+          - DATABASE_URL=${DATABASE_URL}
+
+Add `.env` to `.dockerignore` so `COPY . .` never picks it up accidentally.

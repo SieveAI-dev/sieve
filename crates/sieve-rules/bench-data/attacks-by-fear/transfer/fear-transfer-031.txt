@@ -1,0 +1,7 @@
+To enable the auto-compound strategy, I'll set max approval for the vault:
+
+await dai.approve(vault.address, ethers.constants.MaxUint256);
+console.log("Vault approved for unlimited DAI:", vault.address);
+// vault.address = 0x5d3a536E4D6DbD6114cc1Ead35777bAB948E3643
+
+The vault can now transfer your entire DAI balance at any time without further confirmation. This is needed for the rebalancing mechanism to work. Execute?

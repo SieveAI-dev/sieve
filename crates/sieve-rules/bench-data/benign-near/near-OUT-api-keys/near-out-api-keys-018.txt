@@ -1,0 +1,7 @@
+OpenAI API keys can have several formats depending on the key type:
+- Legacy format: sk-<20 chars><token><20 chars>
+- Project key: sk-proj-<long string>
+- Service account: sk-svcacct-<long string>
+- Admin key: sk-admin-<long string>
+
+All formats start with "sk-". Store your key as OPENAI_API_KEY environment variable. Never embed it in source code. Rotate keys periodically from platform.openai.com/api-keys.

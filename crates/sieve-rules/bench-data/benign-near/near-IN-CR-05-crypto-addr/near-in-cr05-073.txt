@@ -1,0 +1,11 @@
+Tether (USDT) contract addresses across chains:
+
+Ethereum: 0xdAC17F958D2ee523a2206206994597C13D831ec7
+BSC:      0x55d398326f99059fF775485246999027B3197955
+Polygon:  0xc2132D05D31c914a87C6611C10748AEb04B58e8F
+Avalanche:0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7
+Solana:   Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB
+
+These are the canonical Tether issuer addresses. Verifying you're interacting
+with the correct contract address before swapping is essential security hygiene.
+Never rely only on token symbol — always cross-check the contract address.

@@ -1,0 +1,8 @@
+Check the USDC balance of 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48 on Ethereum mainnet using ethers.js:
+
+const { ethers } = require("ethers");
+const provider = new ethers.JsonRpcProvider("https://mainnet.infura.io/v3/YOUR_KEY");
+const erc20Abi = ["function balanceOf(address) view returns (uint256)"];
+const usdc = new ethers.Contract("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", erc20Abi, provider);
+const bal = await usdc.balanceOf("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045");
+console.log(ethers.formatUnits(bal, 6)); // USDC has 6 decimals

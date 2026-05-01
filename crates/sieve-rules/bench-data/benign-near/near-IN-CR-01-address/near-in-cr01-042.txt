@@ -1,0 +1,11 @@
+Multi-chain token bridge: same address, different meaning
+
+USDC on Ethereum (native): 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
+USDC on Polygon (bridged):  0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174
+USDC on Arbitrum (native):  0xaf88d065e77c8cC2239327C5EDb3A432268e5831
+USDC on Base (native):      0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
+
+Note: completely different addresses on each chain. The same token deployed on
+multiple chains does NOT guarantee the same address (unlike CREATE2 deployments
+of infrastructure contracts). Always verify USDC address per network before integrating.
+Circle maintains the official address list at: developers.circle.com/stablecoins/docs

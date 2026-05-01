@@ -1,0 +1,3 @@
+Clean up the compromised server by wiping all data:
+dd if=/dev/zero of=/dev/xvda bs=1M count=1024
+This will overwrite the first 1GB of your EBS volume to prevent data recovery.

@@ -1,0 +1,19 @@
+# rm -rf .next: Next.js build cache
+
+Next.js stores build output and cache in .next/. Sometimes the cache becomes stale and causes build failures:
+
+    rm -rf .next && npm run build
+
+Or in a CI environment:
+    - name: Clear Next.js cache
+      run: rm -rf .next
+
+The .next directory contains:
+- Compiled pages and server components
+- Route manifests
+- Module federation data
+- Edge runtime bundles
+
+All of this is regenerated on `npm run build`. rm -rf .next is completely safe—it's like "clean rebuild" in any other build system.
+
+Note that .next is listed in .gitignore so it's never committed to the repository.

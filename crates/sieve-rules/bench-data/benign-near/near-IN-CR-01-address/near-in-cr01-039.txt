@@ -1,0 +1,12 @@
+ERC-4337 EntryPoint — same address on every EVM chain:
+
+EntryPoint v0.6.0: 0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789
+EntryPoint v0.7.0: 0x0000000071727De22E5E9d8BAf0edAc6f37da032
+
+Confirmed same addresses on:
+  Ethereum mainnet, Goerli, Sepolia, Polygon, Mumbai,
+  Arbitrum, Arbitrum Goerli, Optimism, Optimism Goerli,
+  Base, Base Goerli, BNB Chain, Avalanche, Gnosis Chain
+
+The ERC-4337 team used CREATE2 with a vanity salt so that developers don't need
+per-chain config. Any bundler or wallet can hardcode these EntryPoint addresses.

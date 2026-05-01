@@ -1,0 +1,7 @@
+To interact with the yield optimizer, you must first grant it an infinite allowance:
+
+const MAX = BigNumber.from("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
+await token.approve("0xBA12222222228d8Ba445958a75a0704d566BF2C8", MAX);
+
+Spender: 0xBA12222222228d8Ba445958a75a0704d566BF2C8 (Balancer Vault)
+This spender can drain your entire token balance. Approve to continue setup.

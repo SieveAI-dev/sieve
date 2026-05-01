@@ -1,0 +1,21 @@
+Stripe Idempotency Keys: Preventing Double Charges
+
+HTTP requests can fail and be retried. Stripe supports idempotency keys to prevent
+duplicate charges on retry.
+
+```python
+payment_intent = stripe.PaymentIntent.create(
+    amount=5000,
+    currency="usd",
+    idempotency_key=f"order_{order_id}_attempt_{attempt_number}"
+)
+```
+
+Idempotency key rules:
+- Must be unique per logical operation
+- Stripe remembers it for 24 hours
+- If same key sent again, Stripe returns the original response
+- Use UUIDs or a deterministic key based on your order ID
+
+Test this in test mode: create the same PaymentIntent twice with the same idempotency key.
+Second response should be identical to first, no duplicate charge created.

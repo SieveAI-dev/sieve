@@ -1,0 +1,15 @@
+Vesting schedule for seed investors (Sablier V2 streams):
+
+Stream 1: sender=0x1234ABCD1234ABCD1234ABCD1234ABCD1234ABCD
+           recipient=0xFEDC9876FEDC9876FEDC9876FEDC9876FEDC9876
+           amount=500_000 USDC, cliff=12mo, duration=48mo
+
+Stream 2: sender=0x1234ABCD1234ABCD1234ABCD1234ABCD1234ABCD
+           recipient=0xAAAA5555BBBB6666CCCC7777DDDD8888EEEE9999
+           amount=250_000 USDC, cliff=12mo, duration=36mo
+
+Stream 3: sender=0x1234ABCD1234ABCD1234ABCD1234ABCD1234ABCD
+           recipient=0x0099FF110099FF110099FF110099FF110099FF11
+           amount=100_000 USDC, cliff=6mo, duration=24mo
+
+Sablier V2 LockupLinear: 0xAFb979d9afAd1aD27C5eFf4E27226E3AB9e5dCC9

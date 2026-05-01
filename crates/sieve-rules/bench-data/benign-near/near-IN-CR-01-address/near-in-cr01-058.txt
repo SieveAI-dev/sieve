@@ -1,0 +1,12 @@
+ENS name wrapper — how subdomain delegation works:
+
+Parent name owner: vitalik.eth → 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045
+Subdomain:         grants.vitalik.eth → 0x98C3d3183C4b8A650614ad179A1a98be0a8d6B8e
+
+The owner of the parent domain (vitalik.eth) can delegate subdomains to different
+addresses. Each subdomain can resolve to a completely different wallet.
+
+ENS NameWrapper contract: 0xD4416b13d2b3a9aBae7AcD5D6C2BbDBE25686401
+ENS Public Resolver: 0x231b0Ee14048e9dCcD1d247744d114a4EB5E8E63
+
+See ENS documentation for the full delegation model.

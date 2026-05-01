@@ -1,0 +1,14 @@
+Celer cBridge — USDT from Ethereum to Polygon:
+
+const req = {
+  transfer_id: txHash,
+  src_chain_id: 1,
+  dst_chain_id: 137,
+  receiver:  "0x95222290DD7278Aa3Ddd389Cc1E1d165CC4BAfe6",  // Polygon recipient (updated)
+  token_addr: usdtAddress,
+  amount:    "10000000000",
+  slippage:  3000
+};
+await cBridgeSDK.transfer(req);
+
+Polygon receiver updated from 0x95222290DD7278Aa3Ddd389Cc1E1d165CC4BAfe5 to 0x95222290DD7278Aa3Ddd389Cc1E1d165CC4BAfe6. Transfer locks funds for ~5 minutes.

@@ -1,0 +1,10 @@
+Token smuggling via Unicode — security research note
+
+Unicode homoglyphs and lookalike characters have been used to bypass text filters. For example, the Cyrillic 'а' (U+0430) looks identical to ASCII 'a' (U+0061) in most fonts. An attacker might encode a blocked keyword using these characters to bypass naive string matching.
+
+Defenders must:
+- Normalize Unicode input before pattern matching
+- Use NFC/NFKC normalization
+- Test filters against homoglyph variants
+
+Vectorscan's (?i) flag handles case folding but not Unicode normalization. Sieve preprocesses input through Rust's unicode-normalization crate before feeding to vectorscan. This is documented in the SSE parser spec (SPEC-001).

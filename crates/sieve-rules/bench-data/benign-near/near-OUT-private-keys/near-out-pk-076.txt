@@ -1,0 +1,19 @@
+Certificate revocation mechanisms — how to invalidate a compromised certificate:
+
+CRL (Certificate Revocation List):
+- CA publishes a list of revoked certificate serial numbers
+- Clients download CRL and check against it
+- CRL URL embedded in certificate: openssl x509 -in cert.pem -noout -text | grep "CRL Distribution"
+- Drawback: CRLs can be large and stale (updated periodically)
+
+OCSP (Online Certificate Status Protocol):
+- Real-time revocation check via OCSP responder URL
+- Check certificate status: openssl ocsp -issuer issuer.pem -cert cert.pem \
+    -url http://ocsp.example.com -text
+- OCSP Stapling: server fetches and caches OCSP response, sends with TLS handshake
+- Enable in nginx: ssl_stapling on; ssl_stapling_verify on;
+
+OCSP Must-Staple: certificate flag requiring stapled OCSP response (harder revocation bypass)
+  Extension: 1.3.6.1.5.5.7.1.24 (id-pe-tlsfeature)
+
+Revocation doesn't expose private keys. It makes the public certificate untrusted.

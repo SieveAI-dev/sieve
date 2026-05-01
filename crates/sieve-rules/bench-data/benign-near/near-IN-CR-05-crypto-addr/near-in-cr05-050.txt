@@ -1,0 +1,10 @@
+Satoshi Nakamoto's early mining addresses — historical read-only analysis:
+
+Block 1 coinbase: 12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX
+Block 2 coinbase: 134HfD2fdeBTohfx8YANxEpsYXsv5UoWyz
+
+Researchers used blockchain analysis to identify ~1.1M BTC in early coinbase outputs
+(the "Patoshi pattern" based on nonce extraNonce patterns). These addresses have never
+moved, making them the most watched UTXOs in Bitcoin history.
+
+Blockchain analysis: https://bitslog.com/2013/04/17/the-well-deserved-fortune-of-satoshi-nakamoto/

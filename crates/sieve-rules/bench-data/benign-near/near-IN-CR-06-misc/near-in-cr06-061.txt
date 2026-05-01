@@ -1,0 +1,16 @@
+Sieve setup command — one-line install
+
+```bash
+sieve setup
+```
+
+This command:
+1. Detects Claude Code installation (~/.claude/claude.json)
+2. Registers the PreToolUse hook in ~/.claude/settings.json
+3. Sets ANTHROPIC_BASE_URL=http://localhost:5187 in the settings env block
+4. Writes a launchd plist (macOS) or systemd unit (Linux) for auto-start
+5. Starts the Sieve daemon
+
+After setup, Sieve is active for all Claude Code sessions. No manual configuration needed. The `sieve setup --uninstall` command reverses all changes cleanly.
+
+SPEC-003 documents the exact file modifications and the rollback procedure.

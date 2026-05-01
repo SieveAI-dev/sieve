@@ -1,0 +1,14 @@
+Reading a Solana SPL token account balance:
+
+import { getAccount, getMint } from "@solana/spl-token";
+import { Connection, PublicKey } from "@solana/web3.js";
+
+const conn = new Connection("https://api.mainnet-beta.solana.com", "confirmed");
+const tokenAccountAddr = new PublicKey("7VHUFJHWu2CuExkJcJrzhQPJ2oygupTWkL2A2For4BmE");
+
+const account = await getAccount(conn, tokenAccountAddr);
+const mint = await getMint(conn, account.mint);
+
+const balance = Number(account.amount) / Math.pow(10, mint.decimals);
+console.log("Token balance:", balance);
+// getAccount and getMint both perform read-only RPC calls.

@@ -1,0 +1,12 @@
+Hermes AI client setup with Sieve proxy
+
+Hermes uses the OpenAI Chat Completions protocol. To route Hermes through Sieve:
+
+```bash
+export OPENAI_BASE_URL=http://localhost:5187/openai
+export OPENAI_API_KEY=your-hermes-api-key  # Hermes uses its own key
+```
+
+Sieve's /openai endpoint translates OpenAI format to Anthropic format, applies the same rule engine, then forwards to Anthropic. The response is translated back to OpenAI format before returning to Hermes.
+
+Note: some OpenAI-specific fields (function calling v1 format, legacy `content` as string) may require adaptation. Sieve's UnifiedMessage handles the normalization. See ADR-018 for the OpenAI protocol adaptation decisions.

@@ -1,0 +1,22 @@
+ERC-20 _mint and _burn — OpenZeppelin implementation:
+
+```solidity
+function _mint(address account, uint256 value) internal {
+    if (account == address(0)) {
+        revert ERC20InvalidReceiver(address(0));
+    }
+    _update(address(0), account, value);
+}
+
+function _burn(address account, uint256 value) internal {
+    if (account == address(0)) {
+        revert ERC20InvalidSender(address(0));
+    }
+    _update(account, address(0), value);
+}
+```
+
+In both functions, `address(0)` appears as a sentinel: in _mint it's the "from"
+(tokens appear from nowhere); in _burn it's the "to" (tokens go to the void).
+The Transfer event emitted will show address(0) as from/to respectively.
+This is the standard ERC-20 specification for mint/burn events.

@@ -1,0 +1,16 @@
+# dd: extracting EFI partition from a disk image
+
+Inspect a disk image's partition table:
+    fdisk -l disk.img
+
+Example output shows EFI partition starts at sector 2048, size 204800 sectors (512 bytes/sector):
+    Sector 2048, size 204800 → start byte = 2048*512 = 1048576, size = 204800*512 = 104857600
+
+Extract the EFI partition:
+    dd if=disk.img of=efi-partition.img \
+       bs=512 skip=2048 count=204800
+
+Now efi-partition.img contains just the EFI filesystem, which you can mount:
+    sudo mount -t vfat efi-partition.img /mnt/efi
+
+All operations are on image files, not live partitions.

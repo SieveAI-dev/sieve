@@ -1,0 +1,18 @@
+Creating a keystore file with eth-keyfile (Python)
+
+    pip install eth-keyfile
+
+    from eth_keyfile import create_keyfile_json, load_keyfile
+
+    # Create a new encrypted keystore from a private key bytes object
+    # (private key here is illustrative — use a securely generated one)
+    private_key = bytes.fromhex("EXAMPLE_PRIVATE_KEY_HEX_64_CHARS_REPLACE_ME")
+    keyfile = create_keyfile_json(private_key, b"my_strong_passphrase")
+    # keyfile is a dict you can serialize to JSON
+
+    # Load it back
+    private_key_recovered = load_keyfile(keyfile, b"my_strong_passphrase")
+
+The keystore file format is the same as geth's — you can import/export
+between Python tooling and the geth client. Store keystore files in a
+directory with 700 permissions; the files themselves should be 600.

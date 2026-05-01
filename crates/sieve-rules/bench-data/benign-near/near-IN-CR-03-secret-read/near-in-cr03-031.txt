@@ -1,0 +1,19 @@
+GCP Application Default Credentials (ADC)
+
+ADC is the GCP SDK's credential discovery mechanism. The lookup order:
+
+1. GOOGLE_APPLICATION_CREDENTIALS environment variable (points to a JSON file)
+2. gcloud CLI credentials (~/.config/gcloud/application_default_credentials.json)
+3. Metadata server (on GCE / GKE / Cloud Run automatically)
+
+For local development, authenticate once:
+
+    gcloud auth application-default login
+
+This opens a browser, you log in, and credentials are written to
+~/.config/gcloud/application_default_credentials.json. The file contains
+an OAuth2 refresh token — not a service account key. It expires and must
+be refreshed periodically.
+
+In production, attach a service account to the compute resource instead.
+The SDK picks up credentials from the metadata server with no file needed.

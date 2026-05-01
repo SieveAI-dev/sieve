@@ -1,0 +1,17 @@
+Protocol fee collector recipients (Uniswap V3 style):
+
+```
+feeRecipients:
+  - address: 0x1a9C8182C09F50C8318d769245beA52c32BE35BC
+    share: 60%
+    label: "Treasury"
+  - address: 0x36416d4618E84A53FB5c5Bf44cbca78DA7c0A9C9
+    share: 25%
+    label: "Team vesting"
+  - address: 0xFB6916095ca1df60bB79Ce92cE3Ea74c37c5d359
+    share: 15%
+    label: "Bug bounty reserve"
+```
+
+Fee switch activated at governance proposal #47 (passed with 72% quorum).
+Distribution runs on-chain via the FeeDistributor contract at block epoch boundaries.

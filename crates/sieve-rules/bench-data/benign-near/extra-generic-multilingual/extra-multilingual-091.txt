@@ -1,0 +1,19 @@
+CSS flexbox 布局问题 🤔
+
+子元素明明设了 `flex: 1` 但是高度没有撑满父容器：
+
+```css
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.sidebar {
+  flex: 1;
+  background: #f0f0f0;
+  /* height is 0?? */
+}
+```
+
+父元素是 `100vh`，子元素 `flex: 1` 不应该自动填满吗？🙄

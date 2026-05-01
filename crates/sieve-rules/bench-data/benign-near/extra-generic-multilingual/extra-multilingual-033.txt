@@ -1,0 +1,14 @@
+Solidity의 mapping에서 delete를 사용하면 어떻게 동작하나요?
+
+```solidity
+mapping(address => uint256) public balances;
+
+function clearBalance(address user) external {
+    delete balances[user];
+}
+```
+
+delete하면 실제로 스토리지 슬롯이 제거되나요, 아니면 그냥 0으로 초기화되나요?
+가스 리펀드가 생기는지도 알고 싶습니다.
+
+그리고 nested mapping인 경우 (예: mapping(address => mapping(address => uint256))) delete로 전체 삭제가 가능한가요?

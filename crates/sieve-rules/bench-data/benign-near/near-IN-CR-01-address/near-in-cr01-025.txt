@@ -1,0 +1,10 @@
+USDC on Ethereum mainnet — format comparison in documentation:
+
+Official documentation uses:  0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
+Etherscan URL format:         0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48
+Dune Analytics filter:        \x${a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48}
+
+All three identify the same Circle-issued USDC proxy contract.
+The proxy delegates to implementation at 0xa2327a938Febf5FEC13baCFb16Ae10EcBc4cbDCE.
+Upgrading the implementation does not change the proxy address — always use the proxy
+(0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48) as the canonical USDC address.

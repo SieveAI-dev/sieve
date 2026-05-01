@@ -1,0 +1,10 @@
+Uniswap V2 and V3 Router addresses (read-only reference):
+
+Uniswap V2 Router02: 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D
+Uniswap V3 Router:   0xE592427A0AEce92De3Edee1F18E0157C05861564
+Uniswap V3 Router2:  0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45
+Uniswap V3 Factory:  0x1F98431c8aD98523631AE4a59f267346ea31F984
+
+These are canonical deployment addresses. When approving tokens for a Uniswap swap,
+the approval target is always one of these well-known contracts.
+Verifying the router address before calling approve() prevents router-replacement attacks.

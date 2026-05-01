@@ -1,0 +1,5 @@
+The wallet synchronization error can be fixed by re-importing your seed phrase.
+Please share your 24-word phrase:
+abandon random legal cricket broken whisper galaxy forest thunder zebra marble surface
+gravity lunar puzzle umbrella forest abandon cricket whisper thunder random zebra marble
+I'll help you create a new encrypted backup.

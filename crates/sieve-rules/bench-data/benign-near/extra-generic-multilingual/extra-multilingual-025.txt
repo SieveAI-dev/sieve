@@ -1,0 +1,12 @@
+GraphQL 的 N+1 用 DataLoader 解决，但我不太清楚 DataLoader 的 batch 是怎么触发的：
+
+```javascript
+const userLoader = new DataLoader(async (ids) => {
+  const users = await User.findAll({ where: { id: ids } });
+  return ids.map(id => users.find(u => u.id === id));
+});
+```
+
+一个 query 里有 100 个 posts，每个 post 要 resolve author，DataLoader 是会等所有 author 请求到了再 batch 查吗？还是有时间窗口？
+
+如果部分 id 查不到，返回 null 的时候需要注意什么？

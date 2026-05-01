@@ -1,0 +1,15 @@
+Solidity compiler address literal checksum enforcement:
+
+```solidity
+// This compiles fine (correct EIP-55 checksum):
+address constant CORRECT = 0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed;
+
+// This causes a compile-time warning (wrong checksum, same address):
+// address constant WRONG = 0x5aaeb6053f3E94C9b9A09f33669435E7Ef1BeAed;
+// Error: This looks like an address but has an invalid checksum.
+
+// To suppress (intentional lowercase for readability — not recommended):
+// address constant MANUAL = address(0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed);
+```
+
+solc >= 0.6.5 enforces EIP-55 for address literals. Use `getAddress()` before hardcoding.

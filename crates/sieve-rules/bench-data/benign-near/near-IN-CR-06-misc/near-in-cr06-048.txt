@@ -1,0 +1,10 @@
+OpenClaw skill installation — what happens under the hood
+
+When a user installs a new OpenClaw skill, the client:
+1. Fetches the skill manifest from the registry
+2. Downloads and verifies the skill package signature
+3. Writes the skill binary to ~/.openclaw/skills/
+4. Registers the skill in the OpenClaw config
+5. Reloads the skill registry (may restart the agent)
+
+Sieve monitors for the skill install endpoint being called in a way that bypasses step 2 (signature verification). This is the attack vector: a malicious prompt could trigger installation of an unsigned skill that overrides safety behaviors. IN-CR-06's fail-closed gate ensures the user must explicitly approve any skill installation, even if Claude or OpenClaw "authorized" it.

@@ -1,0 +1,24 @@
+AWS profile switching in a multi-account setup
+
+The recommended pattern for teams managing multiple AWS accounts:
+
+    # ~/.aws/config
+    [profile dev]
+    region = us-west-2
+    output = json
+
+    [profile prod]
+    role_arn = arn:aws:iam::123456789012:role/DeployRole
+    source_profile = default
+    region = us-east-1
+
+Shell helpers for switching:
+    export AWS_PROFILE=dev     # affects all aws CLI calls in this shell
+    export AWS_PROFILE=prod
+
+For CI pipelines, inject credentials via environment variables instead of
+the credentials file:
+    AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN
+
+Never store production credentials in `~/.aws/credentials` on developer
+laptops — use IAM Identity Center (SSO) with `aws sso login` instead.

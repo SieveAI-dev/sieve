@@ -1,0 +1,23 @@
+Quick Python one-liners for PEM/certificate inspection:
+
+# Check certificate expiry from command line:
+python3 -c "
+import ssl, datetime
+cert = ssl.get_server_certificate(('example.com', 443))
+x509 = ssl.PEM_cert_to_DER_cert(cert)
+# For expiry: use cryptography library
+from cryptography import x509 as cx509
+from cryptography.hazmat.backends import default_backend
+c = cx509.load_pem_x509_certificate(cert.encode(), default_backend())
+print('Expires:', c.not_valid_after_utc)
+print('Subject:', c.subject.rfc4514_string())
+"
+
+# Decode a base64 blob that might be a DER cert:
+python3 -c "
+import base64, sys
+data = base64.b64decode(sys.argv[1])
+print('Length:', len(data))
+print('First bytes hex:', data[:4].hex())
+# DER starts with 30 (SEQUENCE tag)
+" 'MIIFazCC...'

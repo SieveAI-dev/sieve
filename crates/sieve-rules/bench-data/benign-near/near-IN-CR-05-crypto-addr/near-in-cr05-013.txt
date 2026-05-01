@@ -1,0 +1,13 @@
+Checking if an address is a contract or EOA:
+
+async function isContract(address: string, provider: ethers.Provider): Promise<boolean> {
+  const code = await provider.getCode(address);
+  return code !== "0x";
+}
+
+// 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D is Uniswap V2 Router (contract)
+// 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045 is Vitalik's EOA
+const [isRouter, isVitalik] = await Promise.all([
+  isContract("0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D", provider),
+  isContract("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045", provider)
+]);

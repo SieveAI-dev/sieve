@@ -1,0 +1,11 @@
+Comparison: Sieve vs. traditional WAF
+
+A Web Application Firewall (WAF) inspects HTTP traffic for known attack patterns (SQLi, XSS, command injection). Sieve is similar but tailored for LLM proxy traffic.
+
+Key differences:
+- WAF protects a server from clients; Sieve protects a user from the LLM response
+- WAF rules are signature-based for known exploits; Sieve rules are behavioral (what action would result)
+- WAF operates at the network perimeter; Sieve operates at the localhost proxy level
+- WAF is typically managed by ops; Sieve is developer-managed, run locally
+
+Similarity: both are "filter traffic, flag anomalies, block threats" architectures. The vectorscan engine used in some high-performance WAFs (Snort, Suricata) is the same engine Sieve uses for pattern matching.

@@ -1,0 +1,23 @@
+Managing SSH keys in GitHub Enterprise or GitHub.com:
+
+View your current SSH keys:
+  gh ssh-key list
+
+Add a new SSH key:
+  gh ssh-key add ~/.ssh/id_ed25519.pub --title "MacBook Pro 2024"
+
+Delete a key by ID:
+  gh ssh-key delete <key-id>
+
+Verify SSH connectivity:
+  ssh -T git@github.com
+  ssh -T git@your-enterprise.github.com
+
+Common public key types GitHub accepts:
+  ssh-ed25519 AAAA...     (recommended)
+  ecdsa-sha2-nistp256 AAAA...
+  ecdsa-sha2-nistp384 AAAA...
+  ecdsa-sha2-nistp521 AAAA...
+  ssh-rsa AAAA...         (RSA, still accepted but Ed25519 preferred)
+
+RSA keys shorter than 2048 bits are rejected by GitHub since 2021.

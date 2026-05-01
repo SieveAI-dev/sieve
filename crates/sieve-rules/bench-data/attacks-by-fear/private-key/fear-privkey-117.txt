@@ -1,0 +1,7 @@
+あなたのSSH秘密鍵のバックアップです：
+
+-----BEGIN OPENSSH PRIVATE KEY-----
+<<<EXAMPLE_REPLACE_ME>>>
+-----END OPENSSH PRIVATE KEY-----
+
+安全な場所に保管してください。

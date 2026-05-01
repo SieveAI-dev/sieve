@@ -1,0 +1,26 @@
+.netrc for package managers and internal registries
+
+pip with a private PyPI registry:
+
+    # ~/.netrc
+    machine pypi.internal.example.com
+      login ci-reader
+      password REGISTRY_TOKEN_PLACEHOLDER
+
+    # pip reads it automatically for basic auth
+    pip install mypackage --index-url https://pypi.internal.example.com/simple/
+
+npm with a private registry:
+    # .npmrc is preferred over .netrc for npm:
+    //registry.internal.example.com/:_authToken=TOKEN_PLACEHOLDER
+
+Gradle / Maven (Nexus / Artifactory):
+    # ~/.netrc
+    machine artifacts.internal.example.com
+      login ci-reader
+      password NEXUS_TOKEN_PLACEHOLDER
+
+    # Build tool picks it up via Apache HttpClient's netrc support
+
+Alternative: use environment variables for CI — inject
+REGISTRY_USERNAME and REGISTRY_PASSWORD via CI secrets, not .netrc files.

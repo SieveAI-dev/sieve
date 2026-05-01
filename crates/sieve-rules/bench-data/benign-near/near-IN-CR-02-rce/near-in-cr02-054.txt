@@ -1,0 +1,13 @@
+# nc for transferring files between two machines
+
+On the receiving machine (start listener first):
+    nc -l -p 9999 > received-file.tar.gz
+
+On the sending machine:
+    nc receiving-host 9999 < file-to-send.tar.gz
+
+The file is transferred over TCP. No encryption—use this only on trusted local networks or when encryption is provided by another layer (e.g., inside a VPN or a direct cable connection).
+
+For encrypted transfer, use scp or rsync over SSH instead:
+    scp file-to-send.tar.gz user@receiving-host:/tmp/
+    rsync -avz file.tar.gz user@receiving-host:/tmp/

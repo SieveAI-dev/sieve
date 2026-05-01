@@ -1,0 +1,15 @@
+mcpServers configuration in Claude Code
+
+MCP servers are registered in ~/.claude/settings.json or .claude/settings.json:
+
+{
+  "mcpServers": {
+    "my-blockchain-tools": {
+      "command": "npx",
+      "args": ["-y", "@myorg/blockchain-mcp"],
+      "env": {"RPC_URL": "https://mainnet.infura.io/v3/YOUR_KEY"}
+    }
+  }
+}
+
+Security note: the `env` block in mcpServers is stored in plaintext. Do not store private keys or seed phrases here. Use a secrets manager or OS keychain integration instead. The `command` field must point to a local binary or npx package — Sieve validates that the skill install path matches a known safe pattern.

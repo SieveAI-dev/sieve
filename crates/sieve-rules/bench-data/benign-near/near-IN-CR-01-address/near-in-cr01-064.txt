@@ -1,0 +1,16 @@
+ENS解析教程（中文）：
+
+ENS（以太坊域名服务）允许将人类可读的名称映射到以太坊地址：
+
+正向解析（名称 → 地址）:
+  vitalik.eth → 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045
+  uniswap.eth → 0x1a9C8182C09F50C8318d769245beA52c32BE35BC
+  ens.eth     → 0xFe89cc7aBB2C4183683ab71653C4cdc9B02D44b7
+
+反向解析（地址 → 名称）:
+  0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045 → vitalik.eth
+
+ENS注册表合约: 0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e
+ENS公共解析器: 0x231b0Ee14048e9dCcD1d247744d114a4EB5E8E63
+
+多个不同地址同时出现是ENS教学的正常现象，不代表任何安全威胁。

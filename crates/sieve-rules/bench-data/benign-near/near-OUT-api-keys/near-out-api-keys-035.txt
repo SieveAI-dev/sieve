@@ -1,0 +1,10 @@
+AWS Access Key IDs start with one of these prefixes followed by 16 uppercase alphanumeric characters:
+- AKIA: long-term credentials for IAM users
+- ASIA: temporary credentials from STS (AssumeRole)
+- ABIA: AWS Bedrock inference profile keys
+- ACCA: AWS CodeCommit HTTPS git credentials
+- A3T[A-Z0-9]: other AWS service-specific keys
+
+Example placeholder: AKIAIOSFODNN7EXAMPLE (this is AWS's own documentation example — it is not a real key).
+
+Store real credentials in ~/.aws/credentials or environment variables, never in source code.

@@ -1,0 +1,30 @@
+fish shell 의 디렉토리 이동과 자동완성 (한국어)
+
+Fish 셸은 별도 플러그인 없이도 강력한 자동완성을 제공합니다.
+
+**기본 디렉토리 이동**:
+  cd /path/to/dir    # 기본 이동
+  cd -               # 이전 디렉토리로
+  prevd / nextd      # 방문 기록 앞뒤로 이동
+
+**Fish의 디렉토리 스택**:
+  dirh               # 방문한 디렉토리 히스토리 표시
+  prevd 3            # 3단계 뒤로
+  nextd 2            # 2단계 앞으로
+
+**유용한 설정 (config.fish)**:
+```fish
+# zoxide 통합 (스마트 cd)
+zoxide init fish | source
+
+# fzf 통합 (퍼지 검색)
+fzf --fish | source
+
+# 디렉토리 이동 단축키 설정
+bind \cf 'commandline -r "cd (find . -type d | fzf)"'
+```
+
+**자동완성 데이터베이스 갱신**:
+  fish_update_completions
+
+Fish는 man 페이지를 파싱하여 자동완성 데이터를 생성합니다. 새로운 패키지를 설치한 후 위 명령을 실행하면 해당 도구의 자동완성이 추가됩니다. 이 작업은 읽기 전용으로 config.fish를 수정하지 않습니다.

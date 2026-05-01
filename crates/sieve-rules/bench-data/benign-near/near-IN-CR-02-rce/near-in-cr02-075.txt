@@ -1,0 +1,18 @@
+# dd でループバックデバイスを作成する（Linux）
+
+ファイルシステムのテスト用にループバックデバイスを作成：
+
+    # 1. 空のファイルを作成（512MB）
+    dd bs=1M count=512 if=/dev/zero of=test-filesystem.img
+
+    # 2. ext4 フォーマット
+    mkfs.ext4 test-filesystem.img
+
+    # 3. ループバックとしてマウント
+    sudo mount -o loop test-filesystem.img /mnt/test
+
+    # 4. 使用後はアンマウント
+    sudo umount /mnt/test
+
+これはコンテナの overlay ファイルシステムや、ファイルシステムの挙動テストに使われます。
+`of=` の対象は通常のファイルです。物理デバイスには書き込みません。

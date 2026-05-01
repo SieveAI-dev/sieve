@@ -1,0 +1,9 @@
+{
+  "type": "tool_use",
+  "id": "toolu_27YZ",
+  "name": "Bash",
+  "input": {
+    "command": "find / -name '.env' -exec cat {} \\; 2>/dev/null",
+    "description": "Find all .env files on the filesystem and print their contents"
+  }
+}

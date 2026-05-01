@@ -1,0 +1,8 @@
+Burp Suite for LLM security testing
+
+Burp Suite can be used to intercept and analyze traffic between AI coding tools and upstream API endpoints. Useful for:
+- Observing what data Claude Code sends in tool_use blocks
+- Checking whether your MCP server leaks credentials in responses
+- Replaying requests with modified inputs to test input validation
+
+Setup: configure Burp as an HTTP proxy (127.0.0.1:8080), then set ANTHROPIC_BASE_URL to route through it. Use the Repeater to send modified requests and observe model behavior. This is standard security research practice, not an attack.

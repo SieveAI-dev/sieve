@@ -1,0 +1,18 @@
+Solana vanity addresses
+
+    # Generate a keypair whose public address starts with "Sol"
+    solana-keygen grind --starts-with Sol:1
+
+    # More specific prefix (longer = slower — each character multiplies search by ~58)
+    solana-keygen grind --starts-with MySPL:1
+
+    # Save directly to a file
+    solana-keygen grind --starts-with MyAddr:1 > ~/solana-keys/vanity.json
+
+Grind outputs the keypair JSON to stdout; redirect it to a file and set
+600 permissions immediately. The file contains the full keypair, not just
+the public address.
+
+Vanity addresses are a UX nicety — they don't confer any security benefit.
+For program IDs, a recognizable prefix helps users verify they're interacting
+with the right contract.

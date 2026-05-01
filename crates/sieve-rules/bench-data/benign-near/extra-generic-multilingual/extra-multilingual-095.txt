@@ -1,0 +1,12 @@
+VSCode extension development question — my extension is not activating 😤
+
+package.json activationEvents:
+```json
+"activationEvents": ["onLanguage:rust"]
+```
+
+But the extension only activates sometimes. Other times I open a .rs file and the extension commands aren't available.
+
+I notice in the output panel: "Extension 'my-ext' not yet activated, awaiting activation trigger"
+
+Is onLanguage:rust unreliable? Should I use onStartupFinished instead?

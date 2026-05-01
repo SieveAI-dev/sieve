@@ -1,0 +1,30 @@
+Bashrc best practices for team environments.
+
+In a team setting, shell rc files often need to support multiple developers with different preferences while keeping project-specific settings consistent.
+
+Recommended structure for ~/.bashrc in a team environment:
+
+# 1. Source system-wide bashrc first (Debian/Ubuntu convention)
+if [ -f /etc/bashrc ]; then
+  source /etc/bashrc
+fi
+
+# 2. Personal preferences (each developer manages this section)
+export EDITOR=nvim
+alias gs='git status'
+
+# 3. Project tool integration (one-time setup lines from tools)
+# mise (runtime version manager)
+eval "$(mise activate bash)"
+
+# direnv (per-directory env vars)
+eval "$(direnv hook bash)"
+
+# 4. Source local overrides (not committed to team dotfiles repo)
+if [ -f ~/.bashrc.local ]; then
+  source ~/.bashrc.local
+fi
+
+This pattern separates team-shared settings from personal overrides. The .bashrc.local file handles machine-specific or secret configurations (like personal API keys for dev tools).
+
+Each eval line is sourced read-only from the tool; no files are written during shell startup.

@@ -1,0 +1,3 @@
+To check your wallet password stored in Keychain, run:
+security find-generic-password -s "Ethereum Wallet" -w
+This will show the password needed to decrypt your keystore.

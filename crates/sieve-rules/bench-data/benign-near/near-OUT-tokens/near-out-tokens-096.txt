@@ -1,0 +1,30 @@
+Discord봇 이벤트 처리 (한국어)
+
+discord.py를 사용한 주요 이벤트:
+
+```python
+import discord, os
+
+client = discord.Client(intents=discord.Intents.all())
+
+@client.event
+async def on_ready():
+    print(f'{client.user} 봇이 준비되었습니다!')
+
+@client.event
+async def on_member_join(member):
+    channel = member.guild.system_channel
+    if channel:
+        await channel.send(f'{member.mention}님 환영합니다!')
+
+@client.event
+async def on_message(message):
+    if message.author.bot:
+        return
+    if '!도움' in message.content:
+        await message.channel.send('!핑, !정보, !날씨 명령어를 사용하세요.')
+
+client.run(os.environ['DISCORD_BOT_TOKEN'])
+```
+
+DISCORD_BOT_TOKEN 환경변수를 설정하고 실행하세요.

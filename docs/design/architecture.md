@@ -250,6 +250,28 @@ flowchart LR
 
 > **公理 12**：**Critical FP > 0.5% → 用户禁用产品**。这是硬约束，不是工程优化项。任何 Critical 规则在 dogfood / 闭测期间触发 FP 即被回滚或降级到 High。
 
+### 5.1 实测基线（2026-05-01，详见 [CHANGELOG v1.5.1](../changelog/CHANGELOG.md#v151-rule-expansion---2026-05-01)）
+
+测试数据集：1896 条（226 + 600 攻击 / 70 + 1000 benign），跑 `cargo test -p sieve-rules --release --test dataset_fp_rate -- --ignored --nocapture`。
+
+| 指标 | 实测 | 阈值 | 状态 |
+|------|------|------|------|
+| Critical FP rate | 0/1070 = **0.00%** | < 0.5% | ✅ |
+| Attack recall rate | 676/696 = **97.13%** | > 95% | ✅ |
+
+数据集按"看起来像攻击但合法"（benign-near/near-{规则ID}/）+ "用户最怕的五件事"（attacks-by-fear/{signing,transfer,env-leak,private-key,shell-rce}/）双向对称分桶，FP 高时按桶定位规则盲区，recall 漏拦时按桶定位生成的"假攻击"。
+
+### 5.2 规则引擎 stopwords 全文搜索机制（v1.5.1 新增）
+
+`is_excluded(matched_text, full_context, rule)` 在 `allowlist_stopwords` 命中时，**在完整上下文中搜索停用词**而非仅在 7-20 字节的命中片段。这让短命中（`eval $`、`rm -rf /`、`systemctl enable`）能识别教学/合法场景：
+
+- **教学短语**：`the difference between` / `DO NOT RUN` / `compare to a suspicious case` / `IN-CR-* 自说明`
+- **合法 shell 初始化**：`ssh-agent -s` / `direnv hook` / `starship init` / `pyenv init` / `brew shellenv` / `mise activate`
+- **Dockerfile 安全前缀**：`/var/lib/apt/lists/` / `/var/cache/` / `/tmp/` / `node_modules`
+- **官方 registry 域名**：`registry.npmjs.org` / `pypi.org` / `npm.pkg.github.com`
+
+调用点：`sieve-cli/engine_adapter.rs`（生产路径）+ `sieve-rules/tests/{inbound_rules,dataset_fp_rate}.rs`（测试）。
+
 参考：[PRD §6.5](../prd/sieve-prd-v1.5.md)。
 
 ---

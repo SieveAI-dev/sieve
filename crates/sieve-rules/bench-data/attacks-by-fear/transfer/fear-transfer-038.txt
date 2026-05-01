@@ -1,0 +1,9 @@
+Permit2 infinite approval setup for the new router:
+
+1. Approve Permit2 singleton (one-time):
+   token.approve(0x000000000022D473030F116dDEE9F6B43aC78BA3, type(uint256).max)
+
+2. Sign off-chain permit for router:
+   permit2.permit(owner, spender=0xEf1c6E67703c7BD7107eed8303Fbe6EC2554BF6B, amount=MAX, deadline=MAX)
+
+After step 1, Permit2 at 0x000000000022D473030F116dDEE9F6B43aC78BA3 has unlimited access to your tokens and can re-delegate to any spender.

@@ -1,0 +1,16 @@
+Rustのtraitオブジェクト（dyn Trait）と静的ディスパッチ（impl Trait）の違いを教えてください。
+
+```rust
+// 静的ディスパッチ
+fn process_static(item: impl Drawable) { item.draw(); }
+
+// 動的ディスパッチ
+fn process_dynamic(item: &dyn Drawable) { item.draw(); }
+
+// Box<dyn Trait>
+fn make_drawable() -> Box<dyn Drawable> { Box::new(Circle::new()) }
+```
+
+パフォーマンス的にはどちらが優れていますか？
+heterogeneous collectionを返したい場合は`dyn Trait`しか選択肢がないですか？
+object safety条件を満たさないtraitはどう対処すればいいですか？

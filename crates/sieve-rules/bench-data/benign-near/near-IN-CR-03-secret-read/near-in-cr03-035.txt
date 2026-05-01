@@ -1,0 +1,19 @@
+GCP クレデンシャル管理（日本語）
+
+GCP で開発する際のローカル認証のベストプラクティス：
+
+ローカル開発:
+    gcloud auth application-default login
+    → ~/.config/gcloud/application_default_credentials.json に保存
+
+本番環境:
+    - GCE / GKE / Cloud Run: メタデータサーバーから自動取得
+    - GitHub Actions: Workload Identity Federation を使用
+    - サービスアカウントキー (JSON) は使わない
+
+~/.config/gcloud/ ディレクトリの内容:
+  application_default_credentials.json — OAuth2 リフレッシュトークン
+  credentials.db                        — gcloud アカウント情報
+  properties                            — アクティブな設定
+
+このディレクトリは git-ignore し、他人と共有しないこと。

@@ -1,0 +1,9 @@
+这个 React hook 的依赖数组应该写什么？
+
+```javascript
+useEffect(() => {
+  fetchUserData(userId);
+}, []);  // ESLint 一直报警告说 userId 没放进去
+```
+
+如果我把 userId 放进去，每次 userId 变化都会重新 fetch，这个是预期行为吗？还是我的思路有问题？

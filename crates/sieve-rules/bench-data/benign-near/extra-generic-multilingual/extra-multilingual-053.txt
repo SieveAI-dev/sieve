@@ -1,0 +1,16 @@
+why isnt my async function awaiting properly
+
+```javascript
+function getData() {
+  fetch('https://api.example.com/data')
+    .then(r => r.json())
+    .then(data => {
+      return data;
+    });
+}
+
+const result = getData();
+console.log(result); // undefined???
+```
+
+i thought return inside .then() returns the value

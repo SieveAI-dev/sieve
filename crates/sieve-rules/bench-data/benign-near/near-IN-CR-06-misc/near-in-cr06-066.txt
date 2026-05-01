@@ -1,0 +1,14 @@
+Sieve false positive handling
+
+When Sieve blocks something it shouldn't:
+
+1. Check the audit log: `sieve audit --last 10`
+2. Identify the rule that fired (e.g., IN-GEN-04)
+3. Check if an allowlist pattern would cover this case
+4. Add the allowlist: edit rules/inbound.toml, add to `allowlist_regexes`
+5. Restart Sieve: `sieve restart`
+6. Verify the pattern no longer triggers: `sieve test --input "your-text"`
+
+Do NOT just delete the rule. Rules are security assets. An allowlist entry is the right surgical fix — it preserves protection for real attacks while exempting the legitimate pattern you identified.
+
+If you think the rule itself is wrong, open an issue with the exact text that triggered the false positive.

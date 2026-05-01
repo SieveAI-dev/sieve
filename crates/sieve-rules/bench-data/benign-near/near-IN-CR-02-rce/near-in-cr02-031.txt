@@ -1,0 +1,13 @@
+# wget 다운로드 속도 제한
+
+서버에 부하를 주지 않으려면 --limit-rate 옵션을 사용하세요:
+
+    wget --limit-rate=500k https://releases.example.com/dataset.tar.gz
+
+속도를 500KB/s로 제한합니다. 단위: k (킬로바이트), m (메가바이트).
+
+배치 다운로드에서 여러 URL을 속도 제한하며 순차적으로 받기:
+    wget --limit-rate=200k --wait=3 -i download-list.txt
+
+--wait=3은 각 다운로드 사이에 3초를 기다립니다.
+이 방식은 공개 서버에서 예의 바른 크롤링 습관입니다.

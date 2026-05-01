@@ -1,0 +1,22 @@
+Service account keys vs. Workload Identity Federation
+
+Service account key files (JSON downloaded from IAM console) are long-lived
+credentials that look like:
+
+    {
+      "type": "service_account",
+      "project_id": "my-project",
+      "private_key_id": "abc123...",
+      "client_email": "mysa@my-project.iam.gserviceaccount.com",
+      ...
+    }
+
+These are high-risk: they don't expire, can be hard to detect if leaked,
+and require manual rotation.
+
+Prefer Workload Identity Federation for CI/CD:
+- GitHub Actions OIDC → maps to a GCP service account without key files
+- No JSON key file to store, rotate, or accidentally commit
+
+For GKE workloads, use Workload Identity to bind Kubernetes service accounts
+to GCP service accounts — again, no key file needed.

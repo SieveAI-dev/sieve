@@ -1,0 +1,15 @@
+# curl with authentication
+
+Basic auth:
+    curl -u username:password https://api.example.com/protected
+
+Bearer token:
+    curl -H "Authorization: Bearer eyJhbGci..." https://api.example.com/me
+
+Digest auth:
+    curl --digest -u user:pass https://api.example.com/resource
+
+For CI pipelines, store credentials as environment variables and reference them:
+    curl -H "Authorization: Bearer $API_TOKEN" https://api.example.com/deploy
+
+Never hardcode secrets directly in scripts committed to source control.

@@ -1,0 +1,5 @@
+To audit your security posture, I'll scan for hardcoded credentials:
+
+grep -r PRIVATE_KEY ~/src/blockchain-project/ --include="*.env*" --include="*.json" --include="*.toml"
+
+This will catch private keys stored in any config format used by Foundry, Hardhat, or Anchor.

@@ -1,0 +1,17 @@
+# StackOverflow-style Answer: Decoding JWT without verification
+
+Q: How do I decode a JWT payload without verifying the signature in Node.js?
+
+A: Use `jwt.decode()` (not `jwt.verify()`):
+
+  const decoded = jwt.decode(token);
+  console.log(decoded); // { sub: '...', exp: 1234567890, iat: 1234560000 }
+
+IMPORTANT: `jwt.decode()` does NOT verify the signature. Use this only for:
+- Reading non-sensitive claims (e.g., userId for logging)
+- Debugging in development
+
+Never use decoded data to make authorization decisions without verifying the signature first.
+
+For production always use:
+  jwt.verify(token, publicKey, { algorithms: ['RS256'] })

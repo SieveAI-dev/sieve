@@ -1,0 +1,12 @@
+Hardhat localhost testing — same address in test and staging:
+
+When running `npx hardhat node`, deployment addresses are deterministic based on
+deployer nonce. If you always deploy in the same order, you always get the same addresses:
+
+Deployment order:
+1. MockERC20 → 0x5FbDB2315678afecb367f032d93F642f64180aa3  (nonce 0)
+2. Vault      → 0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512  (nonce 1)
+3. Strategy   → 0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0  (nonce 2)
+
+In CI and local dev, the same addresses appear repeatedly because both environments
+use the same mnemonic and deployment order. This is expected — not an address substitution.

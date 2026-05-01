@@ -1,0 +1,33 @@
+Automating server setup review with read-only shell snippets.
+
+A common SRE practice: before touching a new server, run a read-only inventory. Example shell script for gathering scheduler information (no modifications):
+
+#!/bin/bash
+set -euo pipefail
+
+echo "=== System crontab ==="
+cat /etc/crontab 2>/dev/null || echo "(not found)"
+
+echo ""
+echo "=== cron.d directory ==="
+ls -la /etc/cron.d/ 2>/dev/null || echo "(empty or not accessible)"
+
+echo ""
+echo "=== systemd timers ==="
+systemctl list-timers --all --no-pager 2>/dev/null || echo "(systemd not available)"
+
+echo ""
+echo "=== at queue ==="
+atq 2>/dev/null || echo "(at not installed)"
+
+echo ""
+echo "=== User crontabs ==="
+for user in $(getent passwd | awk -F: '$3 >= 1000 {print $1}'); do
+  entries=$(crontab -l -u "$user" 2>/dev/null)
+  if [ -n "$entries" ]; then
+    echo "--- $user ---"
+    echo "$entries"
+  fi
+done
+
+This script is entirely read-only and produces a report of scheduled tasks on the system for review.

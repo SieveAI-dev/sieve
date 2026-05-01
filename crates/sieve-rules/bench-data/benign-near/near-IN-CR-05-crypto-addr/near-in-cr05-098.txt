@@ -1,0 +1,20 @@
+# Consulta de saldo EVM con ethers.js (solo lectura)
+
+```javascript
+const { ethers } = require("ethers");
+
+// Proveedor de solo lectura — sin capacidad de firma
+const provider = new ethers.JsonRpcProvider("https://rpc.ankr.com/eth");
+
+const address = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"; // vitalik.eth
+
+async function consultarSaldo() {
+  const saldo = await provider.getBalance(address);
+  console.log(`Saldo: ${ethers.formatEther(saldo)} ETH`);
+}
+
+consultarSaldo();
+```
+
+`JsonRpcProvider` no tiene clave privada. Solo puede leer el estado
+de la cadena de bloques; no puede firmar ni enviar transacciones.

@@ -1,0 +1,30 @@
+Go standard library PEM handling:
+
+package main
+
+import (
+    "crypto/tls"
+    "crypto/x509"
+    "encoding/pem"
+    "fmt"
+    "os"
+)
+
+func main() {
+    // Load certificate pool (public CA certs)
+    pool := x509.NewCertPool()
+    caCert, _ := os.ReadFile("ca.pem")
+    pool.AppendCertsFromPEM(caCert)
+
+    // Inspect a certificate PEM file (no private key needed)
+    certData, _ := os.ReadFile("server.crt")
+    block, _ := pem.Decode(certData)
+    if block == nil {
+        fmt.Println("failed to parse PEM block")
+        return
+    }
+    cert, _ := x509.ParseCertificate(block.Bytes)
+    fmt.Printf("Subject: %s\n", cert.Subject)
+    fmt.Printf("Expires: %s\n", cert.NotAfter)
+    fmt.Printf("SANs: %v\n", cert.DNSNames)
+}

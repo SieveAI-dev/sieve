@@ -1,0 +1,19 @@
+# rm -rf node_modules: the universal developer ritual
+
+The most common legitimate use of rm -rf in JavaScript/Node.js development:
+
+    rm -rf node_modules && npm install
+
+Or with yarn:
+    rm -rf node_modules && yarn install
+
+When to do this:
+- After switching branches that have different package versions
+- When npm install fails with mysterious dependency errors
+- After manually editing package-lock.json
+- When package resolution gets stuck in a broken state
+
+Safe alternative that avoids rm entirely:
+    npm ci   # clean install from lockfile, always faster
+
+The target (node_modules) is a well-known directory, not / or ~. This rm -rf is idiomatic and expected in Node.js projects.

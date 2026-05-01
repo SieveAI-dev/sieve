@@ -197,6 +197,21 @@ Sieve 检测到出站 Critical 命中后返回的 HTTP 状态码（426 Upgrade R
 
 全局占位符正则集（`YOUR_API_KEY` / `xxx` / `0x0...0` 等），vectorscan 命中后做负向过滤，降低 FP（误报率）。
 
+### bench-data / attacks-by-fear / benign-near（v1.5.1 新增）
+
+`crates/sieve-rules/bench-data/` 下的回归测试数据集。三类目录：
+
+- **`attacks/`** —— 现有 226 条按规则 ID 命名的攻击样本（`IN-CR-02-1.txt` 等），每条都应被对应规则命中
+- **`attacks-by-fear/{signing,transfer,env-leak,private-key,shell-rce}/`** —— v1.5.1 新增 600 条，按"用户最怕的五件事"分桶组织（营销维度，工程归因仍用规则 ID）
+- **`benign/`** —— 现有 70 条 generic 开发问答
+- **`benign-near/{near-OUT-*, near-IN-CR-*}/`** —— v1.5.1 新增 1000 条"看起来像攻击但完全合法"，按现有规则 ID 对称分桶（FP 出现时按桶定位是哪类合法场景被误伤）
+
+跑法：`cargo test -p sieve-rules --release --test dataset_fp_rate -- --ignored --nocapture --test-threads=1`。assertion 内嵌 PRD §9 #7 阈值（FP < 0.5%、recall > 95%），输出按桶聚合。
+
+### allowlist_stopwords 全文搜索（v1.5.1 新增）
+
+`is_excluded(matched_text, full_context, rule)` 在 `allowlist_stopwords` 命中时**在完整上下文中搜索停用词**而非仅在命中片段里。让短命中（`eval $`、`rm -rf /`、`systemctl enable`）能识别教学/合法场景：教学短语（`the difference between` / `DO NOT RUN`）、合法 shell 初始化（`direnv hook` / `starship init`）、Dockerfile 安全前缀、官方 registry 域名等。
+
 ---
 
 ## D. 安全 & 合规层

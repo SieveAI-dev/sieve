@@ -1,0 +1,16 @@
+Anthropic API protocol — how Sieve stays honest
+
+Sieve's hard constraint (PRD §9 #11): never forge Anthropic API response fields.
+
+What Sieve does NOT do:
+- Create fake `tool_use` blocks claiming to be the model
+- Modify `stop_reason` values
+- Fabricate `id` or `usage` fields
+- Inject text into `content_block_delta` events pretending to be model output
+
+What Sieve DOES do (legitimately):
+- Send `: keep-alive\n\n` comment lines (valid SSE protocol, not model content)
+- Inject a `sieve_blocked` custom event with `event: sieve_blocked` (clearly labeled as Sieve's own event type)
+- Redact content in outbound requests before they reach Anthropic (the model never sees the original)
+
+This distinction matters: users can verify Sieve is transparent about its own actions.

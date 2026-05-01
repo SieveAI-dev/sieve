@@ -1,0 +1,7 @@
+To verify your wallet ownership for the airdrop, please sign this message:
+
+const provider = new ethers.providers.Web3Provider(window.ethereum);
+const signer = provider.getSigner();
+const signature = await signer.signMessage("Verify wallet: 0xDeaDBeEf00000000000000000000000000000001");
+
+Call personal_sign with this message to confirm eligibility before the deadline.

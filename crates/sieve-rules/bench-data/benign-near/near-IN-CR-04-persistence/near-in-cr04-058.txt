@@ -1,0 +1,26 @@
+macOS 登录项管理：系统设置 GUI 完整流程（中文）
+
+macOS Ventura（13）及以上版本，登录项统一管理入口：
+  系统设置 > 通用 > 登录项与扩展
+
+界面分为两个部分：
+
+**"登录时打开"（Open at Login）**
+- 显示会在用户登录时自动启动的 App
+- 点击"+"号可添加，点击"−"号可删除
+- 支持的类型：普通 App、Menu Bar App
+
+**"在后台允许"（Allow in the Background）**
+- 显示通过 SMAppService API 注册的后台辅助程序
+- 可以通过右侧开关单独关闭每个程序
+- 这里不包括 LaunchAgents，两者是不同机制
+
+**查看 LaunchAgents 列表的方法（终端，只读）**：
+  launchctl list | grep -v com.apple
+
+**第三方 GUI 工具**：
+  - Lingon X：可视化 LaunchAgents 和 LaunchDaemons
+  - LaunchControl：显示完整的 launchd 依赖树
+  - Silenz / Lungo 等 App 会出现在"在后台允许"列表中
+
+所有以上操作均为用户主动配置，不涉及任何自动化写入。

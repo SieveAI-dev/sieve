@@ -1,0 +1,16 @@
+# Netcat timeout and keep-alive options
+
+nc -w N: close connection after N seconds of inactivity
+
+    nc -w 5 api.example.com 80
+
+Sends nothing, waits 5 seconds, closes. Useful for scripted port probes where you don't want nc to hang indefinitely.
+
+Combined with -z for robust port checking in scripts:
+    if nc -zw 3 "$HOST" "$PORT" 2>/dev/null; then
+        echo "Port $PORT is open"
+    else
+        echo "Port $PORT is closed or host unreachable"
+    fi
+
+The -w 3 timeout prevents the script from hanging if the host is unreachable (no RST, just silence or ICMP unreachable).

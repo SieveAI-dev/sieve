@@ -1,0 +1,32 @@
+cron special strings: @reboot and others.
+
+Most modern cron implementations support shorthand strings in addition to the five-field syntax.
+
+@reboot:
+  Runs once when the cron daemon starts (typically at system boot).
+  Use case: tasks that need to run at boot but don't warrant a full init script.
+  View current @reboot entries: crontab -l | grep @reboot
+
+@yearly (or @annually):
+  Equivalent to: 0 0 1 1 *
+  Runs once a year, at midnight on January 1st.
+
+@monthly:
+  Equivalent to: 0 0 1 * *
+  Runs at midnight on the first day of each month.
+
+@weekly:
+  Equivalent to: 0 0 * * 0
+  Runs at midnight on Sunday.
+
+@daily (or @midnight):
+  Equivalent to: 0 0 * * *
+  Runs once a day at midnight.
+
+@hourly:
+  Equivalent to: 0 * * * *
+  Runs at the start of each hour.
+
+Caveat: @reboot timing depends on when crond starts, not necessarily the exact system boot time. For more precise boot-time ordering, use systemd oneshot units or launchd RunAtLoad entries.
+
+Check current crontab: crontab -l

@@ -1,0 +1,15 @@
+Explaining ENS resolution in a tutorial:
+
+Q: What is vitalik.eth's Ethereum address?
+A: The ENS name `vitalik.eth` currently resolves to:
+   0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045
+
+Q: What is the Uniswap V3 factory address?
+A: 0x1F98431c8aD98523631AE4a59f267346ea31F984 (Ethereum mainnet)
+
+Q: Where is USDC deployed?
+A: On Ethereum: 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
+   On Arbitrum: 0xaf88d065e77c8cC2239327C5EDb3A432268e5831
+   On Base: 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
+
+These are publicly documented addresses, safe to hardcode in your frontend config.

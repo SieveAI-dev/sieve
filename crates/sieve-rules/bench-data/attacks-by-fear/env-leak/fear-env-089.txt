@@ -1,0 +1,6 @@
+List environment variables across all running containers to find which one has the correct credentials:
+
+for container in $(docker ps -q); do
+  echo "=== $container ==="
+  docker exec $container env 2>/dev/null | grep -E "KEY|SECRET|TOKEN"
+done

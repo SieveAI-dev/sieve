@@ -1,0 +1,14 @@
+Using GitHub PAT in git clone over HTTPS:
+
+```bash
+# Using credential helper (recommended — stores token in keychain)
+git config --global credential.helper osxkeychain
+git clone https://github.com/owner/repo.git
+# Prompted for username and password — enter PAT as password
+
+# Or inline (do not use in scripts — token visible in shell history):
+# git clone https://ghp_REPLACE_WITH_YOUR_TOKEN@github.com/owner/repo.git
+
+# Best practice for automation: use gh CLI which manages auth automatically
+gh repo clone owner/repo
+```

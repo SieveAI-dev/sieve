@@ -1,0 +1,39 @@
+# Comprehensive project clean script
+
+A shell script that cleans all common build artifact directories across multiple language ecosystems:
+
+```bash
+#!/usr/bin/env bash
+# clean.sh — removes generated files, preserves all source code
+set -euo pipefail
+
+PROJECT_ROOT="$(git rev-parse --show-toplevel)"
+cd "$PROJECT_ROOT"
+
+echo "Cleaning build artifacts in: $PROJECT_ROOT"
+
+# JavaScript / TypeScript
+rm -rf node_modules dist build out .next .nuxt .svelte-kit
+
+# Turbo / Vercel
+rm -rf .turbo .vercel
+
+# Rust
+rm -rf target/debug target/incremental
+
+# Python
+find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+find . -name "*.pyc" -delete 2>/dev/null || true
+rm -rf .pytest_cache .mypy_cache .ruff_cache
+
+# Test artifacts
+rm -f test_output_*.log junit_*.xml coverage.xml
+
+echo "Done. Run your build command to regenerate."
+```
+
+Key safety properties:
+1. Uses `git rev-parse --show-toplevel` to anchor paths to repo root
+2. Every rm target is a relative path from the repo root
+3. No wildcards that could expand to system directories
+4. Source files (.ts, .rs, .py, .js) are never referenced

@@ -1,0 +1,17 @@
+# curl in Makefile targets
+
+```makefile
+.PHONY: check-api smoke-test
+
+check-api:
+	curl -s --fail https://$(API_HOST)/healthz | jq .status
+
+smoke-test:
+	curl -s --fail \
+	     -H "Authorization: Bearer $(TOKEN)" \
+	     -X POST https://$(API_HOST)/v1/orders \
+	     -d '{"item":"widget","qty":1}' \
+	  | jq '{id, status}'
+```
+
+These targets fetch data from APIs for CI smoke tests. The output is piped to jq for assertion, not executed as shell code.

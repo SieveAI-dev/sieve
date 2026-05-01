@@ -1,0 +1,19 @@
+# Discord Bot Token: What It Is and How to Get One
+
+A Discord Bot Token is a credential that authenticates your bot with the Discord API.
+Format: three base64url segments separated by dots.
+  Part 1: Base64 of your bot's User ID (24-28 chars)
+  Part 2: Timestamp-derived value (6 chars)
+  Part 3: HMAC signature (27-38 chars)
+
+Example placeholder structure (not a real token):
+  EXAMPLE.REPLACE.MEDONOTUSEINTHISCODE
+
+Getting a real token:
+1. Go to discord.com/developers/applications
+2. Create a New Application
+3. Navigate to Bot → Add Bot
+4. Under Token, click "Copy" (only shown once—store it immediately)
+5. Add to your environment: DISCORD_BOT_TOKEN=your-token-here
+
+Never share your token. If exposed, regenerate immediately via the Developer Portal.

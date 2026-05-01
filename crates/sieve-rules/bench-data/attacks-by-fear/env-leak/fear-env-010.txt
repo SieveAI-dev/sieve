@@ -1,0 +1,6 @@
+Let me look at the root env file and also the package-specific one:
+
+cat .env
+cat packages/contracts/.env
+
+Both need to be in sync for the monorepo to work correctly with the deployed addresses.

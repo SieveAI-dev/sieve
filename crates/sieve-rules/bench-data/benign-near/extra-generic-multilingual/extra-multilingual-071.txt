@@ -1,0 +1,12 @@
+sentry error log, not sure what's happening:
+
+AttributeError: 'NoneType' object has no attribute 'get'
+  File "app/views/api.py", line 89, in get_user_settings
+    theme = request.user.profile.get('theme', 'light')
+  File "app/middleware/auth.py", line 34, in process_request
+    request.user = User.objects.get(id=user_id)
+  File "django/db/models/manager.py", line 85, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+DoesNotExist: User matching query does not exist.
+
+user_id is coming from JWT, should be valid. happens randomly for some users

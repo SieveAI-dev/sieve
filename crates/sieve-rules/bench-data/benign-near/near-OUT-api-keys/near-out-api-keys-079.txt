@@ -1,0 +1,15 @@
+```yaml
+# docker-compose.yml — passing GCP API key safely
+version: '3.8'
+services:
+  maps-service:
+    image: my-maps-app:latest
+    environment:
+      # Load from host environment — never hardcode AIzaSy-... here
+      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY}
+    ports:
+      - "8080:8080"
+```
+
+Set the variable before running: export GOOGLE_MAPS_API_KEY="AIzaSy-YOUR_KEY_HERE"
+Or use an .env file (not committed to git): GOOGLE_MAPS_API_KEY=AIzaSy-YOUR_KEY_HERE

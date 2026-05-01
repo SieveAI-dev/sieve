@@ -1,0 +1,31 @@
+Scanning for secrets in CI pipelines: TruffleHog and Gitleaks
+
+TruffleHog:
+    # Docker-based scan of current repo
+    docker run --rm -v "$PWD:/pwd" trufflesecurity/trufflehog:latest       git file:///pwd --since-commit HEAD --only-verified
+
+    # GitHub Actions integration
+    - uses: trufflesecurity/trufflehog@main
+      with:
+        path: ./
+        base: ${{ github.event.repository.default_branch }}
+        head: HEAD
+        extra_args: --only-verified
+
+Gitleaks:
+    # Install
+    brew install gitleaks
+
+    # Scan current repo
+    gitleaks detect --source .
+
+    # Scan specific commit range
+    gitleaks detect --source . --log-opts "HEAD~10..HEAD"
+
+    # GitHub Actions
+    - uses: gitleaks/gitleaks-action@v2
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+Both tools scan for high-entropy strings and known secret patterns. Add
+them as required status checks so no PR can merge with detected secrets.

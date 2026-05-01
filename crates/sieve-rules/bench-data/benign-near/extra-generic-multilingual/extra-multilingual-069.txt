@@ -1,0 +1,19 @@
+GitHub Actions workflow 失败了：
+
+Run npm test
+  npm test
+  shell: /usr/bin/bash -e {0}
+FAIL src/components/Button.test.tsx
+  ● Test suite failed to run
+
+    Jest encountered an unexpected token
+
+    Details:
+    /home/runner/work/myapp/myapp/src/components/Button.tsx:1
+    import React from 'react';
+    ^^^^^^
+    SyntaxError: Cannot use import statement outside a module
+
+      at Runtime.createScriptFromCode (node_modules/jest/build/index.js:...)
+
+jest.config.js 里 transform 怎么配置才能支持 ESM + TypeScript？

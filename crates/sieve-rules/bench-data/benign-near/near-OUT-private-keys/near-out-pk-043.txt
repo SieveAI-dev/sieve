@@ -1,0 +1,5 @@
+ECDSA P-256 public key example (public information):
+
+ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBNQ7lBV2kH8qrKMvxMFQWFl5oN8eFXMEqvkZ3RLl4dJNKfhRzWvCXJoHzUtGBi1LqXjMiTWfFVOSfaRpAL8K94k= bob@server
+
+The prefix "AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTY" decodes to the key type identifier and curve name. P-384 keys start with "AAAAE2VjZHNhLXNoYTItbmlzdHAzODQ", and P-521 with "AAAAE2VjZHNhLXNoYTItbmlzdHA1MjE". Public ECDSA keys contain the uncompressed or compressed curve point (x,y coordinates).

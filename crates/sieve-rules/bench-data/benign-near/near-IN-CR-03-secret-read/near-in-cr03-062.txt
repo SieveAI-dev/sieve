@@ -1,0 +1,20 @@
+Using `security add-generic-password` to store credentials
+
+The `security` CLI lets you add passwords to the Keychain safely:
+
+    # Store a service password (will prompt for password in Terminal)
+    security add-generic-password       -a "myapp"       -s "my-service"       -w "mysecretpassword"       -T ""       -U
+
+Options:
+  -a  account name
+  -s  service name (used to look up the item later)
+  -w  password value (alternatively, omit -w to be prompted interactively)
+  -T  trusted applications (empty string = no apps get auto-access)
+  -U  update item if it already exists
+
+Reading from applications:
+    # In Swift:
+    let password = try keychain.get("my-service")
+
+    # Via CLI (for debugging only — avoid scripting reads):
+    security find-generic-password -s "my-service" -a "myapp" -g

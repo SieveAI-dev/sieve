@@ -1,0 +1,10 @@
+Constitutional AI and its limits
+
+Anthropic's Constitutional AI (CAI) trains models to follow a set of principles through self-critique and revision. The model learns to evaluate its own outputs against principles like "don't help with harm."
+
+CAI is effective for many safety properties but has known limitations:
+- It operates at training time, not inference time — a model can still be manipulated through carefully crafted prompts
+- It doesn't prevent misuse by the system integrator (an app can pass harmful context to the model)
+- It doesn't address the "excessive agency" problem — a model can be "safe" in its responses but still execute harmful actions through tools
+
+Sieve complements CAI by adding a runtime action filter that doesn't depend on the model's own judgment.

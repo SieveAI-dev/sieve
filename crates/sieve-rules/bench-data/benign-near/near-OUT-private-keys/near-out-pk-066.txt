@@ -1,0 +1,36 @@
+# SSH Key Setup Guide
+
+## Prerequisites
+- OpenSSH client installed
+- Terminal access
+
+## Step 1: Generate Key Pair
+
+```bash
+ssh-keygen -t ed25519 -C "your@email.com"
+```
+
+Follow prompts. Set a passphrase for extra security.
+
+## Step 2: Start ssh-agent
+
+```bash
+eval "$(ssh-agent -s)"
+ssh-add ~/.ssh/id_ed25519
+```
+
+## Step 3: Copy Public Key to Server
+
+```bash
+ssh-copy-id user@server.example.com
+# Or manually:
+cat ~/.ssh/id_ed25519.pub | ssh user@server "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys"
+```
+
+## Step 4: Test Connection
+
+```bash
+ssh user@server.example.com
+```
+
+If prompted for passphrase instead of password: success! The passphrase unlocks your local key.

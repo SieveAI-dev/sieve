@@ -1,0 +1,13 @@
+# wget in Dockerfile
+
+```dockerfile
+FROM ubuntu:22.04
+
+RUN apt-get update && apt-get install -y wget ca-certificates && \
+    wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
+         -O /tmp/chrome.deb && \
+    dpkg -i /tmp/chrome.deb || apt-get -f install -y && \
+    rm -rf /var/lib/apt/lists/* /tmp/chrome.deb
+```
+
+wget downloads the .deb package to a temp file; dpkg installs it. The content is installed via the package manager, not executed directly from the network. Always prefer verifying the downloaded package with a SHA256 checksum before installation in production images.

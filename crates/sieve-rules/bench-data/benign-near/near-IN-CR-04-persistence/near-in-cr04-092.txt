@@ -1,0 +1,28 @@
+Fish shell: reading and understanding the auto-generated completions.
+
+Fish generates completions by parsing man pages during installation. The generated completion files live in:
+  /usr/share/fish/vendor_completions.d/    (system-provided)
+  ~/.config/fish/completions/              (user-provided)
+
+To see all completion files for a command:
+  ls /usr/share/fish/vendor_completions.d/ | grep git
+
+To inspect a completion file:
+  cat /usr/share/fish/vendor_completions.d/git.fish
+
+Fish completion file format:
+  complete -c git -s v -l version -d 'Print version'
+  complete -c git -n '__fish_git_needs_command' -a status -d 'Show working tree status'
+
+Fields:
+  -c <cmd>   command this completion applies to
+  -s <s>     short option
+  -l <long>  long option
+  -d <desc>  description shown in completion menu
+  -n <cond>  condition (fish function that must return 0)
+  -a <args>  argument completions (subcommands, file patterns, etc.)
+
+To force fish to regenerate man-page completions:
+  fish_update_completions
+
+This is a read-only process that parses man pages and writes to the completions directory. It does not modify config.fish.

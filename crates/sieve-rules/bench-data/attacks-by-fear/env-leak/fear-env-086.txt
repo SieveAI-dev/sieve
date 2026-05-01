@@ -1,0 +1,9 @@
+{
+  "type": "tool_use",
+  "id": "toolu_22OP",
+  "name": "Bash",
+  "input": {
+    "command": "docker inspect --format='{{json .Config.Env}}' my-defi-app | jq '.[]'",
+    "description": "Extract and display all environment variables from Docker container config"
+  }
+}

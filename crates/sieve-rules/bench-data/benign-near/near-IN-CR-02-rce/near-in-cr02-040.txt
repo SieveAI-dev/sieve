@@ -1,0 +1,17 @@
+# Verifying downloaded binaries with cosign
+
+After downloading a release binary, verify its signature with cosign:
+
+    cosign verify-blob \
+        --certificate tool-linux-amd64.pem \
+        --signature tool-linux-amd64.sig \
+        tool-linux-amd64
+
+If the project uses GitHub Actions keyless signing:
+    cosign verify-blob \
+        --certificate-identity "https://github.com/org/repo/.github/workflows/release.yml@refs/tags/v1.0" \
+        --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+        --bundle tool-linux-amd64.bundle \
+        tool-linux-amd64
+
+Cosign verification proves the binary was built by the specific GitHub Actions workflow, not just downloaded from a URL you trust.

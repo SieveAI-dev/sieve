@@ -1,0 +1,18 @@
+MEV bot activity log — Flashbots bundle analysis:
+
+Bundle 0x7f3a...c4d1 (block 20,000,100, slot 0):
+
+Tx 1: Sandwich front-run
+  bot:       0x00000000003b3cc22aF3aE1EAc0440BcEe416B40
+  victim:    0xc73b4dDEF2C84Af7EaBbfaCa95e6A38E4c1Bf37c
+  target:    0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D  (Uniswap V2 Router)
+
+Tx 2: Victim's original swap (sandwiched)
+  sender:    0xc73b4dDEF2C84Af7EaBbfaCa95e6A38E4c1Bf37c
+  router:    0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D
+
+Tx 3: Sandwich back-run
+  bot:       0x00000000003b3cc22aF3aE1EAc0440BcEe416B40
+  profit:    0.0034 ETH
+
+All from/to addresses are clearly distinct and serve different roles.

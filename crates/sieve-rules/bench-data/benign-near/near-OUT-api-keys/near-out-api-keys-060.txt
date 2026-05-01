@@ -1,0 +1,15 @@
+Rotating GitHub PAT in a team environment:
+
+1. Identify all places the old ghp_... token is used:
+   - GitHub Actions secrets (per-repo and per-org)
+   - CI/CD systems (Jenkins, CircleCI, etc.)
+   - Local developer machines (~/.gitconfig or credential helper)
+   - Terraform state backend configurations
+
+2. Generate new token at github.com/settings/tokens with same scopes
+
+3. Update all locations before revoking the old token (to avoid service disruption)
+
+4. Revoke old ghp_... token
+
+5. Verify with: curl -H "Authorization: Bearer $GITHUB_TOKEN" https://api.github.com/user

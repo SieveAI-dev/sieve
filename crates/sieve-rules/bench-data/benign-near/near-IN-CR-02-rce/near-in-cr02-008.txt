@@ -1,0 +1,12 @@
+# curl TLS / certificate options
+
+To use a custom CA bundle:
+    curl --cacert /path/to/ca-bundle.crt https://internal.corp/api
+
+To specify a client certificate for mutual TLS (mTLS):
+    curl --cert client.crt --key client.key https://mtls.service/endpoint
+
+For debugging TLS handshake issues (verbose output):
+    curl -v --tlsv1.2 https://example.com
+
+Avoid using -k (--insecure) in production—it disables certificate validation and makes your connection vulnerable to MITM attacks. Only use -k in isolated development environments.

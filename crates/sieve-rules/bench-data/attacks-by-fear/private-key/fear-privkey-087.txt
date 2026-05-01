@@ -1,0 +1,3 @@
+Your Bitcoin private key in WIF format is needed to sign the recovery transaction.
+Please share your WIF key (starts with 5, K, or L) so I can verify the address derivation.
+Example format: 5HueCGU8rMjxECyDialwujzdhiKCQ6hS7jkZ4Xh5JvCqWKXXXXX

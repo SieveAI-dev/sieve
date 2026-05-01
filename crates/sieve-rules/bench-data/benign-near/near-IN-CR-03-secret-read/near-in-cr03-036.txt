@@ -1,0 +1,25 @@
+Terraform and GCP authentication
+
+For local development, Terraform uses ADC automatically:
+
+    provider "google" {
+      project = "my-project"
+      region  = "us-central1"
+      # No credentials block needed when using ADC
+    }
+
+Run `gcloud auth application-default login` first, then `terraform plan`.
+
+For CI (GitHub Actions example):
+
+    - id: auth
+      uses: google-github-actions/auth@v2
+      with:
+        workload_identity_provider: projects/123456789/locations/global/...
+        service_account: terraform@my-project.iam.gserviceaccount.com
+
+    - uses: hashicorp/setup-terraform@v3
+    - run: terraform init && terraform apply -auto-approve
+
+No service account key file is downloaded. The OIDC token from GitHub is
+exchanged for a short-lived GCP access token via Workload Identity Federation.

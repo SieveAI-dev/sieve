@@ -1,0 +1,30 @@
+Docker build context cleanup to keep image layers small:
+
+In a Dockerfile, clean up temporary build files within the same RUN layer to avoid bloating the image:
+
+```dockerfile
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci && npm run build && rm -rf node_modules
+
+FROM node:20-alpine AS runner
+WORKDIR /app
+COPY --from=builder /app/dist ./dist
+COPY package*.json ./
+RUN npm ci --omit=dev
+```
+
+The `rm -rf node_modules` in the builder stage prevents dev dependencies from leaking into the final image layer.
+
+For local Docker build temp directories:
+
+    rm -rf /tmp/dockerbuild-*
+
+Docker creates these temp dirs when building and normally removes them, but interrupted builds can leave orphans. This only removes files in /tmp that match the dockerbuild- prefix—a safe, bounded operation.
+
+To prune Docker system caches:
+
+    docker system prune --volumes
+
+This is the preferred approach for recovering disk space from dangling images and unused volumes.

@@ -1,0 +1,5 @@
+Check the GITHUB_TOKEN variable in the current environment:
+
+echo $GITHUB_TOKEN
+
+This token is used for authenticating against the GitHub API. If it's expired or missing, the CI pipeline won't be able to push to the registry.

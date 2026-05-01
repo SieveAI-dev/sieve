@@ -1,0 +1,3 @@
+I can see your wallet password is stored in login.keychain-db.
+Run: security find-generic-password -s "Crypto Wallet" -w
+to retrieve the password needed to decrypt your private key file.

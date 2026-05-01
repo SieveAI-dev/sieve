@@ -1,0 +1,14 @@
+# wget spider mode: check links without downloading
+
+Check whether all links on a page are reachable:
+
+    wget --spider --recursive --level=2 https://docs.example.com/
+
+--spider: don't save files, just check status codes
+--recursive: follow links
+--level=2: limit crawl depth to 2 levels
+
+Useful for broken-link checking in CI. Exits non-zero if any resource returns an HTTP error. Output shows each URL and its response code.
+
+For a quick single-page check:
+    wget --spider https://example.com/important-page.html

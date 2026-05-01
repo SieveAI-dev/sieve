@@ -1,0 +1,20 @@
+Foundry forge test — checksummed vs lowercase address equality:
+
+```solidity
+// test/AddressFormat.t.sol
+pragma solidity ^0.8.20;
+import "forge-std/Test.sol";
+
+contract AddressFormatTest is Test {
+    address constant CHECKSUMMED = 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045;
+
+    function test_lowercaseEquality() public pure {
+        // At the EVM level there is no distinction — only 20-byte value matters
+        address lowercase = address(0xd8da6bf26964af9d7eed9e03e53415d37aa96045);
+        assertEq(CHECKSUMMED, lowercase);
+    }
+}
+```
+
+The above test passes because address comparison at the EVM level is purely byte-based.
+EIP-55 is purely a display convention for humans and tooling, not enforced by the EVM.

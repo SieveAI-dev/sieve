@@ -1,0 +1,13 @@
+Security review checklist: API key hygiene for LLM-powered apps
+
+Before shipping any app that uses sk-ant-api03-*, sk-proj-*, AKIA*, ghp_*, or AIzaSy-* keys:
+
+- [ ] All keys are loaded from environment variables, not hardcoded
+- [ ] .env is in .gitignore and excluded from Docker image layers
+- [ ] Different keys for development, staging, and production
+- [ ] Keys have minimum required permissions (IAM scoping, API restrictions)
+- [ ] Keys are stored in a secrets manager for production deployments
+- [ ] Rotation schedule is documented and calendared
+- [ ] GitHub secret scanning is enabled on all repositories
+- [ ] Pre-commit hooks or CI scans detect accidental key commits
+- [ ] Incident response runbook is written and team is briefed

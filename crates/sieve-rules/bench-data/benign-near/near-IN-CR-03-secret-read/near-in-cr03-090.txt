@@ -1,0 +1,25 @@
+Credential managers: modern alternatives to .netrc
+
+Operating system credential managers are superior to .netrc because they
+encrypt credentials using OS-provided key management:
+
+macOS:
+    git config --global credential.helper osxkeychain
+    # Credentials stored in login.keychain, never in plaintext files
+
+Linux:
+    git config --global credential.helper /usr/lib/git-core/git-credential-libsecret
+    # Requires gnome-keyring or kwallet
+
+Windows:
+    git config --global credential.helper manager
+    # Git Credential Manager stores in Windows Credential Manager
+
+Cross-platform (VS Code):
+    git config --global credential.helper       "/path/to/vscode --wait --new-window git-credential"
+
+After switching to a credential manager:
+- Verify .netrc no longer contains git credentials
+- Leave .netrc only for tools that don't support credential helpers
+  (legacy FTP clients, some curl scripts)
+- Keep .netrc permissions at 600 regardless

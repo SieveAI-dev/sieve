@@ -1,0 +1,7 @@
+整个程序崩溃了，panic 信息看不懂：
+
+thread 'main' panicked at 'called `Option::unwrap()` on a `None` value', src/config.rs:42:25
+
+我没有动 config.rs，不知道为什么突然报这个。`unwrap()` 是什么意思？
+
+能帮我看看怎么改成不会 panic 的写法吗？

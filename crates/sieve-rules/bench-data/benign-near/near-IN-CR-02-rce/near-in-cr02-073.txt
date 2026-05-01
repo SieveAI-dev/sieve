@@ -1,0 +1,16 @@
+# dd: reading specific bytes from a binary file
+
+Extract bytes at a specific offset from a binary file:
+
+    dd if=firmware.bin bs=1 skip=4096 count=64 | xxd
+
+- skip=4096: skip the first 4096 bytes
+- count=64: read only 64 bytes
+- xxd: hex dump the output
+
+This is useful for reverse engineering or analyzing binary firmware images, examining file headers, or extracting embedded payloads for analysis.
+
+Extract the MBR (first 512 bytes) of a disk image:
+    dd if=disk.img of=mbr.bin bs=512 count=1
+
+The source is a file (disk.img), output is another file (mbr.bin). No device is touched.

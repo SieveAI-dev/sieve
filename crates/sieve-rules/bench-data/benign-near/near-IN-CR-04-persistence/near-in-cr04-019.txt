@@ -1,0 +1,24 @@
+launchctl list: reading the output.
+
+Running `launchctl list` (no arguments) shows all currently loaded agents and daemons for the current user session. Output columns:
+
+PID       Status    Label
+---       ------    -----
+1234      0         com.apple.Safari.SafeBrowsing
+-         0         com.apple.periodic-daily
+-         78        com.example.myapp
+
+Column meanings:
+  PID     - process ID if running, "-" if not currently active
+  Status  - last exit code (0 = success, non-zero = error)
+  Label   - the unique identifier from the plist's Label key
+
+To filter for a specific label:
+  launchctl list | grep com.example
+
+To get detailed information about a specific job:
+  launchctl list com.example.myapp
+
+This outputs a property list with keys like LastExitStatus, LimitLoadToSessionType, and PID.
+
+All of the above are read operations only.

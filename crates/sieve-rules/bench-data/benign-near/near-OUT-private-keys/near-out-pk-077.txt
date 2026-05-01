@@ -1,0 +1,23 @@
+TLS 证书常见错误排查（中文）
+
+1. "certificate has expired"
+   检查有效期：openssl x509 -in cert.pem -noout -dates
+   原因：未自动续期。修复：certbot renew 或检查自动续期计时器
+
+2. "certificate is not trusted" (浏览器红锁)
+   原因：证书链不完整，缺少中间 CA 证书
+   修复：合并全链：cat cert.pem intermediate.pem > fullchain.pem
+
+3. "hostname mismatch" / ERR_CERT_COMMON_NAME_INVALID
+   检查 SAN：openssl x509 -in cert.pem -noout -text | grep "Subject Alternative"
+   原因：证书 CN/SAN 与实际域名不匹配
+   修复：申请包含正确域名的新证书
+
+4. "SSL: no certificate or crl found"
+   原因：PEM 文件为空，或 Windows CRLF 换行
+   修复：dos2unix cert.pem
+
+5. 私钥与证书不匹配
+   验证：openssl x509 -noout -modulus -in cert.pem | md5sum
+         openssl rsa -noout -modulus -in key.pem | md5sum
+   两个 md5 值必须相同

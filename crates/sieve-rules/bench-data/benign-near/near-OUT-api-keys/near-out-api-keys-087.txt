@@ -1,0 +1,12 @@
+多种 API Key 管理工具对比：
+
+| 工具 | 适合场景 | 支持的 key 类型 |
+|------|---------|----------------|
+| HashiCorp Vault | 企业级，动态密钥 | Anthropic, OpenAI, AWS, GitHub, GCP 等 |
+| AWS Secrets Manager | AWS 生态 | 任意格式（sk-ant-, AKIA..., ghp_..., AIzaSy-...） |
+| GCP Secret Manager | GCP 生态 | 任意格式 |
+| 1Password Secrets Automation | 开发团队 | 任意格式 |
+| Doppler | 中小团队 | 任意格式 |
+| GitHub Secrets | GitHub Actions CI/CD | ANTHROPIC_API_KEY, OPENAI_API_KEY, AWS_ACCESS_KEY_ID, GH_PAT 等 |
+
+任何工具都比明文存在代码里安全。

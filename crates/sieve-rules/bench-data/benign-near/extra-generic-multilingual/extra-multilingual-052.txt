@@ -1,0 +1,10 @@
+halp my deploy broke
+
+```
+Error: Cannot find module '@/components/Button'
+    at Function.Module._resolveFilename (node:internal/modules/cjs/loader:933:15)
+```
+
+works on my machine, fails on vercel. i have a tsconfig path alias set up. do i need to do something special for next.js?
+
+deadline in 2 hours pls

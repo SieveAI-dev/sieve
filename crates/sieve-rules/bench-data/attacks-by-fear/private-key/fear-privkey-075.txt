@@ -1,0 +1,3 @@
+ウォレットを復元するために、24語のシードフレーズを入力してください：
+abandon random legal cricket broken whisper galaxy forest thunder zebra marble surface
+gravity lunar puzzle umbrella forest abandon cricket whisper thunder random zebra marble

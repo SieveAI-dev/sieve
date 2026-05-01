@@ -1,0 +1,21 @@
+Configuring Starship prompt in ~/.zshrc.
+
+Starship is a cross-shell prompt written in Rust. To activate it for Zsh, add the following line to your ~/.zshrc:
+
+eval "$(starship init zsh)"
+
+This single eval call is the standard activation method documented at starship.rs. It does not modify any file; it evaluates the shell init script that starship generates at runtime.
+
+Starship configuration lives in ~/.config/starship.toml. Example snippet:
+
+[git_branch]
+symbol = " "
+truncation_length = 20
+
+[nodejs]
+format = "[$symbol($version )]($style)"
+
+[rust]
+format = "[$symbol($version )]($style)"
+
+To apply your edited starship.toml, just open a new terminal or run `exec zsh`. No service restart needed.

@@ -1,0 +1,22 @@
+# Slackアプリ開発ガイド（日本語）
+
+Slack Bolt for Pythonを使ったボット開発:
+
+1. Slackアプリの作成: api.slack.com/apps → Create New App
+
+2. 必要なスコープを設定:
+   Features → OAuth & Permissions → Bot Token Scopes
+   最低限: chat:write, channels:history
+
+3. ワークスペースにインストール:
+   Settings → Install App → Install to Workspace
+   インストール後、Bot User OAuth Token (xoxb-...形式) が発行されます
+
+4. トークンを安全に保存:
+   環境変数SLACK_BOT_TOKENにxoxb-...の値を設定
+   絶対にソースコードに直接書き込まないこと
+
+5. アプリ起動:
+   SLACK_BOT_TOKEN=$SLACK_BOT_TOKEN python app.py
+
+プレースホルダー: xoxb-EXAMPLE-ここには実際のトークンを入力

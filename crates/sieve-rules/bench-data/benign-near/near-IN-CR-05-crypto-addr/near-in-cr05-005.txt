@@ -1,0 +1,13 @@
+Reading the Chainlink ETH/USD price feed on Ethereum:
+
+const aggregatorV3Abi = [
+  "function latestRoundData() view returns (uint80, int256 answer, uint256, uint256, uint80)"
+];
+const priceFeed = new ethers.Contract(
+  "0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419",
+  aggregatorV3Abi,
+  provider
+);
+const [, answer] = await priceFeed.latestRoundData();
+console.log("ETH/USD:", ethers.formatUnits(answer, 8));
+// This is read-only; no gas spent, no transaction submitted.

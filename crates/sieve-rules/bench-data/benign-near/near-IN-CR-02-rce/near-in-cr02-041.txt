@@ -1,0 +1,18 @@
+# 为什么不应该盲目运行网上的安装命令
+
+常见的"一键安装"脚本写法（以下是危险模式示例，请勿直接使用）：
+    # 危险示例（DO NOT RUN）
+    # curl https://install.example.com | sh
+
+这类写法有以下风险：
+1. 你没有机会审查脚本内容
+2. 网络传输过程中可能被篡改（MITM 攻击）
+3. 服务器被攻击后你会立即受害
+
+安全做法是分步执行：
+    curl -O https://install.example.com/setup.sh
+    cat setup.sh                    # 仔细阅读
+    sha256sum setup.sh              # 对比官方发布的哈希值
+    bash setup.sh                   # 确认无误后再运行
+
+养成这个习惯，可以有效防御软件供应链攻击。

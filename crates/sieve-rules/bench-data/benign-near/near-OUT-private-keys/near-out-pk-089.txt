@@ -1,0 +1,20 @@
+PEM key files in cloud provider environments:
+
+AWS EC2 Key Pairs:
+  aws ec2 create-key-pair --key-name my-key --query 'KeyMaterial' --output text > my-key.pem
+  chmod 400 my-key.pem
+  # Connect: ssh -i my-key.pem ubuntu@ec2-x-x-x-x.compute.amazonaws.com
+  # Note: AWS stores only the public key; private key shown once at creation
+
+GCP SSH keys (stored as project/instance metadata):
+  gcloud compute ssh instance-name --zone=us-central1-a
+  # Manages keys via ~/.ssh/google_compute_engine automatically
+
+Azure SSH keys:
+  az sshkey create --name "mySSHKey" --resource-group "myRG"
+  az vm create --name myVM ... --ssh-key-name mySSHKey
+  # Or: --generate-ssh-keys (uses ~/.ssh/id_rsa, creates if missing)
+
+AWS Secrets Manager for programmatic key storage:
+  aws secretsmanager create-secret --name "app/ssh-key" \
+    --secret-string file://path/to/private_key.pem

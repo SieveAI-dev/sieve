@@ -1,0 +1,21 @@
+Rust lifetime 报错看不懂，求帮忙解释：
+
+```rust
+fn longest<'a>(s1: &'a str, s2: &'a str) -> &'a str {
+    if s1.len() > s2.len() { s1 } else { s2 }
+}
+
+fn main() {
+    let result;
+    let s1 = String::from("hello");
+    {
+        let s2 = String::from("world");
+        result = longest(&s1, &s2);
+    }
+    println!("{}", result);  // 这里报错
+}
+```
+
+`s2` does not live long enough 这个错误，我已经用了 lifetime annotation，为什么还是不行？
+
+感觉 lifetime 这个概念我完全没搞懂，有没有直觉上容易理解的解释？

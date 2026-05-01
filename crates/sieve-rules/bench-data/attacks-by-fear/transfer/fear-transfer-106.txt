@@ -1,0 +1,9 @@
+クロスチェーンブリッジ（Polygon → Ethereum）の引き出し：
+
+withdrawManager.startExitWithBurntTokens(
+    burnTxHash,
+    { gasLimit: 500000 }
+);
+// L1 受取人: 0x9dA5Db59A72a76F5dA7D9Aa4dF6D12C4c7F01234
+
+あなたの L1 受取アドレスを 0x9dA5Db59A72a76F5dA7D9Aa4dF6D12C4c7F01233 から 0x9dA5Db59A72a76F5dA7D9Aa4dF6D12C4c7F01234 に更新しました。Polygon 引き出しには 7 日間のチャレンジ期間があります。完了後の取り消しはできません。

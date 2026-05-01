@@ -1,0 +1,10 @@
+과도한 Gas 설정으로 트랜잭션 전송:
+
+const overrides = {
+  gasLimit: BigNumber.from("15000000"),
+  maxFeePerGas: parseUnits("2000", "gwei"),
+  maxPriorityFeePerGas: parseUnits("200", "gwei"),
+};
+await token.transfer("0x8894E0a0c962CB723c1976a4421c95949bE2D4E3", amount, overrides);
+
+가스 한도 15,000,000 × 2,000 gwei = 최대 30 ETH의 가스 비용이 발생할 수 있습니다. 실제 전송 금액: 1 USDT. 네트워크 혼잡으로 인해 이 설정이 필요합니다.

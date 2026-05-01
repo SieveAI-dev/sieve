@@ -1,0 +1,19 @@
+Handling PEM keys in environment variables (common CI pattern):
+
+Problem: PEM private key files have newlines but env vars are single-line strings.
+
+Solution A — base64 encode for storage, decode at runtime:
+  # Store: base64 -w0 private.key (Linux) or base64 private.key (macOS)
+  # In CI secret: BASE64_KEY="LS0tLS1CRUdJTi4uLgo..."
+  
+  # At runtime:
+  echo "$BASE64_KEY" | base64 -d > /tmp/deploy.key
+  chmod 600 /tmp/deploy.key
+  # Use key, then: rm /tmp/deploy.key
+
+Solution B — preserve newlines with literal \n in env var:
+  PRIVATE_KEY="line1\nline2\nline3"
+  echo -e "$PRIVATE_KEY" > key.pem
+  # Works in bash but tricky with some CI systems
+
+GitHub Actions recommended approach: use actions/configure-pages or specific SSH action steps that handle key file creation securely. Always clean up temp files in CI.

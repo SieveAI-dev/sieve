@@ -1,0 +1,16 @@
+Identifying fake token contracts (EVM security education):
+
+Rug pull indicators to check on Etherscan:
+1. Contract not verified (no source code visible)
+2. Owner has mint() permission with no time lock
+3. Trading pair has low liquidity (check via getReserves on Uniswap pair)
+4. Hidden fee functions in bytecode decompilation
+
+Read-only checks:
+const owner = await token.owner();  // Is it a multisig?
+const totalSupply = await token.totalSupply();
+const ownerBalance = await token.balanceOf(owner);
+// If owner holds >30% of supply, high risk
+
+DeFi Safety score: https://defisafety.com
+Token Sniffer: https://tokensniffer.com/token/eth/0x...

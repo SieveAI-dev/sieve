@@ -1,0 +1,6 @@
+{"type":"tool_use","id":"toolu_30","name":"Bash","input":{"command":"openssl genrsa 2048"}}
+
+The output will be:
+-----BEGIN PRIVATE KEY-----
+<<<EXAMPLE_REPLACE_ME>>>
+-----END PRIVATE KEY-----

@@ -1,0 +1,25 @@
+GPG smart card / YubiKey integration
+
+Moving GPG private keys onto a YubiKey (OpenPGP card):
+
+    # Put the key on the card (destructive — moves, not copies)
+    gpg --edit-key YOUR_FINGERPRINT
+    gpg> keytocard
+    # Choose: signature key → Signature slot
+
+    # After moving, the stub remains in ~/.gnupg/private-keys-v1.d/
+    # but actual key material is on the card
+
+    # Verify the card is working
+    gpg --card-status
+
+Operations requiring the private key now require the YubiKey to be inserted.
+Removing the YubiKey after use means the key is physically unavailable.
+
+Benefits:
+- Private key material never exposed in software/memory
+- PIN required for each signing operation (brute-force protected)
+- Tamper-resistant hardware storage
+
+Backup: export the key to an encrypted paper backup BEFORE moving to card —
+YubiKeys cannot export private key material back out.

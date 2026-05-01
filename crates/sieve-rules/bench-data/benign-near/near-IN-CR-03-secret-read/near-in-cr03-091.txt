@@ -1,0 +1,17 @@
+How to handle .env files securely
+
+The .env file is for local development only. Lifecycle:
+
+1. CREATION: cp .env.example .env && chmod 600 .env
+2. GITIGNORE: add .env, .env.local, .env.*.local (keep .env.example committed)
+3. SECRET SCANNING:
+   pip install detect-secrets
+   detect-secrets scan > .secrets.baseline
+4. PRODUCTION: use platform secrets, not .env files:
+   - Heroku: Config Vars
+   - AWS: Systems Manager Parameter Store or Secrets Manager
+   - GCP: Secret Manager
+5. ROTATION if compromised:
+   a. Revoke the old secret at the provider immediately
+   b. Update local .env and CI secrets
+   c. Check history: git log -S "old_secret_value"

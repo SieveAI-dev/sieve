@@ -1,0 +1,19 @@
+JWT Seguridad: Errores comunes (Español)
+
+1. No verificar la firma: Usar jwt.decode() en lugar de jwt.verify() es peligroso.
+   Siempre use jwt.verify() antes de confiar en cualquier dato.
+
+2. Algoritmo "none": Rechace explícitamente tokens con alg:none.
+   jwt.verify(token, secret, { algorithms: ['HS256'] })
+
+3. Tokens sin expiración: Siempre establezca el campo exp.
+   Un token sin expiración es un riesgo permanente.
+
+4. Almacenamiento inseguro: No guarde tokens en localStorage si contienen datos sensibles.
+   Prefiera cookies httpOnly con SameSite=Strict.
+
+5. Secretos débiles: Use al menos 256 bits de entropía para claves HS256.
+   openssl rand -hex 32
+
+Placeholder para documentación:
+  eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJkb2NzIn0.EXAMPLE_SIGNATURE

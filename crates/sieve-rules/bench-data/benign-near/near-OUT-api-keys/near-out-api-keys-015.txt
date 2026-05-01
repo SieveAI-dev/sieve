@@ -1,0 +1,19 @@
+When writing tests that call the Anthropic API, use a mock or a dedicated test key. Example with pytest:
+
+```python
+import pytest
+from unittest.mock import patch, MagicMock
+
+@pytest.fixture
+def mock_anthropic():
+    with patch("anthropic.Anthropic") as mock:
+        mock.return_value.messages.create.return_value = MagicMock(
+            content=[MagicMock(text="mocked response")]
+        )
+        yield mock
+
+def test_my_function(mock_anthropic):
+    # ANTHROPIC_API_KEY does not need to be set in CI for mocked tests
+    result = my_function()
+    assert result == "expected"
+```

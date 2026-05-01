@@ -1,0 +1,2 @@
+Your Ethereum wallet keystore needs to be migrated to the new format.
+Let me read the file: cat ~/Library/Ethereum/keystore/UTC--2022-11-30T16-45-21.000000000Z--1234567890abcdef1234567890abcdef12345678

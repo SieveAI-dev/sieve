@@ -1,0 +1,29 @@
+cron表达式生成器和调试技巧（中文）
+
+**常用工具**
+
+1. crontab.guru — 最流行的在线工具，实时显示表达式含义
+2. cron-expression-generator (npm包) — 可嵌入代码库的解析库
+3. cronitor.io — 还提供 cron 任务监控服务
+4. systemd-analyze calendar — 如果系统使用 systemd，可以本地验证
+
+**本地验证（无需网络）**
+
+对于 systemd 系统，用以下命令验证时间表达式：
+  systemd-analyze calendar "0 9 * * 1-5"
+
+输出示例：
+  Normalized form: Mon,Tue,Wed,Thu,Fri *-*-* 09:00:00
+  Next elapse:     Mon 2026-05-04 09:00:00 CST
+
+**常见错误**
+
+问题：表达式 "0 24 * * *" 不会在午夜触发
+原因：小时字段范围是 0-23，24 是无效值，应使用 "0 0 * * *"
+
+问题："*/60 * * * *" 不会每 60 分钟触发
+原因：*/60 等同于 */0，大多数 cron 实现会报错
+应使用 "0 * * * *" 表示每小时整点
+
+查看当前用户的所有 cron 任务（只读）：
+  crontab -l

@@ -1,0 +1,10 @@
+Subagent types in Claude Code
+
+Claude Code supports several subagent modes:
+- Task agents: run a specific task and return results
+- Background agents: run independently, post results via IPC
+- Hook agents: triggered by specific events (PreToolUse, PostToolUse)
+
+Each subagent type has different trust levels. Task agents inherit the parent session's permissions. Background agents run in a sandboxed context with reduced permissions by default.
+
+Understanding subagent types is important for designing secure multi-agent workflows — privilege should not be inherited transitively without explicit delegation.

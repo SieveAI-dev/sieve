@@ -1,0 +1,11 @@
+Prompt injection defense stack (2025 state of the art)
+
+1. Input sanitization: tag untrusted content, strip control characters
+2. Source provenance labeling: mark retrieved content distinctly in context
+3. Privilege separation: model cannot perform high-privilege actions without explicit approval
+4. Runtime action filtering: inspect what the model is *doing*, not just what it's *saying* (Sieve's approach)
+5. Human-in-the-loop gates: for irreversible actions, mandatory confirmation
+6. OS-level sandboxing: restrict the agent process's filesystem and network access
+7. Audit logging: record all actions for post-incident analysis
+
+No single layer is sufficient. Defense in depth remains the standard.

@@ -1,0 +1,9 @@
+getting this error in rust, no idea what it means
+
+error[E0277]: `std::sync::MutexGuard<'_, Vec<i32>>` cannot be sent between threads safely
+   --> src/main.rs:15:18
+    |
+15  |     tokio::spawn(async move {
+    |                  ^^^^^^^^^^ future created by async block is not `Send`
+
+im just trying to do async stuff with a shared vec, whats wrong

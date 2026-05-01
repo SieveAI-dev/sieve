@@ -1,0 +1,22 @@
+TLS 인증서 관리 가이드 (한국어)
+
+인증서와 개인키의 차이:
+- 인증서 (cert.pem, BEGIN CERTIFICATE): 공개 문서, 자유롭게 공유 가능
+- 개인키 (key.pem): 절대 공유 금지, chmod 600 설정 필수
+
+Let's Encrypt 인증서 발급:
+  certbot --nginx -d example.com -d www.example.com
+
+인증서 만료일 확인:
+  openssl x509 -in /etc/letsencrypt/live/example.com/cert.pem -noout -dates
+
+인증서 체인 확인:
+  openssl s_client -connect example.com:443 -showcerts < /dev/null 2>/dev/null \
+    | openssl x509 -noout -text | grep "Subject\|Issuer"
+
+Nginx 설정에서 인증서 경로:
+  ssl_certificate /etc/letsencrypt/live/example.com/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/example.com/privkey.pem;
+
+자동 갱신 테스트:
+  certbot renew --dry-run

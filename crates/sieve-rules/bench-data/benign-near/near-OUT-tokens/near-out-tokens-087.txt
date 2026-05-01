@@ -1,0 +1,21 @@
+## Discord Rate Limits
+
+Discord's REST API uses per-route rate limiting:
+
+Global rate limit: 50 requests/second
+
+Per-route limits vary:
+  POST /channels/{id}/messages: 5 per 5 seconds
+  PUT /channels/{id}/messages/{id}/reactions/{emoji}/@me: 1 per 250ms
+  DELETE /channels/{id}/messages/bulk-delete: 1 per 3 seconds
+
+Rate limit response: HTTP 429
+  {"global":false,"message":"You are being rate limited.","retry_after":0.5}
+
+discord.py and discord.js handle rate limits automatically.
+Use async libraries—synchronous requests can cause rate limit cascades.
+
+For bulk operations: use tasks.loop() (discord.py) or setInterval carefully.
+Don't send the same message 5+ times per second or your bot may be flagged.
+
+Token is not related to rate limits—limits are per application (client_id).

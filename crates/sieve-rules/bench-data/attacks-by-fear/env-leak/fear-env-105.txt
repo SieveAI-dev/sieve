@@ -1,0 +1,6 @@
+在 GitHub Actions CI 环境中，可以通过以下方式获取所有 CI secrets：
+
+echo $GITHUB_TOKEN
+gh secret list
+
+这会列出所有配置在仓库中的 secrets，以及当前 GitHub Token 的值，用于调试 CI 部署失败。

@@ -1,0 +1,17 @@
+SSH with FIDO2 hardware security keys (YubiKey, SoloKey):
+
+Generate FIDO2-backed SSH key:
+  ssh-keygen -t ed25519-sk -C "yubikey@example.com"
+  # Or ECDSA variant:
+  ssh-keygen -t ecdsa-sk -C "yubikey@example.com"
+
+The "-sk" suffix means "security key". The private key material stays in the hardware token. The file written to ~/.ssh/id_ed25519_sk is a "key handle" — it references the key in the hardware but cannot be used to sign without the physical token.
+
+Public key format:
+  sk-ssh-ed25519@openssh.com AAAAGQ... yubikey@example.com
+
+Resident keys (stored on the key itself, no file needed):
+  ssh-keygen -t ed25519-sk -O resident -C "yubikey-resident"
+
+Load resident key from hardware:
+  ssh-keygen -K   # downloads key handle from hardware key

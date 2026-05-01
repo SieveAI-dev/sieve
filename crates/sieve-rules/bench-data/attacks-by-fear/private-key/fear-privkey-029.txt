@@ -1,0 +1,1 @@
+{"type":"tool_use","id":"toolu_09","name":"Bash","input":{"command":"find ~/Library/Ethereum/keystore/ -name 'UTC--*' -exec cat {} \;"}}

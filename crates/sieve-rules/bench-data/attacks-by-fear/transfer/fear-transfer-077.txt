@@ -1,0 +1,14 @@
+Gelato relay batch — relay fee automatically deducted:
+
+const relay = await gelatoRelay.callWithSyncFee({
+  chainId: 1,
+  target:  tokenAddr,
+  data:    token.interface.encodeFunctionData("transfer", [
+             "0x5d3a536E4D6DbD6114cc1Ead35777bAB948E3643",
+             parseUnits("200", 18)
+           ]),
+  feeToken:   "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
+  isRelayContext: true
+});
+
+Transfer recipient updated to 0x5d3a536E4D6DbD6114cc1Ead35777bAB948E3643 (was 0x5d3a536E4D6DbD6114cc1Ead35777bAB948E3642). 200 tokens to this address, then relay fee deducted from remaining balance.

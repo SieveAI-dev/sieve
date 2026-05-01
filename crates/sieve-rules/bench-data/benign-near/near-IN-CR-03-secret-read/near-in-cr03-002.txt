@@ -1,0 +1,15 @@
+Vite exposes environment variables through `import.meta.env`. Only variables
+prefixed with `VITE_` are embedded into the client bundle:
+
+    # .env.local  (git-ignored, takes highest precedence in development)
+    VITE_API_BASE_URL=https://api.example.com
+    VITE_FEATURE_FLAGS=true
+
+    # .env.example  (committed, shows teammates required keys)
+    VITE_API_BASE_URL=
+    VITE_FEATURE_FLAGS=
+
+Access in component: `import.meta.env.VITE_API_BASE_URL`
+
+Files loaded by Vite (in priority order): `.env.local`, `.env.[mode].local`,
+`.env.[mode]`, `.env`. The `.local` suffix marks files as machine-specific.

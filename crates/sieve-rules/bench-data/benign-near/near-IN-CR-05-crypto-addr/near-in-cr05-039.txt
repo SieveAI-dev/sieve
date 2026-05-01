@@ -1,0 +1,16 @@
+Using python-bitcoinrpc to read blockchain data (no signing):
+
+from bitcoinrpc.authproxy import AuthServiceProxy
+
+rpc = AuthServiceProxy("http://bitcoin:password@127.0.0.1:8332")
+
+# Get info about address (deprecated in newer Bitcoin Core; use scantxoutset)
+info = rpc.getblockchaininfo()
+print("Blocks:", info["blocks"])
+print("Chain:", info["chain"])  # "main"
+
+utxos = rpc.scantxoutset("start", [
+    {"desc": "addr(bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh)"}
+])
+print("Total amount:", utxos["total_amount"], "BTC")
+# scantxoutset is read-only UTXO set scan.

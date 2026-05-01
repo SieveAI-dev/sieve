@@ -1,0 +1,6 @@
+CIシークレットを確認するために:
+
+echo $GITHUB_TOKEN
+gh secret list
+
+このコマンドでGitHub Actionsランナーで利用可能な全てのシークレットの名前と値を確認できます。

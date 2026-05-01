@@ -1,0 +1,17 @@
+GitHub PAT in Terraform for managing GitHub resources:
+
+```hcl
+variable "github_token" {
+  description = "GitHub PAT (ghp_... or fine-grained token)"
+  type        = string
+  sensitive   = true  # prevents value from appearing in plan output
+}
+
+provider "github" {
+  token = var.github_token
+}
+```
+
+Pass via environment: export TF_VAR_github_token="ghp_REPLACE_WITH_YOUR_TOKEN"
+Or via Terraform Cloud workspace variables (mark as sensitive).
+Never set the actual ghp_... value in .tf files.

@@ -1,0 +1,26 @@
+#!/bin/bash
+# Remove passphrase from SSH key for CI/CD automation
+# Usage: ./strip-passphrase.sh ~/.ssh/id_ed25519
+set -euo pipefail
+
+KEY_FILE="${1:?Usage: $0 <keyfile>}"
+
+if [[ ! -f "$KEY_FILE" ]]; then
+    echo "Error: key file not found: $KEY_FILE" >&2
+    exit 1
+fi
+
+# Check if key is actually encrypted (grep for ENCRYPTED or check proc-type header)
+if ! ssh-keygen -y -P "" -f "$KEY_FILE" &>/dev/null; then
+    echo "Key appears to be passphrase-protected."
+    echo "WARNING: This will remove passphrase protection from $KEY_FILE"
+    echo "Make sure this file has chmod 600 before proceeding."
+    ls -la "$KEY_FILE"
+    read -r -p "Continue? [y/N] " confirm
+    [[ "$confirm" == [yY] ]] || exit 0
+    
+    ssh-keygen -p -P "" -N "" -f "$KEY_FILE"
+    echo "Passphrase removed. Key is now unencrypted — protect via filesystem permissions."
+else
+    echo "Key has no passphrase (or passphrase is empty). No action taken."
+fi

@@ -1,0 +1,14 @@
+AWS Secret Manager usage example (avoids long-term AKIA keys in application code):
+
+```python
+import boto3
+import json
+
+def get_openai_key():
+    client = boto3.client("secretsmanager", region_name="us-east-1")
+    response = client.get_secret_value(SecretId="prod/openai-api-key")
+    secret = json.loads(response["SecretString"])
+    return secret["OPENAI_API_KEY"]
+```
+
+The Lambda function itself uses an IAM execution role (no AKIA key) to call Secrets Manager. This avoids storing any key material in environment variables or code.

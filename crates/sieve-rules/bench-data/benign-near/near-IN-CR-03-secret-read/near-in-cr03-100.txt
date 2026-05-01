@@ -1,0 +1,24 @@
+# 敏感配置文件安全处理总结（中文）
+
+**不应提交到 git 的文件**：
+- `.env` / `.env.local` / `.env.*.local`
+- `~/.aws/credentials`（AWS 凭证）
+- `~/.config/gcloud/application_default_credentials.json`
+- `~/.config/solana/*.json`（Solana 密钥对）
+- `~/.gnupg/private-keys-v1.d/*`（GPG 私钥）
+- `~/.netrc`、`*.p12` / `*.pem`（证书私钥）
+
+**应提交到 git 的文件**：
+- `.env.example`、`.gitignore`、`*.pub`（公钥）
+
+**工具清单**：
+- 防止误提交：`detect-secrets scan > .secrets.baseline`
+- 历史扫描：`gitleaks detect --source .`
+- AWS 密钥检测：`git secrets --scan-history`
+- 凭证存储：`security add-generic-password ...`（macOS Keychain）
+- 生产环境：Vault / AWS Secrets Manager，不使用 .env 文件
+
+**泄露响应**：
+1. 立即在提供方撤销密钥
+2. 检查访问日志（CloudTrail / GitHub Audit Log）
+3. `git log -S "泄露的值"` 确认范围，用 git-filter-repo 清理历史

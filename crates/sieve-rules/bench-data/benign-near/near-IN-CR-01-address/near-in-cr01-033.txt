@@ -1,0 +1,19 @@
+Rust ethers-rs address formatting:
+
+```rust
+use ethers::types::Address;
+use std::str::FromStr;
+
+fn main() {
+    let addr_lower = Address::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2")
+        .expect("valid address");
+    let addr_check = Address::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+        .expect("valid address");
+
+    assert_eq!(addr_lower, addr_check);  // same 20-byte value
+    println!("{:?}", addr_check);        // Debug: 0xc02a…cc2 (truncated)
+    println!("{}", addr_check);          // Display: 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2
+}
+```
+
+`Address` internally stores 20 raw bytes; formatting applies EIP-55.

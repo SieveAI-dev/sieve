@@ -1,0 +1,26 @@
+TLS certificate rotation zero-downtime procedure:
+
+1. Generate new key and CSR (or use ACME automation):
+   openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out new.key
+   openssl req -new -key new.key -out new.csr -subj "/CN=example.com"
+
+2. Obtain new certificate from CA (or Let's Encrypt):
+   certbot certonly --csr new.csr --preferred-challenges dns-01
+
+3. Stage new cert + key (do NOT yet change nginx config):
+   cp new.key /etc/nginx/ssl/new.key
+   cp new_fullchain.pem /etc/nginx/ssl/new_fullchain.pem
+   chmod 600 /etc/nginx/ssl/new.key
+
+4. Test nginx config with new cert before reloading:
+   nginx -t -c /etc/nginx/nginx.conf
+
+5. Reload nginx (zero downtime — existing connections keep old cert):
+   nginx -s reload
+
+6. Verify new cert is live:
+   openssl s_client -connect example.com:443 < /dev/null 2>/dev/null | \
+     openssl x509 -noout -dates
+
+7. Archive old cert (keep for audit trail):
+   mv /etc/nginx/ssl/old.key /archive/$(date +%Y%m%d)_old.key

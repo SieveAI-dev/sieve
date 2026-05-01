@@ -1,0 +1,10 @@
+Checking Marinade staked SOL (mSOL) exchange rate:
+
+import { Connection, PublicKey } from "@solana/web3.js";
+
+// Marinade state account — stores mSOL/SOL ratio
+const MARINADE_STATE = new PublicKey("8szGkuLTAux9XMgZ2vtY39jVSowEcpBfFfD8hXSEqdGC");
+const conn = new Connection("https://api.mainnet-beta.solana.com");
+const info = await conn.getAccountInfo(MARINADE_STATE);
+// Parse the account data to extract the exchange rate
+// mSOL:SOL ratio ≈ 1.07 at the time of this snapshot

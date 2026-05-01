@@ -1,0 +1,26 @@
+GPG 설정 및 서명 키 관리 (한국어)
+
+~/.gnupg/ 디렉토리 구조:
+  pubring.kbx        — 공개 키링
+  private-keys-v1.d/ — 암호화된 비밀키 (패스프레이즈로 보호)
+  gpg.conf           — 사용자 설정
+
+유용한 명령어 (공개 정보만 표시):
+    gpg --list-keys              # 모든 공개키 목록
+    gpg --list-keys user@email   # 특정 사용자의 키
+
+키 지문 확인 (공개 정보, 안전하게 공유 가능):
+    gpg --fingerprint user@email
+
+Git 서명 설정:
+    git config --global user.signingkey 키지문
+    git config --global commit.gpgsign true
+
+공개키 내보내기 (공유 가능):
+    gpg --armor --export user@email > public.asc
+
+디렉토리 권한 설정:
+    chmod 700 ~/.gnupg
+    chmod 600 ~/.gnupg/*
+
+비밀키는 절대 공유하지 말 것. gpg --list-keys 명령은 공개 정보만 표시합니다.

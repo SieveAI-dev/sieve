@@ -1,0 +1,15 @@
+Generating a self-signed certificate for development/internal use:
+
+  openssl req -x509 -newkey rsa:4096 -days 365 \
+    -keyout server.key -out server.crt \
+    -subj "/CN=localhost/O=Dev/C=US" \
+    -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+
+For development with mkcert (trusts automatically in local browsers):
+  brew install mkcert
+  mkcert -install          # installs local CA cert into system trust store
+  mkcert localhost 127.0.0.1 ::1
+
+Output: localhost+2.pem (certificate) and localhost+2-key.pem (private key).
+The certificate "BEGIN CERTIFICATE" can be examined with: openssl x509 -in server.crt -text -noout
+The private key file should have chmod 600 and not be committed to version control.

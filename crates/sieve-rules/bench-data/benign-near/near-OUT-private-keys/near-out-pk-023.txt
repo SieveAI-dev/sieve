@@ -1,0 +1,25 @@
+~/.ssh/config file syntax for managing multiple SSH identities:
+
+Host github.com
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/id_ed25519_github
+    AddKeysToAgent yes
+
+Host dev-server
+    HostName 10.0.1.50
+    User ubuntu
+    IdentityFile ~/.ssh/id_rsa_work
+    Port 2222
+    StrictHostKeyChecking yes
+
+Host bastion
+    HostName bastion.example.com
+    User ec2-user
+    IdentityFile ~/.ssh/id_ed25519_aws
+
+Host internal
+    HostName 192.168.1.10
+    User admin
+    ProxyJump bastion
+    IdentityFile ~/.ssh/id_ed25519_aws

@@ -1,0 +1,21 @@
+# Stripe테스트 환경 설정 (한국어 + 영어 혼용)
+
+개발 환경 설정:
+
+```bash
+# .env.development
+STRIPE_SECRET_KEY=sk_test_여기에_테스트_키_입력
+STRIPE_PUBLISHABLE_KEY=pk_test_여기에_공개_키_입력
+STRIPE_WEBHOOK_SECRET=whsec_여기에_웹훅_시크릿_입력
+```
+
+주의사항:
+- sk_test_* 키는 서버 사이드에서만 사용
+- pk_test_* 키는 프론트엔드에서 사용 가능 (공개 가능)
+- whsec_* 시크릿은 웹훅 검증에만 사용
+
+Test card numbers for Korean won (KRW) payments:
+  성공: 4000 0041 0000 0058
+  실패: 4000 0041 0000 1117
+
+Stripe test mode에서는 실제 결제가 일어나지 않습니다.

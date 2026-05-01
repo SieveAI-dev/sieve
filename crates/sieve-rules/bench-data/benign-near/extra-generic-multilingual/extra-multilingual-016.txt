@@ -1,0 +1,14 @@
+tokio::select! 里面 future cancel safety 怎么理解？
+
+```rust
+tokio::select! {
+    result = some_async_fn() => { /* handle */ }
+    _ = tokio::time::sleep(Duration::from_secs(5)) => {
+        println!("timeout");
+    }
+}
+```
+
+我看文档说某些 future 不是 cancel-safe 的，比如 tokio::io::AsyncReadExt::read_to_end。如果 timeout 先触发，some_async_fn 里正在进行的 IO 会怎样？数据会丢吗？
+
+实际项目里有个 HTTP 请求在 select! 里，不确定是否安全。

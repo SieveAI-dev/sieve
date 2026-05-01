@@ -1,0 +1,17 @@
+Ruby on Rails and dotenv-rails
+
+Add to Gemfile (development + test group only):
+
+    gem 'dotenv-rails', groups: [:development, :test]
+
+It automatically loads `.env` before Rails initializes. Use:
+
+    # .env.development.local  — machine-specific dev overrides
+    REDIS_URL=redis://localhost:6379/1
+    MAIL_SENDER=dev@example.com
+
+Rails 7+ also has built-in support via `config/credentials.yml.enc` (encrypted
+with a master key), which is better for team secrets because the encrypted file
+can be committed and only the key needs to stay out of the repo.
+
+Use dotenv for local convenience; use credentials.yml.enc for shared secrets.

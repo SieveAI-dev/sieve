@@ -1,0 +1,28 @@
+# Stripe CLI: Useful test commands
+
+```bash
+# List recent events
+stripe events list --limit 10
+
+# Retrieve a specific event
+stripe events retrieve evt_XXXXXXXXXXXX
+
+# Trigger a test event
+stripe trigger checkout.session.completed
+
+# Test payment failure
+stripe trigger payment_intent.payment_failed
+
+# Create a test customer
+stripe customers create \
+  --email "test@example.com" \
+  --name "Test User"
+
+# Create a payment intent (test mode, requires sk_test_ key)
+stripe payment_intents create \
+  --amount 2000 \
+  --currency usd
+```
+
+All commands use your test key (sk_test_*) when logged in with `stripe login --interactive`.
+Switch environments with: stripe login --api-key sk_test_YOUR_TEST_KEY

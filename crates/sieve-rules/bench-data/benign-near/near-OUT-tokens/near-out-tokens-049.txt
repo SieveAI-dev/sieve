@@ -1,0 +1,24 @@
+## Stripe: Handling Refunds
+
+```ruby
+# Ruby example
+require 'stripe'
+Stripe.api_key = ENV['STRIPE_SECRET_KEY']  # sk_test_* in development
+
+refund = Stripe::Refund.create({
+  payment_intent: 'pi_XXXXXXXXXXXXXX',
+  amount: 1000,  # Partial refund of $10.00
+  reason: 'requested_by_customer'
+})
+
+puts refund.status  # 'succeeded' in test mode
+```
+
+Refund reasons: duplicate, fraudulent, requested_by_customer
+Refunds in test mode settle immediately.
+In live mode, refunds take 5-10 business days to appear on the customer's statement.
+
+Webhook events for refunds:
+  charge.refunded           → Refund succeeded
+  charge.refund.updated     → Refund status changed
+  refund.failed             → Refund failed (rare)

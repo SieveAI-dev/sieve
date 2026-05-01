@@ -1,0 +1,27 @@
+Kubernetes secret for OpenAI API key:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: openai-credentials
+type: Opaque
+stringData:
+  api-key: "sk-proj-REPLACE_WITH_ACTUAL_KEY"
+---
+apiVersion: apps/v1
+kind: Deployment
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          env:
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: openai-credentials
+                  key: api-key
+```
+
+Use `kubectl create secret` with `--from-literal` instead of embedding in YAML for production.

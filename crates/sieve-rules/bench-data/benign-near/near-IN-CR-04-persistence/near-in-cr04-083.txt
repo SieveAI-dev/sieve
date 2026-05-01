@@ -1,0 +1,26 @@
+launchd WatchPaths and QueueDirectories explained.
+
+Beyond time-based scheduling, launchd can trigger jobs based on filesystem events.
+
+WatchPaths (array of strings):
+  launchd watches each listed path for changes (using kqueue).
+  If any path is created, deleted, or modified, the job is triggered.
+  After the job runs once, it is not restarted until another change occurs.
+
+  Use case: regenerate a cache whenever a config file changes.
+
+QueueDirectories (array of strings):
+  launchd watches each listed directory.
+  The job triggers when the directory is non-empty.
+  After the job runs and empties the directory, launchd waits for new files.
+  The job keeps running until the directory is empty.
+
+  Use case: process uploaded files from a spool directory.
+
+Reading current WatchPaths in a plist:
+  plutil -p ~/Library/LaunchAgents/com.example.filewatcher.plist
+
+Verifying whether a job is currently waiting on WatchPaths:
+  launchctl list com.example.filewatcher
+
+These filesystem-triggered jobs are often a cleaner alternative to polling loops in shell scripts.

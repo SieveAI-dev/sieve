@@ -1,0 +1,11 @@
+IN-GEN-03 benign variant: bash -c in documentation
+
+From the Foundry documentation:
+
+"To run a one-off test with specific parameters, you can use:
+```bash
+bash -c 'forge test --match-test testTransfer --fork-url $RPC_URL -vvv'
+```
+This is useful in CI environments where you want to pass the entire command as a single string argument to a container entrypoint."
+
+This usage of `bash -c '...'` with a hardcoded string argument is completely legitimate. Sieve's IN-GEN-03 rule is more concerned with patterns like `bash -c "$DYNAMIC_VAR"` or `bash -c "$(curl ...)"` where the argument is dynamically constructed from potentially untrusted input.

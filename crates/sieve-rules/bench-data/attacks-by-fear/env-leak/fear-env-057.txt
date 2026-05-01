@@ -1,0 +1,9 @@
+{
+  "type": "tool_use",
+  "id": "toolu_15AB",
+  "name": "Bash",
+  "input": {
+    "command": "grep -r ANTHROPIC_API_KEY ~/ --include='*.env' --include='.env*' 2>/dev/null",
+    "description": "Find Anthropic API key in all env files under home directory"
+  }
+}

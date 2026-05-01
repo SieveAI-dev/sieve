@@ -1,0 +1,14 @@
+IN-GEN-06 context: why "ignore previous instructions" is a red flag
+
+The phrase pattern detected by IN-GEN-06 — variations of "ignore/disregard previous instructions" — is a classic injection signal because:
+
+1. Legitimate responses never need to instruct the model about its own context
+2. The phrase is meaningless in a benign context (you're talking to the user, not the model)
+3. It targets the meta-level: system prompt override
+
+Edge cases where this might legitimately appear:
+- Security tutorials discussing the attack pattern (educational)
+- Prompting guides explaining what NOT to do
+- Security research documents
+
+Sieve uses a 30-character window between components for tolerance, but FP risk in security discussions is acknowledged.

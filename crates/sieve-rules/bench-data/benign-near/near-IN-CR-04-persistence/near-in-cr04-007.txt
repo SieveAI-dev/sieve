@@ -1,0 +1,16 @@
+Systemd vs Docker: when to use each for long-running services.
+
+For a simple single-host deployment, systemd units are often sufficient:
+- No additional software required (ships with every modern Linux distro)
+- systemctl status gives instant health information
+- journalctl provides structured logging out of the box
+- Automatic restart policies via Restart= and RestartSec=
+
+Docker shines when you need:
+- Image-based deployments with dependency isolation
+- Multi-container orchestration with Docker Compose
+- Portability across distributions
+
+A hybrid approach: run Docker Compose via a systemd unit, so the container group starts on boot, restarts on failure, and integrates with journald.
+
+Reference: systemd.service(5) man page, `man 5 systemd.service`

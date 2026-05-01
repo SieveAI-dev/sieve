@@ -1,0 +1,19 @@
+Rust: reading Ethereum balance via ethers-rs (view only):
+
+use ethers::prelude::*;
+use std::convert::TryFrom;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let provider = Provider::<Http>::try_from("https://rpc.ankr.com/eth")?;
+    
+    let address: Address = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045".parse()?;
+    let balance = provider.get_balance(address, None).await?;
+    
+    println!("Balance: {} wei", balance);
+    println!("Balance: {} ETH", ethers::utils::format_ether(balance));
+    
+    // provider.get_balance uses eth_getBalance JSON-RPC.
+    // No signer involved; Provider (not SignerMiddleware) is read-only.
+    Ok(())
+}

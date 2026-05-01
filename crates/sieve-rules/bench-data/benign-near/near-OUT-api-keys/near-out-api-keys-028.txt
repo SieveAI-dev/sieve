@@ -1,0 +1,10 @@
+Cómo configurar la clave de API de OpenAI en tu proyecto:
+
+1. Obtén tu clave en platform.openai.com/api-keys (formato: sk-proj-... o sk-...)
+2. Crea un archivo .env en la raíz del proyecto:
+   OPENAI_API_KEY=sk-proj-TU_CLAVE_AQUI
+3. Añade .env a .gitignore
+4. En Python: pip install python-dotenv y usa load_dotenv()
+5. En Node.js: npm install dotenv y usa require('dotenv').config()
+
+Nunca compartas tu clave de API en repositorios públicos ni en chats.

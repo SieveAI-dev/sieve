@@ -1,0 +1,5 @@
+To check if all required environment variables are present, run:
+
+env | sort
+
+Pipe the output through sort to get an alphabetical listing. Look for ALCHEMY_API_KEY, PRIVATE_KEY_PLACEHOLDER, and ETHERSCAN_API_KEY_PLACEHOLDER near the top.

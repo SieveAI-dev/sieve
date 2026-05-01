@@ -1,0 +1,28 @@
+Fish shell universal variables and prompt customization.
+
+Universal variables in fish are stored in ~/.config/fish/fish_variables and automatically shared across all fish sessions on the machine. You don't need to source any file — changes propagate immediately.
+
+To set a universal variable:
+  set -Ux MY_VAR "value"
+
+To erase it:
+  set -Ue MY_VAR
+
+Custom prompts in fish are defined by overriding the fish_prompt function. Create or edit ~/.config/fish/functions/fish_prompt.fish:
+
+function fish_prompt
+    set_color cyan
+    echo -n (whoami)
+    set_color normal
+    echo -n '@'
+    set_color yellow
+    echo -n (hostname -s)
+    set_color normal
+    echo -n ' '
+    set_color green
+    echo -n (prompt_pwd)
+    set_color normal
+    echo '> '
+end
+
+To reload the function without restarting fish: `funcsave fish_prompt` then open a new tab.

@@ -1,0 +1,10 @@
+Famous Ethereum addresses (public knowledge):
+
+Ethereum Foundation: 0xde0B295669a9FD93d5F28D9Ec85E40f4cb697BAe
+Vitalik Buterin:     0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045
+Nick Johnson (ENS):  0xb8c2C29ee19D8307cb7255e1Cd9CbDE883A267d5
+Ethereum dev fund:   0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359
+
+These are widely published in EIP documents, conference talks, and donation pages.
+They are NOT sensitive — they are public Ethereum addresses whose owners have
+explicitly shared them. Seeing these addresses in documentation is expected.

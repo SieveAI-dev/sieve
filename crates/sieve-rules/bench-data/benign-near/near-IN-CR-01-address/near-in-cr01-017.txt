@@ -1,0 +1,11 @@
+Arbitrum One validator set (permissioned phase, pre-decentralization):
+
+Active validators:
+  0x0fF813f6BD577c3D1cDbE435baC0621BE6aE34B4  (Offchain Labs)
+  0x54c0D3d6C101580dB3be8763A2aE2c6bb9dc840d  (Offchain Labs 2)
+  0xb14d3c4F5FbFBCFb98af2d330000d49C95B93aA7  (Prysm Labs)
+  0x610Aa279989F440820e14248BD3879B148717C6F  (Validated)
+  0x758C6bB08B3ea5889B5cddbdeF9A45b3a983c398  (NOAD)
+
+The validator set is being expanded as part of the Arbitrum decentralization roadmap.
+See: https://docs.arbitrum.io/inside-arbitrum-nitro/ (public documentation)

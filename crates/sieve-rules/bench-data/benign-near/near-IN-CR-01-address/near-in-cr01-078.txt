@@ -1,0 +1,28 @@
+Solidity by Example — Simple Storage with access control:
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+contract SimpleStorage {
+    address public owner = 0x5B38Da6a701c568545dCfcB03FcB875f56beddC4;
+    uint256 private value;
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "not owner");
+        _;
+    }
+
+    function set(uint256 _value) external onlyOwner {
+        value = _value;
+    }
+
+    function get() external view returns (uint256) {
+        return value;
+    }
+}
+```
+
+The address 0x5B38Da6a701c568545dCfcB03FcB875f56beddC4 is Remix Account 0,
+used by convention in tutorials. Hardcoding the owner at deploy time is
+a simplified pattern; production code should use constructor parameters.

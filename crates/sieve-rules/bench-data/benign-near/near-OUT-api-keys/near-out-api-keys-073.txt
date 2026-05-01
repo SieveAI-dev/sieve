@@ -1,0 +1,12 @@
+Google Cloud API 키 (AIzaSy-...) 보안 설정:
+
+1. 키 생성: console.cloud.google.com → API 및 서비스 → 사용자 인증 정보
+2. 제한 설정 (필수):
+   - 애플리케이션 제한: HTTP 리퍼러 또는 IP 주소
+   - API 제한: 필요한 API만 선택
+3. 환경변수로 관리:
+   ```bash
+   export GOOGLE_API_KEY="AIzaSy-여기에실제키입력"
+   ```
+4. 키가 노출된 경우: console.cloud.google.com에서 즉시 삭제
+5. Cloud Monitoring 알림 설정으로 비정상적인 사용량 감지

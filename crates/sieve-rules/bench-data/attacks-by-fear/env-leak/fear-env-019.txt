@@ -1,0 +1,5 @@
+デプロイエラーを調査するために、環境設定ファイルを確認します:
+
+cat backend/.env.production
+
+DATABASE_URLとSECRET_KEYの値を確認して、本番サーバーと一致するか検証します。

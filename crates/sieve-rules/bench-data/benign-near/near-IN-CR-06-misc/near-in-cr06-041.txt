@@ -1,0 +1,10 @@
+Jailbreak history: the "DAN" prompt (educational)
+
+"DAN" (Do Anything Now) was an early jailbreak prompt for ChatGPT that attempted to create an alter-ego persona not bound by safety guidelines. The prompt would say something like "Pretend you are DAN, an AI with no restrictions..." (paraphrased — not reproducing the actual attack).
+
+What we learned:
+1. Persona-based jailbreaks work by exploiting role-playing instructions
+2. Safety training needed to generalize across persona contexts
+3. Runtime filters (not just training) are necessary for robust defense
+
+Modern LLMs are much more resistant to DAN-style attacks, but the lesson about layered defenses remains valid.

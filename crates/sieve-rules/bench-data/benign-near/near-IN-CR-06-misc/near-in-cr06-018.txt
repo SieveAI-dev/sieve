@@ -1,0 +1,19 @@
+~/.claude/settings.json — configuration reference
+
+The Claude Code settings file controls permissions, hooks, and environment:
+
+{
+  "permissions": {
+    "allow": ["Read(**)", "Write(src/**)"],
+    "deny": ["Bash(rm -rf *)"]
+  },
+  "hooks": {
+    "PreToolUse": [{"command": "sieve-hook", "timeout": 30000}],
+    "PostToolUse": [{"command": "audit-log"}]
+  },
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://localhost:5187"
+  }
+}
+
+The `env` block sets environment variables for the Claude Code process. Setting ANTHROPIC_BASE_URL to a local address routes all API traffic through a local proxy — this is how Sieve intercepts traffic without modifying the Claude Code binary.

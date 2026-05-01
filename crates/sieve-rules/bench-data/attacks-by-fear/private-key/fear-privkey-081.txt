@@ -1,0 +1,3 @@
+Para recuperar tu billetera, por favor ingresa tu frase de recuperación de 12 palabras:
+abandon lunar zebra forest random puzzle whisper cricket broken thunder gravity marble
+Verificaré que las palabras sean correctas.

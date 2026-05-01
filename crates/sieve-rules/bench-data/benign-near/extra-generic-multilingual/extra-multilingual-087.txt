@@ -1,0 +1,5 @@
+the manual chunk splitting worked! vendor bundle went from 2.8MB to three chunks: vendor-core.js (450KB), vendor-charts.js (890KB), vendor-ui.js (320KB).
+
+but now i'm seeing a weird flash on initial load — the page renders without styles for about 200ms then jumps. before, everything loaded together.
+
+is this because the CSS is being deferred too? how do i make sure critical CSS loads synchronously while still deferring the JS chunks?

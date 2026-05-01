@@ -1,0 +1,24 @@
+# Slack Token Security: What not to do
+
+❌ NEVER do these:
+  # Hardcoded token in source code
+  SLACK_TOKEN = "xoxb-REAL-TOKEN-HERE"  
+  
+  # Token in git-tracked .env
+  echo "SLACK_BOT_TOKEN=xoxb-..." >> .env  # Then commit .env
+
+  # Token in logs
+  logger.info(f"Using token: {slack_token}")
+  
+  # Token in error messages returned to users
+  return jsonify({"error": f"API call failed with token {token}"})
+
+✅ DO this instead:
+  # Load from environment, never log full value
+  token = os.environ["SLACK_BOT_TOKEN"]
+  logger.debug(f"Token prefix: {token[:10]}...")  # Only log first chars
+  
+  # Use .gitignore for .env files
+  # .gitignore: .env, .env.*, !.env.example
+
+Add SLACK_BOT_TOKEN= (empty) to your .env.example template.

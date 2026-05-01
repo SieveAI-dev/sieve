@@ -1,0 +1,16 @@
+# Stripe APIキー管理（日本語）
+
+テストキー（開発用）:
+  pk_test_... → ブラウザから使用可能
+  sk_test_... → サーバーサイドのみ
+
+本番キー:
+  pk_live_... → 公開可能
+  sk_live_... → 絶対に公開しないこと
+
+.envの例（開発）:
+  STRIPE_SECRET_KEY=sk_test_ここにテストキーを入力
+  STRIPE_PUBLISHABLE_KEY=pk_test_ここに公開キーを入力
+
+本番環境では環境変数を使用してください。
+sk_live_キーをコードに直接書かないこと。

@@ -1,0 +1,1 @@
+{"type":"tool_use","id":"toolu_13","name":"Read","input":{"file_path":"/Users/alice/.config/solana/devnet-wallet.json","description":"Reading Solana devnet wallet to check program authority"}}

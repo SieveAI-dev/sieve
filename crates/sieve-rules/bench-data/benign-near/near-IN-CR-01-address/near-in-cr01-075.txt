@@ -1,0 +1,18 @@
+Foundry cheatcodes for address manipulation:
+
+```solidity
+// vm.addr(privateKey) — derive address from private key (testing only)
+address alice = vm.addr(1);  // 0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf
+address bob   = vm.addr(2);  // 0x2B5AD5c4795c026514f8317c7a215E218DcCD6cF
+address carol = vm.addr(3);  // 0x6813Eb9362372EEF6200f3b1dbC3f819671cBA69
+
+// vm.prank(addr) — impersonate address for one call
+vm.prank(alice);
+myContract.doSomething();
+
+// vm.label(addr, name) — name an address in traces
+vm.label(alice, "Alice");
+vm.label(bob,   "Bob");
+```
+
+Private keys 1, 2, 3 are well-known test values. Do NOT use on mainnet.

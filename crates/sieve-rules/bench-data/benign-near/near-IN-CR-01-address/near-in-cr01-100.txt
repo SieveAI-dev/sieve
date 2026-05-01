@@ -1,0 +1,14 @@
+Code4rena audit — privileged address mapping:
+
+Protocol: HyperVault (fictional example)
+
+Role          Address
+-----------   -------------------------------------------
+Owner:        0x3e122E445588A3C543bc5Ab74Cd6B3Cefc1AeF4A
+Guardian:     0x7F367cC41522cE07553e823bf3be79A889DEBE1B
+TimelockCtrl: 0xC0C3B8b6Fd03C7a3e9B3EBb6B37A53B4DB23F281
+FeeAdmin:     0xA91B3f3c4A9BEa8aFe28A5CA3E9f1CcAcDa28b5E
+
+Finding: no separation between Owner and Guardian roles.
+Fix: OZ Ownable2Step for two-step transfer.
+All four addresses are completely distinct.

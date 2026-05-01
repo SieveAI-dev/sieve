@@ -1,0 +1,23 @@
+launchd plist keys reference: StartInterval vs StartCalendarInterval.
+
+StartInterval (integer):
+  Runs the job every N seconds after it last completed.
+  Simple and reliable but not aligned to wall-clock times.
+  Example: run every hour → StartInterval = 3600
+
+StartCalendarInterval (dictionary or array of dictionaries):
+  Runs at a specific calendar time, similar to cron.
+  Keys: Minute, Hour, Day, Month, Weekday (all optional; omitted = wildcard)
+  Example: every weekday at 08:30:
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>    <integer>8</integer>
+    <key>Minute</key>  <integer>30</integer>
+    <key>Weekday</key> <integer>1</integer>  <!-- 1=Monday, 7=Sunday -->
+  </dict>
+
+For multiple schedules, use an array of dicts.
+
+Read the full key reference: `man launchd.plist`
+List currently scheduled intervals: `launchctl list | grep -v "^-"`

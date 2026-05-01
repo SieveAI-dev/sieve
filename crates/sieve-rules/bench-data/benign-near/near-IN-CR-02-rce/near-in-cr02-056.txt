@@ -1,0 +1,18 @@
+# nc to test SMTP manually
+
+You can speak SMTP directly with nc to test a mail server:
+
+    nc mail.example.com 25
+
+Then type the SMTP commands:
+    EHLO myclient.local
+    MAIL FROM:<test@example.com>
+    RCPT TO:<recipient@example.com>
+    DATA
+    Subject: Test
+    
+    Hello world
+    .
+    QUIT
+
+This is useful for diagnosing mail server issues without a mail client. The nc connection is to port 25 (SMTP), not executing any shell. For encrypted SMTP (587/465), use openssl s_client instead.

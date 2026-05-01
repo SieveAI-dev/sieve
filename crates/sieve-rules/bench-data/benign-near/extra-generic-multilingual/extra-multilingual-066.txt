@@ -1,0 +1,14 @@
+CI 失败了，帮我看下这个 stack trace：
+
+FAILED tests::test_connection_pool
+
+thread 'tests::test_connection_pool' panicked at 'called `Result::unwrap()` on an `Err` value: PoolTimedOut', /home/runner/.cargo/registry/src/github.com-1ecc6299db9ec823/deadpool-postgres-0.10.5/src/lib.rs:289:33
+stack backtrace:
+   0: rust_begin_unwind
+   1: core::panicking::panic_fmt
+   2: core::result::unwrap_failed
+   3: deadpool_postgres::Pool::get::{{closure}}
+   4: my_service::db::get_connection
+   5: my_service::tests::test_connection_pool
+
+pool_size 设的是 5，测试里有 10 个并发请求，是这个原因吗？

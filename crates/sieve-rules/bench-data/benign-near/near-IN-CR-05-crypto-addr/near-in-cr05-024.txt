@@ -1,0 +1,13 @@
+Anchor program ID reference in a workspace config:
+
+[programs.localnet]
+my_dex = "DEXYosS6oEGvk8uCDayvwEZz4qEyDJRf9nFgYCaqPMTm"
+
+[programs.devnet]
+my_dex = "DEXYosS6oEGvk8uCDayvwEZz4qEyDJRf9nFgYCaqPMTm"
+
+[programs.mainnet]
+my_dex = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin"
+
+# These are program IDs (public keys of deployed programs).
+# They identify on-chain bytecode, not wallets. No funds associated.

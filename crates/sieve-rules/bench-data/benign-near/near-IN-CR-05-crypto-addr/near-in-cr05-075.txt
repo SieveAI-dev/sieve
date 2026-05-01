@@ -1,0 +1,11 @@
+Bitcoin Genesis Block address (unspendable):
+
+Address: 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
+Block: 0 (Genesis, January 3, 2009)
+Balance: 50 BTC (coinbase reward) + ~18 BTC in donations
+
+This address is provably unspendable due to a quirk in the original Bitcoin client:
+coinbase outputs in block 0 were not added to the UTXO set. Many people send
+small amounts here as a tribute to Satoshi. The 50 BTC reward can never be spent.
+
+mempool.space: https://mempool.space/address/1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa

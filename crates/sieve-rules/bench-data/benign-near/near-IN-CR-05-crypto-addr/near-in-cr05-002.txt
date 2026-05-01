@@ -1,0 +1,9 @@
+Uniswap V2 pair reserves query (read-only):
+
+const pairAbi = ["function getReserves() view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast)"];
+const pair = new ethers.Contract("0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc", pairAbi, provider);
+const [r0, r1] = await pair.getReserves();
+// USDC/WETH pair on Uniswap V2
+// reserve0 = USDC amount, reserve1 = WETH amount
+console.log("USDC reserve:", ethers.formatUnits(r0, 6));
+console.log("WETH reserve:", ethers.formatUnits(r1, 18));

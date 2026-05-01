@@ -1,0 +1,17 @@
+SSH keys on Windows: OpenSSH vs PuTTY formats
+
+Windows OpenSSH (built-in since Windows 10 1803):
+  # Generate key in PowerShell:
+  ssh-keygen -t ed25519 -C "windows@example.com"
+  # Stored at: C:\Users\username\.ssh\id_ed25519
+
+Enable OpenSSH Agent service:
+  Set-Service ssh-agent -StartupType Automatic
+  Start-Service ssh-agent
+  ssh-add $env:USERPROFILE\.ssh\id_ed25519
+
+PuTTY uses its own .ppk format (not PEM-compatible):
+  puttygen id_ed25519 -o id_ed25519.ppk     # OpenSSH → PPK
+  puttygen id_ed25519.ppk -O private-openssh -o id_ed25519  # PPK → OpenSSH
+
+Pageant (PuTTY agent) vs OpenSSH agent: use one, not both. Modern recommendation: use Windows built-in OpenSSH instead of PuTTY for new setups.

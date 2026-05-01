@@ -1,0 +1,23 @@
+Encrypting files with GPG (file encryption, not key extraction)
+
+    # Encrypt a file for a specific recipient (using their public key):
+    gpg --encrypt --recipient user@example.com sensitive.txt
+    # Creates: sensitive.txt.gpg
+
+    # Encrypt with symmetric encryption (passphrase-based, no key pair needed):
+    gpg --symmetric sensitive.txt
+    # Prompts for passphrase
+
+    # Decrypt (uses your private key or prompts for passphrase):
+    gpg --decrypt sensitive.txt.gpg > sensitive.txt
+
+    # Sign and encrypt together:
+    gpg --sign --encrypt --recipient user@example.com document.txt
+
+    # Verify a signature without decrypting:
+    gpg --verify document.txt.asc
+
+Use cases:
+- Sending secrets to teammates: encrypt to their public key
+- Backup encryption: use symmetric passphrase-based encryption
+- CI artifact signing: sign with the release key, verify in deployment pipeline

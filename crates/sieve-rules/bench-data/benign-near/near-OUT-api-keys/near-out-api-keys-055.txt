@@ -1,0 +1,9 @@
+GitHub PAT (ghp_...) 보안 모범 사례:
+
+1. 필요한 최소 권한만 부여 (최소 권한 원칙)
+2. 만료일 설정: 90일 이하 권장
+3. 저장소 시크릿에 저장: Settings → Secrets → Actions
+4. 환경변수로 사용: GH_TOKEN=${{ secrets.GH_PAT }}
+5. 토큰 접두사로 식별: ghp_ (클래식), gho_ (OAuth), ghu_ (Apps 사용자)
+6. 유출 시 즉시 취소: github.com/settings/tokens
+7. 가능하면 GitHub App 설치 토큰을 ghp_ 대신 사용하세요

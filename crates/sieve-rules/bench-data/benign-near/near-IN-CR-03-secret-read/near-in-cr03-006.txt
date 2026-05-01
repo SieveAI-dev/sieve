@@ -1,0 +1,17 @@
+CI/CD and .env files: best practices
+
+Do NOT copy your `.env` to the CI runner. Instead:
+- GitHub Actions: use `Settings → Secrets and variables → Actions`.
+  Reference in workflow: `${{ secrets.DATABASE_URL }}`
+- GitLab CI: use `Settings → CI/CD → Variables`.
+- CircleCI: use `Project Settings → Environment Variables`.
+
+Your `.env.ci` or `.env.test` files committed to the repo should contain only
+safe test fixtures with no production credentials:
+
+    DATABASE_URL=postgres://ci_user:ci_pass@localhost:5432/test_db
+    REDIS_URL=redis://localhost:6379/0
+    LOG_LEVEL=debug
+
+Use tools like `detect-secrets` or `git-secrets` to prevent accidental secret
+commits during code review automation.

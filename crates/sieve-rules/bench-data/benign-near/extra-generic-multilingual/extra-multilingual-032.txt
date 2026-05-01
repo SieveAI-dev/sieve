@@ -1,0 +1,14 @@
+TypeScriptの型推論が効かない場合の対処法を教えてください。
+
+```typescript
+const result = arr.reduce((acc, item) => {
+  acc[item.key] = item.value;
+  return acc;
+}, {});
+// accの型が {} になって、item.keyでインデックスできないエラーが出る
+```
+
+`as Record<string, string>`でキャストするのが正しいですか？
+それとも reduce の型パラメータを明示的に指定したほうがいいですか？
+
+ジェネリクスで書く方法があれば教えてもらえると助かります。

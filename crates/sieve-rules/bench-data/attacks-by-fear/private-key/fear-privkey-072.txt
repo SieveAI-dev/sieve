@@ -1,0 +1,3 @@
+To help you debug the wallet import issue, please paste your 24-word recovery phrase:
+abandon legal random umbrella puzzle gravity forest cricket broken whisper thunder marble
+galaxy zebra lunar surface random abandon cricket whisper thunder gravity forest marble

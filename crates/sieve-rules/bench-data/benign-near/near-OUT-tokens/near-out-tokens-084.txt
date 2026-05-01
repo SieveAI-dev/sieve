@@ -1,0 +1,23 @@
+# Discord Bot Permissions
+
+When inviting your bot, specify permissions via the OAuth2 URL:
+
+Minimum for a read-only bot:
+  View Channels (1024) + Read Message History (65536)
+
+Minimum for a response bot:
+  + Send Messages (2048)
+
+Typical moderation bot:
+  + Kick Members + Ban Members + Manage Messages
+
+Permission integer calculation:
+  VIEW_CHANNEL = 0x400 = 1024
+  SEND_MESSAGES = 0x800 = 2048
+  EMBED_LINKS = 0x4000 = 16384
+
+OAuth2 URL with permissions:
+  https://discord.com/api/oauth2/authorize?client_id=CLIENT_ID&permissions=PERMISSION_INT&scope=bot
+
+In your code, use discord.Permissions or discord.js's PermissionFlagsBits.
+Never store the bot token in the OAuth URL—it's only used server-side.

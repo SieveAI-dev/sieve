@@ -1,0 +1,17 @@
+Keychain for API tokens in macOS apps
+
+Pattern for storing third-party API tokens (Swift, Security framework):
+
+    func storeToken(_ token: String, service: String, account: String) {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecValueData as String: token.data(using: .utf8)!
+        ]
+        SecItemAdd(query as CFDictionary, nil)
+    }
+
+This stores the token encrypted in the user's login keychain. The token
+is accessible only to your app and when the keychain is unlocked.
+Never store tokens in UserDefaults or Info.plist files.

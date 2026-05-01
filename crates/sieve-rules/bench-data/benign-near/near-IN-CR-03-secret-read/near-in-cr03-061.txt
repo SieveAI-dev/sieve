@@ -1,0 +1,18 @@
+macOS Keychain Access app overview
+
+Keychain Access (found in /Applications/Utilities/) is the GUI for managing
+stored passwords, certificates, and secure notes. Key features:
+
+- login.keychain-db: stores passwords for the current user, unlocked at login
+- System.keychain: system-wide certificates and keys, requires admin password
+- iCloud Keychain: syncs across Apple devices
+
+Common operations via GUI:
+1. View stored items: select a keychain, browse by category
+2. Add a new password: File → New Password Item
+3. Add a certificate: File → Import Items (drag .p12 or .cer file)
+4. Generate a key pair: Certificate Assistant → Create a Key Pair
+
+The Keychain Access app is for inspection and management — it should not
+be used for automated scripting. Use the `security` command-line tool for
+scripting (see following examples for safe write operations).

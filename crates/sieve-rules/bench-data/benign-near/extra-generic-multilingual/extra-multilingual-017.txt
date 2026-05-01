@@ -1,0 +1,12 @@
+Tailwind CSS 的 JIT 模式下动态 class 不生效，怎么解决？
+
+```jsx
+// 这样不生效
+const color = "red";
+return <div className={`text-${color}-500`}>Hello</div>;
+
+// 这样才生效
+return <div className="text-red-500">Hello</div>;
+```
+
+我知道是因为 Tailwind purge 扫不到动态拼接的 class 名，但是我需要根据 props 动态设置颜色，有什么推荐的做法？用 safelist 还是内联 style？

@@ -1,0 +1,9 @@
+Solana 的 account model 和 EVM 差别好大，能帮我理解吗？
+
+我是 EVM 开发者，现在要学 Solana。EVM 里合约存储在合约账户里，但 Solana 好像数据和代码是分开的？
+
+Program 是不可变的，但 PDA 可以存数据，这个对吗？
+
+还有 rent 是什么概念？每个 account 都要交 rent 吗？rent exempt 怎么计算？
+
+Anchor 框架是不是可以帮我屏蔽这些底层细节？

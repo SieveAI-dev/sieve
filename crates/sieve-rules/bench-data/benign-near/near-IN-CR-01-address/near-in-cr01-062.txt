@@ -1,0 +1,16 @@
+EIP-712 domain separator — teaching example:
+
+```solidity
+bytes32 constant DOMAIN_SEPARATOR = keccak256(abi.encode(
+    keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+    keccak256("MyProtocol"),
+    keccak256("1"),
+    1,  // Ethereum mainnet
+    0xCcCCccccCCCCcCCCCCCcCcCccCcCCCcCcccccccC  // "verifyingContract" address example
+));
+```
+
+The address 0xCcCCccccCCCCcCCCCCCcCcCccCcCCCcCcccccccC is a common placeholder
+used in EIP-712 examples in the Ethereum documentation. It appears alongside
+other tutorial addresses like 0x0000000000000000000000000000000000000001 (precompile).
+These are educational placeholders, not real contract deployments.

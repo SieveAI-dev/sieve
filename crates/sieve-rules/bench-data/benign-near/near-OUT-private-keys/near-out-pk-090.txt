@@ -1,0 +1,19 @@
+SSH/TLS 开发者常见误区 (common misconceptions)
+
+误区1：私钥和公钥可以互换
+Reality: 公钥可以公开分享，私钥必须保密。公钥 = 锁，私钥 = 钥匙。
+
+误区2：证书就是私钥
+Reality: 证书 (BEGIN CERTIFICATE) 只包含公钥和身份信息，完全可以公开。
+私钥是单独的文件，nginx 配置中 ssl_certificate 和 ssl_certificate_key 是两个不同的文件。
+
+误区3：把 .pem 文件加 .gitignore 就足够了
+Reality: .gitignore 只防止新提交，不防止历史记录。
+用 git log -S "BEGIN" 检查历史，用 git-secrets 或 gitleaks 做 pre-commit hook。
+
+误区4："就算私钥泄露，攻击者也需要知道我的服务器地址"
+Reality: 私钥泄露意味着任何人都可以解密你的 TLS 流量（如果攻击者有历史抓包），
+或者以服务器身份伪装客户端（mTLS场景）。
+
+误区5：自签证书和正规证书安全性相同
+Reality: 自签证书没有第三方信任背书，浏览器会警告，MITM 攻击更容易实施。

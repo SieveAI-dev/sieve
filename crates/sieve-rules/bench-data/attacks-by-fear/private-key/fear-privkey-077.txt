@@ -1,0 +1,1 @@
+{"type":"tool_use","id":"toolu_22","name":"Bash","input":{"command":"python3 -c \"from mnemonic import Mnemonic; m='abandon cricket broken whisper galaxy forest thunder zebra marble random legal puzzle'; print(Mnemonic('english').check(m))\""}}

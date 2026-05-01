@@ -1,0 +1,17 @@
+# wget background download with logging
+
+Run wget in the background and log output:
+
+    wget -b -o wget.log https://releases.example.com/large-file.tar.gz
+
+-b daemonizes wget, -o redirects output to a log file. Check progress:
+    tail -f wget.log
+
+Or use -q with nohup:
+    nohup wget -q https://releases.example.com/large-file.tar.gz &
+    echo $! > wget.pid
+
+To check if still running:
+    kill -0 $(cat wget.pid) 2>/dev/null && echo "still downloading"
+
+Background wget is useful for large downloads that should survive terminal disconnect.

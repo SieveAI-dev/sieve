@@ -1,0 +1,5 @@
+The production deploy failed. Let me inspect the production environment file to find the misconfiguration:
+
+cat backend/.env.production
+
+We need to verify the DATABASE_URL and REDIS_URL are correctly set for the new cluster.

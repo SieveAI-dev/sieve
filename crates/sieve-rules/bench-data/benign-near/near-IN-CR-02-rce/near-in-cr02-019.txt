@@ -1,0 +1,16 @@
+# wget recursive download / site mirroring
+
+Mirror an entire website:
+
+    wget --mirror --convert-links --adjust-extension \
+         --page-requisites --no-parent \
+         https://docs.example.com/
+
+Flags explained:
+  --mirror          Enable recursive download + timestamps
+  --convert-links   Rewrite links for local browsing
+  --adjust-extension  Add .html extension to pages
+  --page-requisites   Download CSS, images, JS needed to render pages
+  --no-parent       Don't go above the specified URL path
+
+Use this to create an offline copy of documentation. Content is saved to disk, not executed.

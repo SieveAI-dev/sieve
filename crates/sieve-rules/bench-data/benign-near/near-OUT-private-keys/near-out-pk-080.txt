@@ -1,0 +1,20 @@
+SSH over HTTPS port (443) — bypassing restrictive firewalls:
+
+GitHub supports SSH connections on port 443 at ssh.github.com. Useful when corporate firewall blocks port 22.
+
+Test if this works:
+  ssh -T -p 443 git@ssh.github.com
+  # Expected: "Hi username! You've successfully authenticated..."
+
+Configure in ~/.ssh/config to make this automatic:
+  Host github.com
+      HostName ssh.github.com
+      User git
+      Port 443
+      IdentityFile ~/.ssh/id_ed25519
+
+After this config, regular git commands work normally:
+  git clone git@github.com:user/repo.git
+  git push origin main
+
+GitLab also supports this on port 443. Check your provider's documentation. Uses the same SSH key authentication — no additional keys needed.

@@ -1,0 +1,11 @@
+用 ethers.js v6 连接 MetaMask 的写法和 v5 差别好大，能帮我改一下吗？
+
+v5 的写法：
+```javascript
+const provider = new ethers.providers.Web3Provider(window.ethereum);
+const signer = provider.getSigner();
+```
+
+v6 怎么写？我看文档说 BrowserProvider 替换了 Web3Provider，但是 getSigner 也变了，变成 async 的了？
+
+另外 BigNumber 换成原生 bigint 之后，一些格式化函数也不一样了，ethers.utils.formatEther 还能用吗？

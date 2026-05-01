@@ -1,0 +1,31 @@
+macOS 上のスタートアップ項目を調査するツール（日本語）
+
+macOS では、起動時に自動実行される項目を把握することがシステム管理の基本です。
+
+**GUI ツール**
+
+Objective-See の KnockKnock:
+  - すべての macOS 永続化メカニズムをスキャン
+  - LaunchAgents、LaunchDaemons、ログイン項目、カーネル拡張などを網羅
+  - 無料で利用可能（objective-see.org）
+
+Lingon X:
+  - launchd エージェントとデーモンの視覚的管理ツール
+  - plist ファイルの構造を GUI で確認可能
+  - 有料アプリ（Mac App Store で入手）
+
+**コマンドラインでの調査（読み取り専用）**
+
+現在のユーザーのエージェント一覧:
+  launchctl list | grep -v "^PID"
+
+システム全体のデーモン一覧（要管理者権限）:
+  sudo launchctl list
+
+ログイン項目の確認:
+  system_profiler SPLoginItemsDataType
+
+plist ファイルの中身を確認:
+  plutil -p ~/Library/LaunchAgents/com.example.app.plist
+
+**注意**: これらはすべて読み取り専用の操作です。システムの状態を変更することなく、起動項目を把握できます。

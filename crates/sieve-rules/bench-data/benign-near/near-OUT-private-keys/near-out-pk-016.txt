@@ -1,0 +1,15 @@
+PEM 格式详解：
+
+PEM 是一种 Base64 编码的文本格式，用于存储加密材料。文件结构如下：
+- 头部：-----BEGIN <类型>-----
+- 正文：Base64 编码的 DER 二进制数据，每行 64 字符
+- 尾部：-----END <类型>-----
+
+常见类型标签：
+- CERTIFICATE — X.509 证书（包含公钥，可公开分享）
+- PUBLIC KEY — PKCS#8 格式公钥
+- CERTIFICATE REQUEST — 证书签名请求 (CSR)
+- ENCRYPTED PRIVATE KEY — 加密保护的私钥
+
+查看证书内容（安全操作，只读公开信息）：
+  openssl x509 -in cert.pem -text -noout

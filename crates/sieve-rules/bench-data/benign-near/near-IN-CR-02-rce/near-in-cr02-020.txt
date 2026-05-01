@@ -1,0 +1,15 @@
+# wget resume and continue (-c flag)
+
+Resume an interrupted download:
+
+    wget -c https://releases.example.com/large-model-weights.bin
+
+The -c flag checks the local file size and sends a Range request to skip already-downloaded bytes. This is the wget equivalent of curl's -C -.
+
+For very large files in a CI environment, use --tries and --timeout:
+
+    wget -c --tries=5 --timeout=30 \
+         https://releases.example.com/large-model-weights.bin
+
+After download, verify the file checksum against the published hash:
+    md5sum large-model-weights.bin

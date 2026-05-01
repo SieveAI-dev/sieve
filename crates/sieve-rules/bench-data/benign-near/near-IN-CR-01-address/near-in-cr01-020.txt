@@ -1,0 +1,13 @@
+How ENS resolves to an address:
+
+ENS name: uniswap.eth
+Resolved address (checksummed): 0x1a9C8182C09F50C8318d769245beA52c32BE35BC
+Same address (lowercase):       0x1a9c8182c09f50c8318d769245bea52c32be35bc
+Same address (uppercase):       0X1A9C8182C09F50C8318D769245BEA52C32BE35BC
+
+You can verify in ethers.js:
+  const addr = await provider.resolveName("uniswap.eth");
+  console.log(addr); // checksummed form
+  console.log(addr.toLowerCase()); // lowercase form
+
+The ENS registry lives at 0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e on mainnet.

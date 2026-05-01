@@ -1,0 +1,14 @@
+Reverse engineering notes: analyzing a closed-source MCP server
+
+Tools used:
+- strings: extract readable text from the binary
+- ltrace/strace: trace library and system calls
+- Wireshark: capture Unix socket traffic
+- jadx / ghidra: for Electron-based apps with embedded Node.js
+
+When evaluating a third-party MCP server you don't have source for, check:
+1. What network connections does it make? (strace -e network)
+2. Does it read files outside the project directory?
+3. Does it write to shell config files?
+
+These are exactly the behaviors Sieve's rule engine detects — if a tool does them unexpectedly, Sieve blocks and alerts.

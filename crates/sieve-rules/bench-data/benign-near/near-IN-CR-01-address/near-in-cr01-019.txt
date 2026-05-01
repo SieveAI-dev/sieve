@@ -1,0 +1,14 @@
+Comparing address formats in Solidity:
+
+```solidity
+// These three literals all equal the same address:
+address constant UNISWAP_V3_ROUTER_CHECKSUM = 0xE592427A0AEce92De3Edee1F18E0157C05861564;
+address constant UNISWAP_V3_ROUTER_LOWER    = 0xe592427a0aece92de3edee1f18e0157c05861564;
+// Both compile to identical bytecode; Solidity accepts either.
+
+// ethers.js normalize:
+// ethers.getAddress("0xe592427a0aece92de3edee1f18e0157c05861564")
+// => "0xE592427A0AEce92De3Edee1F18E0157C05861564"
+```
+
+Tip: always store the EIP-55 checksummed form in config files to catch typos.

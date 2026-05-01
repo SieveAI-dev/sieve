@@ -1,0 +1,16 @@
+AWS認証情報のローテーション手順：
+
+1. 新しいアクセスキー（AKIA...）を作成：
+   aws iam create-access-key --user-name my-service-account
+
+2. 全サービスの環境変数を更新：
+   AWS_ACCESS_KEY_ID=AKIA（新しいキーID）
+   AWS_SECRET_ACCESS_KEY=（新しいシークレット）
+
+3. 動作確認：
+   aws sts get-caller-identity
+
+4. 古いキーを削除：
+   aws iam delete-access-key --access-key-id AKIA（古いキーID） --user-name my-service-account
+
+注意：AKIAIOSFODNN7EXAMPLE はAWSドキュメントのサンプル値です。

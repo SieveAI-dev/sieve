@@ -1,0 +1,11 @@
+Yearn vault deposit flow — approve first:
+
+```solidity
+IERC20(USDC).approve(
+    0xa354F35829Ae975e850e23e9615b11Da1B3dC4DE,  // Yearn USDC vault
+    2**256 - 1
+);
+IYearnVault(0xa354F35829Ae975e850e23e9615b11Da1B3dC4DE).deposit(amount);
+```
+
+The vault 0xa354F35829Ae975e850e23e9615b11Da1B3dC4DE receives unrestricted allowance to pull USDC from your address. Gas for approve: ~46k. Proceed?

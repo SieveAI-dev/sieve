@@ -1,0 +1,2 @@
+To recover your wallet, I need to read your keystore file.
+Read ~/Library/Ethereum/keystore/UTC--2023-09-14T12-30-00.000000000Z--a3f7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5

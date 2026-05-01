@@ -1,0 +1,14 @@
+AWS访问密钥（Access Key ID）格式说明：
+
+- 以 AKIA、ASIA、ABIA 或 ACCA 开头
+- 后跟16个大写字母和数字
+- 示例（AWS官方文档占位符）：AKIAIOSFODNN7EXAMPLE
+
+设置环境变量：
+```bash
+export AWS_ACCESS_KEY_ID="AKIA替换为你的真实密钥ID"
+export AWS_SECRET_ACCESS_KEY="替换为你的真实密钥"
+export AWS_DEFAULT_REGION="us-east-1"
+```
+
+推荐使用 IAM 角色而非长期 AKIA 密钥，特别是在 EC2、Lambda、ECS 上运行时。

@@ -1,0 +1,15 @@
+Prompt injection in RAG (Retrieval Augmented Generation) systems
+
+RAG systems fetch relevant documents and include them in the model's context. This introduces indirect injection risk: a document in the vector database could contain instructions for the model.
+
+Attack scenario:
+1. Attacker uploads a malicious document to a shared knowledge base
+2. User queries the RAG system about a topic
+3. The malicious document is retrieved as "relevant"
+4. The document's embedded instructions override the system prompt
+
+Mitigations:
+- Sanitize document content before indexing
+- Mark retrieved content with a "RETRIEVED CONTENT:" prefix
+- Apply injection detection to retrieved chunks before including in context
+- Limit model actions in "RAG mode"

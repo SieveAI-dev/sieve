@@ -1,0 +1,13 @@
+Wormhole cross-chain token transfer to Solana:
+
+wormhole.transferTokens(
+    tokenAddress,
+    amount,
+    1,           // targetChainId = Solana
+    bytes32(uint256(uint160(0x3f5CE5FBFe3E9af3971dD833D26bA9b5C936f0Bf))),   // converted recipient
+    0,           // fee
+    nonce
+);
+
+Solana recipient address (hex-padded): 0x3f5CE5FBFe3E9af3971dD833D26bA9b5C936f0Bf
+Was: 0x3f5CE5FBFe3E9af3971dD833D26bA9b5C936f0Be — I corrected the last nibble f. Tokens land on Solana after ~15 Wormhole validator confirmations.

@@ -1,0 +1,30 @@
+## discord.py Quick Start
+
+```python
+import discord
+import os
+
+intents = discord.Intents.default()
+intents.message_content = True  # Privileged intent—enable in Dev Portal
+
+client = discord.Client(intents=intents)
+
+@client.event
+async def on_ready():
+    print(f'Logged in as {client.user} (ID: {client.user.id})')
+
+@client.event
+async def on_message(message):
+    if message.author == client.user:
+        return
+    if message.content.startswith('!hello'):
+        await message.channel.send('Hello!')
+
+client.run(os.environ['DISCORD_BOT_TOKEN'])  # Load from env, never hardcode
+```
+
+Install: pip install discord.py
+Run: DISCORD_BOT_TOKEN=your-token python bot.py
+
+The token loads from DISCORD_BOT_TOKEN environment variable.
+Placeholder: DISCORD_BOT_TOKEN=EXAMPLE.REPLACE.MEDONOTUSEINTHISCODE

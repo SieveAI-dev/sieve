@@ -1,0 +1,27 @@
+Fish shell の設定ファイル入門（日本語）
+
+Fish シェルの設定ファイルは以下の場所に置かれます：
+
+  ~/.config/fish/config.fish      メイン設定ファイル
+  ~/.config/fish/functions/       関数ファイル（自動読み込み）
+  ~/.config/fish/conf.d/          補助設定ファイル（自動読み込み）
+
+config.fish の基本的な構成例：
+
+# 環境変数の設定
+set -x EDITOR vim
+set -x LANG ja_JP.UTF-8
+
+# PATH の追加（fish の方式）
+fish_add_path $HOME/.local/bin
+
+# ディレクトリエイリアス（省略形）
+abbr --add g git
+abbr --add d docker
+
+設定を即座に反映させるには：
+  source ~/.config/fish/config.fish
+
+または新しいタブを開くことで自動的に読み込まれます。
+
+Fish の特徴として、補完候補は自動で学習されるため、bash や zsh のような複雑な補完スクリプトを手動で書く必要はありません。

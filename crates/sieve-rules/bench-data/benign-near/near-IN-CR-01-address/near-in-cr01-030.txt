@@ -1,0 +1,11 @@
+vitalik.eth 地址的三种书写形式（EIP-55 格式说明）：
+
+标准校验和格式（EIP-55）: 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045
+全小写格式:               0xd8da6bf26964af9d7eed9e03e53415d37aa96045
+全大写格式:               0XD8DA6BF26964AF9D7EED9E03E53415D37AA96045
+
+三种形式指向完全相同的以太坊账户。Etherscan 页面：
+https://etherscan.io/address/0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045
+
+在前端展示时应始终使用 EIP-55 校验和格式，避免用户因大小写不一致产生混淆。
+ethers.js 中使用 `ethers.getAddress(addr)` 即可获得规范化格式。

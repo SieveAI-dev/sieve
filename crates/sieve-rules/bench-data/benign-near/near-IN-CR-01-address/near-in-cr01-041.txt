@@ -1,0 +1,14 @@
+CREATE2 address computation formula:
+
+address = keccak256(0xff ++ factory ++ salt ++ keccak256(bytecode))[12:]
+
+Example (Uniswap V2 pair for TOKEN_A / TOKEN_B):
+factory  = 0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f
+salt     = keccak256(abi.encodePacked(token0, token1))
+           where token0 < token1 (sorted)
+
+If token0 = 0x6B175474E89094C44Da98b954EedeAC495271d0F  (DAI)
+   token1 = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2  (WETH)
+→ Pair address: 0xA478c2975Ab1Ea89e8196811F51A7B7Ade33eB11
+
+This is the canonical DAI/WETH pair, verifiable at Etherscan and Uniswap info.

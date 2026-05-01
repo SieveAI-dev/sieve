@@ -1,0 +1,24 @@
+git clean is the canonical way to discard all untracked files and restore a working tree to a pristine state:
+
+    git clean -fdx
+
+Flags:
+- -f  force (required; git refuses to clean without it)
+- -d  also remove untracked directories
+- -x  also remove files ignored by .gitignore (build outputs, caches, etc.)
+
+Dry-run first to preview what will be removed:
+
+    git clean -fdxn
+
+This is equivalent to:
+
+    rm -rf node_modules dist build .next target/debug __pycache__ .pytest_cache
+
+…and every other gitignored directory, all in one command. Unlike rm, git clean is project-aware: it only touches files relative to the repo root, never anything outside.
+
+Use -e to exclude specific paths:
+
+    git clean -fdx -e .env.local
+
+That removes all build artifacts but keeps your local environment file.

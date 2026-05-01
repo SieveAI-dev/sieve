@@ -1,0 +1,14 @@
+macOS 上用 Homebrew 装了 node，但 nvm 管的 node 和 brew 的冲突了 🔥
+
+```bash
+$ which node
+/opt/homebrew/bin/node
+$ nvm use 18
+Now using node v18.19.0 (npm v10.2.3)
+$ which node
+/opt/homebrew/bin/node  # 还是 brew 的！
+```
+
+`.zshrc` 里 nvm init 在 homebrew 之后，但 which 还是指向 brew 的 node。
+
+export PATH 顺序怎么配？还是要彻底卸掉 brew 的 node？

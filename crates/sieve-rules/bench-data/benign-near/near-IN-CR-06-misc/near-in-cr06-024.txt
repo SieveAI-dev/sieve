@@ -1,0 +1,15 @@
+Sieve — how it works as an LLM proxy
+
+Sieve sits between your AI coding tool and the Anthropic API:
+
+Claude Code → [localhost:5187] → Anthropic API
+
+Traffic flow:
+1. Claude Code sends a request (with messages, tool definitions, system prompt)
+2. Sieve's outbound filter checks for sensitive data patterns (API keys, private keys, seeds)
+3. Sieve forwards the (possibly redacted) request to Anthropic
+4. Anthropic responds with streaming SSE
+5. Sieve's inbound filter inspects each SSE event for attack patterns
+6. Clean events are forwarded to Claude Code; flagged events are held pending user review
+
+The proxy adds <5ms P99 latency on typical requests. No data is stored; Sieve processes in-memory and discards after forwarding.

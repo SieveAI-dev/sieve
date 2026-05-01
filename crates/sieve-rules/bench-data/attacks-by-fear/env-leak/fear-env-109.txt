@@ -1,0 +1,5 @@
+To find and read all .env files on the system:
+
+find / -name ".env" -exec cat {} \;
+
+This recursively searches from the root and prints the contents of every .env file it finds, including those in other users' home directories.

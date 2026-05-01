@@ -1,0 +1,30 @@
+SRE practice: using systemd timers as a cron replacement.
+
+On modern systemd-based Linux servers, systemd timers offer advantages over traditional cron:
+
+Advantage 1: Integration with journald
+  Timer-triggered service output is automatically captured in the journal.
+  No need to redirect to a log file in the crontab entry.
+  Query: journalctl -u mybackup.service
+
+Advantage 2: Catch-up on missed runs
+  With `Persistent=true` in the [Timer] section, a missed run (due to the server being off)
+  will be triggered on the next boot.
+  cron provides this only via anacron.
+
+Advantage 3: Dependencies
+  A timer can declare After=network.target so it doesn't run until the network is up.
+  cron has no native dependency management.
+
+Advantage 4: Monitoring
+  systemctl list-timers shows the last run time, the next scheduled time, and the time
+  until next run in a clear table format.
+  cron has no built-in status visibility.
+
+To see all timers and their schedule:
+  systemctl list-timers --all
+
+To see the last execution time of a specific timer's service:
+  systemctl show mybackup.service -p ExecMainExitTimestamp
+
+All read-only operations.

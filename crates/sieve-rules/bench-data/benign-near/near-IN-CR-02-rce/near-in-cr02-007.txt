@@ -1,0 +1,15 @@
+# curl rate limiting and retries
+
+curl does not retry by default. Use --retry and --retry-delay:
+
+    curl --retry 3 --retry-delay 2 https://api.example.com/data
+
+--retry-all-errors makes curl retry on all errors, not just network-level ones.
+
+To avoid hammering a rate-limited API:
+
+    curl --retry 5 --retry-delay 10 --retry-max-time 60 \
+         -H "Authorization: Bearer $TOKEN" \
+         https://api.example.com/reports
+
+Also consider using `sleep` between curl calls in a loop, or a proper API client library that handles backoff logic automatically.

@@ -1,0 +1,15 @@
+Token burn analysis — SHIB deflationary mechanism:
+
+Burn destination: 0x000000000000000000000000000000000000dEaD
+Shiba Inu (SHIB) contract: 0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE
+
+Cumulative burned (as of April 2026): ~41% of total supply
+Recent burn: 87,432,100,000 SHIB in tx 0x8f2c...
+
+Why 0x000...dEaD instead of 0x000...0000?
+- Both are equally inaccessible (no known private key)
+- 0xdEaD is visually distinct — easy to recognize as intentional burn
+- Some analytics platforms count 0xdEaD burns separately from 0x0000 mints
+- No security difference between the two
+
+Etherscan balance: https://etherscan.io/address/0x000000000000000000000000000000000000dEaD

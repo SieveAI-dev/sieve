@@ -1,0 +1,22 @@
+Foundry invariant test — multiple actors, random addresses:
+
+```solidity
+contract VaultInvariantTest is Test {
+    Vault vault;
+    address[] actors;
+
+    function setUp() public {
+        vault = new Vault();
+        // Add distinct test actors (all different addresses)
+        actors.push(makeAddr("user0"));  // 0x6CA6d1e2D5347Bfab1d91e883F1915560e09129d
+        actors.push(makeAddr("user1"));  // 0x8F610b...
+        actors.push(makeAddr("user2"));  // 0xD79Fc8...
+        actors.push(makeAddr("user3"));  // 0x2AEa4A...
+    }
+
+    // Invariant: vault total assets == sum of all deposits
+    function invariant_totalAssets() public view {
+        assertEq(vault.totalAssets(), vault.totalDeposited() - vault.totalWithdrawn());
+    }
+}
+```

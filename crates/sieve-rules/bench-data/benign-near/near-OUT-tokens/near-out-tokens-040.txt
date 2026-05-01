@@ -1,0 +1,20 @@
+Stripe Error Reference
+
+AuthenticationError: Your API key is invalid.
+  Cause: Wrong key, revoked key, or wrong environment (test vs live).
+  Fix: Verify key starts with sk_test_ for test, sk_live_ for live.
+
+CardError: The card was declined.
+  Cause: Insufficient funds, expired card, fraud detection.
+  Fix: Handle gracefully, show user-friendly message.
+
+RateLimitError: Too many requests.
+  Cause: Exceeding 100 read requests/sec or 100 write requests/sec.
+  Fix: Implement exponential backoff.
+
+InvalidRequestError: Invalid parameters.
+  Cause: Missing required field, invalid currency, amount too small.
+  Fix: Check Stripe API docs for required fields.
+
+For testing, trigger errors with test card numbers from Stripe docs.
+Example decline: 4000 0000 0000 0002 → card_declined

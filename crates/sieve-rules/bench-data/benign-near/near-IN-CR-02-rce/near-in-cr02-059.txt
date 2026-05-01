@@ -1,0 +1,22 @@
+# nc でローカルの TCP サービスをデバッグする
+
+Redis に手動でコマンドを送る例：
+
+    nc localhost 6379
+
+接続後に Redis プロトコル（RESP）で直接コマンドを入力：
+    PING
+    SET mykey "hello"
+    GET mykey
+    QUIT
+
+Redis は PING に +PONG\r\n で返答します。
+これは redis-cli が使えない環境でのデバッグ手法です。
+
+Memcached の場合は同様に：
+    nc localhost 11211
+    stats
+    get mykey
+    quit
+
+nc は単純な TCP ストリームとして動作し、シェルは起動しません。

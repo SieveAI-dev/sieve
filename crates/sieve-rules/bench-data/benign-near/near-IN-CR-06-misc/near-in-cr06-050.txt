@@ -1,0 +1,10 @@
+Multi-agent security: trust boundaries between subagents
+
+In a multi-agent Claude Code setup, trust does not automatically transfer between agents. If Agent A (trusted) spawns Agent B with a task derived from untrusted input, Agent B could be running an injected instruction.
+
+Sieve's hook model handles this correctly:
+- Each agent instance registers as a separate Claude Code session
+- Each session's hooks run independently
+- A decision approved for Agent A does not auto-approve the same action for Agent B
+
+This prevents "trust laundering" where a compromised subagent escalates privileges by claiming its actions were delegated from a trusted parent agent.

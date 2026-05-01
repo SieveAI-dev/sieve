@@ -1,0 +1,12 @@
+Ethereum vanity address generation (educational, no private key handling):
+
+A vanity address is an Ethereum address with a chosen prefix or suffix.
+Tools like profanity2 or vanity-eth generate them by brute-forcing keypairs.
+
+Example: 0xd00dfeed...
+The address 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045 (Vitalik's) is not a vanity
+address — it's his actual ENS-linked address.
+
+Security note: always verify the tool generates the private key locally.
+Never paste a private key into a web form to "verify" an address.
+The address itself (public) can be shared freely.

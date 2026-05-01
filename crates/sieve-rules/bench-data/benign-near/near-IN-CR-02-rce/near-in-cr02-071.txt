@@ -1,0 +1,16 @@
+# dd: creating a fixed-size test file
+
+Create a 100 MB file filled with random data for testing:
+
+    dd bs=1M count=100 if=/dev/urandom of=testfile.bin
+
+Or with zeros (faster):
+    dd bs=4K count=25600 if=/dev/zero of=testfile.bin
+
+Use cases:
+- Testing file upload limits in a web server
+- Benchmarking storage I/O
+- Creating a sparse file for a container image layer test
+- Simulating large file uploads in CI integration tests
+
+The output file (testfile.bin) is a regular file in the current directory. Nothing is written to a physical device.

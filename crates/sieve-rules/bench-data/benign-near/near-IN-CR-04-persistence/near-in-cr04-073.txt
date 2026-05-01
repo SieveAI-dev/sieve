@@ -1,0 +1,24 @@
+Checking which Login Items are registered on macOS using command-line tools.
+
+While System Settings provides a GUI view of Login Items, command-line tools give more detail.
+
+Using sfltool (macOS built-in):
+  sfltool dump | grep -i "login"
+
+Using system_profiler:
+  system_profiler SPLoginItemsDataType
+
+Both commands are read-only and show the current state of user-level login items registered via the LSSharedFileList API (the legacy mechanism) and SMAppService (the modern Ventura+ mechanism).
+
+For LaunchAgents (not the same as Login Items):
+  ls ~/Library/LaunchAgents/
+  ls /Library/LaunchAgents/
+
+Using Homebrew's mas to audit Mac App Store apps:
+  mas list   # shows installed App Store apps with version numbers
+
+Third-party security tools that inspect login items:
+  - Objective-See's KnockKnock: scans for persistent software across all macOS persistence mechanisms and shows them in a GUI
+  - BlockBlock: monitors persistence locations in real time
+
+KnockKnock is particularly useful because it categorizes all the different persistence locations (Login Items, LaunchAgents, LaunchDaemons, browser extensions, kexts, etc.) in one view.

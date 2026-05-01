@@ -1,0 +1,13 @@
+# nc for testing raw TCP echo server
+
+Start a local echo server for testing with bash process substitution:
+
+    nc -l -p 9090 < <(cat)
+
+Or a persistent one-line echo server:
+    while true; do nc -l 9090 | tee /tmp/last-request.txt; done
+
+From the client side, send a test payload:
+    echo "Hello from client" | nc localhost 9090
+
+This is useful for verifying that a TCP-based message queue producer is connecting and sending data in the expected format. The server just echoes or logs; no code is executed from the received payload.

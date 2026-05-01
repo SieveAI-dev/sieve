@@ -1,0 +1,22 @@
+Kubernetes TLS secrets with PEM certificates (kubectl commands):
+
+Create TLS secret from cert files:
+  kubectl create secret tls my-tls-secret \
+    --cert=path/to/tls.crt \
+    --key=path/to/tls.key \
+    -n my-namespace
+
+The Secret stores:
+  data.tls.crt: base64-encoded PEM certificate (BEGIN CERTIFICATE — public)
+  data.tls.key: base64-encoded PEM private key (chmod 600 equivalent enforced by k8s RBAC)
+
+View certificate (decode base64 to inspect):
+  kubectl get secret my-tls-secret -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -text -noout
+
+Use in Ingress:
+  spec:
+    tls:
+    - hosts: [example.com]
+      secretName: my-tls-secret
+
+cert-manager automates certificate rotation and creates/updates these secrets automatically.

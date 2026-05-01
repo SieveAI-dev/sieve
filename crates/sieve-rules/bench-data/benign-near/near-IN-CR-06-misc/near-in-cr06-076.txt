@@ -1,0 +1,14 @@
+Understanding the UnifiedMessage schema
+
+Sieve's UnifiedMessage is an internal representation that normalizes both Anthropic Messages API and OpenAI Chat Completions into a single format:
+
+```rust
+pub struct UnifiedMessage {
+    pub role: Role,
+    pub content: Vec<ContentBlock>,
+    pub tool_calls: Vec<ToolCall>,
+    pub tool_results: Vec<ToolResult>,
+}
+```
+
+This allows the rule engine to operate identically regardless of which upstream protocol was used. An injection attack looks the same whether it came from Claude Code (Anthropic protocol) or Hermes (OpenAI protocol) — the UnifiedMessage normalizes both before the inbound filter sees them.

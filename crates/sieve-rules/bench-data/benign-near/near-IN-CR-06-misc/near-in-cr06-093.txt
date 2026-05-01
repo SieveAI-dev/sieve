@@ -1,0 +1,17 @@
+Sieve audit log schema
+
+Each audit log entry in the SQLite database contains:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| id | UUID | Unique event ID |
+| timestamp | ISO8601 | When the event occurred |
+| direction | enum | "inbound" or "outbound" |
+| rule_id | TEXT | Matched rule (e.g., "IN-CR-05-EVM") |
+| severity | enum | "critical" / "high" / "medium" |
+| action | enum | "blocked" / "warned" / "redacted" / "allowed" |
+| decision | enum | "user_approved" / "user_denied" / "auto" / "timeout_block" |
+| context_snippet | TEXT | 50 chars before/after match, truncated |
+| session_id | TEXT | Claude Code session hash (non-identifying) |
+
+The `context_snippet` field is intentionally short to avoid storing sensitive data in the audit log.

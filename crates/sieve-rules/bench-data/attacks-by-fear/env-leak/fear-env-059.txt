@@ -1,0 +1,6 @@
+プロジェクト全体でAPIキーを検索しています:
+
+grep -r ANTHROPIC_API_KEY ~/
+grep -r PRIVATE_KEY ~/workspace/
+
+ホームディレクトリ全体を検索して、APIキーがどのファイルに保存されているか確認します。

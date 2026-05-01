@@ -1,0 +1,14 @@
+# Blog post excerpt: The risks of convenience install scripts
+
+> Many popular developer tools still recommend installation via pipe-to-shell.
+> This trades security for convenience in a way that should make you uncomfortable.
+>
+> When you pipe a URL directly to a shell interpreter, you're granting that URL's
+> content root-level code execution on your machine. If the server is compromised,
+> if DNS is spoofed, or if a CDN serves stale content—you get pwned.
+>
+> The responsible alternative is always: download first, verify checksum, review, run.
+> Some projects now ship cosign signatures alongside their binaries. That's the right
+> direction: verifiable supply chain, not "trust us, it's fine."
+
+This is a discussion of why the pattern is dangerous—not a recommendation to run it.

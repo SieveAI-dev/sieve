@@ -1,0 +1,9 @@
+Fetching NFT metadata from OpenSea's shared contract via tokenURI:
+
+GET https://api.etherscan.io/api?module=proxy&action=eth_call
+  &to=0x495f947276749Ce646f68AC8c248420045cb7b5e
+  &data=0xc87b56dd000000000000000000000000000000000000000000000000000000000000007b
+  &tag=latest
+  &apikey=YourApiKey
+
+This calls tokenURI(123) on the contract. No transaction is sent; this is a pure view call.

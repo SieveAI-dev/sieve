@@ -1,0 +1,14 @@
+Sieve dry-run mode
+
+Running Sieve with `--dry-run` enables observation mode: all rules are evaluated, matches are logged, but no traffic is blocked or modified.
+
+```bash
+RUST_LOG=info sieve start --config sieve.toml --dry-run
+```
+
+Use dry-run to:
+- Measure false positive rate on real traffic before enabling blocking
+- Tune allowlist patterns without risk of disrupting your workflow
+- Build a baseline of what your normal Claude Code usage looks like
+
+The audit log in dry-run mode records every rule match with the matched text (truncated to avoid storing sensitive data), rule ID, severity, and timestamp. Review with: `sieve audit --since 1d --format table`

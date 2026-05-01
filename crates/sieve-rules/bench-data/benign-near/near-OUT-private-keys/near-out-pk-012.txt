@@ -1,0 +1,8 @@
+Current NIST recommendations for key sizes (2024):
+- RSA: minimum 2048 bits, prefer 4096 for new deployments beyond 2030
+- ECDSA P-256: 128-bit security, recommended for TLS
+- ECDSA P-384: 192-bit security, for higher assurance
+- Ed25519: preferred for SSH and code signing (small keys, fast, no parameter selection errors)
+- Ed448: higher security margin (224-bit)
+
+RSA 1024-bit is deprecated and should not be used. NIST SP 800-131A Rev 2 disallowed RSA-1024 after 2013. Check existing cert key size: openssl x509 -in cert.pem -text -noout | grep "Public-Key:"
