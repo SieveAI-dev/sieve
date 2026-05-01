@@ -238,7 +238,9 @@ mod dispatch_impl {
 
             let outcome = inbound_hold::hold_and_decide(ipc, ipc_req, ka_tx).await?;
             return match outcome {
-                HoldOutcome::Allow | HoldOutcome::RedactAndAllow => {
+                // `remember` / `context_hint` 由 daemon 消费写灰名单（PRD §5.4.2），
+                // dispatch 层只做放行 / 拒绝路由，不处理灰名单逻辑。
+                HoldOutcome::Allow { .. } | HoldOutcome::RedactAndAllow { .. } => {
                     Ok(DispatchResult::AllowAfterHold)
                 }
                 HoldOutcome::Deny { reason } => Ok(DispatchResult::DenyWithBlock(reason)),

@@ -2,6 +2,70 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+// ── Notify（单向 daemon → GUI，v2.0）────────────────────────────────────────
+
+/// 状态栏通知（单向 daemon → GUI），用于 IN-SEQ-* 序列检测 + 出站脱敏 + 其他不打断的提示。
+///
+/// JSON-RPC 2.0 method = `"sieve.notify_status_bar"`，fire-and-forget（无 id 字段）。
+///
+/// 关联：PRD v2.0 §5.7（行为序列 StatusBar 通知）+ §5.4.3（GUI 接口预留）+ ADR-013。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StatusBarNotify {
+    /// 全局唯一通知 ID（UUIDv7，便于追踪 + 去重）。
+    pub notify_id: Uuid,
+    /// 创建时间（UTC）。
+    pub created_at: DateTime<Utc>,
+    /// 通知类型枚举。
+    pub kind: NotifyKind,
+    /// 简短文案（GUI 状态栏显示，< 80 字符）。
+    pub title: String,
+    /// 详情（GUI 点击后展开，可选）。
+    #[serde(default)]
+    pub detail: Option<String>,
+    /// 关联规则 ID（如 IN-SEQ-01-RECON-EXFIL / OUT-01-API-KEY）。
+    #[serde(default)]
+    pub rule_id: Option<String>,
+    /// 自动消失秒数（0 = 不自动消失，用户手动关闭）。
+    pub auto_dismiss_seconds: u32,
+}
+
+/// 状态栏通知类型。
+///
+/// 关联：PRD v2.0 §5.7.2（SequenceHit）+ §9 #13（OutboundRedacted）+ §9 #14（UserRules*）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NotifyKind {
+    /// 行为序列检测命中（PRD §5.7.2）。
+    SequenceHit,
+    /// 出站自动脱敏（OUT-01~05/12，PRD §9 #13）。
+    OutboundRedacted,
+    /// 用户规则文件加载失败（PRD §9 #14 fail-safe，daemon 仍正常启动）。
+    UserRulesLoadFailed,
+    /// 用户规则 reload 成功（sieve rules edit 后 daemon 接收到 reload 通知并成功加载）。
+    UserRulesReloaded,
+    /// 其他通用提示。
+    Generic,
+}
+
+/// 用户规则重新加载请求（单向 sieve rules edit 命令 → daemon）。
+///
+/// JSON-RPC 2.0 method = `"sieve.reload_user_rules"`，fire-and-forget（无 id 字段）。
+///
+/// 关联：PRD v2.0 §5.5.5（编辑器关闭后 lint + atomic backup + IPC reload）+ ADR-013。
+///
+/// daemon 收到后：
+/// 1. 重新读取 `~/.sieve/rules/user.toml`
+/// 2. lint + UserEngine::compile（fail-safe，PRD §9 #14：失败保留旧引擎）
+/// 3. atomic swap LayeredEngine 内的 user 字段
+/// 4. 成功 → 推一条 `NotifyKind::UserRulesReloaded` StatusBarNotify
+/// 5. 失败 → 推一条 `NotifyKind::UserRulesLoadFailed`
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ReloadUserRules {
+    /// 触发 reload 的请求 ID（追踪用，可选）。
+    #[serde(default)]
+    pub trigger_id: Option<Uuid>,
+}
+
 // ── Multi-agent fields (v1.5) ────────────────────────────────────────────────
 
 /// 触发本次决策的上游 AI agent。

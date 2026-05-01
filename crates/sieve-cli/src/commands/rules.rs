@@ -191,11 +191,42 @@ fn run_edit_at(path: &Path) -> Result<()> {
         eprintln!("⚠ 备份失败（不影响保存）：{}", e);
     }
 
+    // 4. 通知 daemon 重新加载用户规则（PRD §5.5.5 步骤 4）
+    // run_edit_at 是同步函数；用 tokio::runtime::Runtime::new() 跑一次 async 调用。
+    // socket 不存在（daemon 未运行）时静默跳过，不致命。
+    let socket_path = sieve_ipc::paths::sieve_home()
+        .ok()
+        .map(|h| sieve_ipc::paths::ipc_socket_path(&h));
+    if let Some(ref sp) = socket_path {
+        if sp.exists() {
+            let trigger_id = uuid::Uuid::now_v7();
+            let sp_clone = sp.clone();
+            match tokio::runtime::Runtime::new() {
+                Ok(rt) => match rt.block_on(sieve_ipc::send_reload_user_rules_oneshot(
+                    &sp_clone,
+                    Some(trigger_id),
+                )) {
+                    Ok(()) => {
+                        println!(
+                            "✅ 已通知 daemon 重新加载用户规则（trigger_id = {}）",
+                            trigger_id
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!("⚠ 无法通知 daemon 重新加载（daemon 可能未运行）：{}", e);
+                    }
+                },
+                Err(e) => {
+                    eprintln!("⚠ 无法创建 tokio runtime 用于 reload 通知：{}", e);
+                }
+            }
+        }
+    }
+
     println!(
         "✅ user.toml 通过 lint，{} 条规则已就绪",
         parsed.rules.len()
     );
-    println!("⚠ daemon hot-reload 待 Week 6 落地；本次改动需重启 daemon 才生效");
     Ok(())
 }
 

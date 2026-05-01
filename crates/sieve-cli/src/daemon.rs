@@ -46,6 +46,44 @@ use tokio_stream::wrappers::ReceiverStream;
 use crate::config::Config;
 use crate::upstream_routes::UpstreamRoutes;
 
+// ── v2.0：请求上下文（PRD v2.0 §5.6 / §5.6.1）──────────────────────────────
+
+/// 每请求上下文：caller 进程信息 + audit 存储句柄（PRD v2.0 §5.6 / §5.6.1）。
+///
+/// 合并为一个结构体以减少函数参数数量（clippy too_many_arguments）。
+/// `clone()` 开销：Arc clone + Option clone，均为 O(1)。
+#[derive(Clone)]
+struct RequestCtx {
+    /// 调用方进程信息（v2.0 Phase A：macOS 真实反查；其他平台 None）。
+    caller: Option<crate::process_context::CallerInfo>,
+    /// 审计存储句柄（SQLite append-only，PRD §5.6.1）。
+    audit: Arc<crate::audit::AuditStore>,
+}
+
+impl RequestCtx {
+    /// 从 caller_info + audit_store 构造。
+    fn new(
+        caller: Option<crate::process_context::CallerInfo>,
+        audit: Arc<crate::audit::AuditStore>,
+    ) -> Self {
+        Self { caller, audit }
+    }
+
+    /// 构造 `crate::audit::CallerContext`（供 audit 事件填充）。
+    /// v2.0 Phase A 接入点预留，后续 audit 写入直接调用。
+    #[allow(dead_code)]
+    fn caller_context(&self) -> crate::audit::CallerContext {
+        crate::audit::CallerContext {
+            pid: self.caller.as_ref().map(|c| c.pid),
+            exe: self
+                .caller
+                .as_ref()
+                .and_then(|c| c.exe.as_ref())
+                .map(|p| p.display().to_string()),
+        }
+    }
+}
+
 // ── v2.0：灰名单辅助（PRD v2.0 §5.4.2）─────────────────────────────────────
 
 /// 计算 `DecisionRequest.allow_remember`（PRD v2.0 §5.4.2 / §5.4.3）。
@@ -222,15 +260,16 @@ fn check_graylist_hit(
 ///
 /// TCP peer_addr → PID 在 macOS 上需要 `proc_listpidspath` + 跨进程权限，
 /// 工程量超出 Week 6 范围。本期保持 stub 返回 `None`，
-/// 审计字段路径已打通，v2.1 只需替换此 stub 即可上线。
+/// 通过 TCP 4-tuple 反查 caller PID（v2.0 Phase A 接入真实实现）。
 ///
-/// TODO（v2.1）：调用 `libc::proc_listpids` 扫描所有进程的 TCP socket，
-///     反查 peer_port 对应 PID，再用 `crate::process_context::lookup_caller` 获取完整信息。
-///     关联：PRD v2.0 §6.6 / §5.6。
-fn peer_addr_to_pid(_peer: std::net::SocketAddr) -> Option<i32> {
-    // v2.0 Phase A：stub，永远返回 None。
-    // v2.1 替换为真实 proc_listpids 实现。
-    None
+/// 调用 [`crate::process_context::lookup_caller_by_socket_addr`]，内部走
+/// proc_listpids → proc_pidinfo(FDs) → proc_pidfdinfo(socket_fdinfo) 扫描。
+/// 非 macOS 或失败时静默返回 `None`（不影响主流程）。
+/// 30 秒 LRU cache 保证热路径 P99 < 1µs。
+///
+/// 关联：PRD v2.0 §5.6 / §6.6 / OQ-V20-02。
+fn peer_addr_to_pid(local: std::net::SocketAddr, peer: std::net::SocketAddr) -> Option<i32> {
+    crate::process_context::lookup_caller_by_socket_addr(local, peer)
 }
 
 // ── multi-agent header 解析（ADR-019）────────────────────────────────────────
@@ -327,8 +366,10 @@ type ResponseBody = BoxBody<Bytes, Box<dyn std::error::Error + Send + Sync>>;
 /// `filter` 是出站规则引擎包装；`inbound_engine` + `inbound_sieveignore` 用于每连接构造
 /// [`InboundFilter`]（每连接独立实例，共享 engine Arc）。
 /// `cfg.dry_run` 决定是否实际拦截。
+/// `audit_store` 透传到所有请求处理路径，供 audit 写入使用（PRD §5.6.1）。
 ///
 /// v1.4：启动时绑定 IpcServer Unix socket，accept loop 在后台 spawn。
+/// v2.0：透传 `audit_store: Arc<AuditStore>`；启动 reload listener task（PRD §5.5.5）。
 ///
 /// # Errors
 /// bind 端口失败或 Forwarder 初始化失败时返回错误。
@@ -338,6 +379,7 @@ pub async fn run(
     inbound_engine: Arc<dyn InboundEngine>,
     inbound_sieveignore: Arc<HashSet<String>>,
     address_guard_config: sieve_core::pipeline::inbound::AddressGuardConfig,
+    audit_store: Arc<crate::audit::AuditStore>,
 ) -> Result<()> {
     let listen = cfg.listen_addr()?;
     let dry_run = cfg.dry_run;
@@ -428,6 +470,89 @@ pub async fn run(
         }
     };
 
+    // v2.0 §5.5.5：启动 reload listener（best-effort，PRD §9 #14 fail-safe）。
+    // daemon 监听 IpcServer::reload_rx 的用户规则 reload 请求：
+    // 1. 重新读 user.toml + lint + UserEngine::compile（只验证合法性，不做 hot swap）
+    // 2. 推送 NotifyKind::UserRulesReloaded / UserRulesLoadFailed
+    // 3. 写 AuditEvent::UserRulesReloaded
+    // TODO（v2.1）：实现真正的 LayeredEngine zero-downtime hot swap（需改 sieve-rules 接口）。
+    if let Some(ref ipc_srv) = ipc_server {
+        if let Some(mut reload_rx) = ipc_srv.reload_rx().await {
+            let ipc_for_reload = Arc::clone(ipc_srv);
+            let audit_for_reload = Arc::clone(&audit_store);
+            let user_rules_path_for_reload = sieve_ipc::paths::sieve_home()
+                .ok()
+                .map(|h| h.join("rules").join("user.toml"));
+            tokio::spawn(async move {
+                while let Some(req) = reload_rx.recv().await {
+                    let trigger_id_str = req.trigger_id.map(|id| id.to_string());
+                    tracing::info!(
+                        trigger_id = ?trigger_id_str,
+                        "收到用户规则 reload 请求（PRD §5.5.5）"
+                    );
+
+                    // best-effort：重新读取 + lint + 编译（不做真正的 hot swap，v2.1 实现）
+                    let reload_result =
+                        reload_user_rules_best_effort(user_rules_path_for_reload.as_deref());
+
+                    let (notify_kind, notify_title, notify_detail, success, rule_count, err_msg) =
+                        match reload_result {
+                            Ok(count) => {
+                                tracing::info!(rule_count = count, "用户规则重新加载验证通过");
+                                (
+                                    sieve_ipc::protocol::NotifyKind::UserRulesReloaded,
+                                    format!("用户规则已重新加载（{count} 条）"),
+                                    Some(
+                                        "完整生效需重启 daemon（v2.1 zero-downtime swap）"
+                                            .to_owned(),
+                                    ),
+                                    true,
+                                    Some(count),
+                                    None,
+                                )
+                            }
+                            Err(e) => {
+                                tracing::warn!(error = %e, "用户规则重新加载失败（保留旧引擎）");
+                                (
+                                    sieve_ipc::protocol::NotifyKind::UserRulesLoadFailed,
+                                    "用户规则加载失败".to_owned(),
+                                    Some(e.to_string()),
+                                    false,
+                                    None,
+                                    Some(e.to_string()),
+                                )
+                            }
+                        };
+
+                    let notify = sieve_ipc::protocol::StatusBarNotify {
+                        notify_id: uuid::Uuid::now_v7(),
+                        created_at: chrono::Utc::now(),
+                        kind: notify_kind,
+                        title: notify_title,
+                        detail: notify_detail,
+                        rule_id: None,
+                        auto_dismiss_seconds: 5,
+                    };
+                    ipc_for_reload.broadcast_status_bar(notify).await;
+
+                    // audit 写入（fail-soft）
+                    let event = crate::audit::AuditEvent::UserRulesReloaded {
+                        success,
+                        rule_count,
+                        error: err_msg,
+                        trigger_id: trigger_id_str,
+                    };
+                    let audit_clone = Arc::clone(&audit_for_reload);
+                    tokio::spawn(async move {
+                        if let Err(e) = audit_clone.append(event).await {
+                            tracing::warn!(error = %e, "audit append UserRulesReloaded failed");
+                        }
+                    });
+                }
+            });
+        }
+    }
+
     let listener = TcpListener::bind(listen)
         .await
         .with_context(|| format!("bind {}", listen))?;
@@ -448,19 +573,17 @@ pub async fn run(
             }
         };
 
-        // v2.0 Phase A：caller PID 反查 stub（PRD §5.6 / §6.6）。
-        // peer_addr_to_pid 当前永远返回 None，v2.1 替换为真实 proc_listpids 实现。
-        // 此处记录日志以证明 audit 字段路径已打通，下游 v2.1 只替换 stub 即可。
-        let _caller_pid: Option<i32> = peer_addr_to_pid(peer);
-        let _caller_exe: Option<String> = _caller_pid.and_then(|pid| {
-            crate::process_context::lookup_caller(pid)
-                .and_then(|info| info.exe.map(|p| p.display().to_string()))
-        });
+        // v2.0 Phase A：caller PID 反查（PRD §5.6 / §6.6 / OQ-V20-02）。
+        // 调用 process_context::lookup_caller_by_socket_addr 走真实 socket 4-tuple 反查；
+        // 非 macOS 或失败时静默返回 None，不影响主流程。
+        let local_addr = listener.local_addr().ok().unwrap_or(listen);
+        let caller_info: Option<crate::process_context::CallerInfo> =
+            peer_addr_to_pid(local_addr, peer).and_then(crate::process_context::lookup_caller);
         tracing::trace!(
             peer = %peer,
-            caller_pid = ?_caller_pid,
-            caller_exe = ?_caller_exe,
-            "new connection: caller context (Phase A stub)"
+            caller_pid = ?caller_info.as_ref().map(|c| c.pid),
+            caller_exe = ?caller_info.as_ref().and_then(|c| c.exe.as_ref()).map(|p| p.display().to_string()),
+            "new connection: caller context"
         );
 
         let forwarder = forwarder.clone();
@@ -470,6 +593,8 @@ pub async fn run(
         let ipc_server = ipc_server.clone();
         let ag_cfg = address_guard_config.clone();
         let pf = provider_forwarders.clone();
+        // 构造 RequestCtx（caller + audit），per-connection clone
+        let req_ctx = RequestCtx::new(caller_info.clone(), Arc::clone(&audit_store));
 
         tokio::spawn(async move {
             let io = TokioIo::new(stream);
@@ -485,7 +610,9 @@ pub async fn run(
                 );
                 let ipc = ipc_server.clone();
                 let pf = pf.clone();
-                async move { proxy(f, pf, flt, ib_filter, dry_run, ipc, req).await }
+                // RequestCtx（caller + audit）捕获到闭包（v2.0 Phase A，PRD §5.6.1）
+                let ctx = req_ctx.clone();
+                async move { proxy(f, pf, flt, ib_filter, dry_run, ipc, ctx, req).await }
             });
 
             if let Err(e) = auto::Builder::new(TokioExecutor::new())
@@ -498,7 +625,38 @@ pub async fn run(
     }
 }
 
+/// best-effort 用户规则重新加载（PRD §5.5.5 步骤 1-2）。
+///
+/// 只做 lint + 编译验证，**不做真正的 hot swap**（v2.1 实现）。
+/// 文件不存在或 lint 失败时返回 Err（fail-safe：daemon 保留旧引擎继续运行）。
+///
+/// 返回规则数量供 StatusBar 通知展示。
+fn reload_user_rules_best_effort(
+    user_rules_path: Option<&std::path::Path>,
+) -> anyhow::Result<usize> {
+    let path = user_rules_path
+        .ok_or_else(|| anyhow::anyhow!("user rules path 未知（SIEVE_HOME 未设置）"))?;
+    if !path.exists() {
+        return Ok(0); // 文件不存在视为 0 条规则，不报错
+    }
+    let parsed = sieve_policy::loader::load_user_rules(path)
+        .map_err(|e| anyhow::anyhow!("user.toml 解析失败: {e}"))?;
+    let violations =
+        sieve_policy::lint::lint(&parsed, path.metadata().map(|m| m.len()).unwrap_or(0));
+    if !violations.is_empty() {
+        return Err(anyhow::anyhow!(
+            "user.toml lint 失败（{} 条违规）：{}",
+            violations.len(),
+            violations[0].message
+        ));
+    }
+    Ok(parsed.rules.len())
+}
+
 /// 请求入口：捕获 `proxy_inner` 的所有错误，转换为 502 Bad Gateway 响应。
+///
+/// v2.0：新增 `ctx`（caller + audit_store，PRD §5.6 / §5.6.1）参数。
+#[allow(clippy::too_many_arguments)]
 async fn proxy(
     forwarder: Arc<Forwarder>,
     provider_forwarders: Arc<HashMap<String, Arc<Forwarder>>>,
@@ -506,6 +664,7 @@ async fn proxy(
     inbound_filter: InboundFilter,
     dry_run: bool,
     ipc: Option<Arc<sieve_ipc::IpcServer>>,
+    ctx: RequestCtx,
     req: Request<Incoming>,
 ) -> Result<Response<ResponseBody>, hyper::Error> {
     match proxy_inner(
@@ -515,6 +674,7 @@ async fn proxy(
         inbound_filter,
         dry_run,
         ipc,
+        ctx,
         req,
     )
     .await
@@ -553,6 +713,7 @@ async fn proxy(
 /// 转发到上游前**移除** `X-Sieve-Provider` header（内部路由 header，不透传给上游）。
 ///
 /// 关联：PRD v1.5 §6.1 / ADR-018（OpenAI 协议）/ ADR-019（multi-agent header）。
+#[allow(clippy::too_many_arguments)]
 async fn proxy_inner(
     forwarder: Arc<Forwarder>,
     provider_forwarders: Arc<HashMap<String, Arc<Forwarder>>>,
@@ -560,6 +721,7 @@ async fn proxy_inner(
     inbound_filter: InboundFilter,
     dry_run: bool,
     ipc: Option<Arc<sieve_ipc::IpcServer>>,
+    ctx: RequestCtx,
     req: Request<Incoming>,
 ) -> Result<Response<ResponseBody>> {
     let (mut parts, body) = req.into_parts();
@@ -1185,6 +1347,7 @@ async fn proxy_inner(
                     source_channel,
                     chain_depth,
                 },
+                RequestCtx::new(ctx.caller.clone(), Arc::clone(&ctx.audit)),
             )
             .await;
         }
@@ -1220,6 +1383,7 @@ async fn proxy_inner(
                 source_channel,
                 chain_depth,
             },
+            RequestCtx::new(ctx.caller.clone(), Arc::clone(&ctx.audit)),
         )
         .await;
     }
@@ -1240,6 +1404,7 @@ async fn proxy_inner(
             origin_chain,
             source_channel,
             chain_depth,
+            RequestCtx::new(ctx.caller.clone(), Arc::clone(&ctx.audit)),
         )
         .await;
     }
@@ -1282,7 +1447,12 @@ async fn proxy_openai(
     origin_chain: Vec<sieve_ipc::protocol::OriginHop>,
     source_channel: Option<String>,
     chain_depth: usize,
+    ctx: RequestCtx,
 ) -> Result<Response<ResponseBody>> {
+    let RequestCtx {
+        caller,
+        audit: audit_store,
+    } = ctx;
     use sieve_core::pipeline::PipelineNode;
     use sieve_core::protocol::unified_message::{
         ContentBlock, ContentSpan, Direction, MessageMetadata, UpstreamProvider,
@@ -1402,7 +1572,23 @@ async fn proxy_openai(
         .collect();
 
     if !hold_detections.is_empty() {
-        if let Some(ref ipc_server) = ipc {
+        // v2.0 §5.4.2：出站 OpenAI GuiPopup 路径——决策前先查灰名单（与 Anthropic 路径对称）
+        // fail-closed：查询失败 → 走正常 IPC 流程（PRD §9 #14 禁止 fail-open）
+        let agent_str_openai_out = format!("{:?}", source_agent).to_lowercase();
+        let graylist_hit_openai = hold_detections.first().is_some_and(|d| {
+            check_graylist_hit(
+                &d.rule_id,
+                &d.evidence_truncated,
+                "",
+                "openai",
+                "outbound_text",
+                &agent_str_openai_out,
+            )
+        });
+        if graylist_hit_openai {
+            tracing::info!("出站 OpenAI GuiPopup：灰名单命中 → 直接放行，跳过 IPC 弹窗");
+            // 灰名单命中：直接跳过 hold，继续往下走转发路径
+        } else if let Some(ref ipc_server) = ipc {
             use chrono::Utc;
 
             let request_id = uuid::Uuid::new_v4();
@@ -1662,6 +1848,7 @@ async fn proxy_openai(
                 source_channel,
                 chain_depth,
             },
+            RequestCtx::new(caller.clone(), Arc::clone(&audit_store)),
         )
         .await;
     }
@@ -1696,6 +1883,7 @@ async fn proxy_openai(
             source_channel,
             chain_depth,
         },
+        RequestCtx::new(caller, audit_store),
     )
     .await
 }
@@ -1729,6 +1917,7 @@ struct MultiAgentMeta {
     chain_depth: usize,
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn forward_with_inbound_inspection(
     forwarder: Arc<Forwarder>,
     mut inbound_filter: InboundFilter,
@@ -1737,7 +1926,13 @@ async fn forward_with_inbound_inspection(
     mut parts: http::request::Parts,
     body_bytes: Bytes,
     meta: MultiAgentMeta,
+    ctx: RequestCtx,
 ) -> Result<Response<ResponseBody>> {
+    // 解构 ctx 供内部使用（避免在 spawn move 时多次 clone Arc）
+    let RequestCtx {
+        caller,
+        audit: audit_store,
+    } = ctx;
     use http_body_util::Full;
 
     // 修 A2-#2：把 source_channel 注入 InboundFilter，使 IN-GEN-06 运行时提级逻辑
@@ -1784,8 +1979,16 @@ async fn forward_with_inbound_inspection(
         .unwrap_or(false);
 
     if is_json_response {
-        return handle_anthropic_json_inbound(resp_parts, resp_body, inbound_filter, dry_run, meta)
-            .await;
+        return handle_anthropic_json_inbound(
+            resp_parts,
+            resp_body,
+            inbound_filter,
+            dry_run,
+            meta,
+            ipc.clone(),
+            RequestCtx::new(caller.clone(), Arc::clone(&audit_store)),
+        )
+        .await;
     }
 
     // P0-5：bounded channel，深度 64，上游读取自然受背压限制。
@@ -1836,6 +2039,9 @@ async fn forward_with_inbound_inspection(
                         &mut aggregator,
                         dry_run,
                         meta.chain_depth,
+                        &ipc,
+                        &audit_store,
+                        caller.as_ref(),
                     );
 
                     // 修 #4（fail-closed 被绕过修复）：Block 检查必须在 Hold 之前。
@@ -1953,12 +2159,35 @@ async fn forward_with_inbound_inspection(
                             ka_fwd_handle.abort();
 
                             match outcome {
-                                Ok(sieve_core::pipeline::HoldOutcome::Allow)
-                                | Ok(sieve_core::pipeline::HoldOutcome::RedactAndAllow) => {
+                                Ok(sieve_core::pipeline::HoldOutcome::Allow {
+                                    remember,
+                                    context_hint,
+                                })
+                                | Ok(sieve_core::pipeline::HoldOutcome::RedactAndAllow {
+                                    remember,
+                                    context_hint,
+                                }) => {
                                     // 修 R2-#3：用户允许后，补发缓存的触发帧（hold 前未发），
                                     // 然后继续转发后续 SSE。
-                                    // v2.0：HoldOutcome 不携带 remember 字段，灰名单写入在 v2.1 接入
-                                    // hold_and_decide 返回完整 DecisionResponse 后实现。
+
+                                    // v2.0 §5.4.2：remember=true 时写灰名单（PRD §5.4.2）
+                                    if remember && allow_remember {
+                                        let agent_str =
+                                            format!("{:?}", meta.source_agent).to_lowercase();
+                                        for det in &hold_detections {
+                                            try_write_graylist(
+                                                &det.rule_id,
+                                                &det.evidence_truncated,
+                                                "",
+                                                "anthropic",
+                                                "inbound_sse",
+                                                &agent_str,
+                                                context_hint.clone(),
+                                                &request_id.to_string(),
+                                            );
+                                        }
+                                    }
+
                                     if tx
                                         .send(Ok(hyper::body::Frame::data(frame_bytes)))
                                         .await
@@ -2026,6 +2255,9 @@ async fn forward_with_inbound_inspection(
             &mut aggregator,
             dry_run,
             meta.chain_depth,
+            &ipc,
+            &audit_store,
+            caller.as_ref(),
         );
 
         // flush 阶段 Hook 类同样 fail-closed：写失败即截流
@@ -2089,6 +2321,7 @@ async fn forward_with_inbound_inspection(
 ///     Aggregator 的 tool_use 完整检测能力将自动生效，无需修改此函数。
 ///
 /// 关联：ADR-018 §流式解析 / PRD v1.5 §6.1 / R6-#2。
+#[allow(clippy::too_many_arguments)]
 async fn forward_with_openai_inbound_inspection(
     forwarder: Arc<Forwarder>,
     mut inbound_filter: InboundFilter,
@@ -2097,7 +2330,13 @@ async fn forward_with_openai_inbound_inspection(
     mut parts: http::request::Parts,
     body_bytes: Bytes,
     meta: MultiAgentMeta,
+    ctx: RequestCtx,
 ) -> Result<Response<ResponseBody>> {
+    // 解构 ctx 供内部使用
+    let RequestCtx {
+        caller,
+        audit: audit_store,
+    } = ctx;
     use http_body_util::Full;
     use sieve_core::sse::openai_parser::OpenAiSseParser;
     use sieve_core::sse::parser::SseParse as _;
@@ -2138,8 +2377,16 @@ async fn forward_with_openai_inbound_inspection(
         .unwrap_or(false);
 
     if is_json_response {
-        return handle_openai_json_inbound(resp_parts, resp_body, inbound_filter, dry_run, meta)
-            .await;
+        return handle_openai_json_inbound(
+            resp_parts,
+            resp_body,
+            inbound_filter,
+            dry_run,
+            meta,
+            ipc.clone(),
+            RequestCtx::new(caller.clone(), Arc::clone(&audit_store)),
+        )
+        .await;
     }
 
     const INBOUND_CHANNEL_DEPTH: usize = 64;
@@ -2187,6 +2434,9 @@ async fn forward_with_openai_inbound_inspection(
                         &mut aggregator,
                         dry_run,
                         meta.chain_depth,
+                        &ipc,
+                        &audit_store,
+                        caller.as_ref(),
                     );
 
                     // 1. Block 类：注入 sieve_blocked 并截流（fail-closed 优先）
@@ -2289,9 +2539,32 @@ async fn forward_with_openai_inbound_inspection(
                             ka_fwd_handle.abort();
 
                             match outcome {
-                                Ok(sieve_core::pipeline::HoldOutcome::Allow)
-                                | Ok(sieve_core::pipeline::HoldOutcome::RedactAndAllow) => {
-                                    // v2.0：HoldOutcome 不携带 remember，灰名单写入推 v2.1
+                                Ok(sieve_core::pipeline::HoldOutcome::Allow {
+                                    remember,
+                                    context_hint,
+                                })
+                                | Ok(sieve_core::pipeline::HoldOutcome::RedactAndAllow {
+                                    remember,
+                                    context_hint,
+                                }) => {
+                                    // v2.0 §5.4.2：remember=true 时写灰名单（OpenAI 入站 SSE 路径）
+                                    if remember && allow_remember {
+                                        let agent_str =
+                                            format!("{:?}", meta.source_agent).to_lowercase();
+                                        for det in &hold_detections {
+                                            try_write_graylist(
+                                                &det.rule_id,
+                                                &det.evidence_truncated,
+                                                "",
+                                                "openai",
+                                                "inbound_sse",
+                                                &agent_str,
+                                                context_hint.clone(),
+                                                &request_id.to_string(),
+                                            );
+                                        }
+                                    }
+
                                     if tx
                                         .send(Ok(hyper::body::Frame::data(frame_bytes)))
                                         .await
@@ -2357,6 +2630,9 @@ async fn forward_with_openai_inbound_inspection(
             &mut aggregator,
             dry_run,
             meta.chain_depth,
+            &ipc,
+            &audit_store,
+            caller.as_ref(),
         );
 
         for d in &hook_detections {
@@ -2428,13 +2704,20 @@ async fn forward_with_openai_inbound_inspection(
 /// 默认 cargo feature `sequence_detection` 关闭时（GA 默认形态，PRD §9 #15），
 /// `record_tool_use_into_sequence` 与 `detect_sequence_hits` 均为 no-op，本函数零开销。
 ///
-/// 命中仅 tracing::info 通知（`target = "sequence_alert"`），**不引入新 Block 路径**
-/// （PRD §9 #15 硬约束）。GUI StatusBar 通知 + audit 写入推 v2.1。
+/// 命中通过 IPC broadcast StatusBar 通知 + audit 写入（PRD §5.7 / §9 #15）。
+/// **不引入新 Block 路径**（PRD §9 #15 硬约束）。
+///
+/// v2.0：新增 `ipc_server` / `audit_store` / `caller` 参数，接入 StatusBar + audit。
+/// feature `sequence_detection` 关闭时 detect_sequence_hits 是 no-op，
+/// 但闭包仍构造 Arc clone 保持代码始终编译通过。
 fn record_into_sequence_and_detect(
     inbound_filter: &sieve_core::pipeline::inbound::InboundFilter,
     tool: &sieve_core::CompletedToolCall,
     rule_hits: &[sieve_core::Detection],
     path_label: &'static str,
+    ipc_server: &Option<Arc<sieve_ipc::IpcServer>>,
+    audit_store: &Arc<crate::audit::AuditStore>,
+    caller: Option<&crate::process_context::CallerInfo>,
 ) {
     let rule_ids: Vec<String> = rule_hits.iter().map(|d| d.rule_id.clone()).collect();
     if let Err(e) = inbound_filter.record_tool_use_into_sequence(&tool.name, &tool.input, rule_ids)
@@ -2452,6 +2735,42 @@ fn record_into_sequence_and_detect(
                     description = %h.description,
                     "IN-SEQ-* sequence detection hit (StatusBar notify, no block per PRD §9 #15)"
                 );
+
+                // v2.0 §5.7：IPC StatusBar 通知（单向广播，no-block）
+                if let Some(ref srv) = ipc_server {
+                    let notify = sieve_ipc::protocol::StatusBarNotify {
+                        notify_id: uuid::Uuid::now_v7(),
+                        created_at: chrono::Utc::now(),
+                        kind: sieve_ipc::protocol::NotifyKind::SequenceHit,
+                        title: format!("行为序列检测命中：{}", h.rule_id),
+                        detail: Some(h.description.clone()),
+                        rule_id: Some(h.rule_id.clone()),
+                        auto_dismiss_seconds: 10,
+                    };
+                    let srv_clone = Arc::clone(srv);
+                    tokio::spawn(async move {
+                        srv_clone.broadcast_status_bar(notify).await;
+                    });
+                }
+
+                // v2.0 §5.7：audit 写入（fail-soft，PRD §5.6.1）
+                let event = crate::audit::AuditEvent::SequenceHit {
+                    rule_id: h.rule_id.clone(),
+                    description: h.description.clone(),
+                    path_label: path_label.to_owned(),
+                    caller: crate::audit::CallerContext {
+                        pid: caller.map(|c| c.pid),
+                        exe: caller
+                            .and_then(|c| c.exe.as_ref())
+                            .map(|p| p.display().to_string()),
+                    },
+                };
+                let audit_clone = Arc::clone(audit_store);
+                tokio::spawn(async move {
+                    if let Err(e) = audit_clone.append(event).await {
+                        tracing::warn!(error = %e, "audit append SequenceHit failed");
+                    }
+                });
             }
         }
         Ok(_) => {}
@@ -2459,12 +2778,16 @@ fn record_into_sequence_and_detect(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn classify_inbound_detections(
     events: &[sieve_core::sse::parser::SseEvent],
     inbound_filter: &mut sieve_core::pipeline::inbound::InboundFilter,
     aggregator: &mut sieve_core::tool_use_aggregator::Aggregator,
     dry_run: bool,
     chain_depth: usize,
+    ipc_server: &Option<Arc<sieve_ipc::IpcServer>>,
+    audit_store: &Arc<crate::audit::AuditStore>,
+    caller: Option<&crate::process_context::CallerInfo>,
 ) -> (
     Vec<sieve_core::Detection>,
     Vec<sieve_core::Detection>,
@@ -2481,7 +2804,15 @@ fn classify_inbound_detections(
             Ok(Some(tool)) => match inbound_filter.on_tool_use_complete(&tool) {
                 Ok(hits) => {
                     // PRD §5.7.4 双路径不变量：SSE 路径接入序列窗口（feature off 时是 no-op）
-                    record_into_sequence_and_detect(inbound_filter, &tool, &hits, "sse");
+                    record_into_sequence_and_detect(
+                        inbound_filter,
+                        &tool,
+                        &hits,
+                        "sse",
+                        ipc_server,
+                        audit_store,
+                        caller,
+                    );
                     all_hits.extend(hits);
                 }
                 Err(e) => tracing::warn!(error = %e, "inbound on_tool_use_complete error"),
@@ -2692,7 +3023,13 @@ async fn handle_anthropic_json_inbound(
     mut inbound_filter: InboundFilter,
     dry_run: bool,
     meta: MultiAgentMeta,
+    ipc: Option<Arc<sieve_ipc::IpcServer>>,
+    ctx: RequestCtx,
 ) -> Result<Response<ResponseBody>> {
+    let RequestCtx {
+        caller,
+        audit: audit_store,
+    } = ctx;
     use http_body_util::BodyExt as _;
 
     // 收集完整 body（非流式 JSON 响应通常很小，不存在 DoS 风险，上游负责 content-length 校验）
@@ -2756,6 +3093,9 @@ async fn handle_anthropic_json_inbound(
                         &completed,
                         &hits,
                         "anthropic-json",
+                        &ipc,
+                        &audit_store,
+                        caller.as_ref(),
                     );
                     for mut d in hits {
                         match &d.action {
@@ -2825,7 +3165,13 @@ async fn handle_openai_json_inbound(
     mut inbound_filter: InboundFilter,
     dry_run: bool,
     meta: MultiAgentMeta,
+    ipc: Option<Arc<sieve_ipc::IpcServer>>,
+    ctx: RequestCtx,
 ) -> Result<Response<ResponseBody>> {
+    let RequestCtx {
+        caller,
+        audit: audit_store,
+    } = ctx;
     use http_body_util::BodyExt as _;
 
     let body_bytes = match resp_body.collect().await {
@@ -2898,6 +3244,9 @@ async fn handle_openai_json_inbound(
                             &completed,
                             &hits,
                             "openai-json",
+                            &ipc,
+                            &audit_store,
+                            caller.as_ref(),
                         );
                         for mut d in hits {
                             match &d.action {

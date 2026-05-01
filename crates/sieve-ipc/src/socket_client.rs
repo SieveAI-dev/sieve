@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::{
     error::IpcError,
-    protocol::{jsonrpc, DecisionResponse},
+    protocol::{jsonrpc, DecisionResponse, ReloadUserRules},
 };
 
 /// 测试 / mock GUI 用的 IPC 客户端。
@@ -94,6 +94,35 @@ impl IpcClient {
         }
         Ok(())
     }
+}
+
+/// 一次性连接 IPC socket → 发 `sieve.reload_user_rules` 通知 → 关闭。
+///
+/// 供 `sieve rules edit` 命令（commands/rules.rs）调用，在编辑器关闭后通知
+/// daemon 重新加载 `~/.sieve/rules/user.toml`。
+///
+/// 失败静默丢弃（daemon 可能未运行；用户可手动重启 daemon 生效）。
+///
+/// 关联：PRD v2.0 §5.5.5（编辑器关闭后 lint + atomic backup + IPC reload）+ ADR-013。
+pub async fn send_reload_user_rules_oneshot(
+    socket_path: &Path,
+    trigger_id: Option<Uuid>,
+) -> Result<(), IpcError> {
+    let mut stream = UnixStream::connect(socket_path).await?;
+
+    let reload = ReloadUserRules { trigger_id };
+    let notification = jsonrpc::Request {
+        jsonrpc: "2.0".to_owned(),
+        method: "sieve.reload_user_rules".to_owned(),
+        params: Some(serde_json::to_value(&reload)?),
+        id: None, // 单向通知，无 id。
+    };
+
+    let mut payload = serde_json::to_string(&notification)?;
+    payload.push('\n');
+    stream.write_all(payload.as_bytes()).await?;
+    // 不等回复，直接关闭连接。
+    Ok(())
 }
 
 /// 连接重试辅助——服务端 spawn 后稍有延迟才就绪。

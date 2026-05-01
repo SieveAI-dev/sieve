@@ -31,12 +31,37 @@ pub enum HoldError {
 }
 
 /// [`hold_and_decide`] 的返回值，表示 hold 结束后的处置动作。
+///
+/// `remember` / `context_hint` 从 IPC [`sieve_ipc::DecisionResponse`] 透传，
+/// 供 daemon 在 Allow / RedactAndAllow 路径写灰名单（PRD v2.0 §5.4.2）。
+///
+/// **注意**：daemon 消费 `remember` 字段写灰名单前**必须二次校验** critical_lock
+/// （PRD §5.4.2 三道防线之三），sieve-core 不做该校验（crate 边界，避免依赖 sieve-rules）。
 #[derive(Debug, PartialEq, Eq)]
 pub enum HoldOutcome {
     /// 用户允许（或超时 default_on_timeout = Allow）→ 继续转发原始 SSE。
-    Allow,
+    Allow {
+        /// 是否记住此次决策（来自 `DecisionResponse.remember`）。
+        ///
+        /// `true` 时 daemon 应写灰名单；超时兜底路径强制为 `false`。
+        ///
+        /// **注意**：daemon 写灰名单前必须二次校验 critical_lock（PRD §5.4.2 三道防线之三），
+        /// sieve-core 不做该校验（crate 边界，避免依赖 sieve-rules）。
+        remember: bool,
+        /// 用户在 GUI 输入的上下文备注（来自 `DecisionResponse.context_hint`）。
+        ///
+        /// 写入灰名单 JSON `context_hint` 字段（PRD v2.0 §5.4.2 schema）。
+        context_hint: Option<String>,
+    },
     /// 用户允许且要求脱敏（仅出站脱敏类，入站实际等价 Allow）→ 继续转发。
-    RedactAndAllow,
+    RedactAndAllow {
+        /// 是否记住此次决策（来自 `DecisionResponse.remember`）。
+        ///
+        /// 语义同 [`HoldOutcome::Allow::remember`]。
+        remember: bool,
+        /// 用户在 GUI 输入的上下文备注（来自 `DecisionResponse.context_hint`）。
+        context_hint: Option<String>,
+    },
     /// 用户拒绝（或超时 default_on_timeout = Block）→ 注入 `sieve_blocked` event 并关流。
     Deny {
         /// 拒绝原因（来自 rule_id 列表或 "timeout"）。
@@ -107,9 +132,17 @@ pub async fn hold_and_decide(
         }
     };
 
+    // 透传 remember + context_hint（PRD v2.0 §5.4.2 灰名单 schema）。
+    // Deny 路径不携带这两个字段（灰名单仅对 Allow 路径有意义）。
     let outcome = match resp.decision {
-        DecisionAction::Allow => HoldOutcome::Allow,
-        DecisionAction::RedactAndAllow => HoldOutcome::RedactAndAllow,
+        DecisionAction::Allow => HoldOutcome::Allow {
+            remember: resp.remember,
+            context_hint: resp.context_hint,
+        },
+        DecisionAction::RedactAndAllow => HoldOutcome::RedactAndAllow {
+            remember: resp.remember,
+            context_hint: resp.context_hint,
+        },
         DecisionAction::Deny => HoldOutcome::Deny {
             reason: if resp.by_user {
                 format!("用户拒绝（rules: {rule_ids}）")
@@ -123,13 +156,23 @@ pub async fn hold_and_decide(
 }
 
 /// 按 [`DefaultOnTimeout`] 构造超时结果。
+///
+/// 超时路径 `remember` 强制 `false`（用户未主动选择，不写灰名单），
+/// `context_hint` 为 `None`（无 GUI 输入）。
 fn timeout_outcome(dot: DefaultOnTimeout, rule_ids: &str) -> HoldOutcome {
     match dot {
         DefaultOnTimeout::Block => HoldOutcome::Deny {
             reason: format!("超时 fail-closed（rules: {rule_ids}）"),
         },
-        DefaultOnTimeout::Allow => HoldOutcome::Allow,
-        DefaultOnTimeout::Redact => HoldOutcome::RedactAndAllow,
+        // 超时 Allow / Redact：remember=false，不写灰名单（无用户主动决策）
+        DefaultOnTimeout::Allow => HoldOutcome::Allow {
+            remember: false,
+            context_hint: None,
+        },
+        DefaultOnTimeout::Redact => HoldOutcome::RedactAndAllow {
+            remember: false,
+            context_hint: None,
+        },
     }
 }
 
@@ -216,7 +259,10 @@ mod tests {
         let outcome = hold_and_decide(Arc::clone(&server), req, ka_tx)
             .await
             .unwrap();
-        assert_eq!(outcome, HoldOutcome::Allow);
+        assert!(
+            matches!(outcome, HoldOutcome::Allow { .. }),
+            "expected Allow, got {outcome:?}"
+        );
     }
 
     // ── Mock IPC 返回 Deny ────────────────────────────────────────────────────
@@ -311,7 +357,16 @@ mod tests {
         tokio::time::resume();
 
         let outcome = task.await.unwrap().unwrap();
-        assert_eq!(outcome, HoldOutcome::Allow);
+        assert!(
+            matches!(
+                outcome,
+                HoldOutcome::Allow {
+                    remember: false,
+                    context_hint: None
+                }
+            ),
+            "timeout Allow should have remember=false, context_hint=None, got {outcome:?}"
+        );
     }
 
     // ── keep-alive channel 收到数据 ──────────────────────────────────────────
@@ -355,6 +410,127 @@ mod tests {
         let outcome = hold_and_decide(Arc::clone(&server), req, ka_tx)
             .await
             .unwrap();
-        assert_eq!(outcome, HoldOutcome::Allow);
+        assert!(
+            matches!(outcome, HoldOutcome::Allow { .. }),
+            "expected Allow, got {outcome:?}"
+        );
+    }
+
+    // ── 新测试：remember 字段默认值 ──────────────────────────────────────────
+
+    /// `hold_outcome_remember_default_false`：超时 Allow 路径 remember 为 false。
+    ///
+    /// 验证 PRD §5.4.2：超时兜底不触发灰名单写入（无用户主动选择）。
+    #[test]
+    fn hold_outcome_remember_default_false() {
+        let outcome = HoldOutcome::Allow {
+            remember: false,
+            context_hint: None,
+        };
+        assert!(
+            matches!(
+                outcome,
+                HoldOutcome::Allow {
+                    remember: false,
+                    context_hint: None
+                }
+            ),
+            "默认构造 Allow 时 remember 应为 false"
+        );
+
+        let outcome2 = HoldOutcome::RedactAndAllow {
+            remember: false,
+            context_hint: None,
+        };
+        assert!(
+            matches!(
+                outcome2,
+                HoldOutcome::RedactAndAllow {
+                    remember: false,
+                    context_hint: None
+                }
+            ),
+            "默认构造 RedactAndAllow 时 remember 应为 false"
+        );
+    }
+
+    /// `hold_outcome_serde_round_trip`：HoldOutcome 序列化 → 反序列化字段一致。
+    ///
+    /// 注：HoldOutcome 当前未实现 Serde（非公开序列化需求），
+    /// 此处改为验证 PartialEq 字段一致性（round-trip 通过 pattern matching）。
+    #[test]
+    fn hold_outcome_field_equality() {
+        let a = HoldOutcome::Allow {
+            remember: true,
+            context_hint: Some("测试备注".into()),
+        };
+        let b = HoldOutcome::Allow {
+            remember: true,
+            context_hint: Some("测试备注".into()),
+        };
+        assert_eq!(a, b, "相同字段的 Allow 变体应 PartialEq");
+
+        let c = HoldOutcome::Allow {
+            remember: false,
+            context_hint: None,
+        };
+        assert_ne!(a, c, "remember 不同的 Allow 变体不应 PartialEq");
+    }
+
+    // ── hold_and_decide 透传 remember + context_hint ─────────────────────────
+
+    /// `hold_and_decide_propagates_remember_from_response`：
+    /// mock IPC 返回 remember=true + context_hint，HoldOutcome 携带相同字段。
+    ///
+    /// 验证 PRD §5.4.2：daemon 收到 Allow { remember: true } 时可直接写灰名单。
+    #[tokio::test]
+    async fn hold_and_decide_propagates_remember_from_response() {
+        let (server, listener, socket_path) = make_ipc_server();
+        let srv = Arc::clone(&server);
+        tokio::spawn(async move { srv.run(listener).await });
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        let _gui_stream = tokio::net::UnixStream::connect(&socket_path)
+            .await
+            .expect("connect to IPC socket failed");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        let id = Uuid::now_v7();
+        let req = make_request(id, 5, DefaultOnTimeout::Block);
+
+        let inject_srv = Arc::clone(&server);
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            inject_srv
+                .inject_decision(DecisionResponse {
+                    request_id: id,
+                    decision: DecisionAction::Allow,
+                    decided_at: Utc::now(),
+                    by_user: true,
+                    remember: true,
+                    context_hint: Some("用户确认：已核对地址".into()),
+                })
+                .await;
+        });
+
+        let (ka_tx, _ka_rx) = mpsc::channel::<Bytes>(8);
+        let outcome = hold_and_decide(Arc::clone(&server), req, ka_tx)
+            .await
+            .unwrap();
+
+        match outcome {
+            HoldOutcome::Allow {
+                remember,
+                context_hint,
+            } => {
+                assert!(remember, "remember 应从 DecisionResponse 透传为 true");
+                assert_eq!(
+                    context_hint,
+                    Some("用户确认：已核对地址".into()),
+                    "context_hint 应从 DecisionResponse 透传"
+                );
+            }
+            other => panic!("期望 Allow，得到 {other:?}"),
+        }
     }
 }

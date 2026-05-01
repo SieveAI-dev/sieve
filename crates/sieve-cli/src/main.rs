@@ -72,8 +72,10 @@ async fn main() -> Result<()> {
             cfg.enforce_safety_invariants(); // bind_addr 非 127.0.0.1 → exit(1)
 
             let audit_path = cfg.audit_db_path()?;
-            let _audit = AuditStore::init(&audit_path)
-                .with_context(|| format!("init audit store at {}", audit_path.display()))?;
+            let audit_store = Arc::new(
+                AuditStore::init(&audit_path)
+                    .with_context(|| format!("init audit store at {}", audit_path.display()))?,
+            );
 
             // 加载出站规则（fail-closed：加载失败直接退出，不 fallback 到无规则模式，ADR-007）
             let rules_path = cfg.resolved_rules_path();
@@ -195,6 +197,7 @@ async fn main() -> Result<()> {
                 Arc::new(inbound_adapter),
                 Arc::clone(&sieveignore_arc),
                 address_guard_config,
+                audit_store,
             )
             .await?;
         }
