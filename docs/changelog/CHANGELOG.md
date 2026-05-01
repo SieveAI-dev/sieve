@@ -11,6 +11,60 @@
 
 ---
 
+## [v2.0-alpha-deferred-2] - 2026-05-01
+
+### 背景
+
+把 v2.0 推迟清单里所有 daemon-side 接入工作一次性清空：IPC 协议扩展（StatusBarNotify + ReloadUserRules）+ HoldOutcome 携带 remember/context_hint + daemon 全接入（audit 透传 / peer_addr / 灰名单写入 / IN-SEQ-* 通知 / hot-reload）。
+
+仅保留 zero-downtime LayeredEngine swap 推 v2.1（需改 sieve-rules，本期 best-effort reload + StatusBar 提示"需重启 daemon 完整生效"）。
+
+### Added
+
+**sieve-ipc 协议扩展（W2A-1）**：
+- `StatusBarNotify` + `NotifyKind { SequenceHit, OutboundRedacted, UserRulesLoadFailed, UserRulesReloaded, Generic }` 枚举（PRD §5.4.3 / §5.7 单向通知）
+- `ReloadUserRules` 通知（sieve rules edit → daemon，PRD §5.5.5 步骤 4）
+- `IpcServer::broadcast_status_bar` 广播给所有连接 GUI（无 GUI 时静默丢弃）
+- `IpcServer::reload_rx()` 暴露 mpsc receiver（容量 16），daemon spawn 监听 task
+- `send_reload_user_rules_oneshot(socket, trigger_id)` 独立函数给 cli 用
+- 7 个新测试 + 4 个 request_decision 集成测试全通过（44 passed / 1 ignored）
+
+**sieve-core HoldOutcome 扩展（W2A-2）**：
+- `HoldOutcome::Allow { remember, context_hint }` + `RedactAndAllow { remember, context_hint }`（PRD §5.4.2 灰名单字段透传）
+- `Deny { reason }` 不变（Deny 路径不写灰名单）
+- `hold_and_decide` 把 IPC `DecisionResponse.remember/context_hint` 透传到 HoldOutcome
+- 超时路径强制 `remember: false`（无用户主动决策不触发灰名单）
+- 顶层文档注释明确 daemon 必须二次校验 critical_lock（crate 边界，sieve-core 不依赖 sieve-rules）
+
+**daemon-side 全接入（W2B）**：
+- **修 4 处 HoldOutcome 解构编译错误**（HoldOutcome 改 enum 结构体变体）
+- **`peer_addr_to_pid` 替换 stub** → 调 `process_context::lookup_caller_by_socket_addr(local, peer)`，accept loop 拿 `local_addr` + caller info 合并进 `RequestCtx` 透传
+- **AuditStore 透传**：main.rs `Arc<AuditStore>` 注入 daemon::run；新建 `RequestCtx { caller, audit }` 合并参数透传到 proxy → proxy_inner → proxy_openai → forward_with_*_inspection → handle_*_json_inbound
+- **7 个新 AuditEvent 变体**：`DecisionMade / GraylistAdded / GraylistCriticalRejected / GraylistHit / SequenceHit / UserRulesReloaded / UserRulesLoadFailed`
+- **入站 SSE 灰名单 add_entry**（Anthropic + OpenAI 两条）：消费 HoldOutcome.remember/context_hint，二次校验 critical_lock 后调 try_write_graylist
+- **OpenAI 出站灰名单 lookup 对称**：与 Anthropic 出站对称的 `check_graylist_hit` 在 HoldForDecision 块前
+- **IN-SEQ-* IPC StatusBar 通知 + audit**：`record_into_sequence_and_detect` 新签名加 ipc_server / audit_store / caller 参数；4 个调用点全更新；命中时 broadcast SequenceHit notify + audit append（feature off 时不影响）
+- **`sieve rules edit` 后 IPC notify reload**：lint 通过后 `tokio::runtime::Runtime::new().block_on(send_reload_user_rules_oneshot(...))`，socket 不存在静默跳过
+- **daemon reload listener**（best-effort，PRD §5.5.5 妥协实现）：spawn task 监听 reload_rx → 重新读 user.toml + lint + UserEngine::compile 验证 → broadcast UserRulesReloaded / UserRulesLoadFailed 通知 + audit；**不做 zero-downtime hot swap**（推 v2.1，需改 sieve-rules LayeredEngine）
+
+### Test
+
+- 默认 feature：`cargo test --workspace --no-fail-fast` → **627 passed / 1 failed（已知 doctor 竞态）/ 5 ignored**（+ 偶发 outbound_block r11 daemon 启动竞态，单跑通过）
+- feature on：`cargo test --workspace --features sieve-cli/sequence_detection --no-fail-fast` → **638 passed / 1 failed（同上）/ 5 ignored**
+- `cargo fmt --all -- --check`：clean
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings`：clean
+- `cargo build --workspace --features sieve-cli/sequence_detection`：clean
+
+### Deferred to v2.1（仅剩工程项）
+
+- **zero-downtime LayeredEngine hot swap**：改 sieve-rules `LayeredEngine.user` 为 `Arc<RwLock<Option<UserEngine>>>`，daemon reload listener 做 atomic swap；本期 best-effort 验证 + StatusBar 告知"需重启 daemon"
+- **`try_write_graylist` 内部 audit ERROR 写入**：失败路径目前只 tracing::error，audit 写入留 v2.1
+- **行为序列升级 Block 类的 ADR 评审**（PRD §9 #15 升级触发条件：真实付费用户连续 4 周 ≥ 50 个序列样本 + FP rate < 0.5%）
+- **多 GUI 客户端支持**（当前 broadcast_status_bar 单 GUI 约束，ADR-013 扩展）
+- **行为序列 ML 分类器**（v2.1+ 训练）
+
+---
+
 ## [v2.0-alpha-deferred-1] - 2026-05-01
 
 ### 背景

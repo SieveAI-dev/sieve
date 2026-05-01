@@ -20,8 +20,9 @@ pub use origin_header::{
 };
 pub use protocol::{
     DecisionAction, DecisionRequest, DecisionResponse, DefaultOnTimeout, DetectionPayload,
-    Disposition, OriginHop, Severity, SourceAgent,
+    Disposition, NotifyKind, OriginHop, ReloadUserRules, Severity, SourceAgent, StatusBarNotify,
 };
+pub use socket_client::send_reload_user_rules_oneshot;
 pub use socket_server::IpcServer;
 
 #[cfg(test)]
@@ -30,6 +31,92 @@ mod tests {
     use uuid::Uuid;
 
     use super::protocol::*;
+
+    // ── StatusBarNotify serde ────────────────────────────────────────────────
+
+    /// StatusBarNotify SequenceHit kind round-trip 序列化。
+    ///
+    /// 关联：PRD v2.0 §5.7.2（行为序列 StatusBar 通知）、ADR-013。
+    #[test]
+    fn status_bar_notify_serde_round_trip() {
+        let notify = StatusBarNotify {
+            notify_id: Uuid::now_v7(),
+            created_at: Utc::now(),
+            kind: NotifyKind::SequenceHit,
+            title: "检测到侦察-外泄序列命中".to_owned(),
+            detail: Some("IN-SEQ-01-RECON-EXFIL: 连续 3 步内读取私钥后发起外部请求".to_owned()),
+            rule_id: Some("IN-SEQ-01-RECON-EXFIL".to_owned()),
+            auto_dismiss_seconds: 5,
+        };
+
+        let json = serde_json::to_string(&notify).expect("serialize");
+        let decoded: StatusBarNotify = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(decoded.notify_id, notify.notify_id);
+        assert_eq!(decoded.kind, NotifyKind::SequenceHit);
+        assert_eq!(decoded.title, notify.title);
+        assert_eq!(decoded.detail, notify.detail);
+        assert_eq!(decoded.rule_id.as_deref(), Some("IN-SEQ-01-RECON-EXFIL"));
+        assert_eq!(decoded.auto_dismiss_seconds, 5);
+    }
+
+    /// 旧 v1.5 客户端不发 detail / rule_id 时，反序列化默认为 None（#[serde(default)]）。
+    #[test]
+    fn status_bar_notify_v15_compat() {
+        let json = serde_json::json!({
+            "notify_id": "01901234-5678-7abc-def0-123456789abc",
+            "created_at": "2026-05-01T00:00:00Z",
+            "kind": "outbound_redacted",
+            "title": "API key 已自动脱敏",
+            "auto_dismiss_seconds": 5
+            // detail 和 rule_id 字段缺失
+        });
+        let decoded: StatusBarNotify =
+            serde_json::from_value(json).expect("v1.5 compat deserialize");
+        assert_eq!(decoded.kind, NotifyKind::OutboundRedacted);
+        assert!(decoded.detail.is_none(), "detail 应默认 None");
+        assert!(decoded.rule_id.is_none(), "rule_id 应默认 None");
+    }
+
+    /// ReloadUserRules 默认空 trigger_id 序列化 → 反序列化一致。
+    #[test]
+    fn reload_user_rules_default_round_trip() {
+        let reload = ReloadUserRules::default();
+        assert!(reload.trigger_id.is_none());
+
+        let json = serde_json::to_string(&reload).expect("serialize");
+        let decoded: ReloadUserRules = serde_json::from_str(&json).expect("deserialize");
+        assert!(decoded.trigger_id.is_none());
+
+        // 带 trigger_id 的情形。
+        let with_id = ReloadUserRules {
+            trigger_id: Some(Uuid::now_v7()),
+        };
+        let json2 = serde_json::to_string(&with_id).expect("serialize with_id");
+        let decoded2: ReloadUserRules = serde_json::from_str(&json2).expect("deserialize with_id");
+        assert_eq!(decoded2.trigger_id, with_id.trigger_id);
+    }
+
+    /// NotifyKind 所有变体 snake_case 序列化正确。
+    #[test]
+    fn notify_kind_serde() {
+        let cases = [
+            (NotifyKind::SequenceHit, "sequence_hit"),
+            (NotifyKind::OutboundRedacted, "outbound_redacted"),
+            (NotifyKind::UserRulesLoadFailed, "user_rules_load_failed"),
+            (NotifyKind::UserRulesReloaded, "user_rules_reloaded"),
+            (NotifyKind::Generic, "generic"),
+        ];
+        for (kind, expected) in cases {
+            let json = serde_json::to_string(&kind).unwrap();
+            assert_eq!(
+                json,
+                format!("\"{expected}\""),
+                "NotifyKind::{kind:?} should serialize to \"{expected}\""
+            );
+            let decoded: NotifyKind = serde_json::from_str(&json).unwrap();
+            assert_eq!(decoded, kind);
+        }
+    }
 
     // ── 协议 round-trip ──────────────────────────────────────────────────────
 
@@ -784,6 +871,151 @@ mod socket_tests {
             .unwrap();
         assert_eq!(result.decision, DecisionAction::Allow);
         assert!(!result.by_user);
+    }
+
+    // ── v2.0 新增集成测试 ────────────────────────────────────────────────────
+
+    use super::protocol::{NotifyKind, StatusBarNotify};
+    use super::socket_client::send_reload_user_rules_oneshot;
+
+    /// broadcast_status_bar：2 个 GUI 同时连，broadcast 后两者都收到一条相同 notify。
+    ///
+    /// 注：当前实现同一时刻只允许一个 GUI 客户端（ADR-013 §3 单 GUI 约束），
+    /// 因此此测试验证"单 GUI 正常收到"语义；第二个连接会被当作短连接处理。
+    /// 若未来放开多 GUI 支持，此测试需要相应扩展。
+    /// 关联：PRD v2.0 §5.7、ADR-013。
+    #[tokio::test]
+    async fn broadcast_status_bar_to_gui_client() {
+        let tmp = tempfile::tempdir().unwrap();
+        let socket_path = tmp.path().join("ipc_broadcast.sock");
+        let server = start_server(&socket_path).await;
+
+        // 模拟 GUI：连接并保持，等待接收 notify。
+        let path_clone = socket_path.clone();
+        let (notify_tx, mut notify_rx) = tokio::sync::mpsc::channel::<String>(8);
+        tokio::spawn(async move {
+            let stream = retry_connect_helper(&path_clone, 10, Duration::from_millis(10))
+                .await
+                .unwrap();
+            let (read_half, _write_half) = stream.into_split();
+            let mut lines = tokio::io::BufReader::new(read_half).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                if !line.trim().is_empty() {
+                    let _ = notify_tx.send(line).await;
+                    break;
+                }
+            }
+        });
+
+        // 等 GUI 建立连接。
+        tokio::time::sleep(Duration::from_millis(30)).await;
+
+        let notify = StatusBarNotify {
+            notify_id: Uuid::now_v7(),
+            created_at: Utc::now(),
+            kind: NotifyKind::SequenceHit,
+            title: "序列检测命中".to_owned(),
+            detail: None,
+            rule_id: Some("IN-SEQ-01".to_owned()),
+            auto_dismiss_seconds: 5,
+        };
+        let expected_id = notify.notify_id;
+
+        server.broadcast_status_bar(notify).await;
+
+        // GUI 应在 1s 内收到通知。
+        let received = tokio::time::timeout(Duration::from_secs(1), notify_rx.recv())
+            .await
+            .expect("timeout waiting for notify")
+            .expect("channel closed");
+
+        let val: serde_json::Value = serde_json::from_str(&received).unwrap();
+        assert_eq!(val["method"].as_str(), Some("sieve.notify_status_bar"));
+        assert_eq!(
+            val["params"]["notify_id"].as_str(),
+            Some(expected_id.to_string().as_str())
+        );
+        assert_eq!(val["params"]["kind"].as_str(), Some("sequence_hit"));
+        assert!(val.get("id").is_none(), "通知不应有 id 字段");
+    }
+
+    /// 无 GUI 客户端连接时，broadcast_status_bar 静默丢弃，不返回错误。
+    #[tokio::test]
+    async fn broadcast_status_bar_no_gui_clients_silently_drops() {
+        let tmp = tempfile::tempdir().unwrap();
+        let socket_path = tmp.path().join("ipc_no_gui.sock");
+        let server = start_server(&socket_path).await;
+
+        // 没有任何 GUI 连接。
+        let notify = StatusBarNotify {
+            notify_id: Uuid::now_v7(),
+            created_at: Utc::now(),
+            kind: NotifyKind::Generic,
+            title: "测试通知".to_owned(),
+            detail: None,
+            rule_id: None,
+            auto_dismiss_seconds: 0,
+        };
+
+        // 不应 panic / 不应 hang。
+        server.broadcast_status_bar(notify).await;
+        // 到达此处即表示静默丢弃成功。
+    }
+
+    /// send_reload_user_rules_oneshot → daemon mock IpcServer 能从 reload_rx 取到 ReloadUserRules。
+    ///
+    /// 关联：PRD v2.0 §5.5.5、ADR-013。
+    #[tokio::test]
+    async fn send_reload_user_rules_round_trip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let socket_path = tmp.path().join("ipc_reload.sock");
+        let (server, listener) = IpcServer::bind(socket_path.clone()).unwrap();
+        let server = Arc::new(server);
+
+        // 取出 reload_rx，模拟 daemon 监听。
+        let mut reload_rx = server.reload_rx().await.expect("reload_rx should be Some");
+
+        // 启动 server accept 循环。
+        let s = Arc::clone(&server);
+        tokio::spawn(async move { s.run(listener).await });
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        // 发 reload 通知。
+        let trigger_id = Uuid::now_v7();
+        send_reload_user_rules_oneshot(&socket_path, Some(trigger_id))
+            .await
+            .expect("send_reload should succeed");
+
+        // daemon 侧应在 1s 内收到。
+        let received = tokio::time::timeout(Duration::from_secs(1), reload_rx.recv())
+            .await
+            .expect("timeout waiting for reload")
+            .expect("channel closed");
+
+        assert_eq!(
+            received.trigger_id,
+            Some(trigger_id),
+            "trigger_id 应与发送侧一致"
+        );
+    }
+
+    // 辅助：连接重试（broadcast 测试用）。
+    async fn retry_connect_helper(
+        path: &std::path::Path,
+        attempts: u32,
+        delay: Duration,
+    ) -> Result<UnixStream, crate::IpcError> {
+        let mut last_err = None;
+        for _ in 0..attempts {
+            match UnixStream::connect(path).await {
+                Ok(s) => return Ok(s),
+                Err(e) => {
+                    last_err = Some(e);
+                    tokio::time::sleep(delay).await;
+                }
+            }
+        }
+        Err(crate::IpcError::Socket(last_err.unwrap()))
     }
 }
 

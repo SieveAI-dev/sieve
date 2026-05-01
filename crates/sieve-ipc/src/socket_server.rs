@@ -12,11 +12,20 @@ use uuid::Uuid;
 
 use crate::{
     error::IpcError,
-    protocol::{DecisionAction, DecisionRequest, DecisionResponse, DefaultOnTimeout},
+    protocol::{
+        DecisionAction, DecisionRequest, DecisionResponse, DefaultOnTimeout, ReloadUserRules,
+        StatusBarNotify,
+    },
 };
 
 /// pending map：request_id → oneshot 发送端，等待 GUI 回复。
 type PendingMap = Arc<Mutex<HashMap<Uuid, oneshot::Sender<DecisionResponse>>>>;
+
+/// reload 通知 channel 容量。
+///
+/// 容量 16：daemon 通常实时消费（spawn task 监听），16 条积压足够应对短暂卡顿；
+/// 积压超限说明 daemon reload handler 异常，此时丢弃最新通知优于阻塞 IPC server。
+const RELOAD_CHANNEL_CAPACITY: usize = 16;
 
 /// GUI 客户端的写通道：向其发送换行分隔的 JSON 字符串即可推送到对端。
 ///
@@ -37,11 +46,21 @@ type GuiWriter = Arc<Mutex<Option<mpsc::Sender<String>>>>;
 /// ```text
 /// [主代理]  ─request_decision JSON-RPC request─▶  [GUI]
 /// [主代理]  ◀─decision_response JSON-RPC response─  [GUI]
+/// [主代理]  ─sieve.notify_status_bar notification─▶  [GUI]  （单向）
+/// [rules edit]  ─sieve.reload_user_rules notification─▶  [主代理 IpcServer]  （单向）
 /// ```
 ///
 /// 每个方向在同一条 TCP/Unix 连接上用换行分隔的 JSON-RPC 帧传输。
 /// `handle_connection` 负责从 GUI 读取响应帧并派发到 `pending` map；
 /// `request_decision` 通过 `gui_writer` mpsc 通道写入请求帧。
+///
+/// # 单向通知（v2.0）
+///
+/// - `broadcast_status_bar`：daemon 向所有已连接 GUI 广播状态栏通知（IN-SEQ-* 命中 / 出站脱敏等）。
+///   失败（无客户端 / socket 写错）静默丢弃 + warn 日志，**daemon 主流程不阻塞**。
+///   关联：PRD v2.0 §5.7、ADR-013。
+/// - `reload_rx`：daemon 通过此 channel 接收来自 `sieve rules edit` 的 reload 通知。
+///   关联：PRD v2.0 §5.5.5、ADR-013。
 ///
 /// 关联：ADR-013 §3（JSON-RPC over Unix socket）、ADR-014 §5（GUI 路径）。
 pub struct IpcServer {
@@ -49,6 +68,10 @@ pub struct IpcServer {
     pending: PendingMap,
     /// 当前已连接的 GUI 客户端写通道；无 GUI 时为 None。
     gui_writer: GuiWriter,
+    /// reload 通知发送端（接收端通过 `reload_rx()` 暴露给 daemon）。
+    reload_tx: mpsc::Sender<ReloadUserRules>,
+    /// reload 通知接收端（`Option` 包装以支持 `take` 一次性移交给 daemon task）。
+    reload_rx: Arc<Mutex<Option<mpsc::Receiver<ReloadUserRules>>>>,
 }
 
 impl IpcServer {
@@ -61,17 +84,41 @@ impl IpcServer {
             std::fs::remove_file(&socket_path)?;
         }
         let listener = UnixListener::bind(&socket_path)?;
+        let (reload_tx, reload_rx) = mpsc::channel::<ReloadUserRules>(RELOAD_CHANNEL_CAPACITY);
         let server = Self {
             socket_path,
             pending: Arc::new(Mutex::new(HashMap::new())),
             gui_writer: Arc::new(Mutex::new(None)),
+            reload_tx,
+            reload_rx: Arc::new(Mutex::new(Some(reload_rx))),
         };
         Ok((server, listener))
     }
 
-    /// 运行 accept 循环，处理来自 GUI 的长连接。
+    /// 取出 reload 通知接收端（只能调用一次，之后返回 None）。
+    ///
+    /// daemon 应在启动时调用一次，spawn task 监听此 channel：
+    ///
+    /// ```ignore
+    /// if let Some(mut rx) = server.reload_rx().await {
+    ///     tokio::spawn(async move {
+    ///         while let Some(reload) = rx.recv().await {
+    ///             // 重新加载 user.toml …
+    ///         }
+    ///     });
+    /// }
+    /// ```
+    ///
+    /// 关联：PRD v2.0 §5.5.5、ADR-013。
+    pub async fn reload_rx(&self) -> Option<mpsc::Receiver<ReloadUserRules>> {
+        self.reload_rx.lock().await.take()
+    }
+
+    /// 运行 accept 循环，处理来自 GUI 和 sieve-hook/rules 进程的连接。
     ///
     /// 每个连接独立 spawn；同一时刻只接受一个 GUI 客户端，多余的直接关闭。
+    /// 来自 `sieve rules edit` 的 reload 通知（短连接）通过 `reload_tx` 分发到
+    /// `reload_rx` channel，daemon 通过 `reload_rx()` 取出接收端监听。
     pub async fn run(&self, listener: UnixListener) {
         info!(socket = %self.socket_path.display(), "IPC server listening");
         loop {
@@ -79,6 +126,7 @@ impl IpcServer {
                 Ok((stream, _addr)) => {
                     let pending = Arc::clone(&self.pending);
                     let gui_writer = Arc::clone(&self.gui_writer);
+                    let reload_tx = self.reload_tx.clone();
 
                     // 检查是否已有 GUI 客户端。
                     // 用 try_lock 避免阻塞 accept 循环；如果锁被占用就放通并让
@@ -86,9 +134,13 @@ impl IpcServer {
                     {
                         let mut guard = gui_writer.lock().await;
                         if guard.is_some() {
-                            warn!("second GUI client attempted to connect; rejecting");
-                            // 直接 drop stream 关闭连接，不 spawn 处理。
-                            drop(stream);
+                            // 已有 GUI 长连接——此新连接可能是短连接通知（如 reload）。
+                            // 放通给 handle_notification_or_reject 处理。
+                            warn!("second client connected; treating as short-lived notification");
+                            drop(guard);
+                            tokio::spawn(async move {
+                                handle_notification(stream, reload_tx).await;
+                            });
                             continue;
                         }
                         // 还没有 GUI 客户端——创建 mpsc 通道，把发送端存入 gui_writer，
@@ -98,8 +150,14 @@ impl IpcServer {
                         drop(guard);
 
                         tokio::spawn(async move {
-                            if let Err(e) =
-                                handle_connection(stream, pending, gui_writer.clone(), rx).await
+                            if let Err(e) = handle_connection(
+                                stream,
+                                pending,
+                                gui_writer.clone(),
+                                rx,
+                                reload_tx,
+                            )
+                            .await
                             {
                                 error!("IPC connection error: {e}");
                             }
@@ -115,6 +173,56 @@ impl IpcServer {
                     break;
                 }
             }
+        }
+    }
+
+    /// 向已连接的 GUI 广播 StatusBarNotify（单向，不等回复）。
+    ///
+    /// 失败（无 GUI 客户端 / socket 写错）静默丢弃 + warn 日志，**daemon 主流程不阻塞**。
+    ///
+    /// 关联：PRD v2.0 §5.7（行为序列 StatusBar 通知）+ §5.4.3（GUI 接口预留）+ ADR-013。
+    pub async fn broadcast_status_bar(&self, notify: StatusBarNotify) {
+        let sender = {
+            let guard = self.gui_writer.lock().await;
+            guard.clone()
+        };
+
+        let Some(sender) = sender else {
+            debug!(
+                notify_id = %notify.notify_id,
+                "broadcast_status_bar: no GUI client connected; dropping"
+            );
+            return;
+        };
+
+        // 构造 JSON-RPC 2.0 通知（无 id = fire-and-forget）。
+        let notification = crate::protocol::jsonrpc::Request {
+            jsonrpc: "2.0".to_owned(),
+            method: "sieve.notify_status_bar".to_owned(),
+            params: match serde_json::to_value(&notify) {
+                Ok(v) => Some(v),
+                Err(e) => {
+                    warn!(notify_id = %notify.notify_id, "failed to serialize StatusBarNotify: {e}");
+                    return;
+                }
+            },
+            id: None, // 单向通知，无 id。
+        };
+
+        let mut payload = match serde_json::to_string(&notification) {
+            Ok(s) => s,
+            Err(e) => {
+                warn!("failed to serialize notify JSON-RPC frame: {e}");
+                return;
+            }
+        };
+        payload.push('\n');
+
+        if let Err(_e) = sender.send(payload).await {
+            warn!(
+                notify_id = %notify.notify_id,
+                "broadcast_status_bar: GUI writer channel closed; dropping notify"
+            );
         }
     }
 
@@ -200,7 +308,8 @@ impl IpcServer {
 /// 处理单个 GUI 长连接。
 ///
 /// 同时管理两个方向：
-/// - **读方向**：从 GUI 读换行分隔的 JSON-RPC response，派发到 `pending` map。
+/// - **读方向**：从 GUI 读换行分隔的 JSON-RPC response，派发到 `pending` map；
+///   同时识别 `sieve.reload_user_rules` 通知并转发到 `reload_tx`。
 /// - **写方向**：从 `write_rx` mpsc 通道读取待发送的帧，写入 GUI socket。
 ///
 /// 任一方向出错（GUI 断线 / 写失败）都会退出，调用方负责清理 `gui_writer`。
@@ -209,6 +318,7 @@ async fn handle_connection(
     pending: PendingMap,
     gui_writer: GuiWriter,
     mut write_rx: mpsc::Receiver<String>,
+    reload_tx: mpsc::Sender<ReloadUserRules>,
 ) -> Result<(), IpcError> {
     info!("GUI client connected");
 
@@ -231,7 +341,7 @@ async fn handle_connection(
                             continue;
                         }
                         debug!(raw = %line, "received IPC message from GUI");
-                        dispatch_response(&line, &pending).await;
+                        dispatch_message(&line, &pending, &reload_tx).await;
                     }
                 }
             }
@@ -272,8 +382,53 @@ async fn handle_connection(
     Ok(())
 }
 
-/// 解析 GUI 发来的一行 JSON-RPC response 并派发到 pending map。
-async fn dispatch_response(line: &str, pending: &PendingMap) {
+/// 处理短连接传来的单向通知（如 `sieve.reload_user_rules`）。
+///
+/// 适用于无 GUI 长连接时 `sieve rules edit` 直接连 daemon 发 reload 的场景；
+/// 也用于 GUI 长连接期间新连接携带 reload 的情形。
+async fn handle_notification(stream: UnixStream, reload_tx: mpsc::Sender<ReloadUserRules>) {
+    let (read_half, _write_half) = stream.into_split();
+    let mut lines = BufReader::new(read_half).lines();
+
+    while let Ok(Some(line)) = lines.next_line().await {
+        let line = line.trim().to_owned();
+        if line.is_empty() {
+            continue;
+        }
+        dispatch_notification_line(&line, &reload_tx).await;
+        break; // 短连接只处理第一条消息。
+    }
+}
+
+/// 解析一行 JSON-RPC 消息，区分 decision response 与单向通知并分别派发。
+async fn dispatch_message(
+    line: &str,
+    pending: &PendingMap,
+    reload_tx: &mpsc::Sender<ReloadUserRules>,
+) {
+    // 先尝试解析为通用 JSON Value，从 method 字段判断消息类型。
+    let val: serde_json::Value = match serde_json::from_str(line) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!("failed to parse IPC frame: {e}");
+            return;
+        }
+    };
+
+    // 有 method 字段 = 通知（Notification）或请求（Request）。
+    if let Some(method) = val.get("method").and_then(|v| v.as_str()) {
+        match method {
+            "sieve.reload_user_rules" => {
+                dispatch_notification_line(line, reload_tx).await;
+            }
+            other => {
+                warn!(method = other, "received unknown IPC method; ignoring");
+            }
+        }
+        return;
+    }
+
+    // 无 method = response（GUI 回复的 decision）。
     let rpc: crate::protocol::jsonrpc::Response = match serde_json::from_str(line) {
         Ok(v) => v,
         Err(e) => {
@@ -308,6 +463,39 @@ async fn dispatch_response(line: &str, pending: &PendingMap) {
                 warn!("failed to deserialize DecisionResponse: {e}");
             }
         }
+    }
+}
+
+/// 解析 `sieve.reload_user_rules` 通知并发送到 reload channel。
+async fn dispatch_notification_line(line: &str, reload_tx: &mpsc::Sender<ReloadUserRules>) {
+    let val: serde_json::Value = match serde_json::from_str(line) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!("failed to parse reload notification: {e}");
+            return;
+        }
+    };
+
+    let params = val
+        .get("params")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let reload: ReloadUserRules = if params.is_null() {
+        ReloadUserRules::default()
+    } else {
+        match serde_json::from_value(params) {
+            Ok(r) => r,
+            Err(e) => {
+                warn!("failed to deserialize ReloadUserRules params: {e}");
+                ReloadUserRules::default()
+            }
+        }
+    };
+
+    if let Err(_e) = reload_tx.send(reload).await {
+        warn!("reload channel closed; dropping reload notification");
+    } else {
+        debug!("reload_user_rules notification dispatched to daemon");
     }
 }
 

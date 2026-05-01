@@ -38,8 +38,6 @@ pub struct CallerContext {
 ///
 /// PRD §5.6.1 v2.0：每个 variant 含 `caller: CallerContext`，
 /// 记录 caller_pid / caller_exe；`#[serde(default)]` 保证旧 raw_json 反序列化兼容。
-// 方法在 daemon 完整接入前不被调用；Week 6 移除此 allow。
-#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AuditEvent {
@@ -94,10 +92,66 @@ pub enum AuditEvent {
         #[serde(default)]
         caller: CallerContext,
     },
+    // ── v2.0 新增事件变体（PRD §5.4.2 / §5.5.5 / §5.7）──────────────────────
+    /// 入站工具调用被用户决策（Allow/Deny）处置完成（PRD §5.4.2）。
+    DecisionMade {
+        rule_id: String,
+        /// "allow" | "deny" | "redact_and_allow"
+        decision: String,
+        severity: String,
+        /// true = 用户点击 Allow；false = 超时 / 系统回退
+        by_user: bool,
+        request_id: String,
+        #[serde(default)]
+        caller: CallerContext,
+    },
+    /// 灰名单条目已写入（PRD §5.4.2）。
+    GraylistAdded {
+        rule_id: String,
+        fingerprint: String,
+        request_id: String,
+        #[serde(default)]
+        caller: CallerContext,
+    },
+    /// 灰名单写入被 Critical 锁拒绝（fail-closed 二次校验，PRD §5.4.2）。
+    GraylistCriticalRejected {
+        rule_id: String,
+        request_id: String,
+        #[serde(default)]
+        caller: CallerContext,
+    },
+    /// 灰名单命中，跳过 IPC 弹窗直接 Allow（PRD §5.4.2）。
+    GraylistHit {
+        rule_id: String,
+        fingerprint: String,
+        request_id: String,
+        #[serde(default)]
+        caller: CallerContext,
+    },
+    /// 行为序列检测命中（IN-SEQ-*，PRD §5.7）。
+    SequenceHit {
+        rule_id: String,
+        description: String,
+        path_label: String,
+        #[serde(default)]
+        caller: CallerContext,
+    },
+    /// 用户规则 reload 结果（PRD §5.5.5）。
+    UserRulesReloaded {
+        /// reload 是否成功
+        success: bool,
+        /// 成功时的规则数量
+        #[serde(default)]
+        rule_count: Option<usize>,
+        /// 失败时的错误信息
+        #[serde(default)]
+        error: Option<String>,
+        /// 触发 reload 的 trigger_id（来自 sieve rules edit）
+        #[serde(default)]
+        trigger_id: Option<String>,
+    },
 }
 
-// impl 方法仅在 tests 和 append 中使用；Week 6 接入后移除此 allow。
-#[allow(dead_code)]
 impl AuditEvent {
     fn direction(&self) -> &'static str {
         match self {
@@ -105,7 +159,13 @@ impl AuditEvent {
             Self::InboundHookMarked { .. }
             | Self::InboundDecisionRequested { .. }
             | Self::InboundDecisionResolved { .. }
-            | Self::StatusBarNotified { .. } => "inbound",
+            | Self::StatusBarNotified { .. }
+            | Self::DecisionMade { .. }
+            | Self::GraylistAdded { .. }
+            | Self::GraylistCriticalRejected { .. }
+            | Self::GraylistHit { .. }
+            | Self::SequenceHit { .. } => "inbound",
+            Self::UserRulesReloaded { .. } => "system",
         }
     }
 
@@ -115,7 +175,13 @@ impl AuditEvent {
             | Self::InboundHookMarked { rule_id, .. }
             | Self::InboundDecisionRequested { rule_id, .. }
             | Self::InboundDecisionResolved { rule_id, .. }
-            | Self::StatusBarNotified { rule_id, .. } => rule_id,
+            | Self::StatusBarNotified { rule_id, .. }
+            | Self::DecisionMade { rule_id, .. }
+            | Self::GraylistAdded { rule_id, .. }
+            | Self::GraylistCriticalRejected { rule_id, .. }
+            | Self::GraylistHit { rule_id, .. }
+            | Self::SequenceHit { rule_id, .. } => rule_id,
+            Self::UserRulesReloaded { .. } => "system.user_rules_reload",
         }
     }
 
@@ -125,7 +191,13 @@ impl AuditEvent {
             | Self::InboundHookMarked { severity, .. }
             | Self::InboundDecisionRequested { severity, .. }
             | Self::InboundDecisionResolved { severity, .. }
-            | Self::StatusBarNotified { severity, .. } => severity,
+            | Self::StatusBarNotified { severity, .. }
+            | Self::DecisionMade { severity, .. } => severity,
+            Self::GraylistAdded { .. }
+            | Self::GraylistCriticalRejected { .. }
+            | Self::GraylistHit { .. }
+            | Self::SequenceHit { .. }
+            | Self::UserRulesReloaded { .. } => "info",
         }
     }
 
@@ -136,14 +208,20 @@ impl AuditEvent {
             Self::InboundDecisionRequested { .. } => "pending",
             Self::InboundDecisionResolved { .. } => "resolved",
             Self::StatusBarNotified { .. } => "notify",
+            Self::DecisionMade { .. } => "decision_made",
+            Self::GraylistAdded { .. } => "graylist_added",
+            Self::GraylistCriticalRejected { .. } => "graylist_critical_rejected",
+            Self::GraylistHit { .. } => "graylist_hit",
+            Self::SequenceHit { .. } => "sequence_hit",
+            Self::UserRulesReloaded { .. } => "user_rules_reloaded",
         }
     }
 
     fn decision(&self) -> Option<&str> {
-        if let Self::InboundDecisionResolved { decision, .. } = self {
-            Some(decision)
-        } else {
-            None
+        match self {
+            Self::InboundDecisionResolved { decision, .. }
+            | Self::DecisionMade { decision, .. } => Some(decision),
+            _ => None,
         }
     }
 
@@ -153,7 +231,12 @@ impl AuditEvent {
             | Self::InboundHookMarked { request_id, .. }
             | Self::InboundDecisionRequested { request_id, .. }
             | Self::InboundDecisionResolved { request_id, .. }
-            | Self::StatusBarNotified { request_id, .. } => request_id,
+            | Self::StatusBarNotified { request_id, .. }
+            | Self::DecisionMade { request_id, .. }
+            | Self::GraylistAdded { request_id, .. }
+            | Self::GraylistCriticalRejected { request_id, .. }
+            | Self::GraylistHit { request_id, .. } => request_id,
+            Self::SequenceHit { .. } | Self::UserRulesReloaded { .. } => "",
         }
     }
 
@@ -164,6 +247,7 @@ impl AuditEvent {
             | Self::InboundDecisionRequested { raw_json, .. }
             | Self::InboundDecisionResolved { raw_json, .. }
             | Self::StatusBarNotified { raw_json, .. } => raw_json.as_deref(),
+            _ => None,
         }
     }
 
@@ -174,7 +258,13 @@ impl AuditEvent {
             | Self::InboundHookMarked { caller, .. }
             | Self::InboundDecisionRequested { caller, .. }
             | Self::InboundDecisionResolved { caller, .. }
-            | Self::StatusBarNotified { caller, .. } => caller.pid,
+            | Self::StatusBarNotified { caller, .. }
+            | Self::DecisionMade { caller, .. }
+            | Self::GraylistAdded { caller, .. }
+            | Self::GraylistCriticalRejected { caller, .. }
+            | Self::GraylistHit { caller, .. }
+            | Self::SequenceHit { caller, .. } => caller.pid,
+            Self::UserRulesReloaded { .. } => None,
         }
     }
 
@@ -185,7 +275,13 @@ impl AuditEvent {
             | Self::InboundHookMarked { caller, .. }
             | Self::InboundDecisionRequested { caller, .. }
             | Self::InboundDecisionResolved { caller, .. }
-            | Self::StatusBarNotified { caller, .. } => caller.exe.as_deref(),
+            | Self::StatusBarNotified { caller, .. }
+            | Self::DecisionMade { caller, .. }
+            | Self::GraylistAdded { caller, .. }
+            | Self::GraylistCriticalRejected { caller, .. }
+            | Self::GraylistHit { caller, .. }
+            | Self::SequenceHit { caller, .. } => caller.exe.as_deref(),
+            Self::UserRulesReloaded { .. } => None,
         }
     }
 }
@@ -247,15 +343,11 @@ fn migrate(conn: &Connection) -> Result<()> {
 ///
 /// Week 5 起持有真实 SQLite 连接；线程安全通过 `Arc<Mutex<Connection>>` 实现。
 /// 关联 ADR-014 双层防御日志需求。
-// Week 5：`conn` / `append` 在 daemon 完整接入前不被调用，加 allow 避免 dead_code lint。
-// Week 6 接入后移除这个属性。
-#[allow(dead_code)]
+/// 审计存储句柄（SQLite append-only，PRD §5.6.1 / ADR-014）。
 pub struct AuditStore {
     conn: Arc<Mutex<Connection>>,
 }
 
-// `append` 在 daemon 完整接入前不被 main.rs 调用；Week 6 移除此 allow。
-#[allow(dead_code)]
 impl AuditStore {
     /// 初始化审计存储：打开 SQLite，执行 schema 迁移，安装 append-only 触发器。
     ///
