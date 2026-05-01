@@ -1044,6 +1044,282 @@ async fn openai_prompt_address_seed_blocks_address_substitution() {
     );
 }
 
+/// 在 :0 端口启动 plain-HTTP mock 上游，返回 application/json 响应（带 content-length）。
+///
+/// 与 spawn_mock_sse_upstream 的区别：Content-Type 固定为 application/json，
+/// 响应用 Full<Bytes> 带 content-length（非 chunked），模拟非流式 API 调用。
+async fn spawn_mock_json_upstream<F, Fut>(responder: F) -> (SocketAddr, oneshot::Sender<()>)
+where
+    F: Fn(Request<Bytes>) -> Fut + Clone + Send + Sync + 'static,
+    Fut: std::future::Future<Output = (hyper::StatusCode, Bytes)> + Send,
+{
+    use http_body_util::Full;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (tx, mut rx) = oneshot::channel::<()>();
+
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = &mut rx => break,
+                accept = listener.accept() => {
+                    let Ok((stream, _)) = accept else { continue };
+                    let io = TokioIo::new(stream);
+                    let r = responder.clone();
+                    tokio::spawn(async move {
+                        let svc = service_fn(move |req: Request<Incoming>| {
+                            let r = r.clone();
+                            async move {
+                                let (parts, body) = req.into_parts();
+                                let bytes = body
+                                    .collect()
+                                    .await
+                                    .unwrap_or_default()
+                                    .to_bytes();
+                                let req_collected = Request::from_parts(parts, bytes);
+                                let (status, body_bytes) = r(req_collected).await;
+                                let body_len = body_bytes.len();
+                                let resp: Response<http_body_util::Full<Bytes>> = Response::builder()
+                                    .status(status)
+                                    .header(http::header::CONTENT_TYPE, "application/json")
+                                    .header(http::header::CONTENT_LENGTH, body_len)
+                                    .body(Full::new(body_bytes))
+                                    .unwrap();
+                                Ok::<_, Infallible>(resp)
+                            }
+                        });
+                        let _ = server_http1::Builder::new()
+                            .serve_connection(io, svc)
+                            .await;
+                    });
+                }
+            }
+        }
+    });
+
+    (addr, tx)
+}
+
+/// 发非流式 POST /v1/messages 请求（stream 字段缺失），返回原始响应 body。
+fn fetch_json_response_raw(port: u16) -> (hyper::StatusCode, Bytes) {
+    use std::io::{Read, Write};
+    use std::net::TcpStream;
+
+    // 注意：无 stream:true，触发非流式 application/json 响应路径
+    let body_json = r#"{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}"#;
+    let request = format!(
+        "POST /v1/messages HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nContent-Length: {len}\r\nConnection: close\r\n\r\n{body}",
+        port = port,
+        len = body_json.len(),
+        body = body_json,
+    );
+
+    let mut stream = TcpStream::connect(format!("127.0.0.1:{port}")).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    stream.write_all(request.as_bytes()).unwrap();
+    stream.flush().unwrap();
+
+    let mut raw = Vec::new();
+    stream.read_to_end(&mut raw).ok();
+
+    let raw_str = String::from_utf8_lossy(&raw);
+    let status_code = raw_str
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|code| code.parse::<u16>().ok())
+        .unwrap_or(0);
+    let status = hyper::StatusCode::from_u16(status_code).unwrap_or(hyper::StatusCode::OK);
+
+    let sep = b"\r\n\r\n";
+    let raw_body = if let Some(pos) = raw.windows(sep.len()).position(|w| w == sep) {
+        &raw[pos + sep.len()..]
+    } else {
+        &[]
+    };
+
+    // 非流式响应可能带 content-length（非 chunked），直接返回 raw body
+    let decoded = decode_chunked(raw_body);
+    (status, Bytes::from(decoded))
+}
+
+async fn fetch_json_response(port: u16) -> (hyper::StatusCode, Bytes) {
+    tokio::task::spawn_blocking(move || fetch_json_response_raw(port))
+        .await
+        .unwrap()
+}
+
+/// 发非流式 POST /v1/chat/completions 请求（stream 字段缺失），返回原始响应 body。
+fn fetch_openai_json_response_raw(port: u16) -> (hyper::StatusCode, Bytes) {
+    use std::io::{Read, Write};
+    use std::net::TcpStream;
+
+    // 无 stream:true，触发非流式 application/json 响应路径
+    let body_json = r#"{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}"#;
+    let request = format!(
+        "POST /v1/chat/completions HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nContent-Length: {len}\r\nConnection: close\r\n\r\n{body}",
+        port = port,
+        len = body_json.len(),
+        body = body_json,
+    );
+
+    let mut stream = TcpStream::connect(format!("127.0.0.1:{port}")).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    stream.write_all(request.as_bytes()).unwrap();
+    stream.flush().unwrap();
+
+    let mut raw = Vec::new();
+    stream.read_to_end(&mut raw).ok();
+
+    let raw_str = String::from_utf8_lossy(&raw);
+    let status_code = raw_str
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|code| code.parse::<u16>().ok())
+        .unwrap_or(0);
+    let status = hyper::StatusCode::from_u16(status_code).unwrap_or(hyper::StatusCode::OK);
+
+    let sep = b"\r\n\r\n";
+    let raw_body = if let Some(pos) = raw.windows(sep.len()).position(|w| w == sep) {
+        &raw[pos + sep.len()..]
+    } else {
+        &[]
+    };
+
+    let decoded = decode_chunked(raw_body);
+    (status, Bytes::from(decoded))
+}
+
+async fn fetch_openai_json_response(port: u16) -> (hyper::StatusCode, Bytes) {
+    tokio::task::spawn_blocking(move || fetch_openai_json_response_raw(port))
+        .await
+        .unwrap()
+}
+
+// ─── 非流式 JSON 响应入站拦截（漏洞修复验证）──────────────────────────────────
+
+/// Anthropic 非流式 JSON 响应含 tool_use（eth_signTransaction）→ 应替换为 sieve_blocked。
+///
+/// 漏洞（lessons.md 2026-04-27）：daemon 假设入站响应永远是 SSE，
+/// application/json 响应里的 tool_use 完全绕过所有入站规则。
+/// 修复后：按 Content-Type 路由，JSON 路径解析 content[] 提取 tool_use 喂 InboundFilter。
+///
+/// 关联：lessons.md 2026-04-27 [安全] 条目 / PRD §5.2 IN-CR-05。
+#[tokio::test]
+async fn anthropic_non_streaming_json_inbound_block() {
+    // 非流式 Anthropic 响应：含 tool_use eth_signTransaction → 应触发 IN-CR-05-EVM 截流
+    let json_body = serde_json::json!({
+        "id": "msg_01",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-sonnet-4-5",
+        "content": [
+            {
+                "type": "tool_use",
+                "id": "toolu_01",
+                "name": "eth_signTransaction",
+                "input": {
+                    "to": "0xdeadbeef",
+                    "value": "1000000000000000000"
+                }
+            }
+        ],
+        "stop_reason": "tool_use",
+        "usage": {
+            "input_tokens": 10,
+            "output_tokens": 50
+        }
+    });
+    let body_bytes = Bytes::from(json_body.to_string());
+
+    let (upstream, _up) = spawn_mock_json_upstream(move |_req| {
+        let body = body_bytes.clone();
+        async move { (hyper::StatusCode::OK, body) }
+    })
+    .await;
+
+    let (port, _g) = spawn_sieve_daemon(&format!("http://{upstream}"));
+    let (_status, body) = fetch_json_response(port).await;
+
+    let body_str = String::from_utf8_lossy(&body);
+    assert!(
+        body_str.contains("sieve_blocked"),
+        "非流式 JSON 响应含 eth_signTransaction tool_use 必须触发 sieve_blocked:\n{body_str}"
+    );
+    assert!(
+        body_str.contains("IN-CR-05"),
+        "sieve_blocked 应包含 IN-CR-05 rule_id:\n{body_str}"
+    );
+}
+
+/// OpenAI 非流式 JSON 响应含 tool_calls → 应替换为 sieve_blocked。
+///
+/// 同上漏洞的 OpenAI 路径（/v1/chat/completions 非流式响应）。
+/// 修复后：JSON 路径解析 choices[0].message.tool_calls 提取 function 调用喂 InboundFilter。
+///
+/// 关联：lessons.md 2026-04-27 [安全] 条目 / PRD §5.2 IN-CR-05 / ADR-018。
+#[tokio::test]
+async fn openai_non_streaming_json_inbound_block() {
+    // 非流式 OpenAI 响应：含 tool_calls eth_signTransaction → 应触发 IN-CR-05-EVM 截流
+    let json_body = serde_json::json!({
+        "id": "chatcmpl-01",
+        "object": "chat.completion",
+        "created": 1700000000_u64,
+        "model": "gpt-4o",
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [
+                        {
+                            "id": "call_01",
+                            "type": "function",
+                            "function": {
+                                "name": "eth_signTransaction",
+                                "arguments": "{\"to\":\"0xdeadbeef\",\"value\":\"1000000000000000000\"}"
+                            }
+                        }
+                    ]
+                },
+                "finish_reason": "tool_calls"
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 10,
+            "completion_tokens": 50,
+            "total_tokens": 60
+        }
+    });
+    let body_bytes = Bytes::from(json_body.to_string());
+
+    let (upstream, _up) = spawn_mock_json_upstream(move |_req| {
+        let body = body_bytes.clone();
+        async move { (hyper::StatusCode::OK, body) }
+    })
+    .await;
+
+    let (port, _g) = spawn_sieve_daemon(&format!("http://{upstream}"));
+    let (_status, body) = fetch_openai_json_response(port).await;
+
+    let body_str = String::from_utf8_lossy(&body);
+    assert!(
+        body_str.contains("sieve_blocked"),
+        "非流式 OpenAI JSON 响应含 eth_signTransaction tool_calls 必须触发 sieve_blocked:\n{body_str}"
+    );
+    assert!(
+        body_str.contains("IN-CR-05"),
+        "sieve_blocked 应包含 IN-CR-05 rule_id:\n{body_str}"
+    );
+}
+
 /// OpenAI 路径：AutoRedact 命中（含 OUT secret）后地址 seed 仍生效 → IN-CR-01 截流。
 ///
 /// 验证 AutoRedact 路径（redact_hits_openai 非空）也调用 seed_known_addresses_from_text，
