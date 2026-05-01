@@ -128,6 +128,17 @@ pub enum AuditEvent {
         #[serde(default)]
         caller: CallerContext,
     },
+    /// 灰名单写入失败（磁盘满 / 权限错 / 序列化错，PRD §5.4.2）。
+    ///
+    /// 写入失败不影响本次 Allow 决策（fail-soft），但必须记录到 audit 供事后排查。
+    GraylistAddFailed {
+        rule_id: String,
+        /// 错误描述（`e.to_string()`）
+        error: String,
+        request_id: String,
+        #[serde(default)]
+        caller: CallerContext,
+    },
     /// 行为序列检测命中（IN-SEQ-*，PRD §5.7）。
     SequenceHit {
         rule_id: String,
@@ -164,6 +175,7 @@ impl AuditEvent {
             | Self::GraylistAdded { .. }
             | Self::GraylistCriticalRejected { .. }
             | Self::GraylistHit { .. }
+            | Self::GraylistAddFailed { .. }
             | Self::SequenceHit { .. } => "inbound",
             Self::UserRulesReloaded { .. } => "system",
         }
@@ -180,6 +192,7 @@ impl AuditEvent {
             | Self::GraylistAdded { rule_id, .. }
             | Self::GraylistCriticalRejected { rule_id, .. }
             | Self::GraylistHit { rule_id, .. }
+            | Self::GraylistAddFailed { rule_id, .. }
             | Self::SequenceHit { rule_id, .. } => rule_id,
             Self::UserRulesReloaded { .. } => "system.user_rules_reload",
         }
@@ -196,6 +209,7 @@ impl AuditEvent {
             Self::GraylistAdded { .. }
             | Self::GraylistCriticalRejected { .. }
             | Self::GraylistHit { .. }
+            | Self::GraylistAddFailed { .. }
             | Self::SequenceHit { .. }
             | Self::UserRulesReloaded { .. } => "info",
         }
@@ -212,6 +226,7 @@ impl AuditEvent {
             Self::GraylistAdded { .. } => "graylist_added",
             Self::GraylistCriticalRejected { .. } => "graylist_critical_rejected",
             Self::GraylistHit { .. } => "graylist_hit",
+            Self::GraylistAddFailed { .. } => "graylist_add_failed",
             Self::SequenceHit { .. } => "sequence_hit",
             Self::UserRulesReloaded { .. } => "user_rules_reloaded",
         }
@@ -235,7 +250,8 @@ impl AuditEvent {
             | Self::DecisionMade { request_id, .. }
             | Self::GraylistAdded { request_id, .. }
             | Self::GraylistCriticalRejected { request_id, .. }
-            | Self::GraylistHit { request_id, .. } => request_id,
+            | Self::GraylistHit { request_id, .. }
+            | Self::GraylistAddFailed { request_id, .. } => request_id,
             Self::SequenceHit { .. } | Self::UserRulesReloaded { .. } => "",
         }
     }
@@ -263,6 +279,7 @@ impl AuditEvent {
             | Self::GraylistAdded { caller, .. }
             | Self::GraylistCriticalRejected { caller, .. }
             | Self::GraylistHit { caller, .. }
+            | Self::GraylistAddFailed { caller, .. }
             | Self::SequenceHit { caller, .. } => caller.pid,
             Self::UserRulesReloaded { .. } => None,
         }
@@ -280,6 +297,7 @@ impl AuditEvent {
             | Self::GraylistAdded { caller, .. }
             | Self::GraylistCriticalRejected { caller, .. }
             | Self::GraylistHit { caller, .. }
+            | Self::GraylistAddFailed { caller, .. }
             | Self::SequenceHit { caller, .. } => caller.exe.as_deref(),
             Self::UserRulesReloaded { .. } => None,
         }
@@ -813,6 +831,79 @@ mod tests {
         assert!(
             err_msg.contains("append-only"),
             "错误信息应含 append-only，实际: {err_msg}"
+        );
+    }
+
+    // ─── v2.1 GraylistAddFailed 变体测试（PRD §5.4.2）──────────────────────────
+
+    /// GraylistAddFailed 事件能够写入并从 SQLite 读回，字段完整（PRD §5.4.2）。
+    ///
+    /// 验证：disposition = "graylist_add_failed"、rule_id、request_id、caller 字段全部持久化。
+    #[tokio::test]
+    async fn graylist_add_failed_event_persists() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("graylist_fail.db");
+        let store = AuditStore::init(&db_path).expect("init failed");
+
+        let event = AuditEvent::GraylistAddFailed {
+            rule_id: "IN-GEN-04".to_string(),
+            error: "磁盘空间不足: No space left on device".to_string(),
+            request_id: "req-fail-001".to_string(),
+            caller: CallerContext {
+                pid: Some(4242),
+                exe: Some("/usr/local/bin/claude".to_string()),
+            },
+        };
+
+        store
+            .append(event)
+            .await
+            .expect("GraylistAddFailed append 不应失败");
+
+        let conn = Connection::open(&db_path).unwrap();
+        let row: (String, String, String, Option<i32>, Option<String>) = conn
+            .query_row(
+                "SELECT rule_id, disposition, request_id, caller_pid, caller_exe
+                 FROM audit_events WHERE id = 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )
+            .unwrap();
+        let (rule_id, disposition, request_id, caller_pid, caller_exe) = row;
+        assert_eq!(rule_id, "IN-GEN-04", "rule_id 应持久化");
+        assert_eq!(
+            disposition, "graylist_add_failed",
+            "disposition 应为 graylist_add_failed"
+        );
+        assert_eq!(request_id, "req-fail-001", "request_id 应持久化");
+        assert_eq!(caller_pid, Some(4242), "caller_pid 应持久化");
+        assert_eq!(
+            caller_exe.as_deref(),
+            Some("/usr/local/bin/claude"),
+            "caller_exe 应持久化"
+        );
+    }
+
+    /// GraylistAddFailed direction = "inbound"，severity = "info"（PRD §5.4.2）。
+    #[test]
+    fn graylist_add_failed_metadata() {
+        let event = AuditEvent::GraylistAddFailed {
+            rule_id: "IN-GEN-04".to_string(),
+            error: "测试错误".to_string(),
+            request_id: "req-meta".to_string(),
+            caller: CallerContext::default(),
+        };
+        // 验证内部方法返回正确元数据
+        assert_eq!(event.rule_id(), "IN-GEN-04", "rule_id getter 应返回正确值");
+        assert_eq!(
+            event.severity(),
+            "info",
+            "GraylistAddFailed severity 应为 info（fail-soft 事件）"
+        );
+        assert_eq!(
+            event.disposition(),
+            "graylist_add_failed",
+            "GraylistAddFailed disposition 应为 graylist_add_failed"
         );
     }
 }

@@ -14,7 +14,9 @@ use crate::critical_lock::is_fail_closed;
 use crate::error::{SieveRulesError, SieveRulesResult};
 use crate::manifest::RuleEntry;
 use crate::placeholder::is_placeholder;
+use arc_swap::ArcSwap;
 use std::collections::HashMap;
+use std::sync::Arc;
 use vectorscan_rs::{BlockDatabase, BlockScanner, Flag, Pattern, Scan};
 
 /// 扫描方向（PRD v2.0 §6.3.1）。
@@ -144,15 +146,41 @@ pub trait MatchEngine: Send + Sync {
 /// 3. 否则追加用户规则命中（用户规则命中的 `rule_id` 已携带 `user:` 前缀，由 UserEngine 保证）
 ///
 /// 此顺序保证用户规则无法 suppress 系统 Critical 命中（PRD §9 #3 + §5.5.2.1）。
+///
+/// # Hot Swap（PRD §5.5.5 / v2.1 zero-downtime reload）
+///
+/// `user` 字段由 [`arc_swap::ArcSwap`] 包装，允许 daemon reload listener 通过
+/// [`LayeredEngine::swap_user`] 原子替换用户引擎，无需重启 daemon：
+/// - scan 路径（hot path）调用 `ArcSwap::load()` 取快照，**零锁零开销**（lock-free read）。
+/// - swap 路径调用 `ArcSwap::store()` 原子写入新指针，所有后续 scan 立即看到新引擎。
+/// - 正在进行中的 scan 持有旧 `Arc<U>`，结束后旧引擎自动释放（引用计数归零）。
 pub struct LayeredEngine<S: MatchEngine, U: MatchEngine> {
     system: S,
-    user: Option<U>,
+    /// 原子可替换的用户引擎（PRD §5.5.5 hot reload）。
+    ///
+    /// `ArcSwap<Option<Arc<U>>>` 允许：
+    /// - `None`：无用户规则，纯系统引擎模式
+    /// - `Some(Arc<U>)`：系统 + 用户规则分层模式
+    user: ArcSwap<Option<Arc<U>>>,
 }
 
 impl<S: MatchEngine, U: MatchEngine> LayeredEngine<S, U> {
     /// 构造分层引擎。`user` 为 `None` 时退化为纯系统规则引擎。
     pub fn new(system: S, user: Option<U>) -> Self {
-        Self { system, user }
+        Self {
+            system,
+            user: ArcSwap::from(Arc::new(user.map(Arc::new))),
+        }
+    }
+
+    /// Atomic swap 用户规则引擎（PRD §5.5.5 zero-downtime hot reload）。
+    ///
+    /// daemon reload listener 调用此方法替换 user engine，无需重启 daemon。
+    /// 调用完成后所有后续 [`LayeredEngine::scan`] 调用立即使用新引擎；
+    /// 已在进行中的 scan 持有旧 `Arc<U>` 快照，完成后旧引擎自动释放。
+    /// 传入 `None` 时退化为纯系统规则引擎（等同于构造时 `user = None`）。
+    pub fn swap_user(&self, new_user: Option<U>) {
+        self.user.store(Arc::new(new_user.map(Arc::new)));
     }
 }
 
@@ -180,9 +208,11 @@ impl<S: MatchEngine, U: MatchEngine> MatchEngine for LayeredEngine<S, U> {
             return Ok(report);
         }
 
-        // 第二层：追加用户规则命中（`user:` 前缀由 UserEngine 保证）
-        if let Some(user) = &self.user {
-            let user_report = user.scan_with_context(req)?;
+        // 第二层：追加用户规则命中（`user:` 前缀由 UserEngine 保证）。
+        // ArcSwap::load() 返回 Guard（内部含 Arc 快照），零锁 lock-free read，hot path 安全。
+        let user_guard = self.user.load();
+        if let Some(user_arc) = user_guard.as_ref().as_ref() {
+            let user_report = user_arc.scan_with_context(req)?;
             report.rule_count += user_report.rule_count;
             report.elapsed_us += user_report.elapsed_us;
             report.hits.extend(user_report.hits);
@@ -196,13 +226,20 @@ impl<S: MatchEngine, U: MatchEngine> MatchEngine for LayeredEngine<S, U> {
     }
 
     fn rule_count(&self) -> usize {
-        self.system.rule_count() + self.user.as_ref().map(|u| u.rule_count()).unwrap_or(0)
+        let user_guard = self.user.load();
+        self.system.rule_count()
+            + user_guard
+                .as_ref()
+                .as_ref()
+                .map(|u| u.rule_count())
+                .unwrap_or(0)
     }
 
     fn compiled_pattern_size_bytes(&self) -> usize {
+        let user_guard = self.user.load();
         self.system.compiled_pattern_size_bytes()
-            + self
-                .user
+            + user_guard
+                .as_ref()
                 .as_ref()
                 .map(|u| u.compiled_pattern_size_bytes())
                 .unwrap_or(0)
@@ -608,5 +645,112 @@ mod tests {
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].rule_id, "SYS-ONLY");
         assert_eq!(layered.rule_count(), 1);
+    }
+
+    // -------------------------------------------------------------------------
+    // v2.1 hot swap 测试（PRD §5.5.5 zero-downtime reload）
+    // -------------------------------------------------------------------------
+
+    /// swap_user 能原子替换用户引擎，scan 立即看到新规则。
+    ///
+    /// 验证步骤：v1 引擎命中 → swap 到 v2 → v2 命中 v1 不命中 → swap 到 None → 纯系统规则。
+    #[test]
+    fn layered_engine_hot_swap_works() {
+        let system_rules = vec![rule("SYS-KEEP", r"system_token", Severity::High)];
+        let system = VectorscanEngine::compile(system_rules).unwrap();
+
+        // 用户引擎 v1：匹配 "user_v1_secret"
+        let user_v1 =
+            VectorscanEngine::compile(vec![rule("USER-V1", r"user_v1_secret", Severity::Medium)])
+                .unwrap();
+
+        let layered = LayeredEngine::new(system, Some(user_v1));
+
+        // 初始状态：v1 规则命中
+        let hits1 = layered.scan(b"user_v1_secret found").unwrap();
+        assert!(
+            hits1.iter().any(|h| h.rule_id == "USER-V1"),
+            "v1 规则应命中: {hits1:?}"
+        );
+
+        // swap 到 v2（匹配 "user_v2_token"）
+        let user_v2 =
+            VectorscanEngine::compile(vec![rule("USER-V2", r"user_v2_token", Severity::Medium)])
+                .unwrap();
+        layered.swap_user(Some(user_v2));
+
+        // swap 后：v2 命中，v1 不再命中
+        let hits2 = layered.scan(b"user_v2_token appeared").unwrap();
+        assert!(
+            hits2.iter().any(|h| h.rule_id == "USER-V2"),
+            "swap 后 v2 规则应命中: {hits2:?}"
+        );
+        let hits2_on_v1 = layered.scan(b"user_v1_secret found").unwrap();
+        assert!(
+            !hits2_on_v1.iter().any(|h| h.rule_id == "USER-V1"),
+            "swap 后 v1 规则不应命中: {hits2_on_v1:?}"
+        );
+
+        // swap 到 None → 纯系统规则
+        layered.swap_user(None::<VectorscanEngine>);
+        assert_eq!(
+            layered.rule_count(),
+            1,
+            "swap None 后 rule_count 应等于系统规则数"
+        );
+        let hits3 = layered.scan(b"user_v2_token appeared").unwrap();
+        assert!(
+            !hits3.iter().any(|h| h.rule_id.starts_with("USER-")),
+            "swap None 后无用户规则命中: {hits3:?}"
+        );
+        // 系统规则仍正常工作
+        let sys_hits = layered.scan(b"system_token here").unwrap();
+        assert!(
+            sys_hits.iter().any(|h| h.rule_id == "SYS-KEEP"),
+            "系统规则始终有效: {sys_hits:?}"
+        );
+    }
+
+    /// swap_user 期间并发 scan 不阻塞、不 panic（ArcSwap lock-free 保证）。
+    #[test]
+    fn layered_engine_swap_does_not_block_concurrent_reads() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let system_rules = vec![rule("SYS-A", r"sys_pattern", Severity::High)];
+        let system = VectorscanEngine::compile(system_rules).unwrap();
+        let user_init =
+            VectorscanEngine::compile(vec![rule("USER-INIT", r"init_data", Severity::Low)])
+                .unwrap();
+        let layered = Arc::new(LayeredEngine::new(system, Some(user_init)));
+
+        let layered_read = Arc::clone(&layered);
+        let layered_swap = Arc::clone(&layered);
+
+        // reader 线程：反复 scan，验证不阻塞不 panic
+        let reader = thread::spawn(move || {
+            for _ in 0..200 {
+                let _ = layered_read
+                    .scan(b"sys_pattern init_data swap_data")
+                    .unwrap();
+            }
+        });
+
+        // swapper 线程：交替 swap 不同引擎
+        let swapper = thread::spawn(move || {
+            for i in 0..10u32 {
+                let new_user =
+                    VectorscanEngine::compile(vec![rule("USER-SWAP", r"swap_data", Severity::Low)])
+                        .unwrap();
+                if i % 2 == 0 {
+                    layered_swap.swap_user(Some(new_user));
+                } else {
+                    layered_swap.swap_user(None::<VectorscanEngine>);
+                }
+            }
+        });
+
+        reader.join().expect("reader 线程不应 panic");
+        swapper.join().expect("swapper 线程不应 panic");
     }
 }

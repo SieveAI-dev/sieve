@@ -17,6 +17,7 @@ tracing = { workspace = true }
 toml = { workspace = true }
 sha2 = "0.10"
 regex = "1"
+arc-swap = { workspace = true }
 
 # Vectorscan 多模式正则引擎（关联 ADR-001）。
 #

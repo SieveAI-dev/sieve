@@ -105,8 +105,10 @@ async fn main() -> Result<()> {
             );
 
             // 用 LayeredEngine 包装系统 + 用户规则（PRD §6.3 / §5.5.2.1）
-            let outbound_layered = LayeredEngine::new(system_engine, outbound_user_engine);
-            let adapter = OutboundAdapter::new(Arc::new(outbound_layered), rules);
+            // 以 Arc 持有，同时给 OutboundAdapter 使用，并保留 Arc 引用供 reload hot swap（PRD §5.5.5 v2.1）
+            let outbound_layered =
+                Arc::new(LayeredEngine::new(system_engine, outbound_user_engine));
+            let adapter = OutboundAdapter::new(Arc::clone(&outbound_layered), rules);
 
             // 加载 .sieveignore（出站 + 入站共用同一份）
             let sieveignore_path = cfg.resolved_sieveignore_path();
@@ -156,9 +158,14 @@ async fn main() -> Result<()> {
             );
 
             // 用 LayeredEngine 包装入站系统 + 用户规则
-            let inbound_layered = LayeredEngine::new(inbound_system_engine, inbound_user_engine);
+            // 以 Arc 持有，同时给 InboundAdapter 使用，并保留 Arc 引用供 reload hot swap（PRD §5.5.5 v2.1）
+            let inbound_layered = Arc::new(LayeredEngine::new(
+                inbound_system_engine,
+                inbound_user_engine,
+            ));
             // InboundAdapter 持有全量 rule_lookup（含 placeholder，用于反查元数据）
-            let inbound_adapter = InboundAdapter::new(Arc::new(inbound_layered), inbound_rules_raw);
+            let inbound_adapter =
+                InboundAdapter::new(Arc::clone(&inbound_layered), inbound_rules_raw);
 
             // 从 IN-CR-01 RuleEntry 读取地址替换检测配置（修 R3-#5）。
             // 若未找到 IN-CR-01（不应发生），使用安全默认值（60s + fail-closed block）。
@@ -198,6 +205,8 @@ async fn main() -> Result<()> {
                 Arc::clone(&sieveignore_arc),
                 address_guard_config,
                 audit_store,
+                outbound_layered,
+                inbound_layered,
             )
             .await?;
         }

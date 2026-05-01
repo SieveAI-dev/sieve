@@ -11,6 +11,53 @@
 
 ---
 
+## [v2.1-alpha-engineering] - 2026-05-01
+
+### 背景
+
+把 v2.1 推迟清单里所有纯工程项一次性清空：LayeredEngine zero-downtime hot swap / try_write_graylist 失败路径 audit / 多 GUI broadcast 支持。剩 2 项需 dogfood 数据触发（行为序列升级 Block 的 ADR 评审 + ML 分类器训练），不属代码工作。
+
+### Added
+
+**LayeredEngine zero-downtime hot swap（v2.1-1）**：
+- `crates/sieve-rules/src/engine/mod.rs`：`LayeredEngine.user` 字段从 `Option<U>` 改为 `ArcSwap<Option<Arc<U>>>`（lock-free read，atomic pointer swap）
+- `LayeredEngine::swap_user(new_user)`：daemon reload listener 调用此方法替换用户引擎，零阻塞所有并发 reader
+- `LayeredEngine::new(system, user)` 签名保留向后兼容，内部包装 ArcSwap
+- 新增 `arc-swap = "1"` workspace 依赖（lock-free 库，hot path 零开销）
+- 新增 2 单元测试：swap 真生效（v1 → v2 → None 切换） + 并发 scan + swap 不阻塞
+- `daemon::run` 加 `outbound_layered` / `inbound_layered: Arc<LayeredEngine<...>>` 参数
+- `reload_user_rules_best_effort` 重写为 `reload_user_engines`（重新读 + lint + compile + 返回新引擎），reload listener 成功时调 `swap_user(...)` 真正 hot swap
+
+**try_write_graylist 失败路径 audit（v2.1-2）**：
+- `crates/sieve-cli/src/audit.rs`：新增 `AuditEvent::GraylistAddFailed { rule_id, error, request_id, caller }` 变体；7 个 getter 全补分支
+- `crates/sieve-cli/src/daemon.rs::try_write_graylist`：3 个失败分支（Critical 锁拒绝 / SIEVE_HOME 不可用 / add_entry IO 错）全部加 audit append（spawn task fail-soft，不阻塞决策路径）
+- 2 新单元测试：GraylistAddFailed 变体 SQLite round-trip + getter 元数据验证
+
+**多 GUI broadcast 支持（v2.1-4）**：
+- `crates/sieve-ipc/src/socket_server.rs`：`gui_writer: Arc<Mutex<Option<Sender>>>` 改为 `gui_writers: Arc<Mutex<Vec<Sender>>>`
+- `broadcast_status_bar` 改为 fan-out 实现：drain + try_send 全部 sender，dead sender（`TrySendError::Closed`）即时清理
+- `broadcast_status_bar` 从 `async fn` 改为 `fn`（持锁不跨 await，配 std::sync::Mutex）；daemon 端 2 处 await 调用相应去掉
+- 新增 2 集成测试：3 GUI 同时收到广播 / GUI 断开后 dead writer lazy 清理；现有 7 测试全过
+- `request_decision` 仍单 GUI（`gui_writers[0]`，接连最旧），fan-out 仅扩展 broadcast
+
+### Test
+
+- `cargo test --workspace --no-fail-fast`（feature off）：**633 passed / 1 failed（已知 doctor 竞态）/ 5 ignored**（v2.0-deferred-2 时 627 → +6 测试）
+- `cargo test --workspace --features sieve-cli/sequence_detection --no-fail-fast`：**643 passed / 1 failed / 5 ignored**
+- `cargo fmt --all -- --check`：clean
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings`：clean
+- `cargo build --workspace --features sieve-cli/sequence_detection`：clean
+
+### Deferred (非代码项)
+
+仅剩 2 项需 dogfood 数据触发，**不属代码工作**：
+- 行为序列升级 Block 类的 ADR 评审（PRD §9 #15 升级触发条件：真实付费用户连续 4 周 ≥ 50 个序列样本 + FP rate < 0.5%）
+- 行为序列 ML 分类器训练（v2.1+ 需 dogfood 数据集积累后做）
+
+至此 PRD v2.0/v2.1 所有需要写代码的部分**全部完成**。
+
+---
+
 ## [v2.0-alpha-deferred-2] - 2026-05-01
 
 ### 背景
