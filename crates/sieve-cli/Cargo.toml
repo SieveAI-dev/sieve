@@ -41,6 +41,7 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 futures-util = "0.3"
 serde_yaml = "0.9"
 lru = "0.12"
+regex = "1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = "0.2"

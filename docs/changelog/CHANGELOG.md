@@ -11,6 +11,64 @@
 
 ---
 
+## [v2.0-alpha-A-integration] - 2026-05-01
+
+### 背景
+
+PRD v2.0 Phase A 第二批落地：Week 6 接入工作 —— 把 v2.0-alpha-A-skeleton 的骨架接入 daemon 决策路径，加 benchmark + corruption 测试覆盖 PRD §9 #14 / §9 #16 硬约束。
+
+### Added
+
+- **daemon 启动加载用户规则 + LayeredEngine 包装**（`main.rs` + `engine_adapter.rs`）：
+  - 出站 + 入站两侧均加载 `~/.sieve/rules/user.toml` → lint → `UserEngine::compile` → `LayeredEngine::new(system, user)`（PRD §6.3 / §5.5.2.1）
+  - **fail-safe**（PRD §9 #14）：load 失败 / lint 违规 / compile 错误 → warn 日志 + 用 None 用户引擎，daemon 必须正常启动，系统规则不退化
+  - `OutboundAdapter` / `InboundAdapter` 改泛型 `<E: MatchEngine + Send + Sync + 'static>`（默认 `= VectorscanEngine` 兼容旧调用方）
+  - 新辅助函数 `load_and_compile_user_engine` + `load_user_engine_fail_safe`
+- **daemon 三态决策 allow_remember 计算**（`daemon.rs`）：
+  - 6 处 `DecisionRequest` 构造点全部从 hardcoded `false` 改为 `compute_allow_remember(rule_ids)`：任一 rule_id 在 `FAIL_CLOSED_RULES` 中即返 false，否则 true（PRD §5.4.3 + §9 #3）
+  - 覆盖：IN-CR-06 OpenClaw skill / 出站 Anthropic / 出站 OpenAI / 入站 Anthropic SSE / 入站 OpenAI SSE / Hook 类 pending 文件
+- **daemon 灰名单接入决策路径**（`daemon.rs`）：
+  - `check_graylist_hit`：HoldForDecision 前 fingerprint lookup，命中 → 跳过 IPC 弹窗直接放行（出站 Anthropic 路径首发，OpenAI / 入站 SSE 推 v2.1）
+  - `try_write_graylist`：收 `DecisionResponse.remember=true && allow_remember=true` 时调 `sieve_policy::graylist::add_entry`（内部二次校验 critical_lock，命中 → `PolicyError::CriticalRuleNotGraylistable`）
+  - 灰名单查询失败 → fail-closed（不 fail-open，PRD §9 #14 延伸）
+- **daemon caller 进程上下文 stub**（`daemon.rs`）：
+  - accept loop 调 `peer_addr_to_pid` + `process_context::lookup_caller`，trace 日志带 caller_pid/caller_exe
+  - `peer_addr_to_pid` v2.0 Phase A 返 None stub（PRD OQ-V20-02 决策走系统 API，真实 `proc_listpids` 反查推 v2.1）
+  - audit 字段路径打通：A4 已加 schema 字段，本期日志 trace 接入；audit 调用点透传留 v2.1 一行替换
+- **集成测试**：
+  - `crates/sieve-cli/tests/user_rules_loading.rs`（8 测试）：5 类 corruption 在 daemon 启动路径上的 fail-safe 验证
+  - `crates/sieve-cli/tests/graylist_integration.rs`（14 测试）：fingerprint 确定性 / round-trip / Critical 拒绝 / 篡改检测 / allow_remember 计算 / 文件权限
+  - `crates/sieve-cli/tests/content_type_matrix.rs`（6 测试）：PRD §9 #16 4 类组合（Anthropic SSE/JSON + OpenAI SSE/JSON）+ audit schema v2 caller 列验证
+  - `crates/sieve-policy/tests/corruption.rs`（12 测试）：完整 11 类 lint 违规 + 文件权限/symlink/目录权限/重复 ID/未知字段/超大文件/超量规则
+- **规则引擎 benchmark baseline**（PRD §6.3.2）：
+  - `crates/sieve-rules/benches/scan_70_rules.rs`：79 系统规则 × 5KB → P50 327µs（目标 P99 < 1ms，远优于目标）
+  - `crates/sieve-rules/benches/scan_with_user_rules.rs`：LayeredEngine 79 系统 + 30 用户 → 336µs（vs system_only 347µs，overhead -3%；early return 优于 PRD 要求的 < 20%）
+
+### Changed
+
+- `OutboundAdapter` / `InboundAdapter` 签名改泛型化（向后兼容默认 `= VectorscanEngine`）
+- `is_excluded` 从 `VectorscanEngine` 方法迁移为模块级 `is_excluded_by_rule` 函数（适配泛型）
+- `crates/sieve-cli/Cargo.toml` 加 `regex = "1"`（engine_adapter 直接用 regex 处理 allowlist）
+- `crates/sieve-rules/Cargo.toml` 加 2 个 `[[bench]]` 入口
+
+### Deferred to v2.1
+
+- `peer_addr_to_pid` 真实实现（macOS `proc_listpids` 反查 TCP peer port → PID）
+- 入站 SSE 路径灰名单写入（`HoldOutcome` 枚举需扩展携带 `remember` 字段）
+- OpenAI 出站灰名单 lookup（与 Anthropic 路径对称）
+- daemon 命中/决策处接入 `AuditStore::append`，传入真实 `CallerContext`
+- 用户规则 `direction` 字段（按方向分流到 outbound / inbound 两侧）
+- vectorscan_rs 暴露 `hs_database_size()` 后补 PatternDbTooLarge 1MB 上限校验
+- criterion CI gate 集成（P99 退化 > 10% 失败）
+
+### Test
+
+- `cargo test --workspace --no-fail-fast`：**586 passed / 1 failed（已知 doctor 竞态，单跑通过）/ 3 ignored**（v2.0-alpha-A-skeleton 时 546 → 加 40 个新测试）
+- `cargo fmt --all -- --check`：clean
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings`：clean
+
+---
+
 ## [v2.0-alpha-A-skeleton] - 2026-05-01
 
 ### 背景

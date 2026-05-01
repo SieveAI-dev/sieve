@@ -47,3 +47,11 @@ harness = false
 [[bench]]
 name = "dataset_bench"
 harness = false
+
+[[bench]]
+name = "scan_70_rules"
+harness = false
+
+[[bench]]
+name = "scan_with_user_rules"
+harness = false
