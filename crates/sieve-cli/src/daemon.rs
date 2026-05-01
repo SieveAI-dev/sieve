@@ -1363,25 +1363,23 @@ async fn proxy_openai(
             }
         }
 
-        return if openai_req.stream {
-            forward_with_openai_inbound_inspection(
-                forwarder,
-                inbound_filter,
-                dry_run,
-                ipc,
-                new_parts,
-                new_body,
-                MultiAgentMeta {
-                    source_agent,
-                    origin_chain,
-                    source_channel,
-                    chain_depth,
-                },
-            )
-            .await
-        } else {
-            forward_raw(forwarder, new_parts, new_body).await
-        };
+        // 漏洞修复：AutoRedact stream=false 分支也需入站检测（同非 AutoRedact stream=false 修复）。
+        // forward_with_openai_inbound_inspection 内部按 Content-Type 路由，JSON 响应走 JSON 路径。
+        return forward_with_openai_inbound_inspection(
+            forwarder,
+            inbound_filter,
+            dry_run,
+            ipc,
+            new_parts,
+            new_body,
+            MultiAgentMeta {
+                source_agent,
+                origin_chain,
+                source_channel,
+                chain_depth,
+            },
+        )
+        .await;
     }
 
     // 5. prompt 地址 seed（修 R9-#1，与 Anthropic 路径等价）
@@ -1393,30 +1391,29 @@ async fn proxy_openai(
         }
     }
 
-    // 6. 出站通过 → 入站检测路由（修 R6-#2）
+    // 6. 出站通过 → 入站检测路由（修 R6-#2 + 漏洞修复）
     // stream=true 时用 OpenAI SSE parser 做 tee 截流检测，与 Anthropic 路径对称。
-    // stream=false 时直接透传（非流式响应无需 SSE 解析）。
+    // stream=false 时：上游可能返回 application/json（含 tool_calls），
+    //   同样需要入站检测（漏洞修复：lessons.md 2026-04-27 [安全]）。
+    //   forward_with_openai_inbound_inspection 内部按 Content-Type 路由：
+    //   JSON 响应走 handle_openai_json_inbound，SSE 响应走原 SSE 路径。
     // TODO（R6-#3）：OpenAiSseParser ContentBlockStart/Stop 支持完成后，tool_call 检测能力
     //    将自动生效（inbound_filter 已经协议无关）。
-    if openai_req.stream {
-        forward_with_openai_inbound_inspection(
-            forwarder,
-            inbound_filter,
-            dry_run,
-            ipc,
-            parts,
-            body_bytes,
-            MultiAgentMeta {
-                source_agent,
-                origin_chain,
-                source_channel,
-                chain_depth,
-            },
-        )
-        .await
-    } else {
-        forward_raw(forwarder, parts, body_bytes).await
-    }
+    forward_with_openai_inbound_inspection(
+        forwarder,
+        inbound_filter,
+        dry_run,
+        ipc,
+        parts,
+        body_bytes,
+        MultiAgentMeta {
+            source_agent,
+            origin_chain,
+            source_channel,
+            chain_depth,
+        },
+    )
+    .await
 }
 
 /// 透传并同步做入站 SSE 解析检测（tee 模式）。
@@ -1487,6 +1484,25 @@ async fn forward_with_inbound_inspection(
     // 入站响应可能被 sieve 注入 sieve_blocked event 截流，实际 body 长度不一定等于上游
     // content-length。剥掉 content-length 强制 chunked transfer，防止 hyper client 截断。
     resp_parts.headers.remove(http::header::CONTENT_LENGTH);
+
+    // 漏洞修复（lessons.md 2026-04-27 [安全]）：按 Content-Type 路由入站检测路径。
+    //
+    // 原实现假设入站永远是 SSE 流（text/event-stream），上游返回 application/json
+    // 时响应 body 直接透传，所有入站规则失效。修复：
+    //   - text/event-stream → 走现有 SSE 路径（tokio::spawn + channel tee）
+    //   - application/json  → 收集完整 body → 解析 content[] → 提取 tool_use →
+    //                         喂 InboundFilter → 命中 Critical 时替换为 sieve_blocked JSON
+    let is_json_response = resp_parts
+        .headers
+        .get(http::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(|ct| ct.starts_with("application/json"))
+        .unwrap_or(false);
+
+    if is_json_response {
+        return handle_anthropic_json_inbound(resp_parts, resp_body, inbound_filter, dry_run, meta)
+            .await;
+    }
 
     // P0-5：bounded channel，深度 64，上游读取自然受背压限制。
     const INBOUND_CHANNEL_DEPTH: usize = 64;
@@ -1819,6 +1835,20 @@ async fn forward_with_openai_inbound_inspection(
 
     // 剥掉 content-length，防止 hyper client 截断注入的 sieve_blocked event。
     resp_parts.headers.remove(http::header::CONTENT_LENGTH);
+
+    // 漏洞修复（lessons.md 2026-04-27 [安全]）：OpenAI 路径同样按 Content-Type 路由。
+    // application/json 非流式响应里的 tool_calls 数组否则会完全绕过入站检测。
+    let is_json_response = resp_parts
+        .headers
+        .get(http::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(|ct| ct.starts_with("application/json"))
+        .unwrap_or(false);
+
+    if is_json_response {
+        return handle_openai_json_inbound(resp_parts, resp_body, inbound_filter, dry_run, meta)
+            .await;
+    }
 
     const INBOUND_CHANNEL_DEPTH: usize = 64;
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<hyper::body::Frame<Bytes>, std::io::Error>>(
@@ -2256,6 +2286,334 @@ fn map_severity_to_ipc(s: sieve_core::Severity) -> sieve_ipc::Severity {
         sieve_core::Severity::Medium => sieve_ipc::Severity::Medium,
         sieve_core::Severity::Low => sieve_ipc::Severity::Low,
     }
+}
+
+/// 构造 sieve_blocked JSON 响应 body（application/json 路径使用，非 SSE 格式）。
+///
+/// 漏洞修复（lessons.md 2026-04-27 [安全]）：非流式 JSON 响应被拦截时，
+/// 不能注入 SSE event 格式的 sieve_blocked，需要返回合法 JSON body。
+/// 格式与 build_sieve_blocked_sse 的 payload 部分相同，只是不包装为 SSE event 行。
+fn build_sieve_blocked_json_body(detections: &[sieve_core::Detection]) -> Bytes {
+    let payload = serde_json::json!({
+        "type": "sieve_blocked",
+        "blocked_at": epoch_secs_string(),
+        "detections": detections.iter().map(|d| serde_json::json!({
+            "rule_id": d.rule_id,
+            "severity": d.severity,
+            "fingerprint": d.fingerprint,
+        })).collect::<Vec<_>>(),
+        "guidance": {
+            "zh": format!(
+                "Sieve 检测到 {} 条入站 Critical 命中。非流式响应已被替换。\
+                 Critical 级别命中不可通过白名单绕过，请人工审查当前上下文后重试。",
+                detections.len()
+            ),
+            "en": format!(
+                "Sieve blocked {} inbound critical detection(s). Non-streaming response replaced. \
+                 Critical detections cannot be bypassed via allowlist. Please review and retry.",
+                detections.len()
+            ),
+        }
+    });
+    Bytes::from(payload.to_string())
+}
+
+/// 构造因入站 JSON 拦截而替换响应的 HTTP Response。
+fn build_sieve_blocked_json_response(
+    detections: &[sieve_core::Detection],
+) -> Response<ResponseBody> {
+    let body_bytes = build_sieve_blocked_json_body(detections);
+    Response::builder()
+        .status(http::StatusCode::OK)
+        .header(
+            http::header::CONTENT_TYPE,
+            "application/json; charset=utf-8",
+        )
+        .header(http::header::CONTENT_LENGTH, body_bytes.len())
+        .body(bytes_body(body_bytes))
+        .unwrap_or_else(|_| Response::new(empty_body()))
+}
+
+/// 处理 Anthropic 非流式 JSON 入站响应的入站检测路径。
+///
+/// 漏洞修复（lessons.md 2026-04-27 [安全]）：上游返回 `application/json` 时，
+/// 收集完整 body，解析 `content[]` 中的 `tool_use` 块，
+/// 喂给 `InboundFilter::on_tool_use_complete`。
+/// 命中 fail-closed Critical 时把响应 body 替换为 sieve_blocked JSON；否则原样透传。
+///
+/// 不走 SSE 路径（tokio::spawn + channel tee），直接 await body 收集再决策。
+async fn handle_anthropic_json_inbound(
+    resp_parts: http::response::Parts,
+    resp_body: impl http_body::Body<Data = Bytes, Error = impl std::fmt::Display> + Send + 'static,
+    mut inbound_filter: InboundFilter,
+    dry_run: bool,
+    meta: MultiAgentMeta,
+) -> Result<Response<ResponseBody>> {
+    use http_body_util::BodyExt as _;
+
+    // 收集完整 body（非流式 JSON 响应通常很小，不存在 DoS 风险，上游负责 content-length 校验）
+    let body_bytes = match resp_body.collect().await {
+        Ok(collected) => collected.to_bytes(),
+        Err(e) => {
+            tracing::warn!("handle_anthropic_json_inbound: collect body error: {e}");
+            return Ok(build_sieve_blocked_json_response(&[]));
+        }
+    };
+
+    // 解析响应 JSON（宽松解析，只取 content 数组）
+    let resp_json: serde_json::Value = match serde_json::from_slice(&body_bytes) {
+        Ok(v) => v,
+        Err(e) => {
+            // 无法解析 JSON，原样透传（不拦截非 JSON 内容）
+            tracing::debug!("handle_anthropic_json_inbound: non-JSON body, passthrough: {e}");
+            return passthrough_json_response(resp_parts, body_bytes);
+        }
+    };
+
+    // 提取 content[] 中的 tool_use 块
+    let content_arr = resp_json.get("content").and_then(|v| v.as_array());
+    let mut all_blocking: Vec<sieve_core::Detection> = Vec::new();
+
+    if let Some(content) = content_arr {
+        for block in content {
+            let obj = match block.as_object() {
+                Some(o) => o,
+                None => continue,
+            };
+            if obj.get("type").and_then(|v| v.as_str()) != Some("tool_use") {
+                continue;
+            }
+            let tool_id = obj
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+                .to_string();
+            let tool_name = obj
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let tool_input = obj
+                .get("input")
+                .cloned()
+                .unwrap_or(serde_json::Value::Object(Default::default()));
+
+            let completed = sieve_core::CompletedToolCall {
+                id: tool_id,
+                name: tool_name,
+                input: tool_input,
+            };
+
+            match inbound_filter.on_tool_use_complete(&completed) {
+                Ok(hits) => {
+                    for mut d in hits {
+                        match &d.action {
+                            sieve_core::detection::Action::Block => {
+                                if d.severity == sieve_core::Severity::Critical
+                                    && (sieve_rules::critical_lock::is_fail_closed(&d.rule_id)
+                                        || !dry_run)
+                                {
+                                    all_blocking.push(d);
+                                }
+                            }
+                            sieve_core::detection::Action::HoldForDecision { .. } => {
+                                // JSON 路径 GuiPopup：暂无 keep-alive 机制，fail-closed
+                                tracing::warn!(
+                                    rule = %d.rule_id,
+                                    "GuiPopup in non-streaming JSON path, fail-closed"
+                                );
+                                d.action = sieve_core::detection::Action::Block;
+                                all_blocking.push(d);
+                            }
+                            _ => {
+                                // HookMark / MarkOnly / SilentLog / Redact：记录但不阻断
+                                // chain_depth ≥ 2 时 HookMark 升级为 GuiPopup（同 SSE 路径）
+                                if meta.chain_depth >= 2
+                                    && matches!(d.action, sieve_core::detection::Action::HookMark)
+                                {
+                                    tracing::warn!(
+                                        rule = %d.rule_id,
+                                        "HookMark upgraded to GuiPopup (chain_depth >= 2), fail-closed in JSON path"
+                                    );
+                                    all_blocking.push(d);
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "handle_anthropic_json_inbound: on_tool_use_complete error");
+                }
+            }
+        }
+    }
+
+    if !all_blocking.is_empty() {
+        tracing::warn!(
+            count = all_blocking.len(),
+            "INBOUND BLOCKED (anthropic json)"
+        );
+        for d in &all_blocking {
+            tracing::warn!(rule = %d.rule_id, "anthropic json inbound detection");
+        }
+        return Ok(build_sieve_blocked_json_response(&all_blocking));
+    }
+
+    // 无拦截：原样透传（重建含原 headers 的响应）
+    passthrough_json_response(resp_parts, body_bytes)
+}
+
+/// 处理 OpenAI 非流式 JSON 入站响应的入站检测路径。
+///
+/// 漏洞修复（lessons.md 2026-04-27 [安全]）：上游返回 `application/json` 时，
+/// 解析 `choices[].message.tool_calls` 提取 function 调用，喂给 InboundFilter。
+/// 命中 fail-closed Critical 时替换响应 body 为 sieve_blocked JSON；否则原样透传。
+async fn handle_openai_json_inbound(
+    resp_parts: http::response::Parts,
+    resp_body: impl http_body::Body<Data = Bytes, Error = impl std::fmt::Display> + Send + 'static,
+    mut inbound_filter: InboundFilter,
+    dry_run: bool,
+    meta: MultiAgentMeta,
+) -> Result<Response<ResponseBody>> {
+    use http_body_util::BodyExt as _;
+
+    let body_bytes = match resp_body.collect().await {
+        Ok(collected) => collected.to_bytes(),
+        Err(e) => {
+            tracing::warn!("handle_openai_json_inbound: collect body error: {e}");
+            return Ok(build_sieve_blocked_json_response(&[]));
+        }
+    };
+
+    let resp_json: serde_json::Value = match serde_json::from_slice(&body_bytes) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::debug!("handle_openai_json_inbound: non-JSON body, passthrough: {e}");
+            return passthrough_json_response(resp_parts, body_bytes);
+        }
+    };
+
+    // 遍历 choices[].message.tool_calls[]
+    let choices = resp_json.get("choices").and_then(|v| v.as_array());
+    let mut all_blocking: Vec<sieve_core::Detection> = Vec::new();
+
+    if let Some(choices) = choices {
+        for choice in choices {
+            let message = match choice.get("message") {
+                Some(m) => m,
+                None => continue,
+            };
+            let tool_calls = match message.get("tool_calls").and_then(|v| v.as_array()) {
+                Some(tc) => tc,
+                None => continue,
+            };
+            for tc in tool_calls {
+                let obj = match tc.as_object() {
+                    Some(o) => o,
+                    None => continue,
+                };
+                let tc_id = obj
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let func = match obj.get("function").and_then(|v| v.as_object()) {
+                    Some(f) => f,
+                    None => continue,
+                };
+                let func_name = func
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let arguments_str = func
+                    .get("arguments")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("{}");
+                let input: serde_json::Value = serde_json::from_str(arguments_str)
+                    .unwrap_or(serde_json::Value::Object(Default::default()));
+
+                let completed = sieve_core::CompletedToolCall {
+                    id: tc_id,
+                    name: func_name,
+                    input,
+                };
+
+                match inbound_filter.on_tool_use_complete(&completed) {
+                    Ok(hits) => {
+                        for mut d in hits {
+                            match &d.action {
+                                sieve_core::detection::Action::Block => {
+                                    if d.severity == sieve_core::Severity::Critical
+                                        && (sieve_rules::critical_lock::is_fail_closed(&d.rule_id)
+                                            || !dry_run)
+                                    {
+                                        all_blocking.push(d);
+                                    }
+                                }
+                                sieve_core::detection::Action::HoldForDecision { .. } => {
+                                    tracing::warn!(
+                                        rule = %d.rule_id,
+                                        "GuiPopup in non-streaming OpenAI JSON path, fail-closed"
+                                    );
+                                    d.action = sieve_core::detection::Action::Block;
+                                    all_blocking.push(d);
+                                }
+                                _ => {
+                                    if meta.chain_depth >= 2
+                                        && matches!(
+                                            d.action,
+                                            sieve_core::detection::Action::HookMark
+                                        )
+                                    {
+                                        tracing::warn!(
+                                            rule = %d.rule_id,
+                                            "HookMark upgraded (chain_depth >= 2), fail-closed in OpenAI JSON path"
+                                        );
+                                        all_blocking.push(d);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "handle_openai_json_inbound: on_tool_use_complete error");
+                    }
+                }
+            }
+        }
+    }
+
+    if !all_blocking.is_empty() {
+        tracing::warn!(count = all_blocking.len(), "INBOUND BLOCKED (openai json)");
+        for d in &all_blocking {
+            tracing::warn!(rule = %d.rule_id, "openai json inbound detection");
+        }
+        return Ok(build_sieve_blocked_json_response(&all_blocking));
+    }
+
+    passthrough_json_response(resp_parts, body_bytes)
+}
+
+/// 把已收集的 body bytes 原样构建为 HTTP Response（JSON 路径无拦截时透传）。
+fn passthrough_json_response(
+    resp_parts: http::response::Parts,
+    body_bytes: Bytes,
+) -> Result<Response<ResponseBody>> {
+    let body_len = body_bytes.len();
+    let mut builder = Response::builder().status(resp_parts.status);
+    // 保留原 headers（除 content-length，重新按实际 body 大小设置）
+    for (name, value) in &resp_parts.headers {
+        if name == http::header::CONTENT_LENGTH {
+            continue;
+        }
+        builder = builder.header(name, value);
+    }
+    builder = builder.header(http::header::CONTENT_LENGTH, body_len);
+    let resp = builder
+        .body(bytes_body(body_bytes))
+        .map_err(|e| anyhow!("passthrough_json_response: build response: {e}"))?;
+    Ok(resp)
 }
 
 /// 构造注入给客户端的 `sieve_blocked` SSE event 字节块。

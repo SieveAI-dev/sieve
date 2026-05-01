@@ -11,6 +11,54 @@
 
 ---
 
+## [v1.5.4-non-streaming-json-inbound-fix] - 2026-05-01
+
+### 背景
+
+Week 4 dogfood 实测发现的 P0 安全漏洞，标记"必须 Week 4 关闭"，至今未关。子代理修复时**顺手发现第二个隐蔽 bug**：OpenAI 路径 `stream=false` 分支原本直接 `forward_raw` 完全跳过入站检测——OpenAI 默认就是 stream=false，意味着 OpenAI 入站检测从来没生效过。
+
+### Fixed [SECURITY]
+
+- 🔴 **P0 漏洞 1（Anthropic 路径）**：daemon 当前只扫 `text/event-stream` SSE 流，`application/json` 非流式响应里的 `tool_use` **整体绕过所有入站规则**（IN-CR-02/03/04/05 / IN-GEN-* 全失效，含 v1.5.x 70 条新规则）。修复：`forward_with_inbound_inspection` 在收上游响应后按 Content-Type 路由，JSON 路径走新增 `handle_anthropic_json_inbound()` 解析 `content[]` → 提取 tool_use → 喂 `InboundFilter::on_tool_use_complete` → Critical 命中替换 body 为 `sieve_blocked` JSON
+
+- 🔴 **P0 漏洞 2（OpenAI 路径，子代理顺手发现）**：`proxy_openai` 的 `stream=false` 分支原本直接 `forward_raw`，**跳过整个入站检测路径**——OpenAI 协议默认就是 stream=false，意味着 OpenAI 入站规则从来没生效过。AutoRedact 的 stream=false 分支同样问题。修复：改为调用 `forward_with_openai_inbound_inspection` 让 Content-Type 路由处理；新增 `handle_openai_json_inbound()` 解析 `choices[].message.tool_calls[]`
+
+### Added
+
+- 4 个新 helper 函数（`crates/sieve-cli/src/daemon.rs`）：
+  - `handle_anthropic_json_inbound`：收 body → 解析 `AnthropicResponse.content[]` → tool_use 提取 → InboundFilter
+  - `handle_openai_json_inbound`：同上但解析 OpenAI ChatCompletion 格式
+  - `build_sieve_blocked_json_body` / `build_sieve_blocked_json_response`：构造非 SSE 格式的拦截响应（保持 PRD §9 #11 协议层诚实，body 内嵌 `sieve_blocked` 字段不冒充 model）
+  - `passthrough_json_response`：未命中时原样转发（重建 headers）
+
+- 2 条新集成测试（`crates/sieve-cli/tests/inbound_block.rs`）：
+  - `anthropic_non_streaming_json_inbound_block`：mock 上游返回 `application/json` + `eth_signTransaction` tool_use → 验证 daemon 替换 body
+  - `openai_non_streaming_json_inbound_block`：同款 OpenAI Chat Completions 格式 + `tool_calls` 数组
+  - 新增 `spawn_mock_json_upstream` 测试 helper
+
+### Changed
+
+- `proxy_openai` `stream=false` 分支：`forward_raw` → `forward_with_openai_inbound_inspection`
+- AutoRedact `stream=false` 同款修复
+
+### 测试结果
+
+| 指标 | 修复前 | 修复后 |
+|------|------|------|
+| Anthropic 非流式 JSON tool_use 拦截 | ❌ 完全绕过 | ✅ block |
+| OpenAI 非流式 tool_calls 拦截 | ❌ 完全绕过（含 stream=false 默认场景）| ✅ block |
+| inbound_block 集成测试 | 12 passed | **14 passed**（+2 新增）|
+| dataset_fp_rate | 0% FP / 99.71% recall | **不变**（无回归）|
+| cargo fmt --check / clippy -D warnings | pass | pass |
+
+### Impact 评估
+
+**这是 v1.5.x 系列发现的最严重漏洞。**Anthropic SDK 和 OpenAI SDK 的常见配置中，**非流式响应使用率 50%+**——这意味着 v1.5.x 累计加的 70 条入站规则在这些场景**实际拦截率为 0%**。本 patch 把"纸面 70 条规则"恢复到"实际 70 条规则"。
+
+PRD §9 #7 实测数字（FP 0% / Recall 99.71%）此前**仅在 SSE 流模式有效**，本 patch 后才在所有响应模式生效。
+
+---
+
 ## [v1.5.3-windows-powershell-pipe] - 2026-05-01
 
 ### 背景
