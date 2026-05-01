@@ -26,7 +26,11 @@ fn build_engine() -> VectorscanEngine {
     let rules = load_inbound_rules(&rules_path()).expect("load inbound.toml failed");
     let filtered: Vec<_> = rules
         .into_iter()
-        .filter(|r| r.pattern != "__ADDRESS_GUARD_PLACEHOLDER__")
+        .filter(|r| {
+            r.pattern != "__ADDRESS_GUARD_PLACEHOLDER__"
+                && r.pattern != "__OPENCLAW_SKILL_GUARD_PLACEHOLDER__"
+                && r.pattern != "__BIP39_SECOND_PASS_PLACEHOLDER__"
+        })
         .collect();
     VectorscanEngine::compile(filtered).expect("VectorscanEngine compile failed")
 }

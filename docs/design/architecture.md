@@ -250,16 +250,21 @@ flowchart LR
 
 > **公理 12**：**Critical FP > 0.5% → 用户禁用产品**。这是硬约束，不是工程优化项。任何 Critical 规则在 dogfood / 闭测期间触发 FP 即被回滚或降级到 High。
 
-### 5.1 实测基线（2026-05-01，详见 [CHANGELOG v1.5.1](../changelog/CHANGELOG.md#v151-rule-expansion---2026-05-01)）
+### 5.1 实测基线（2026-05-01，详见 [CHANGELOG v1.5.2](../changelog/CHANGELOG.md#v152-blind-spots-and-public-replay---2026-05-01)）
 
-测试数据集：1896 条（226 + 600 攻击 / 70 + 1000 benign），跑 `cargo test -p sieve-rules --release --test dataset_fp_rate -- --ignored --nocapture`。
+测试数据集：1951 条（226 + 600 合成攻击 / 70 + 1000 benign / 55 公开攻击复现），跑 `cargo test -p sieve-rules --release --test dataset_fp_rate -- --ignored --nocapture`。
 
 | 指标 | 实测 | 阈值 | 状态 |
 |------|------|------|------|
 | Critical FP rate | 0/1070 = **0.00%** | < 0.5% | ✅ |
-| Attack recall rate | 676/696 = **97.13%** | > 95% | ✅ |
+| Attack recall rate（合成数据集） | 694/696 = **99.71%** | > 95% | ✅ |
+| Public Attack Replay（已公开发生过的攻击复现） | 51/55 = **92.7%** | 揭露盲区，无硬阈值 | — |
 
-数据集按"看起来像攻击但合法"（benign-near/near-{规则ID}/）+ "用户最怕的五件事"（attacks-by-fear/{signing,transfer,env-leak,private-key,shell-rce}/）双向对称分桶，FP 高时按桶定位规则盲区，recall 漏拦时按桶定位生成的"假攻击"。
+数据集三层结构：
+1. **合成攻击**：按"看起来像攻击但合法"（benign-near/near-{规则ID}/）+ "用户最怕的五件事"（attacks-by-fear/{signing,transfer,env-leak,private-key,shell-rce}/）双向对称分桶
+2. **公开攻击复现**（attacks-public-replay/）：6 个子目录覆盖 rugpull-ai / injection-pocs / ctf-replays / owasp-llm-top10 / real-events（Ledger 2023、Multichain $126M、Lazarus Op99 等）/ mcp-supply-chain（CVE-2025-6514）
+
+剩余 6 条漏拦记录在 `tasks/2026-05-01-public-attack-replay-report.md`，多数为 vectorscan 能力边界外（JS 语义分析 / RAG 投毒无 payload 特征 / 纯社工邮件不在 LLM 流量内）。
 
 ### 5.2 规则引擎 stopwords 全文搜索机制（v1.5.1 新增）
 

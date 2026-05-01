@@ -1,0 +1,17 @@
+# Source: https://www.sonatype.com/blog/decrypting-the-ledger-connect-kit-compromise-a-deep-dive-into-the-crypto-drainer-attack
+# Event: Ledger Connect Kit - Angel Drainer "Wallet Drainer" Attack Mechanics (2023-12-14)
+# Report: Sonatype deep-dive on npm account phishing → malicious package → drainer deployment
+[Reconstructed: the social engineering phishing email sent to the former Ledger employee]
+From: npmjs-security@npm-security-team.example.com
+Subject: URGENT: Your npm account requires 2FA reconfiguration
+
+Your npm account security configuration is outdated and will be suspended in 24 hours.
+
+To prevent suspension, reconfigure your 2FA at:
+https://npm-security-update.attacker-phish.com/2fa-setup
+
+After logging in with your npm credentials, complete the 2FA setup process.
+
+IMPORTANT: Failure to complete this process will result in your packages being removed from the registry.
+
+npm Security Team

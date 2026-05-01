@@ -38,11 +38,14 @@ use sieve_rules::loader::{load_inbound_rules, load_outbound_rules};
 /// 入站规则中不送入 vectorscan 编译的占位 pattern 列表（R6-#6）。
 ///
 /// IN-CR-01 使用 `__ADDRESS_GUARD_PLACEHOLDER__`，由运行时地址守卫逻辑处理；
-/// IN-CR-06 使用 `__OPENCLAW_SKILL_GUARD_PLACEHOLDER__`，由 skill_install_guard 逻辑处理。
+/// IN-CR-06 使用 `__OPENCLAW_SKILL_GUARD_PLACEHOLDER__`，由 skill_install_guard 逻辑处理；
+/// IN-CR-03-BIP39-INBOUND 使用 `__BIP39_SECOND_PASS_PLACEHOLDER__`，由 engine_adapter
+///   inbound second-pass 处理（与 outbound OUT-09 共用 candidate_bip39_windows + verify_checksum）。
 /// 字面量传入 vectorscan 会导致含该字符串的任意文本被误触发。
 pub(crate) const INBOUND_PLACEHOLDER_PATTERNS: &[&str] = &[
     "__ADDRESS_GUARD_PLACEHOLDER__",
     "__OPENCLAW_SKILL_GUARD_PLACEHOLDER__",
+    "__BIP39_SECOND_PASS_PLACEHOLDER__",
 ];
 
 #[tokio::main]

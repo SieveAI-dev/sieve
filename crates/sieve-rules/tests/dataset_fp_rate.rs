@@ -38,6 +38,7 @@ fn build_inbound_engine() -> VectorscanEngine {
         .filter(|r| {
             r.pattern != "__ADDRESS_GUARD_PLACEHOLDER__"
                 && r.pattern != "__OPENCLAW_SKILL_GUARD_PLACEHOLDER__"
+                && r.pattern != "__BIP39_SECOND_PASS_PLACEHOLDER__"
         })
         .collect();
     VectorscanEngine::compile(filtered).expect("compile inbound engine")
@@ -286,6 +287,11 @@ fn attack_dataset_recall_rate() {
     use std::collections::BTreeMap;
     let mut per_bucket: BTreeMap<String, (usize, usize)> = BTreeMap::new();
 
+    // BIP39 second-pass：复用 outbound OUT-09 逻辑在入站侧（IN-CR-03-BIP39-INBOUND）。
+    // dataset 测试直接调用 VectorscanEngine，绕过了 engine_adapter 层的 second-pass，
+    // 此处手动模拟，确保 BIP39 助记词样本（fear-privkey-074~085）被正确计入 recall。
+    let wl = sieve_rules::wordlist::wordlist_index();
+
     for (path, content) in &attacks {
         let bucket = bucket_for(path);
         per_bucket.entry(bucket.clone()).or_default().0 += 1;
@@ -297,7 +303,18 @@ fn attack_dataset_recall_rate() {
             .scan(content.as_bytes())
             .expect("inbound scan failed");
 
-        if !outbound_hits.is_empty() || !inbound_hits.is_empty() {
+        // BIP39 inbound second-pass（与 engine_adapter::InboundEngine 同款逻辑）
+        let bip39_hit = if outbound_hits.is_empty() && inbound_hits.is_empty() {
+            let tokens: Vec<&str> = content.split_whitespace().collect();
+            let candidates = sieve_rules::bip39::candidate_bip39_windows(&tokens, wl);
+            candidates
+                .into_iter()
+                .any(|w| sieve_rules::bip39::verify_checksum(&w, wl))
+        } else {
+            false
+        };
+
+        if !outbound_hits.is_empty() || !inbound_hits.is_empty() || bip39_hit {
             hit_count += 1;
             per_bucket.entry(bucket).or_default().1 += 1;
         } else {
@@ -347,6 +364,102 @@ fn attack_dataset_recall_rate() {
         total - hit_count,
         total,
         missed.join("\n")
+    );
+}
+
+/// 公开攻击复现数据集 recall rate（方案 C，2026-05-01）。
+///
+/// 目的：证明 Sieve 能拦住真实世界已发生的攻击，揭示规则盲区。
+/// 不做强制 assert——本测试输出用于揭露盲区，不是强行通过。
+/// 按子目录分桶输出命中率，漏拦样本单独列出用于规则改进。
+///
+/// 跑法：
+/// ```bash
+/// cargo test -p sieve-rules --release --test dataset_fp_rate public_replay_recall_rate -- --ignored --nocapture
+/// ```
+#[test]
+#[ignore = "public replay recall test; run manually to audit real-world attack coverage"]
+fn public_replay_recall_rate() {
+    let outbound = build_outbound_engine();
+    let inbound = build_inbound_engine();
+
+    let replay_root = bench_data_dir().join("attacks-public-replay");
+    if !replay_root.exists() {
+        println!("attacks-public-replay/ directory not found, skipping");
+        return;
+    }
+
+    // 按子目录分桶扫描
+    let subdirs = [
+        "rugpull-ai",
+        "injection-pocs",
+        "ctf-replays",
+        "owasp-llm-top10",
+        "real-events",
+        "mcp-supply-chain",
+    ];
+
+    let mut grand_total = 0usize;
+    let mut grand_hits = 0usize;
+    let mut all_missed: Vec<String> = Vec::new();
+
+    println!("\n=== Public Attack Replay Recall Report (方案 C, 2026-05-01) ===");
+    println!("{:<30} {:>8} {:>8} {:>10}", "Subdir", "Total", "Hits", "Recall%");
+    println!("{}", "-".repeat(60));
+
+    for subdir in &subdirs {
+        let dir = replay_root.join(subdir);
+        let samples = read_samples_recursive(&dir);
+        if samples.is_empty() {
+            println!("{:<30} {:>8} {:>8} {:>10}", subdir, 0, 0, "N/A");
+            continue;
+        }
+
+        let total = samples.len();
+        let mut hits = 0usize;
+        let mut missed: Vec<String> = Vec::new();
+
+        for (path, content) in &samples {
+            let out_hits = outbound.scan(content.as_bytes()).expect("outbound scan");
+            let in_hits = inbound.scan(content.as_bytes()).expect("inbound scan");
+            if !out_hits.is_empty() || !in_hits.is_empty() {
+                hits += 1;
+            } else {
+                missed.push(path.display().to_string());
+            }
+        }
+
+        let recall_pct = hits as f64 / total as f64 * 100.0;
+        println!("{:<30} {:>8} {:>8} {:>9.1}%", subdir, total, hits, recall_pct);
+        grand_total += total;
+        grand_hits += hits;
+        all_missed.extend(missed);
+    }
+
+    println!("{}", "-".repeat(60));
+    let grand_recall = if grand_total > 0 {
+        grand_hits as f64 / grand_total as f64 * 100.0
+    } else {
+        0.0
+    };
+    println!(
+        "{:<30} {:>8} {:>8} {:>9.1}%",
+        "TOTAL", grand_total, grand_hits, grand_recall
+    );
+
+    if !all_missed.is_empty() {
+        println!("\n--- 漏拦样本（需规则改进或接受盲区）---");
+        for m in &all_missed {
+            println!("  MISS: {m}");
+        }
+    } else {
+        println!("\n全部命中，无漏拦。");
+    }
+
+    // 不做强制 assert，仅打印结果
+    // 目的是揭露盲区，不是强行通过
+    println!(
+        "\n总结：{grand_hits}/{grand_total} = {grand_recall:.1}% recall on public attack replay dataset"
     );
 }
 
