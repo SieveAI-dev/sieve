@@ -1,7 +1,7 @@
 # Sieve 12 周里程碑 Roadmap
 
 > Source of truth: [PRD v1.5 §10](../docs/prd/sieve-prd-v1.5.md#10-12-周里程碑8-周-dogfood--4-周闭测)（Week 6-8 已按 v1.5 multi-agent 扩展重写）
-> 状态：**Week 3 完成，Week 4 入站通用 + benchmark 数据集准备中**。每周开始前更新本文勾选项。
+> 状态：**v2.0 + v2.1 代码 100% 落地（2026-05-01），进入 dogfood 准备阶段**。Phase A 全部代码任务完成，剩余 5 项非代码工作（见 tasks/status-2026-05-01.md）。
 >
 > 本文是 PRD §10 的执行视图，**任务粒度 / 验收标准** 跟随 PRD 同步更新；本文新增"依赖"列与"风险"列辅助调度。
 
@@ -113,26 +113,26 @@
 
 **完成定义**（PRD §10.1 Week 5）：
 
-- doskey 朋友 30 分钟内能 .dmg 安装 + 跑 setup + 看到拦截工作
+- doskey 朋友 30 分钟内能 .dmg 安装 + 跑 setup + 看到拦截工作 ← .dmg 打包阻塞 R10-#3（GUI 独立仓库），核心引擎代码已全部完成
 
 **任务清单**：
 
 - [x] **sieve-ipc crate**（Week 4 末骨架已完成）
 - [x] **sieve-hook crate**（Week 4 末骨架已完成）
 - [x] **sieve-rules manifest 字段扩展**：`disposition` / `timeout_seconds` / `default_on_timeout`（Week 4 末已完成）
-- [ ] **sieve-core pipeline 重构**：
+- [x] **sieve-core pipeline 重构**：
   - `outbound_redact`：命中出站规则时改写 body bytes（替换 secret 为 `[REDACTED]`），而非仅返 426
   - `inbound_hook`：Hook 类规则（IN-CR-02/03/04/05）不修改 SSE 流，通过 IPC 通知 GUI
   - `inbound_hold`：25s keep-alive comment 注入 + IPC 通知 GUI 等待审批（详见 [SPEC-002](../docs/specs/SPEC-002-inbound-hold.md)）
-- [ ] **sieve-cli 新子命令**：
+- [x] **sieve-cli 新子命令**：
   - `sieve setup`：改写 Claude Code `settings.json` 注册 `PreToolUse` hook + 写 `ANTHROPIC_BASE_URL` + 写 launchd plist（详见 [SPEC-003](../docs/specs/SPEC-003-setup-doctor-uninstall.md)）
   - `sieve doctor`：canary 拦截测试，验证 hook + daemon + IPC 全链路就位
   - `sieve uninstall`：按 `setup.log` 逐步回滚，dry-run / 确认 / 执行三阶段
   - `audit.rs`：接入 SQLite append-only 审计，schema 见 [data-model.md](../docs/design/data-model.md)
   - `daemon.rs`：删除对 Hook 类规则的 `sieve_blocked` SSE 注入（改由 IPC + GUI 处理）
-- [ ] **集成测试一次性按 v1.4 重写**：覆盖 IPC hold 流程 / setup 幂等性 / uninstall 回滚 / outbound_redact / 非流式 JSON 入站检测
-- [ ] **GitHub Releases 自动化构建上传**（macOS only，`aarch64-apple-darwin` + `x86_64-apple-darwin`）
-- [ ] **三件套 .dmg 打包**：GUI App + 后台代理 + sieve-hook 合并成单 .dmg
+- [x] **集成测试一次性按 v1.4 重写**：覆盖 IPC hold 流程 / setup 幂等性 / uninstall 回滚 / outbound_redact / 非流式 JSON 入站检测
+- [ ] **GitHub Releases 自动化构建上传**（macOS only，`aarch64-apple-darwin` + `x86_64-apple-darwin`）← 等 GA 前 repo 公开后上传
+- [ ] **三件套 .dmg 打包**：GUI App + 后台代理 + sieve-hook 合并成单 .dmg ← 阻塞 R10-#3 绝对路径 + GUI 独立仓库
 - **GUI App（独立仓库 `sieve-gui-macos`，由 doskey 平行开发）**：
   - 状态栏常驻图标 + 审批弹窗
   - IPC 通道连接 sieve-ipc（[SPEC-001](../docs/specs/SPEC-001-ipc-protocol.md)）
@@ -154,18 +154,74 @@
 
 **任务清单**：
 
-1. 新模块 `crates/sieve-core/src/protocol/openai.rs`：OpenAI Chat Completions 解析（参考 ADR-018）
-2. SSE Parser 适配 OpenAI delta 格式（无 event 头 + `[DONE]` 终止符）
-3. UnifiedMessage 双协议跑通（Anthropic + OpenAI 都能解析为同一中间表示）
-4. `sieve setup --agent claude|openclaw|hermes` 多 agent 参数 + `--all-detected` 自动扫描（参考 SPEC-004）
-5. IN-GEN-06 外部 channel prompt injection 规则定义 + vectorscan 编译
-6. IN-CR-06 OpenClaw 动态 skill 加载 fail-closed 规则定义
-7. IPC schema 加 `source_agent` / `origin_chain` / `source_channel` 字段（向后兼容，`#[serde(default)]`）
-8. X-Sieve-Origin HTTP header 协议落地（签名生成 + 验证，参考 ADR-019）
+1. [x] 新模块 `crates/sieve-core/src/protocol/openai.rs`：OpenAI Chat Completions 解析（参考 ADR-018）
+2. [x] SSE Parser 适配 OpenAI delta 格式（无 event 头 + `[DONE]` 终止符）
+3. [x] UnifiedMessage 双协议跑通（Anthropic + OpenAI 都能解析为同一中间表示）
+4. [x] `sieve setup --agent claude|openclaw|hermes` 多 agent 参数 + `--all-detected` 自动扫描（参考 SPEC-004）
+5. [x] IN-GEN-06 外部 channel prompt injection 规则定义 + vectorscan 编译
+6. [x] IN-CR-06 OpenClaw 动态 skill 加载 fail-closed 规则定义
+7. [x] IPC schema 加 `source_agent` / `origin_chain` / `source_channel` 字段（向后兼容，`#[serde(default)]`）
+8. [x] X-Sieve-Origin HTTP header 协议落地（签名生成 + 验证，参考 ADR-019）
 
 **依赖**：Week 5 三件套 .dmg + IPC + sieve-hook 完整
 **关键风险**：OpenAI SSE 格式差异（尤其 delta 累积 + `[DONE]` 处理）需严格 fuzz 覆盖；IPC schema 向后兼容需测试旧格式能正常 deserialize
 **关联文档**：PRD v1.5 §5.2 / ADR-018 / ADR-019 / SPEC-004
+
+---
+
+### v2.0 + v2.1 · HIPS 改造（2026-05-01，代码 100% 落地）
+
+> 该段记录 PRD v2.0 / v2.1 新增工作，跨越 Week 5-8 执行窗口同步完成。
+
+**Phase A 骨架（commit `cd0248d`）**：
+
+- [x] 新增第 6 个 crate `sieve-policy`（策略引擎，独立于 sieve-rules 和 sieve-core）
+- [x] `MatchEngine` trait + `ScanRequest` / `ScanReport` 抽象
+- [x] `process_context` 模块（macOS `proc_pidinfo` + peer_addr 4-tuple 反查 PID）
+- [x] audit v2 事件定义（7 个新 `AuditEvent` 变体）
+- [x] IPC 三态字段（`HoldOutcome` 加 `remember` + `context_hint`）
+- [x] `sieve rules` CLI 子命令（edit / list / disable / enable）
+
+**Phase A 接入（commit `5021f0c`）**：
+
+- [x] daemon 接入 `LayeredEngine`（向量引擎 + 用户规则引擎双层）
+- [x] 三态决策（Allow / Deny / Remember，灰名单写入）
+- [x] 出站灰名单自动脱敏路径（命中后 body bytes 改写 + 状态栏通知）
+- [x] 4 类 content-type 矩阵路由（application/json / text/event-stream / 其他）
+- [x] criterion benchmark 集成（sieve-rules bench CI）
+
+**Phase B 骨架（commit `e68958b`）**：
+
+- [x] `sequence` 模块（行为序列窗口，滑动 window + 事件计数）
+- [x] IN-SEQ-01（快速部署序列）/ IN-SEQ-02（多签绕过序列）/ IN-SEQ-03（密钥访问 + 网络外传序列）
+- [x] daemon 双路径接入（feature flag `sequence_detection`，默认关闭，等 dogfood 数据驱动评审）
+
+**推迟清单 1（commit `af0b61a`）**：
+
+- [x] 用户规则 `direction` 字段（inbound / outbound / both）
+- [x] 序列 e2e 测试矩阵（6 个端到端测试）
+- [x] criterion CI 集成（`cargo bench` 不报错）
+- [x] `process_context` 4-tuple macOS 真实实现
+
+**推迟清单 2（commit `05040cd`）**：
+
+- [x] IPC 协议扩展（`StatusBarNotify` + `ReloadUserRules` 消息类型）
+- [x] daemon 全接入：`AuditStore` 透传 + 灰名单全路径 + IN-SEQ-* IPC + hot-reload best-effort
+- [x] `peer_addr_to_pid` 真实实现 + caller 透传 audit
+
+**v2.1 工程项（commit `74e5e3a`）**：
+
+- [x] `LayeredEngine` zero-downtime hot swap（`arc-swap` 原子替换）
+- [x] `try_write_graylist` 失败路径 audit `ERROR` 记录
+- [x] 多 GUI 客户端 broadcast 支持
+
+**剩余 5 项非代码工作**：
+
+- [ ] `vectorscan_rs::hs_database_size()` API（等外部 crate 升级）
+- [ ] `origin_header.rs` GA 前真实 Ed25519 密钥（部署任务）
+- [ ] OpenClaw `skill_install_guard` Week 7 实测（dogfood 数据驱动）
+- [ ] 行为序列升级 Block 类的 ADR 评审（需 4 周 ≥ 50 序列样本 + FP < 0.5%）
+- [ ] 行为序列 ML 分类器训练（需积累 dogfood 数据集）
 
 ---
 

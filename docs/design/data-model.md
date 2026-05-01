@@ -1,9 +1,9 @@
 # Sieve 数据模型设计
 
 > **状态**：设计阶段 / 锁定执行
-> **文档版本**：v1.0 / 2026-04-27
-> **依据 PRD**：[`docs/prd/sieve-prd-v1.5.md`](../prd/sieve-prd-v1.5.md)
-> **范围**：Phase 1 内部数据结构、配置文件、审计日志、规则签名、license 数据格式
+> **文档版本**：v2.0 / 2026-05-01
+> **依据 PRD**：[`docs/prd/sieve-prd-v2.0.md`](../prd/sieve-prd-v2.0.md)
+> **范围**：Phase 1 内部数据结构、配置文件、审计日志、规则签名、license 数据格式；v2.0 新增灰名单 schema、user.toml schema、HoldOutcome 枚举、AuditEvent v2
 
 ---
 
@@ -315,10 +315,13 @@ tls_verify_upstream = true
 - 权限：`0600`（仅当前 user 可读写）
 - 写入模式：append-only（通过 `BEFORE UPDATE` / `BEFORE DELETE` 触发器拒绝任何修改）
 - **不存原始 prompt 内容**——只存 fingerprint 与最小元信息（PRD §11.2）
+- 当前 schema 版本：**v2**（`PRAGMA user_version = 2`）
 
-### 6.2 `events` 表
+### 6.2 `events` 表（schema v2）
 
 ```sql
+PRAGMA user_version = 2;
+
 CREATE TABLE events (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   timestamp       INTEGER NOT NULL,        -- unix ms
@@ -329,7 +332,9 @@ CREATE TABLE events (
   fingerprint     TEXT    NOT NULL,        -- 16-hex
   action_taken    TEXT    NOT NULL,        -- block/redact/warn_confirm/mark/silent
   user_choice     TEXT,                    -- allow_once/cancel/redact_send/null
-  evidence_meta   TEXT                     -- JSON: { "len": N, "prefix": "sk-ant-...", ... }
+  evidence_meta   TEXT,                    -- JSON: { "len": N, "prefix": "sk-ant-...", ... }
+  caller_pid      INTEGER,                 -- v2 新增：调用方进程 PID（NULL 若反查失败）
+  caller_exe      TEXT                     -- v2 新增：调用方可执行文件路径（NULL 若反查失败）
 );
 
 CREATE INDEX idx_events_timestamp ON events(timestamp);
@@ -343,11 +348,26 @@ CREATE TRIGGER events_no_delete BEFORE DELETE ON events
 BEGIN SELECT RAISE(ABORT, 'events is append-only'); END;
 ```
 
+### 6.2a schema v1 → v2 迁移
+
+启动时检查 `PRAGMA user_version`，若为 1 则在单个事务内执行：
+
+```sql
+BEGIN;
+ALTER TABLE events ADD COLUMN caller_pid INTEGER;
+ALTER TABLE events ADD COLUMN caller_exe TEXT;
+PRAGMA user_version = 2;
+COMMIT;
+```
+
+迁移完成后重建 append-only 触发器（SQLite ALTER TABLE 不触发触发器重建，需显式 DROP + RECREATE）。迁移失败则回滚并打印 `ERROR`，daemon 拒绝启动。
+
 ### 6.3 字段语义
 
 - `evidence_meta`：JSON 字符串，**仅存元信息**（长度、前缀几个字符、entropy 值），用于事后分析 FP 而不是回放 prompt；
 - `user_choice`：仅 Critical / High 在用户交互后写入；Medium / Low 为 NULL；
-- `session_id`：与 Claude Code 单次进程绑定（启动时随机），**不**做跨进程关联。
+- `session_id`：与 Claude Code 单次进程绑定（启动时随机），**不**做跨进程关联；
+- `caller_pid` / `caller_exe`（v2 新增）：由 accept loop 进程上下文反查注入（[ADR-023](./ADR-023-process-context-audit.md)）；macOS `proc_listpids` + `proc_pidfdinfo` 4-tuple 匹配；反查失败时存 NULL，不阻断请求处理。
 
 > 即使审计文件被攻击者读到，也只能拿到"此用户在此时间点触发过 OUT-09 BIP39 检测"，无法还原任何敏感内容。这是 [ADR-003](./ADR-003-local-only-no-cloud-verifier.md) 在数据层的兑现。
 
@@ -483,12 +503,281 @@ JWT-like，**Ed25519 签名**（不用 RSA / HMAC）：
 
 ---
 
-## 9. 相关文档
+## 9. AuditEvent 枚举（v2.0 扩展）
 
-- [PRD-sieve v1.4](../prd/sieve-prd-v1.5.md) §5、§6.6、§7、§11
+### 9.1 CallerContext 共享子结构
+
+所有 v2.0 新增 AuditEvent variant 均携带 `CallerContext`，由进程上下文反查（[ADR-023](./ADR-023-process-context-audit.md)）填充：
+
+```rust
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CallerContext {
+    pub pid: Option<i32>,   // 调用方 PID；反查失败时 None
+    pub exe: Option<String>, // 调用方可执行文件路径；反查失败时 None
+}
+```
+
+### 9.2 v2.0/v2.1 新增 variant
+
+```rust
+pub enum AuditEvent {
+    // ===== v1.5 已有 variant（略）=====
+
+    // ===== v2.0 新增 =====
+
+    /// 用户在 HIPS 弹窗作出允许/拒绝决策
+    DecisionMade {
+        rule_id: String,
+        decision: String,          // "allow" | "deny"
+        severity: String,
+        by_user: bool,             // true = 用户主动决策；false = 超时 fail-closed
+        caller: CallerContext,
+        request_id: Uuid,
+        timestamp: i64,            // unix ms
+    },
+
+    /// 用户允许并选择"记住"，灰名单新增一条
+    GraylistAdded {
+        rule_id: String,
+        fingerprint: String,       // 64-hex SHA-256
+        caller: CallerContext,
+        expires_at: Option<i64>,   // None = 永不过期
+        request_id: Uuid,
+        timestamp: i64,
+    },
+
+    /// 用户尝试对 Critical 规则添加灰名单，被三道防线锁定拒绝
+    GraylistCriticalRejected {
+        rule_id: String,
+        caller: CallerContext,
+        request_id: Uuid,
+        timestamp: i64,
+    },
+
+    /// 灰名单写入 I/O 失败（v2.1 新增）
+    GraylistAddFailed {
+        rule_id: String,
+        error: String,
+        request_id: Uuid,
+        caller: CallerContext,
+        timestamp: i64,
+    },
+
+    /// 命中灰名单，跳过 IPC 弹窗直接放行
+    GraylistHit {
+        rule_id: String,
+        fingerprint: String,       // 64-hex
+        caller: CallerContext,
+        request_id: Uuid,
+        timestamp: i64,
+    },
+
+    /// IN-SEQ-* 行为序列命中（仅 StatusBar 通知，不阻断）
+    SequenceHit {
+        rule_id: String,           // "IN-SEQ-01" | "IN-SEQ-02" | "IN-SEQ-03"
+        description: String,       // 人类可读的序列描述
+        caller: CallerContext,
+        session_id: String,
+        timestamp: i64,
+    },
+
+    /// 用户规则热加载成功
+    UserRulesReloaded {
+        success: bool,
+        error: Option<String>,     // 加载失败时的错误描述
+        rule_count: u32,           // 成功加载的规则条数
+        timestamp: i64,
+    },
+
+    /// 用户规则加载失败（daemon 以 None engine 继续运行）
+    UserRulesLoadFailed {
+        error: String,
+        timestamp: i64,
+    },
+}
+```
+
+所有新增 variant 中 `caller` 字段标注 `#[serde(default)]`，保证从旧格式反序列化时不报错。
+
+---
+
+## 10. 灰名单 schema（v2.0 PRD §5.4.2）
+
+### 10.1 文件位置与权限
+
+```
+~/.sieve/decisions/<sha256_64_hex>.json
+```
+
+- 文件名 = fingerprint（64 hex 字符，SHA-256），命名即内容索引；
+- 文件权限 `0600`，目录权限 `0700`；
+- 写入方式：先写临时文件（同目录），再 `rename` 原子替换，防止写入中断导致文件损坏。
+
+### 10.2 Entry JSON schema
+
+```json
+{
+  "schema_version": 1,
+  "fingerprint_version": 1,
+  "rule_id": "IN-CR-02",
+  "rule_version": "v2.0",
+  "fingerprint": "<64 hex>",
+  "fingerprint_inputs": {
+    "rule_id": "IN-CR-02",
+    "matched_canonical": "<归一化命中文本>",
+    "tool_name": "bash",
+    "protocol": "anthropic",
+    "content_kind": "tool_use_input",
+    "source_agent": "claude"
+  },
+  "decision": "allow",
+  "expires_at": null,
+  "added_at": 1746057600000,
+  "added_by": "gui_user_decision",
+  "context_hint": "用户备注（可选）",
+  "match_count_since": 0,
+  "audit_event_id": "<uuid>"
+}
+```
+
+### 10.3 fingerprint 计算
+
+```
+fingerprint = sha256(
+  rule_id + ":" +
+  matched_canonical + ":" +
+  tool_name + ":" +
+  protocol + ":" +
+  content_kind + ":" +
+  source_agent
+)
+```
+
+lookup 时**重新计算** fingerprint 并与文件名比对，防篡改。`matched_canonical` 为命中文本的 UTF-8 NFC 归一化 + 前导/尾随空白去除形式。
+
+### 10.4 Critical 锁三道防线
+
+1. **daemon 侧**：`DecisionRequest.allow_remember = true` 时，若 rule severity = Critical，daemon 拒绝调用 `graylist::add_entry`，直接返回 `GraylistCriticalRejected` audit event；
+2. **IPC 协议侧**：`DecisionResponse` 中 Critical 规则的 `allow_remember` 字段服务端强制置 false，GUI 侧无法绕过；
+3. **文件侧**：`graylist::add_entry` 在写入前再次校验 rule severity，Critical 直接 `return Err(GraylistError::CriticalRuleLocked)`。
+
+---
+
+## 11. user.toml schema（v2.0 PRD §5.5）
+
+### 11.1 顶层结构
+
+```toml
+schema_version = 1
+created_at = "2026-05-01T00:00:00Z"  # RFC 3339
+updated_at = "2026-05-01T00:00:00Z"
+
+[[rules]]
+# ... UserRuleEntry 字段（见 §11.2）
+```
+
+路径：`~/.sieve/rules/user.toml`；`#[serde(deny_unknown_fields)]` 严格校验，未知字段直接拒绝加载。
+
+### 11.2 UserRuleEntry 字段表
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `id` | string | ✅ | 用户规则 ID，格式 `USR-NNN`，跨版本不复用 |
+| `description` | string | ✅ | 人类可读描述 |
+| `pattern` | string | ✅ | vectorscan PCRE 子集正则 |
+| `severity` | enum | ✅ | `low` / `medium` / `high`（用户规则**不允许** `critical`） |
+| `action` | enum | ✅ | `mark` / `warn` / `block` |
+| `keywords` | `Vec<String>` | — | vectorscan 预筛选 hint |
+| `allowlist_stopwords` | `Vec<String>` | — | per-rule 停止词白名单 |
+| `disposition` | enum | — | 显式指定 Disposition（覆盖矩阵推导） |
+| `direction` | enum | — | `Outbound` / `Inbound` / `Both`（默认 `Both`） |
+| `enabled` | bool | — | 默认 `true`；`false` 时规则加载但跳过匹配 |
+| `added_at` | string | — | RFC 3339 时间戳（`sieve rules add` 自动填充） |
+| `added_by` | string | — | `gui` / `cli` / `manual` |
+
+### 11.3 RuleDirection 枚举
+
+```rust
+pub enum RuleDirection {
+    Outbound, // 仅在出站 Filter Pipeline 的 LayeredEngine 生效
+    Inbound,  // 仅在入站 Filter Pipeline 的 LayeredEngine 生效
+    Both,     // 默认：出/入站都注册
+}
+```
+
+`direction` 字段决定用户规则被注入到哪侧 `LayeredEngine`。系统规则的方向由 manifest.toml 中 `direction` 字段控制（同一格式）。
+
+### 11.4 lint 11 类约束
+
+加载 `user.toml` 时执行以下 lint（任一失败 → `UserRulesLoadFailed` + daemon 以 `None` user engine 继续运行）：
+
+1. `schema_version` 必须为 1；
+2. 每条规则 `id` 不得与系统规则 ID 冲突；
+3. 同一文件内 `id` 不得重复；
+4. `severity` 不得为 `critical`；
+5. `pattern` 必须能被 vectorscan 成功编译；
+6. `keywords` 中每个字符串长度 ≥ 3；
+7. `allowlist_stopwords` 不得为空字符串；
+8. `action = "block"` 且 `severity = "low"` 时发出 WARN（可能误伤）；
+9. `direction` 值必须是合法枚举成员；
+10. `enabled` 字段若缺失默认 `true`（不报错）；
+11. 整个文件大小不超过 256 KB。
+
+详细 lint 规则和错误码见 [ADR-020](./ADR-020-user-rules-system.md)。
+
+---
+
+## 12. HoldOutcome 枚举（v2.0/v2.1）
+
+`HoldOutcome` 是入站 hold 流路径（`inbound_hold.rs`）从用户决策到执行路径的内部枚举，由 IPC `DecisionResponse` 映射而来。
+
+```rust
+pub enum HoldOutcome {
+    /// 用户允许，放行 SSE 流
+    /// remember: 是否写灰名单；context_hint: GUI 用户备注
+    Allow {
+        remember: bool,
+        context_hint: Option<String>,
+    },
+
+    /// 用户允许但请求脱敏后放行（出站可选路径）
+    RedactAndAllow {
+        remember: bool,
+        context_hint: Option<String>,
+    },
+
+    /// 用户拒绝（或超时 fail-closed）
+    Deny {
+        reason: String, // "user_denied" | "timeout_fail_closed"
+    },
+}
+```
+
+### 12.1 与 IPC DecisionResponse 的字段映射
+
+| DecisionResponse 字段 | HoldOutcome 字段 | 说明 |
+|----------------------|----------------|------|
+| `decision = "allow"` | `Allow { .. }` | — |
+| `decision = "allow_redact"` | `RedactAndAllow { .. }` | 仅出站支持 |
+| `decision = "deny"` | `Deny { reason: "user_denied" }` | — |
+| 超时（无响应） | `Deny { reason: "timeout_fail_closed" }` | Critical only |
+| `allow_remember` | `remember` | Critical 规则服务端强制 false |
+| `context_hint` | `context_hint` | 透传用户备注 |
+
+---
+
+## 13. 相关文档
+
+- [PRD-sieve v2.0](../prd/sieve-prd-v2.0.md) §5、§6.6、§7、§11
 - [architecture.md](./architecture.md) —— 模块职责、性能预算、Phase 2 演进路径
 - [ADR-003](./ADR-003-local-only-no-cloud-verifier.md) —— 不联网 verifier 的硬约束
 - [ADR-004](./ADR-004-anthropic-first-unified-interface.md) —— UnifiedMessage 接口预留
 - [ADR-006](./ADR-006-sigstore-reproducible-build.md) —— 二进制签名与可复现构建
 - [ADR-007](./ADR-007-fail-closed-critical-actions.md) —— Critical 永不可关的产品承诺
+- [ADR-020](./ADR-020-user-rules-system.md) —— 用户规则系统（user.toml lint 规则）
+- [ADR-021](./ADR-021-tri-state-decision-and-graylist.md) —— 三态决策 + 灰名单（含 Critical 锁）
+- [ADR-022](./ADR-022-behavior-sequence-window.md) —— 行为序列窗口（IN-SEQ-*）
+- [ADR-023](./ADR-023-process-context-audit.md) —— 进程上下文反查（caller_pid / caller_exe）
+- [ADR-024](./ADR-024-rules-engine-abstraction.md) —— 规则引擎抽象 + LayeredEngine
+- [ADR-025](./ADR-025-content-type-routing-matrix.md) —— content-type 路由矩阵
 - `docs/api/api-reference.md` —— 待编写

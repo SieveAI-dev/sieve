@@ -1,7 +1,7 @@
 # Sieve API 参考
 
-> **状态：设计阶段（Pre-Code），接口未冻结。**
-> 当前文档反映 PRD v1.5 的设计意图（v1.4 章节保留，v1.5 新增章节标注"v1.5 新增"），**v1 接口将在 Week 12 GA 时冻结**，破坏性变更走 [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html)。
+> **状态：实现阶段（Pre-GA），接口未冻结。**
+> 当前文档反映 PRD v2.0/v2.1 的实现事实（v1.4/v1.5 章节保留，v2.0/v2.1 新增内容标注"v2.0 新增"或"v2.1 新增"），**v1 接口将在 Week 12 GA 时冻结**，破坏性变更走 [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html)。
 > 在冻结前，任何字段、状态码、配置项的细节都可能调整。
 
 ---
@@ -281,6 +281,28 @@ GET /_sieve/v1/events?since=<unix_ms>&severity=<level>&limit=<N>
 
 > **绝不返回原文。**只返回 fingerprint + 元信息（[PRD §9](../prd/sieve-prd-v1.5.md) 硬约束 #2 + §11.3 数据本地化）。详细字段定义见 [data-model.md](../design/data-model.md)。
 
+**v2 audit schema 扩展（v2.0 新增）**：
+
+events 表通过 v2 migration（commit cd0248d）自动添加两列：
+
+| 新增列 | 类型 | 说明 |
+|--------|------|------|
+| `caller_pid` | INTEGER NULL | daemon accept loop 通过 macOS `proc_listpids` + `proc_pidfdinfo` 反查连接方 PID；30s LRU cache |
+| `caller_exe` | TEXT NULL | 对应 PID 的可执行文件路径（`proc_pidpath`）；非 macOS 平台或反查失败时为 NULL |
+
+新增 AuditEvent 变体（v2.0，对应 `crates/sieve-cli/src/audit.rs`）：
+
+| AuditEvent 变体 | 触发场景 |
+|----------------|---------|
+| `DecisionMade` | daemon 处理 `sieve.decision_response` 完毕，记录 allow/deny + remember + context_hint |
+| `GraylistAdded` | 灰名单条目写入成功（`~/.sieve/decisions/<digest>.json`，原子写，0600） |
+| `GraylistCriticalRejected` | daemon 二次校验拒绝 Critical 规则的 remember=true 请求（Critical 锁防线 #2） |
+| `GraylistAddFailed` | 灰名单文件写入失败（磁盘权限、路径冲突等），写 audit ERROR |
+| `GraylistHit` | 本次 scan 命中已有灰名单条目，直接放行（无弹窗） |
+| `SequenceHit` | 行为序列窗口（ToolUseSequence）匹配到 IN-SEQ-* kill chain，发状态栏通知 |
+| `UserRulesReloaded` | `~/.sieve/rules/user.toml` 热加载成功，记录规则数量和 sha256 |
+| `UserRulesLoadFailed` | `user.toml` 加载或 lint 失败，记录错误原因，发状态栏通知 |
+
 #### 2.2.4 白名单管理（`.sieveignore`）
 
 加入：
@@ -548,7 +570,8 @@ GUI App 是**常驻进程**，无 exit code 概念。决策通过 JSON-RPC 2.0 U
     "decision": "allow" | "deny",
     "decided_at": "<iso8601>",
     "by_user": true,
-    "remember": false
+    "remember": false,
+    "context_hint": null
   },
   "id": "<request_id>"
 }
@@ -559,11 +582,154 @@ GUI App 是**常驻进程**，无 exit code 概念。决策通过 JSON-RPC 2.0 U
 - `"deny"` → 代理注入 `sieve_blocked` event + 关闭流，记录 `user_decision: "deny"`
 - GUI 超时（120s）→ 代理侧 oneshot 超时触发 `default_on_timeout=Block`，记录 `user_decision: "timeout"`
 
-### 6.3 sieve setup / doctor / uninstall 退出码
+**DecisionRequest 字段表（v2.0 扩展）**：
+
+| 字段 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `request_id` | Uuid | — | 本次弹窗请求的唯一 ID |
+| `rule_id` | String | — | 命中规则的 ID（如 `IN-CR-05`） |
+| `severity` | String | — | `critical` / `high` / `medium` / `low` |
+| `summary` | String | — | 人类可读的规则摘要，GUI 展示 |
+| `allow_remember` | bool | `false` | **v2.0 新增**。由 daemon 端通过 `is_critical_locked(rule_id)` 计算后传入，**不由 GUI 决定**。内置 Critical 规则（`FAIL_CLOSED_RULES`）强制为 false，旧 v1.5 客户端不发此字段时 `#[serde(default)]` 兼容为 false。GUI 收到 false 时 **Remember checkbox 必须 disabled+灰显**（PRD §5.4.3） |
+
+**DecisionResponse 字段表（v2.0 扩展）**：
+
+| 字段 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `request_id` | Uuid | — | 对应 DecisionRequest.request_id |
+| `decision` | String | — | `"allow"` / `"deny"` |
+| `decided_at` | String | — | ISO 8601 时间戳 |
+| `by_user` | bool | — | true = 用户主动操作；false = 超时自动处理 |
+| `remember` | bool | `false` | **v2.0 新增**，`#[serde(default)]`。GUI 用户勾选"永久允许"后为 true；daemon 收到 true 时**必须二次校验** rule_id 是否允许 Remember（不允许则忽略并写 audit ERROR），此为 v2.0 双路校验路径（PRD §5.4.2） |
+| `context_hint` | Option\<String\> | `null` | **v2.0 新增**，`#[serde(default)]`。GUI 弹窗中用户输入的备注（如 "Vitalik 地址 read-only balanceOf 调用"），写入灰名单 entry；旧客户端不发此字段兼容 null |
+
+### 6.3 IPC 单向通知（v2.0/v2.1 新增）
+
+除双向 JSON-RPC 请求/响应外，sieve-ipc v2.0 引入两类单向通知消息，用于 daemon → GUI 的状态推送和 CLI → daemon 的触发信号。
+
+#### 6.3.1 `sieve.notify_status_bar`（daemon → GUI，单向）
+
+daemon 通过 `IpcServer::broadcast_status_bar(notify)` 将 `StatusBarNotify` 广播给所有当前连接的 GUI 客户端（多 GUI 支持），dead sender 在广播时 lazy 清理。
+
+方法名：`sieve.notify_status_bar`（无响应，单向发送）
+
+**StatusBarNotify schema**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `notify_id` | Uuid | 通知唯一 ID |
+| `created_at` | String | ISO 8601 时间戳 |
+| `kind` | NotifyKind | 通知类型枚举（见下表） |
+| `title` | String | 状态栏显示标题（短文本） |
+| `detail` | Option\<String\> | 可选详情，GUI tooltip 或副标题 |
+| `rule_id` | Option\<String\> | 关联规则 ID（如 `IN-SEQ-01`） |
+| `auto_dismiss_seconds` | u32 | 自动消失秒数（0 = 常驻直到用户关闭） |
+
+**NotifyKind 枚举**：
+
+| 值 | 触发场景 |
+|----|---------|
+| `SequenceHit` | 行为序列窗口命中 IN-SEQ-* kill chain（High，仅 StatusBar 不阻断） |
+| `OutboundRedacted` | 出站脱敏（OUT-01~05/12 AutoRedact 命中，静默通知 5s） |
+| `UserRulesLoadFailed` | `~/.sieve/rules/user.toml` 加载/lint 失败 |
+| `UserRulesReloaded` | 用户规则热加载成功（`sieve rules edit` / `sieve rules enable/disable` 触发） |
+| `Generic` | 其他通知（daemon 内部临时信息） |
+
+示例（SSE 风格伪码，实际走 Unix socket JSON-RPC）：
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "sieve.notify_status_bar",
+  "params": {
+    "notify_id": "a1b2c3d4-...",
+    "created_at": "2026-05-01T12:34:56Z",
+    "kind": "OutboundRedacted",
+    "title": "已脱敏：检测到私钥",
+    "detail": "OUT-03 命中，已替换为 [REDACTED-PRIVKEY]",
+    "rule_id": "OUT-03",
+    "auto_dismiss_seconds": 5
+  }
+}
+```
+
+#### 6.3.2 `sieve.reload_user_rules`（CLI → daemon，单向）
+
+CLI 侧（`sieve rules edit` / `sieve rules enable` / `sieve rules disable`）执行完文件改写后，通过 `sieve_ipc::send_reload_user_rules_oneshot(socket_path, trigger_id)` 向 daemon 发送单向信号。
+
+方法名：`sieve.reload_user_rules`（无响应，单向发送）
+
+**ReloadUserRules schema**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `trigger_id` | Option\<Uuid\> | 可选触发 ID，用于日志关联；`null` = CLI 不关心关联 |
+
+daemon 端通过 `IpcServer::reload_rx()` mpsc channel（容量 16）异步消费此信号，触发 LayeredEngine 热替换（ArcSwap atomic swap），并向所有 GUI 广播 `UserRulesReloaded` 状态栏通知。
+
+---
+
+### 6.4 sieve rules CLI（v2.0 新增）
+
+`sieve rules` 子命令组（PRD §5.5.2），用于管理 `~/.sieve/rules/user.toml` 用户规则文件：
+
+#### `sieve rules edit`
+
+```
+sieve rules edit
+```
+
+行为：
+1. 调用 `$EDITOR`（未设置时 fallback 依次尝试 `vim` → `nano`）打开 `~/.sieve/rules/user.toml`
+2. 编辑器关闭后执行 TOML lint 校验（规则 id/severity/direction 字段合法性检查）
+3. lint 通过后：原文件 atomic backup 到 `~/.sieve/rules/user.toml.bak.YYYYMMDD-HHMMSS`（保留最近 10 份，旧备份自动清理）
+4. atomic rename 写入新规则文件
+5. 通过 IPC `sieve.reload_user_rules` 通知 daemon 热加载
+
+lint 失败时：打印错误到 stderr，原文件不修改，不发 IPC 信号，退出码非零。
+
+#### `sieve rules list`
+
+```
+sieve rules list
+```
+
+合并展示当前用户规则状态（带 `enabled`/`disabled` + `direction` 字段）+ 系统规则数量摘要。不修改任何文件。
+
+#### `sieve rules disable <id>`
+
+```
+sieve rules disable <rule_id>
+```
+
+将 `~/.sieve/rules/user.toml` 中对应规则项的 `enabled` 字段置为 `false`，TOML 序列化 + atomic rename 写回，触发 IPC reload。`<rule_id>` 不存在时退出码非零并打印错误。
+
+#### `sieve rules enable <id>`
+
+```
+sieve rules enable <rule_id>
+```
+
+将对应规则项的 `enabled` 字段置为 `true`，流程同 `disable`。
+
+**用户规则约束**（`~/.sieve/rules/user.toml`）：
+- `severity` 仅允许 `high` / `medium` / `low`（禁止 `critical`）
+- `action` 仅允许 `warn` / `mark` / `ask`（禁止 `block` / `hook_terminal`）
+- `direction` 取值 `Outbound` / `Inbound` / `Both`（默认 `Both`，兼容旧 user.toml）
+- 用户规则与系统规则并存（LayeredEngine 系统规则先行，命中 critical_lock 立即返回不评估用户规则）
+
+**配置文件路径**：
+- 用户规则文件：`~/.sieve/rules/user.toml`
+- 自动备份（最近 10 份）：`~/.sieve/rules/user.toml.bak.YYYYMMDD-HHMMSS`
+- 灰名单存储：`~/.sieve/decisions/<sha256_64_hex>.json`（文件权限 0600，目录权限 0700，atomic rename，no-follow symlink）
+- 系统规则目录：`~/.sieve/rules/`（由 `[detection].rules_path` 配置）
+
+---
+
+### 6.5 sieve setup / doctor / uninstall 退出码
 
 标准 UNIX 惯例：`0` = 成功，非零 = 失败（具体错误信息打印到 stderr）。
 
-### 6.4 sieve setup --agent 退出码（v1.5 新增）
+### 6.6 sieve setup --agent 退出码（v1.5 新增）
 
 `sieve setup --agent` 涉及多家 agent 的配置文件修改，退出码区分"全部成功"、"部分失败已回滚"、"回滚也失败"三种状态：
 
@@ -726,7 +892,7 @@ data: {"type":"sieve_blocked","blocked_at":<unix_epoch>,"detections":[{"rule_id"
 ## 接口冻结声明
 
 - **冻结时间点**：Week 12 GA（参见 [PRD §10.2 Week 12](../prd/sieve-prd-v1.5.md#102-phase-b闭测阶段week-9-12)）
-- **冻结范围**：本文 §1（反向代理路由）、§2（管理 API）、§3（配置文件 schema 顶层字段）、§4（环境变量名）、§5（severity → HTTP 状态码映射）、§6（CLI 退出码语义）、§7（X-Sieve-Origin header 格式 + chain_depth 语义）、§8（自定义错误码 426 / 451 / 499）
+- **冻结范围**：本文 §1（反向代理路由）、§2（管理 API + audit schema）、§3（配置文件 schema 顶层字段）、§4（环境变量名）、§5（severity → HTTP 状态码映射）、§6（CLI 退出码 + IPC 单向通知方法名 + sieve rules 子命令签名）、§7（X-Sieve-Origin header 格式 + chain_depth 语义）、§8（自定义错误码 426 / 451 / 499）
 - **冻结后变更规则**：
   - **MAJOR**（v2.0.0）：删除字段、改语义、改默认绑定地址、关闭 fail-closed 行为（**永远不会做**）
   - **MINOR**（v1.x.0）：新增可选字段、新增端点、新增检测规则 ID
