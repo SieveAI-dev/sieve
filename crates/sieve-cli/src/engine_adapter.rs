@@ -1,8 +1,11 @@
-//! 把 `sieve_rules::VectorscanEngine` 适配到 `sieve_core::OutboundEngine` /
+//! 把 `sieve_rules::MatchEngine` 适配到 `sieve_core::OutboundEngine` /
 //! `sieve_core::InboundEngine` trait。
 //!
 //! 阶段 1 sieve-core 不依赖 sieve-rules，所以 trait 定义在 sieve-core，
 //! 由本 crate 在启动时桥接两边（`.cursorrules §3.3` crate 边界协调）。
+//!
+//! v2.0 Phase A 升级：adapter 改为泛型 `<E: MatchEngine>`，支持 `LayeredEngine<S, U>`
+//! 传入（PRD §6.3 + §5.5.2.1），`is_excluded` 逻辑提取为模块级函数。
 //!
 //! 关联 ADR-002 / PRD §5.1 / Week 2 出站 / Week 3 入站拦截集成。
 
@@ -18,20 +21,58 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
-/// `VectorscanEngine` 包装，实现 `sieve_core::OutboundEngine`。
+/// 检查命中片段是否被 placeholder 黑名单或 per-rule allowlist 排除。
+///
+/// 原先是 `VectorscanEngine::is_excluded` 的职责；提取到模块级后 adapter 可对任意
+/// `MatchEngine` 实现通用过滤，不再依赖 `VectorscanEngine` 具体类型。
+///
+/// - `candidate`：vectorscan 命中的 matched text（短，仅命中片段）
+/// - `full_context`：完整文档内容，用于 `allowlist_stopwords` 上下文感知匹配
+/// - `rule`：对应规则条目（含 allowlist 数据）
+fn is_excluded_by_rule(candidate: &str, full_context: &str, rule: &RuleEntry) -> bool {
+    // 全局 placeholder 黑名单
+    if sieve_rules::placeholder::is_placeholder(candidate) {
+        return true;
+    }
+    // per-rule allowlist regexes（仅匹配 candidate，保持精准）
+    for r in &rule.allowlist_regexes {
+        if let Ok(re) = regex::Regex::new(r) {
+            if re.is_match(candidate) {
+                return true;
+            }
+        }
+    }
+    // per-rule allowlist stopwords：在 full_context（全文）中查找
+    let search_in = if full_context.is_empty() {
+        candidate
+    } else {
+        full_context
+    };
+    for sw in &rule.allowlist_stopwords {
+        if search_in.contains(sw.as_str()) {
+            return true;
+        }
+    }
+    false
+}
+
+/// 出站规则匹配引擎的包装，实现 `sieve_core::OutboundEngine`。
 ///
 /// 内部持有规则反查表（`rule_id → RuleEntry`），用于从 `MatchHit` 取真实 severity/action。
-pub struct OutboundAdapter {
-    engine: Arc<VectorscanEngine>,
+///
+/// 泛型 `E` 允许传入 `VectorscanEngine`（系统规则）或 `LayeredEngine<VectorscanEngine, UserEngine>`
+/// （系统 + 用户规则，PRD §6.3 / §5.5.2.1，Week 6 Phase A 起）。
+pub struct OutboundAdapter<E: MatchEngine + Send + Sync + 'static = VectorscanEngine> {
+    engine: Arc<E>,
     /// rule_id → RuleEntry 反查表，用于从 MatchHit 映射元数据。
     rule_lookup: HashMap<String, RuleEntry>,
 }
 
-impl OutboundAdapter {
+impl<E: MatchEngine + Send + Sync + 'static> OutboundAdapter<E> {
     /// 构造 adapter。
     ///
-    /// `rules` 与 `VectorscanEngine::compile` 传入的规则集一致，用于构建反查表。
-    pub fn new(engine: Arc<VectorscanEngine>, rules: Vec<RuleEntry>) -> Self {
+    /// `rules` 与编译时传入的规则集一致，用于构建反查表。
+    pub fn new(engine: Arc<E>, rules: Vec<RuleEntry>) -> Self {
         let rule_lookup = rules.into_iter().map(|r| (r.id.clone(), r)).collect();
         Self {
             engine,
@@ -134,19 +175,22 @@ fn redact_evidence(matched: &str) -> String {
     }
 }
 
-/// `VectorscanEngine` 包装，实现 `sieve_core::InboundEngine`。
+/// 入站规则匹配引擎的包装，实现 `sieve_core::InboundEngine`。
 ///
 /// 与 [`OutboundAdapter`] 共用辅助函数（`map_severity` / `map_action` / `redact_evidence`），
 /// 额外在工具调用检查中调用 `sieve_rules::critical_lock::enforce_action` 保证 fail-closed。
-pub struct InboundAdapter {
-    engine: Arc<VectorscanEngine>,
+///
+/// 泛型 `E` 允许传入 `VectorscanEngine`（系统规则）或 `LayeredEngine<VectorscanEngine, UserEngine>`
+/// （系统 + 用户规则，PRD §6.3 / §5.5.2.1，Week 6 Phase A 起）。
+pub struct InboundAdapter<E: MatchEngine + Send + Sync + 'static = VectorscanEngine> {
+    engine: Arc<E>,
     /// rule_id → RuleEntry 反查表。
     rule_lookup: HashMap<String, RuleEntry>,
 }
 
-impl InboundAdapter {
+impl<E: MatchEngine + Send + Sync + 'static> InboundAdapter<E> {
     /// 构造 adapter。
-    pub fn new(engine: Arc<VectorscanEngine>, rules: Vec<RuleEntry>) -> Self {
+    pub fn new(engine: Arc<E>, rules: Vec<RuleEntry>) -> Self {
         let rule_lookup = rules.into_iter().map(|r| (r.id.clone(), r)).collect();
         Self {
             engine,
@@ -155,7 +199,7 @@ impl InboundAdapter {
     }
 }
 
-impl InboundEngine for InboundAdapter {
+impl<E: MatchEngine + Send + Sync + 'static> InboundEngine for InboundAdapter<E> {
     fn scan_text(
         &self,
         input: &str,
@@ -175,7 +219,7 @@ impl InboundEngine for InboundAdapter {
             let matched_text = &input[evidence_start..evidence_end];
 
             if let Some(r) = rule {
-                if self.engine.is_excluded(matched_text, input, r) {
+                if is_excluded_by_rule(matched_text, input, r) {
                     continue;
                 }
             }
@@ -319,7 +363,7 @@ impl InboundEngine for InboundAdapter {
     }
 }
 
-impl OutboundEngine for OutboundAdapter {
+impl<E: MatchEngine + Send + Sync + 'static> OutboundEngine for OutboundAdapter<E> {
     /// 扫描文本，返回已过滤（per-rule allowlist）的命中列表，并执行 BIP39 second-pass。
     ///
     /// - `body_byte_offset`：该文本段在原始请求 body 中的绝对起始偏移，
@@ -349,7 +393,7 @@ impl OutboundEngine for OutboundAdapter {
             let matched_text = &input[evidence_start..evidence_end];
 
             if let Some(r) = rule {
-                if self.engine.is_excluded(matched_text, input, r) {
+                if is_excluded_by_rule(matched_text, input, r) {
                     continue;
                 }
             }

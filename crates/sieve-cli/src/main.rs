@@ -33,7 +33,7 @@ use engine_adapter::{InboundAdapter, OutboundAdapter};
 use sieve_core::detection::DefaultOnTimeout;
 use sieve_core::pipeline::inbound::AddressGuardConfig;
 use sieve_core::pipeline::outbound::OutboundFilter;
-use sieve_rules::engine::VectorscanEngine;
+use sieve_rules::engine::{LayeredEngine, MatchEngine, VectorscanEngine};
 use sieve_rules::loader::{load_inbound_rules, load_outbound_rules};
 
 /// 入站规则中不送入 vectorscan 编译的占位 pattern 列表（R6-#6）。
@@ -88,9 +88,21 @@ async fn main() -> Result<()> {
             tracing::info!(count = rules.len(), "outbound rules loaded");
 
             // 编译出站 vectorscan db（fail-closed）
-            let engine = VectorscanEngine::compile(rules.clone())
+            let system_engine = VectorscanEngine::compile(rules.clone())
                 .map_err(|e| anyhow::anyhow!("vectorscan compile: {e}"))?;
-            let adapter = OutboundAdapter::new(Arc::new(engine), rules);
+
+            // 加载用户规则（PRD §5.5 + §9 #14 fail-safe）
+            let user_rules_path = sieve_ipc::paths::sieve_home()
+                .map(|h| h.join("rules").join("user.toml"))
+                .ok();
+
+            // 出站用户规则引擎（PRD §9 #14：失败降级为 None，系统规则不受影响）
+            let outbound_user_engine =
+                load_user_engine_fail_safe(user_rules_path.as_deref(), "outbound");
+
+            // 用 LayeredEngine 包装系统 + 用户规则（PRD §6.3 / §5.5.2.1）
+            let outbound_layered = LayeredEngine::new(system_engine, outbound_user_engine);
+            let adapter = OutboundAdapter::new(Arc::new(outbound_layered), rules);
 
             // 加载 .sieveignore（出站 + 入站共用同一份）
             let sieveignore_path = cfg.resolved_sieveignore_path();
@@ -130,11 +142,17 @@ async fn main() -> Result<()> {
             );
 
             // 编译入站 vectorscan db（独立实例，fail-closed）
-            let inbound_engine_vs = VectorscanEngine::compile(vectorscan_rules)
+            let inbound_system_engine = VectorscanEngine::compile(vectorscan_rules)
                 .map_err(|e| anyhow::anyhow!("inbound vectorscan compile: {e}"))?;
+
+            // 入站用户规则引擎（PRD §9 #14 fail-safe，Phase A 无方向字段时同时挂两侧）
+            let inbound_user_engine =
+                load_user_engine_fail_safe(user_rules_path.as_deref(), "inbound");
+
+            // 用 LayeredEngine 包装入站系统 + 用户规则
+            let inbound_layered = LayeredEngine::new(inbound_system_engine, inbound_user_engine);
             // InboundAdapter 持有全量 rule_lookup（含 placeholder，用于反查元数据）
-            let inbound_adapter =
-                InboundAdapter::new(Arc::new(inbound_engine_vs), inbound_rules_raw);
+            let inbound_adapter = InboundAdapter::new(Arc::new(inbound_layered), inbound_rules_raw);
 
             // 从 IN-CR-01 RuleEntry 读取地址替换检测配置（修 R3-#5）。
             // 若未找到 IN-CR-01（不应发生），使用安全默认值（60s + fail-closed block）。
@@ -243,6 +261,95 @@ fn load_sieveignore(path: &Path) -> HashSet<String> {
                 "failed to load .sieveignore; proceeding with empty allowlist"
             );
             HashSet::new()
+        }
+    }
+}
+
+/// 加载并编译用户规则引擎（PRD §9 #14 fail-safe：失败返 `Err`，调用方降级为 `None`）。
+///
+/// 文件不存在时 `sieve_policy::loader::load_user_rules` 返回空 `UserRulesFile`，
+/// 空规则列表导致 `UserEngine::compile` 返回错误，此时 `load_user_engine_fail_safe`
+/// 返回 `None`，daemon 以纯系统规则正常启动。
+///
+/// `side` 仅用于日志标识（"outbound" / "inbound"）；Phase A 无方向字段，
+/// 用户规则同时挂入两侧（更保守，PRD §5.5 未明确分方向）。
+fn load_and_compile_user_engine(
+    path: &std::path::Path,
+) -> Result<sieve_policy::engine::UserEngine, anyhow::Error> {
+    use sieve_policy::lint::lint;
+    use sieve_policy::loader::load_user_rules;
+
+    // 文件不存在时 load_user_rules 返回空 UserRulesFile（PRD §5.5.2.1）
+    let file_size = if path.exists() {
+        std::fs::metadata(path)?.len()
+    } else {
+        0u64
+    };
+
+    let file = load_user_rules(path)?;
+
+    // 空规则 → 直接返错（调用方会降级为 None，效果等同于无用户规则）
+    if file.rules.is_empty() {
+        anyhow::bail!(
+            "user rules file is empty or not present at {}",
+            path.display()
+        );
+    }
+
+    // lint 校验（PRD §5.5.3）
+    let violations = lint(&file, file_size);
+    if !violations.is_empty() {
+        // PRD §9 #14：记录 + 返错（调用方把错降级为 warn + 用 None）
+        let summary = violations
+            .iter()
+            .map(|v| format!("[{}] {:?}: {}", v.rule_id, v.kind, v.message))
+            .collect::<Vec<_>>()
+            .join("; ");
+        anyhow::bail!("user rules lint failed: {summary}");
+    }
+
+    // 只编译启用规则
+    let enabled: Vec<_> = file.rules.into_iter().filter(|r| r.enabled).collect();
+    sieve_policy::engine::UserEngine::compile(enabled)
+        .map_err(|e| anyhow::anyhow!("compile user engine: {e}"))
+}
+
+/// fail-safe 包装：将 `load_and_compile_user_engine` 的失败降级为 `None`（PRD §9 #14）。
+///
+/// daemon 必须在用户规则损坏时正常启动，系统规则不受影响。
+fn load_user_engine_fail_safe(
+    path: Option<&std::path::Path>,
+    side: &str,
+) -> Option<sieve_policy::engine::UserEngine> {
+    let path = path?;
+    match load_and_compile_user_engine(path) {
+        Ok(eng) => {
+            tracing::info!(
+                side = side,
+                path = %path.display(),
+                rule_count = eng.rule_count(),
+                "用户规则加载成功（PRD §5.5）"
+            );
+            Some(eng)
+        }
+        Err(e) => {
+            // 文件不存在是正常状态，降低日志级别
+            let msg = e.to_string();
+            if msg.contains("empty or not present") {
+                tracing::debug!(
+                    side = side,
+                    path = %path.display(),
+                    "用户规则文件不存在，以纯系统规则启动（PRD §9 #14）"
+                );
+            } else {
+                tracing::warn!(
+                    side = side,
+                    path = %path.display(),
+                    error = %e,
+                    "用户规则加载失败，以纯系统规则继续启动（PRD §9 #14 fail-safe）"
+                );
+            }
+            None
         }
     }
 }

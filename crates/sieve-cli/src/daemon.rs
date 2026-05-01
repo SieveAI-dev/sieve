@@ -46,6 +46,193 @@ use tokio_stream::wrappers::ReceiverStream;
 use crate::config::Config;
 use crate::upstream_routes::UpstreamRoutes;
 
+// ── v2.0：灰名单辅助（PRD v2.0 §5.4.2）─────────────────────────────────────
+
+/// 计算 `DecisionRequest.allow_remember`（PRD v2.0 §5.4.2 / §5.4.3）。
+///
+/// fail-closed Critical 规则（`is_fail_closed` 返回 true）**必须强制 false**，
+/// 禁止用户通过 GUI Remember 将其加入灰名单。
+/// 非 Critical 规则可以为 `true`，允许用户选择"记住此决策"。
+///
+/// 多条 detection 时：任一 detection 的 rule_id 在 fail-closed 名单中 → 整批返回 `false`。
+/// （最保守策略，PRD §9 #3 / #14）
+///
+/// 关联：PRD v2.0 §5.4.2 灰名单 schema、§5.4.3 GUI 接口、sieve_ipc::DecisionRequest::allow_remember。
+fn compute_allow_remember(rule_ids: &[&str]) -> bool {
+    // 任意一条 rule_id 在 fail-closed 名单中 → 整批不可 remember
+    !rule_ids
+        .iter()
+        .any(|id| sieve_rules::critical_lock::is_fail_closed(id))
+}
+
+/// 从一组 detection 列表中提取 rule_id 切片，用于 `compute_allow_remember`。
+///
+/// 内联辅助，避免在每个调用点重复 collect。
+fn detection_rule_ids<'a>(detections: &'a [&sieve_core::Detection]) -> Vec<&'a str> {
+    detections.iter().map(|d| d.rule_id.as_str()).collect()
+}
+
+/// 写灰名单条目，二次校验 Critical 锁（PRD v2.0 §5.4.2 二次校验）。
+///
+/// 调用时机：daemon 收到 `DecisionResponse { decision=Allow, remember=true }` 之后。
+///
+/// 校验路径：
+/// 1. `is_fail_closed(rule_id) == true` → 写 audit ERROR + 忽略 remember（不写灰名单）
+/// 2. `add_entry` 失败 → warn + 不影响本次决策（用户已 Allow，仍 forward）
+///
+/// 关联：PRD v2.0 §5.4.2「Critical 锁约束」三道防线、§5.4.3 GUI 接口。
+///
+/// # 参数
+/// - `rule_id`：命中的规则 ID
+/// - `matched_text`：命中文本（用于 fingerprint 计算；去空白 + 统一小写）
+/// - `tool_name`：触发工具名（可空）
+/// - `protocol`：`"anthropic"` 或 `"openai"`
+/// - `content_kind`：`"tool_use_input"` / `"json_response_body"` 等
+/// - `source_agent_str`：source_agent 字符串表示
+/// - `context_hint`：用户在 GUI 输入的备注（来自 DecisionResponse.context_hint）
+/// - `audit_event_id`：本次 audit 事件 ID（v4 UUID 字符串）
+#[allow(clippy::too_many_arguments)]
+fn try_write_graylist(
+    rule_id: &str,
+    matched_text: &str,
+    tool_name: &str,
+    protocol: &str,
+    content_kind: &str,
+    source_agent_str: &str,
+    context_hint: Option<String>,
+    audit_event_id: &str,
+) {
+    // 二次校验 Critical 锁（防 GUI 端绕过，PRD §5.4.2 第三道防线）
+    if sieve_rules::critical_lock::is_fail_closed(rule_id) {
+        tracing::error!(
+            rule_id,
+            "二次校验失败：fail-closed Critical 规则不可 remember，忽略灰名单写入 + audit ERROR"
+        );
+        // TODO（v2.1）：写 audit ERROR 事件（audit 接入完成后替换此 tracing::error）
+        return;
+    }
+
+    let graylist_dir = match sieve_ipc::paths::sieve_home() {
+        Ok(home) => home.join("decisions"),
+        Err(e) => {
+            tracing::warn!(error = %e, "无法获取 SIEVE_HOME，跳过灰名单写入");
+            return;
+        }
+    };
+
+    // 规范化命中文本（去首尾空白 + 统一小写）
+    let canonical = matched_text.trim().to_lowercase();
+
+    let inputs = sieve_policy::graylist::FingerprintInputs {
+        rule_id: rule_id.to_owned(),
+        matched_canonical: canonical,
+        tool_name: tool_name.to_owned(),
+        protocol: protocol.to_owned(),
+        content_kind: content_kind.to_owned(),
+        source_agent: source_agent_str.to_owned(),
+    };
+    let fingerprint = sieve_policy::graylist::compute_fingerprint(&inputs);
+
+    let entry = sieve_policy::graylist::GraylistEntry {
+        schema_version: 1,
+        fingerprint_version: 1,
+        rule_id: rule_id.to_owned(),
+        rule_version: "v2.0".to_owned(),
+        fingerprint: fingerprint.clone(),
+        fingerprint_inputs: inputs,
+        decision: "allow".to_owned(),
+        expires_at: None,
+        added_at: chrono::Utc::now().timestamp_millis(),
+        added_by: "gui_user_decision".to_owned(),
+        context_hint,
+        match_count_since: 0,
+        audit_event_id: audit_event_id.to_owned(),
+    };
+
+    if let Err(e) = sieve_policy::graylist::add_entry(&graylist_dir, entry) {
+        // add_entry 失败不影响本次决策（用户已 Allow，仍 forward）
+        tracing::warn!(error = %e, rule_id, fingerprint, "灰名单写入失败（warn only，不影响本次 Allow 决策）");
+        // TODO（v2.1）：写 audit ERROR 事件
+    } else {
+        tracing::info!(rule_id, fingerprint, "灰名单条目已写入");
+    }
+}
+
+/// 查询灰名单，命中时返回 `true`（表示应直接 Allow，跳过 IPC 弹窗）。
+///
+/// fail-closed：查询失败（文件损坏 / 权限错）→ warn + 返回 `false`，走正常 IPC 流程。
+/// PRD §9 #14 禁止 fail-open。
+///
+/// 关联：PRD v2.0 §5.4.2 灰名单 schema、§5.4.3 GUI 接口预留。
+///
+/// # 参数说明
+/// 同 `try_write_graylist`，但 `matched_text` 允许来自任意命中片段（首条 detection）。
+fn check_graylist_hit(
+    rule_id: &str,
+    matched_text: &str,
+    tool_name: &str,
+    protocol: &str,
+    content_kind: &str,
+    source_agent_str: &str,
+) -> bool {
+    // fail-closed 规则不可灰名单命中（即使文件存在也视为未命中）
+    if sieve_rules::critical_lock::is_fail_closed(rule_id) {
+        return false;
+    }
+
+    let graylist_dir = match sieve_ipc::paths::sieve_home() {
+        Ok(home) => home.join("decisions"),
+        Err(e) => {
+            tracing::warn!(error = %e, "无法获取 SIEVE_HOME，灰名单查询跳过");
+            return false;
+        }
+    };
+
+    let canonical = matched_text.trim().to_lowercase();
+    let inputs = sieve_policy::graylist::FingerprintInputs {
+        rule_id: rule_id.to_owned(),
+        matched_canonical: canonical,
+        tool_name: tool_name.to_owned(),
+        protocol: protocol.to_owned(),
+        content_kind: content_kind.to_owned(),
+        source_agent: source_agent_str.to_owned(),
+    };
+    let digest = sieve_policy::graylist::compute_fingerprint(&inputs);
+
+    match sieve_policy::graylist::lookup(&graylist_dir, &digest) {
+        Ok(Some(entry)) if entry.decision == "allow" => {
+            tracing::info!(
+                rule_id,
+                fingerprint = %digest,
+                "灰名单命中 → 直接 Allow（跳过 IPC 弹窗）"
+            );
+            true
+        }
+        Ok(Some(_)) => false, // decision 不是 allow，走正常流程
+        Ok(None) => false,    // 未命中
+        Err(e) => {
+            // 查询失败（文件损坏 / 权限错）→ fail-closed（PRD §9 #14）
+            tracing::warn!(error = %e, rule_id, "灰名单查询失败，fail-closed 走正常 IPC 流程");
+            false
+        }
+    }
+}
+
+/// caller PID 反查 stub（PRD v2.0 §5.6 / §6.6 Phase A MVP）。
+///
+/// TCP peer_addr → PID 在 macOS 上需要 `proc_listpidspath` + 跨进程权限，
+/// 工程量超出 Week 6 范围。本期保持 stub 返回 `None`，
+/// 审计字段路径已打通，v2.1 只需替换此 stub 即可上线。
+///
+/// TODO（v2.1）：调用 `libc::proc_listpids` 扫描所有进程的 TCP socket，
+///     反查 peer_port 对应 PID，再用 `crate::process_context::lookup_caller` 获取完整信息。
+///     关联：PRD v2.0 §6.6 / §5.6。
+fn peer_addr_to_pid(_peer: std::net::SocketAddr) -> Option<i32> {
+    // v2.0 Phase A：stub，永远返回 None。
+    // v2.1 替换为真实 proc_listpids 实现。
+    None
+}
+
 // ── multi-agent header 解析（ADR-019）────────────────────────────────────────
 // 修 R8-#1：改用 sieve_ipc::parse_origin_header，支持 3 段（无签名）和 4 段（含签名）格式。
 // 旧实现用 rsplitn(2, ':') 在 4 段时把 base64 签名当 chain_depth 导致解析失败 → fail-open，
@@ -260,6 +447,21 @@ pub async fn run(
                 continue;
             }
         };
+
+        // v2.0 Phase A：caller PID 反查 stub（PRD §5.6 / §6.6）。
+        // peer_addr_to_pid 当前永远返回 None，v2.1 替换为真实 proc_listpids 实现。
+        // 此处记录日志以证明 audit 字段路径已打通，下游 v2.1 只替换 stub 即可。
+        let _caller_pid: Option<i32> = peer_addr_to_pid(peer);
+        let _caller_exe: Option<String> = _caller_pid.and_then(|pid| {
+            crate::process_context::lookup_caller(pid)
+                .and_then(|info| info.exe.map(|p| p.display().to_string()))
+        });
+        tracing::trace!(
+            peer = %peer,
+            caller_pid = ?_caller_pid,
+            caller_exe = ?_caller_exe,
+            "new connection: caller context (Phase A stub)"
+        );
 
         let forwarder = forwarder.clone();
         let filter = filter.clone();
@@ -506,6 +708,13 @@ async fn proxy_inner(
                     })
                     .collect();
 
+                // v2.0：计算 allow_remember（PRD §5.4.2）
+                let skill_rule_ids: Vec<&str> = skill_detections
+                    .iter()
+                    .map(|d| d.rule_id.as_str())
+                    .collect();
+                let allow_remember = compute_allow_remember(&skill_rule_ids);
+
                 let ipc_req = sieve_ipc::DecisionRequest {
                     request_id,
                     created_at: Utc::now(),
@@ -516,7 +725,7 @@ async fn proxy_inner(
                     origin_chain: origin_chain.clone(),
                     source_channel: source_channel.clone(),
                     explicit_chain_depth: Some(chain_depth),
-                    allow_remember: false, // v2.0：Week 6 由规则引擎计算
+                    allow_remember,
                 };
 
                 let timeout_dur = std::time::Duration::from_secs(u64::from(timeout_seconds).max(1));
@@ -527,6 +736,22 @@ async fn proxy_inner(
                         sieve_ipc::DecisionAction::Allow
                         | sieve_ipc::DecisionAction::RedactAndAllow => {
                             tracing::info!("IN-CR-06 GUI: Allow → 转发原 body");
+                            // v2.0：remember=true 时写灰名单（PRD §5.4.2 二次校验）
+                            if resp.remember && allow_remember {
+                                if let Some(d) = skill_detections.first() {
+                                    let agent_str = format!("{:?}", source_agent).to_lowercase();
+                                    try_write_graylist(
+                                        &d.rule_id,
+                                        &d.evidence_truncated,
+                                        "",
+                                        "anthropic",
+                                        "tool_use_input",
+                                        &agent_str,
+                                        resp.context_hint.clone(),
+                                        &request_id.to_string(),
+                                    );
+                                }
+                            }
                             // fall-through，继续路径分发
                         }
                         sieve_ipc::DecisionAction::Deny => {
@@ -692,12 +917,28 @@ async fn proxy_inner(
             .collect();
 
         if !hold_detections_outbound.is_empty() {
-            if let Some(ref ipc_server) = ipc {
+            // v2.0 §5.4.2：决策前先查灰名单（PRD §5.4.2 灰名单命中 → 直接 Allow，不调 IPC）
+            // fail-closed：查询失败 → 走正常 IPC 流程（PRD §9 #14 禁止 fail-open）
+            let agent_str_out = format!("{:?}", source_agent).to_lowercase();
+            let graylist_hit = hold_detections_outbound.first().is_some_and(|d| {
+                check_graylist_hit(
+                    &d.rule_id,
+                    &d.evidence_truncated,
+                    "",
+                    "anthropic",
+                    "outbound_text",
+                    &agent_str_out,
+                )
+            });
+            if graylist_hit {
+                tracing::info!("出站 Anthropic GuiPopup：灰名单命中 → 直接放行，跳过 IPC 弹窗");
+                // 灰名单命中：直接跳过 hold，继续往下走转发路径
+            } else if let Some(ref ipc_server) = ipc {
                 use chrono::Utc;
 
                 let request_id = uuid::Uuid::new_v4();
 
-                // 修 R11-#2：从 hold_detections 的 default_on_timeout 取最严策略��
+                // 修 R11-#2：从 hold_detections 的 default_on_timeout 取最严策略。
                 // 与 OpenAI 路径完全镜像（merge_strictest_timeout + map_dot_to_ipc）。
                 // OUT-06/08 default=Redact → 超时脱敏转发；OUT-07 default=Block → 超时 426。
                 let (timeout_seconds, default_on_timeout) = hold_detections_outbound.iter().fold(
@@ -730,6 +971,10 @@ async fn proxy_inner(
                     })
                     .collect();
 
+                // v2.0：计算 allow_remember（PRD §5.4.2）
+                let outbound_rule_ids = detection_rule_ids(&hold_detections_outbound);
+                let allow_remember = compute_allow_remember(&outbound_rule_ids);
+
                 let ipc_req = sieve_ipc::DecisionRequest {
                     request_id,
                     created_at: Utc::now(),
@@ -742,7 +987,7 @@ async fn proxy_inner(
                     source_channel: source_channel.clone(),
                     // 修 R7-#5：填入 header 真实 chain_depth
                     explicit_chain_depth: Some(chain_depth),
-                    allow_remember: false, // v2.0：Week 6 由规则引擎计算
+                    allow_remember,
                 };
 
                 // 出站 hold：无 SSE keep-alive，直接 await 决策
@@ -753,6 +998,22 @@ async fn proxy_inner(
                     Ok(resp) => match resp.decision {
                         sieve_ipc::DecisionAction::Allow => {
                             tracing::info!("OUTBOUND GUI: Allow → 转发原 body");
+                            // v2.0：remember=true 时写灰名单（PRD §5.4.2）
+                            if resp.remember && allow_remember {
+                                if let Some(d) = hold_detections_outbound.first() {
+                                    let agent_str = format!("{:?}", source_agent).to_lowercase();
+                                    try_write_graylist(
+                                        &d.rule_id,
+                                        &d.evidence_truncated,
+                                        "",
+                                        "anthropic",
+                                        "outbound_text",
+                                        &agent_str,
+                                        resp.context_hint.clone(),
+                                        &request_id.to_string(),
+                                    );
+                                }
+                            }
                             // 继续往下，走正常转发路径
                         }
                         sieve_ipc::DecisionAction::RedactAndAllow => {
@@ -1184,6 +1445,10 @@ async fn proxy_openai(
                 })
                 .collect();
 
+            // v2.0：计算 allow_remember（PRD §5.4.2）
+            let openai_outbound_rule_ids = detection_rule_ids(&hold_detections);
+            let allow_remember = compute_allow_remember(&openai_outbound_rule_ids);
+
             let ipc_req = sieve_ipc::DecisionRequest {
                 request_id,
                 created_at: Utc::now(),
@@ -1196,7 +1461,7 @@ async fn proxy_openai(
                 source_channel: source_channel.clone(),
                 // 修 R7-#5：填入 header 真实 chain_depth
                 explicit_chain_depth: Some(chain_depth),
-                allow_remember: false, // v2.0：Week 6 由规则引擎计算
+                allow_remember,
             };
 
             let timeout_dur = std::time::Duration::from_secs(u64::from(timeout_seconds).max(1));
@@ -1206,6 +1471,22 @@ async fn proxy_openai(
                 Ok(resp) => match resp.decision {
                     sieve_ipc::DecisionAction::Allow => {
                         tracing::info!("OUTBOUND GUI (openai): Allow → 转发原 body");
+                        // v2.0：remember=true 时写灰名单（PRD §5.4.2）
+                        if resp.remember && allow_remember {
+                            if let Some(d) = hold_detections.first() {
+                                let agent_str = format!("{:?}", source_agent).to_lowercase();
+                                try_write_graylist(
+                                    &d.rule_id,
+                                    &d.evidence_truncated,
+                                    "",
+                                    "openai",
+                                    "outbound_text",
+                                    &agent_str,
+                                    resp.context_hint.clone(),
+                                    &request_id.to_string(),
+                                );
+                            }
+                        }
                         // fall-through 到透传（不脱敏，用户明确选择原样允许）
                     }
                     sieve_ipc::DecisionAction::RedactAndAllow => {
@@ -1642,6 +1923,11 @@ async fn forward_with_inbound_inspection(
                                 })
                                 .collect();
 
+                            // v2.0：计算 allow_remember（PRD §5.4.2）
+                            let inbound_sse_rule_ids: Vec<&str> =
+                                hold_detections.iter().map(|d| d.rule_id.as_str()).collect();
+                            let allow_remember = compute_allow_remember(&inbound_sse_rule_ids);
+
                             let ipc_req = sieve_ipc::DecisionRequest {
                                 request_id,
                                 created_at: Utc::now(),
@@ -1654,7 +1940,7 @@ async fn forward_with_inbound_inspection(
                                 source_channel: meta.source_channel.clone(),
                                 // 修 R7-#5：填入 header 真实 chain_depth
                                 explicit_chain_depth: Some(meta.chain_depth),
-                                allow_remember: false, // v2.0：Week 6 由规则引擎计算
+                                allow_remember,
                             };
 
                             let outcome = sieve_core::pipeline::inbound_hold::hold_and_decide(
@@ -1671,6 +1957,8 @@ async fn forward_with_inbound_inspection(
                                 | Ok(sieve_core::pipeline::HoldOutcome::RedactAndAllow) => {
                                     // 修 R2-#3：用户允许后，补发缓存的触发帧（hold 前未发），
                                     // 然后继续转发后续 SSE。
+                                    // v2.0：HoldOutcome 不携带 remember 字段，灰名单写入在 v2.1 接入
+                                    // hold_and_decide 返回完整 DecisionResponse 后实现。
                                     if tx
                                         .send(Ok(hyper::body::Frame::data(frame_bytes)))
                                         .await
@@ -1972,6 +2260,11 @@ async fn forward_with_openai_inbound_inspection(
                                 })
                                 .collect();
 
+                            // v2.0：计算 allow_remember（PRD §5.4.2）
+                            let openai_sse_rule_ids: Vec<&str> =
+                                hold_detections.iter().map(|d| d.rule_id.as_str()).collect();
+                            let allow_remember = compute_allow_remember(&openai_sse_rule_ids);
+
                             let ipc_req = sieve_ipc::DecisionRequest {
                                 request_id,
                                 created_at: Utc::now(),
@@ -1983,7 +2276,7 @@ async fn forward_with_openai_inbound_inspection(
                                 source_channel: meta.source_channel.clone(),
                                 // 修 R7-#5：填入 header 真实 chain_depth
                                 explicit_chain_depth: Some(meta.chain_depth),
-                                allow_remember: false, // v2.0：Week 6 由规则引擎计算
+                                allow_remember,
                             };
 
                             let outcome = sieve_core::pipeline::inbound_hold::hold_and_decide(
@@ -1998,6 +2291,7 @@ async fn forward_with_openai_inbound_inspection(
                             match outcome {
                                 Ok(sieve_core::pipeline::HoldOutcome::Allow)
                                 | Ok(sieve_core::pipeline::HoldOutcome::RedactAndAllow) => {
+                                    // v2.0：HoldOutcome 不携带 remember，灰名单写入推 v2.1
                                     if tx
                                         .send(Ok(hyper::body::Frame::data(frame_bytes)))
                                         .await
@@ -2269,7 +2563,10 @@ fn write_hook_pending_to(
         origin_chain: meta.origin_chain.clone(),
         source_channel: meta.source_channel.clone(),
         explicit_chain_depth: explicit_depth,
-        allow_remember: false, // v2.0：Week 6 由规则引擎计算
+        // v2.0：Hook 类规则 allow_remember 按 fail-closed 清单计算（PRD §5.4.2）
+        // Hook 类规则（IN-CR-02~04、IN-GEN-01/03）均在 FAIL_CLOSED_RULES 中，
+        // 正常情况下此值为 false；保持动态计算以兼容未来用户自定义规则。
+        allow_remember: compute_allow_remember(&[d.rule_id.as_str()]),
     };
 
     sieve_ipc::pending_file::write_pending(&ipc_req, sieve_home)?;

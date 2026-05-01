@@ -1674,6 +1674,7 @@ dependencies = [
  "hyper-util",
  "libc",
  "lru",
+ "regex",
  "rusqlite",
  "serde",
  "serde_json",
