@@ -250,7 +250,9 @@ flowchart LR
 
 > **公理 12**：**Critical FP > 0.5% → 用户禁用产品**。这是硬约束，不是工程优化项。任何 Critical 规则在 dogfood / 闭测期间触发 FP 即被回滚或降级到 High。
 
-### 5.1 实测基线（2026-05-01，详见 [CHANGELOG v1.5.2](../changelog/CHANGELOG.md#v152-blind-spots-and-public-replay---2026-05-01)）
+### 5.1 实测基线（2026-05-01，详见 [CHANGELOG v1.5.4](../changelog/CHANGELOG.md#v154-non-streaming-json-inbound-fix---2026-05-01)）
+
+> ⚠️ **历史说明**：v1.5.0~v1.5.3 实测的 FP 0% / Recall 99.71% **仅在 SSE 流响应模式有效**——非流式 `application/json` 响应路径有 P0 绕过漏洞（v1.5.4 已修，详见 [SECURITY.md 历史 Advisories](../../SECURITY.md#历史-advisories)）。下表数字是 v1.5.4 后**所有响应模式**实测。
 
 测试数据集：1951 条（226 + 600 合成攻击 / 70 + 1000 benign / 55 公开攻击复现），跑 `cargo test -p sieve-rules --release --test dataset_fp_rate -- --ignored --nocapture`。
 

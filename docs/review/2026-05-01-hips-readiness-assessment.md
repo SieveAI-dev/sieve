@@ -86,7 +86,7 @@ SSE 流（Anthropic / OpenAI 协议）
 
 ### 2.3 不足
 
-- 🔴 **P0 漏洞未关**（修复中）：非流式 `application/json` 响应里的 tool_use 完全绕过入站规则。意味着上游一返回 JSON 而不是 SSE，70 条规则全瞎。Week 4 标记必关，至今未关
+- ✅ **P0 漏洞已修**（v1.5.4，2026-05-01 commit `14153e2`）：非流式 `application/json` 响应里的 tool_use 此前完全绕过入站规则；同时修复隐蔽 bug：OpenAI `stream=false` 分支跳过入站检测（OpenAI 协议默认 stream=false，意味着 OpenAI 入站规则**从未生效过**）。详见 [SECURITY.md 历史 Advisories](../../SECURITY.md#历史-advisories)
 - ⚠️ **进程上下文丢失**：Sieve 当前不知道这次 tool_use 是哪个调用链发出的（X-Sieve-Origin 只到 sub-agent 层级，没到操作系统进程层级）。HIPS 级别需要知道"是 chrome.exe 还是 ssh-agent 调的"
 - ⚠️ **行为序列不分析**：InboundFilter 有 SessionState 但只做地址表 + tool_use 聚合，**不分析跨工具序列**。如"模型先 cat .env → 再 curl POST → 再 rm -rf 痕迹"这种典型 kill chain，每步都看似无害，但序列是攻击。Sieve 当前每步独立判断
 - ⚠️ **OpenAI 路径与 Anthropic 路径不对称**：两条几乎平行的代码路径（`forward_with_inbound_inspection` vs `forward_with_openai_inbound_inspection`），任何新检测要双倍维护成本
@@ -193,7 +193,7 @@ SSE 流（Anthropic / OpenAI 协议）
 ### 5.1 短期（Week 5-6，不破坏 GA 节奏）
 
 **P0 必做**：
-1. **关 P0 漏洞**：非流式 JSON 入站检测（修复中，今天完成）
+1. ~~关 P0 漏洞：非流式 JSON 入站检测~~（✅ 2026-05-01 v1.5.4 完成，含 OpenAI stream=false 隐蔽 bug 一并修复）
 2. **加 e2e 测试**：双层防御链路（Claude Code → hook → sieve-hook → IPC → 用户决策）端到端 1 条 happy path + 1 条 fail-closed
 3. **Fuzz 扩展**：BIP39 second-pass + address guard + IPC 协议各加 1 个 fuzz target
 4. **disposition 单一来源**：把 `critical_lock.rs::HOOK_RULES` / `GUI_RULES` 移除，改从 `rule.effective_disposition()` 单一来源拿——这是 ADR-014 + ADR-016 的设计意图，当前是历史遗留
@@ -222,7 +222,7 @@ SSE 流（Anthropic / OpenAI 协议）
 
 | 紧迫度 ↓ \ 收益 → | 高收益 | 中收益 | 低收益 |
 |------|------|------|------|
-| **🔴 立即** | P0 漏洞 / e2e 测试 / disposition 单一来源 | 进程上下文记录 | — |
+| **🔴 立即** | ~~P0 漏洞~~（✅ v1.5.4 关闭）/ e2e 测试 / disposition 单一来源 | 进程上下文记录 | — |
 | **🟠 Week 5-6** | 行为序列窗口 / Fuzz 扩展 | 三态决策 | — |
 | **🟡 GA 前** | 可编程规则 / 规则签名 + 热更新 | 真实流量回放 | — |
 | **🟢 Phase 2** | 沙箱执行 / 行为序列 ML | MITRE ATT&CK 映射 | SIGMA 导入 |
@@ -251,7 +251,7 @@ SSE 流（Anthropic / OpenAI 协议）
 
 **测试方案对规则正确性是业内顶级**（1951 样本 / 5 桶 / 0% FP / 99.71% recall + 公开攻击复现 + 4 fuzz target），但**对拦截引擎链路正确性偏弱**（双层防御 e2e 链路完全没测，真实 Claude Code → hook → sieve-hook → IPC 链路靠开发者手动 dogfood 验证）。这是 HIPS 改造的第一个该补的洞，比加新规则更重要。
 
-**P0 漏洞（非流式 JSON 入站绕过）必须先关**，否则 v1.5.x 的 70 条规则在常见生产路径上等于纸面数字。
+~~**P0 漏洞（非流式 JSON 入站绕过）必须先关**，否则 v1.5.x 的 70 条规则在常见生产路径上等于纸面数字。~~ → ✅ **v1.5.4 已关闭**（2026-05-01）。
 
 ---
 

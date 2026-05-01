@@ -128,7 +128,17 @@ IN-GEN-* 全部）失效。
 - PRD §5.2 「入站是 Sieve 真正的护城河」 / 公理 12 Critical FP < 0.5%
 - 本次 dogfood 验证 commit (待开)
 
-**状态**：Open（**Week 4 必须关闭**，2026-05-04 前）
+**状态**：✅ 已修复（v1.5.4，2026-05-01，commit 14153e2）
+
+**修复实现**（详见 [CHANGELOG v1.5.4](../docs/changelog/CHANGELOG.md#v154-non-streaming-json-inbound-fix---2026-05-01)）：
+- `daemon.rs::forward_with_inbound_inspection` 加 Content-Type 路由
+- 新增 `handle_anthropic_json_inbound` 解析 `content[]` → tool_use → InboundFilter
+- 新增 `handle_openai_json_inbound` 解析 `choices[].message.tool_calls[]`
+- 新增 `build_sieve_blocked_json_body` 构造拦截响应（保持 PRD §9 #11 协议层诚实）
+
+**子代理顺手发现的第二个隐蔽 bug**：`proxy_openai` 的 `stream=false` 分支原本直接 `forward_raw` 完全跳过入站检测——OpenAI 协议默认就是 stream=false，意味着 OpenAI 入站规则**从未生效过**。本 patch 一并修复。
+
+**测试验证**：新增 2 条集成测试 `anthropic_non_streaming_json_inbound_block` + `openai_non_streaming_json_inbound_block`，inbound_block 14/14 通过；dataset_fp_rate FP 0% / Recall 99.71% 不变（无回归）。
 
 ---
 

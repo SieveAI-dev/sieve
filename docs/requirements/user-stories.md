@@ -385,8 +385,10 @@
 **作为** P0 crypto-native 开发者，**我希望** Sieve 能拦住我作为 crypto 开发者最怕的五类攻击 —— **签名诱导 / 转账伪造 / .env 外泄 / 私钥外泄 / shell RCE** —— 同时不会在我做这五类的合法日常工作（写转账逻辑、读 dotenv 文档、用 systemctl 配服务、教徒弟 ssh-keygen）时弹窗骚扰，**以便** 我可以信任 Sieve 一直挂着用一周不需要二次确认。
 
 **关联 PRD**：[PRD v1.5 §5.2 IN-CR-* + §9 #7](../prd/sieve-prd-v1.5.md)
-**关联文档**：[CHANGELOG v1.5.1](../changelog/CHANGELOG.md#v151-rule-expansion---2026-05-01) / [tasks/2026-05-01-test-data-expansion-report.md](../../tasks/2026-05-01-test-data-expansion-report.md)
-**优先级**：P0（Phase 1 v1.5.1，付费门槛级）
+**关联文档**：[CHANGELOG v1.5.4](../changelog/CHANGELOG.md#v154-non-streaming-json-inbound-fix---2026-05-01) / [tasks/2026-05-01-test-data-expansion-report.md](../../tasks/2026-05-01-test-data-expansion-report.md) / [SECURITY.md 历史 Advisories](../../SECURITY.md#历史-advisories)
+**优先级**：P0（Phase 1 v1.5.4，付费门槛级）
+
+> ⚠️ **历史说明**：v1.5.0~v1.5.3 实测数字仅在 SSE 流响应模式有效，非流式 `application/json` + OpenAI `stream=false` 路径有 P0 绕过漏洞（v1.5.4 已修）。本 US 验收标准基于 v1.5.4 后所有响应模式实测。
 **验收标准**（基于 1896 样本数据集，见 `crates/sieve-rules/bench-data/`）：
 
 1. **拦截率**：attacks-by-fear/{signing,transfer,env-leak,private-key,shell-rce}/ 五桶整体 recall > 95%（当前 97.13%）
