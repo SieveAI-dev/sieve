@@ -5,5 +5,6 @@
 //! - `uninstall`：干净回滚 setup 改动（仅 macOS）
 
 pub mod doctor;
+pub mod rules;
 pub mod setup;
 pub mod uninstall;

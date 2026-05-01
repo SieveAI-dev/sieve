@@ -6,6 +6,7 @@ members = [
     "crates/sieve-cli",
     "crates/sieve-ipc",
     "crates/sieve-hook",
+    "crates/sieve-policy",
     "fuzz",
 ]
 exclude = [

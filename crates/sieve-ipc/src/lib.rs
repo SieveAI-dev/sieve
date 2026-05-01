@@ -52,6 +52,7 @@ mod tests {
             origin_chain: vec![],
             source_channel: None,
             explicit_chain_depth: None,
+            allow_remember: false,
         };
 
         let json = serde_json::to_string(&req).expect("serialize");
@@ -69,6 +70,7 @@ mod tests {
             decided_at: Utc::now(),
             by_user: true,
             remember: false,
+            context_hint: None,
         };
 
         let json = serde_json::to_string(&resp).expect("serialize");
@@ -144,6 +146,7 @@ mod tests {
             }],
             source_channel: Some("slack".to_owned()),
             explicit_chain_depth: None,
+            allow_remember: false,
         };
 
         let json = serde_json::to_string(&req).expect("serialize");
@@ -167,6 +170,7 @@ mod tests {
             origin_chain: vec![],
             source_channel: None,
             explicit_chain_depth: None,
+            allow_remember: false,
         };
         assert_eq!(req.chain_depth(), 0);
 
@@ -285,6 +289,7 @@ mod file_tests {
             origin_chain: vec![],
             source_channel: None,
             explicit_chain_depth: None,
+            allow_remember: false,
         }
     }
 
@@ -360,6 +365,7 @@ mod file_tests {
             decided_at: Utc::now(),
             by_user: true,
             remember: false,
+            context_hint: None,
         };
 
         let path = write_decision(&resp, tmp.path()).unwrap();
@@ -403,6 +409,7 @@ mod file_tests {
                 decided_at: Utc::now(),
                 by_user: true,
                 remember: false,
+                context_hint: None,
             };
             write_decision(&resp, &base_clone).unwrap();
         });
@@ -446,6 +453,7 @@ mod socket_tests {
             origin_chain: vec![],
             source_channel: None,
             explicit_chain_depth: None,
+            allow_remember: false,
         }
     }
 
@@ -518,6 +526,7 @@ mod socket_tests {
             origin_chain: vec![],
             source_channel: None,
             explicit_chain_depth: None,
+            allow_remember: false,
         };
 
         let start = std::time::Instant::now();
@@ -569,6 +578,7 @@ mod socket_tests {
             origin_chain: vec![],
             source_channel: None,
             explicit_chain_depth: None,
+            allow_remember: false,
         };
 
         let start = std::time::Instant::now();
@@ -645,6 +655,7 @@ mod socket_tests {
                                 decided_at: Utc::now(),
                                 by_user: true,
                                 remember: false,
+                                context_hint: None,
                             };
                             let rpc_resp = jsonrpc::Response {
                                 jsonrpc: "2.0".to_owned(),
@@ -763,6 +774,7 @@ mod socket_tests {
             origin_chain: vec![],
             source_channel: None,
             explicit_chain_depth: None,
+            allow_remember: false,
         };
 
         // GUI 连着但不回复，100ms 超时后应返回 Allow（default_on_timeout）。

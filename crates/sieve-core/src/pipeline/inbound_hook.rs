@@ -63,6 +63,7 @@ mod tests {
             origin_chain: vec![],
             source_channel: None,
             explicit_chain_depth: None,
+            allow_remember: false,
         }
     }
 

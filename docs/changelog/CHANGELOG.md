@@ -11,6 +11,55 @@
 
 ---
 
+## [v2.0-alpha-A-skeleton] - 2026-05-01
+
+### 背景
+
+PRD v2.0 Phase A 第一批落地：5 项 HIPS 升级能力（用户规则 / 三态 ask / 引擎抽象 / 进程上下文 / audit migration）的代码骨架。daemon 接入推 Week 6（本批仅 ship 模块本身 + CLI 入口）。
+
+### Added
+
+- **新 crate `sieve-policy`**（1680 行 + 40 测试）：
+  - `loader`：解析 `~/.sieve/rules/user.toml`，含 0600 文件权限 / 0700 目录 / no-follow symlink 三道安全校验（PRD §5.5.3-C）
+  - `lint`：11 类用户规则约束（A 语义 / B 资源 / C 文件系统）（PRD §5.5.3）
+  - `engine::UserEngine`：包装 `VectorscanEngine`，hits 自动加 `user:` 前缀（PRD §5.5.2.1）
+  - `graylist`：`~/.sieve/decisions/<digest>.json` 灰名单 add/lookup/remove，含 Critical 锁（add 前调 `is_critical_locked`，命中 → `PolicyError::CriticalRuleNotGraylistable`）（PRD §5.4.2）
+- **`sieve-rules` engine trait 扩展**（向后兼容）：新增 `ScanRequest` / `ScanReport` / `Direction` / `Protocol` / `ContentKind` + `LayeredEngine<S, U>`（系统先行 + Critical 命中立即返回，PRD §6.3.1）
+- **`sieve-cli/src/process_context.rs`**（310 行 + 5 测试）：macOS `proc_pidinfo` + `proc_pidpath` PID → CallerInfo 反查，30s LRU cache，反查耗时 P99 < 1ms；非 macOS 返 None stub（PRD §5.6 / §6.6）
+- **`sieve-cli` audit schema migration**（v1 → v2）：events 表加 `caller_pid INTEGER` + `caller_exe TEXT` 两列（NULL 可），`PRAGMA user_version` 跟踪版本，全新 DB 直接 v2，老 DB 在事务里 ALTER TABLE；append-only 触发器迁移后仍生效；`AuditEvent` 各 variant 加共享 `CallerContext { pid, exe }` 子结构（serde default 兼容旧 JSON）（PRD §5.6.1）
+- **`sieve-ipc` 三态决策协议扩展**（serde default 100% 向后兼容 v1.5）：
+  - `DecisionRequest.allow_remember: bool`（daemon 端必须用 `is_critical_locked` 计算，内置 Critical 强制 false）
+  - `DecisionResponse.context_hint: Option<String>`（GUI 用户备注，写灰名单 entry）
+  - `DecisionResponse.remember` 加 `#[serde(default)]` + 强化二次校验注释（PRD §5.4.2 三道防线）
+- **`sieve rules` CLI 子命令**（PRD §5.5.2 §5.5.5，4 个子命令 + 8 测试）：
+  - `edit`：调用 `$EDITOR`（fallback vim/nano）→ 关闭后 `sieve-policy` lint → backup 旧版本（保留 10 份）→ 提示重启 daemon
+  - `list`：合并展示用户规则（带 enabled/disabled 状态）+ 系统规则数量摘要（70 入站 + 11 出站）
+  - `disable <id>` / `enable <id>`：toml 序列化 + atomic rename（`.tmp` → `user.toml`）+ 0600 重置
+  - 模板自动写入 `~/.sieve/rules/user.toml`（首次 edit 时），目录 0700 + 文件 0600
+
+### Changed
+
+- `crates/sieve-cli/src/audit.rs`：370 行 → 640 行，新增 `migrate()` + `CallerContext` 子结构
+- `crates/sieve-rules/src/engine/mod.rs`：272 行 → 612 行，加 `MatchEngine` 默认方法（保留旧 `scan(&[u8])` 不破坏调用方）
+- `Cargo.toml` workspace 加 `crates/sieve-policy` 成员
+
+### Deferred to Week 6
+
+- daemon 接入 `LayeredEngine` 替换现有 `engine_adapter`
+- 灰名单查询挂入 daemon 决策路径（命中 → 跳过 GUI 弹窗直接 Allow）
+- `sieve rules edit` 完成后 IPC notify daemon hot-reload
+- 进程上下文实际写入 audit 路径
+- 用户规则 e2e 测试矩阵（PRD §9 #16 4 类 content-type 组合）
+- `compiled_pattern_size_bytes` 等 vectorscan_rs 暴露 `hs_database_size()` 后补 1MB 上限
+
+### Test
+
+- 全 workspace `cargo test --workspace --no-fail-fast`：**546 passed / 1 failed（已知 doctor 竞态，单跑通过）/ 3 ignored**
+- `cargo fmt --all -- --check`：clean
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings`：clean
+
+---
+
 ## [v2.0-hips-readiness] - 2026-05-01 [BREAKING]
 
 ### 背景

@@ -233,6 +233,7 @@ mod dispatch_impl {
                 origin_chain: vec![],
                 source_channel: None,
                 explicit_chain_depth: None,
+                allow_remember: false, // v2.0：Week 6 由 daemon 根据规则计算后传入
             };
 
             let outcome = inbound_hold::hold_and_decide(ipc, ipc_req, ka_tx).await?;
@@ -274,6 +275,7 @@ mod dispatch_impl {
                 origin_chain: vec![],
                 source_channel: None,
                 explicit_chain_depth: None,
+                allow_remember: false, // v2.0：Week 6 由 daemon 根据规则计算后传入
             };
 
             sieve_ipc::pending_file::write_pending(&ipc_req, &sieve_home)

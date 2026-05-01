@@ -54,6 +54,39 @@ pub enum Command {
     /// 从备份目录恢复原文件，卸载 launchd plist。
     /// 关联：ADR-015 / SPEC-003 §uninstall / SPEC-004 §2.3。
     Uninstall(UninstallArgs),
+    /// 用户规则管理（PRD v2.0 §5.5）。
+    ///
+    /// 维护 `~/.sieve/rules/user.toml`：编辑、列出、禁用、启用。
+    /// daemon hot-reload 推 Week 6（v2.0 Phase A 仅 ship 文件级操作）。
+    Rules(RulesArgs),
+}
+
+/// `sieve rules` 参数（PRD v2.0 §5.5.2）。
+#[derive(clap::Args, Debug)]
+pub struct RulesArgs {
+    /// 子命令。
+    #[command(subcommand)]
+    pub command: RulesCommand,
+}
+
+/// `sieve rules` 子命令枚举（PRD v2.0 §5.5.2，Phase A MVP 4 个）。
+#[derive(Debug, Subcommand)]
+pub enum RulesCommand {
+    /// 调用 `$EDITOR`（fallback vim/nano）编辑 user.toml；
+    /// 关闭后 lint + atomic backup + rename + IPC reload（reload TBD Week 6）。
+    Edit,
+    /// 列出 user.toml 中所有规则 + 系统规则数量摘要。
+    List,
+    /// 禁用指定规则（在 user.toml 中加 `enabled = false`，不删除）。
+    Disable {
+        /// 要禁用的规则 ID。
+        id: String,
+    },
+    /// 启用指定规则（反向操作）。
+    Enable {
+        /// 要启用的规则 ID。
+        id: String,
+    },
 }
 
 /// 支持的 AI agent 类型（SPEC-004 §2.1）。
