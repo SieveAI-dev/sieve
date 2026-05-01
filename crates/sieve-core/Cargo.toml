@@ -17,6 +17,10 @@ default = ["forwarder"]
 #
 # v1.4 注：dispatch / inbound_hold / inbound_hook 依赖 bytes + tokio(async)，
 # 这些模块通过 #[cfg(feature = "forwarder")] 与 fuzz no-feature 场景隔离。
+#
+# v2.0 Phase B beta（PRD §9 #15）：行为序列窗口默认关闭。
+# 调用方（sieve-cli）通过启用本 feature 激活序列检测；GA 前不在 default 中。
+sequence_detection = []
 forwarder = [
     "dep:tokio",
     "dep:hyper",

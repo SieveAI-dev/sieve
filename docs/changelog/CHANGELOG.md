@@ -11,6 +11,52 @@
 
 ---
 
+## [v2.0-alpha-B-skeleton] - 2026-05-01
+
+### 背景
+
+PRD v2.0 Phase B beta 启动（Week 8 范围）：行为序列窗口骨架 + 3 条 IN-SEQ-* 启发式 + daemon 双路径接入。**默认关闭**（PRD §9 #15），通过 cargo feature `sequence_detection` opt-in 启用。
+
+### Added
+
+- **`sieve-core/sequence` 新模块**（808 行 + 26 测试）：
+  - `sequence/mod.rs`（204 行）：`ToolUseRecord` / `ToolUseSequence` / `SequenceConfig`（默认 N=10 / TTL=300s 滑动窗口，PRD §5.7.1）
+  - `sequence/feature.rs`（282 行）：从 `tool_name + tool_input` 提取结构化特征（`ToolClass` Shell/FileRead/FileWrite/Network/Other × `PathCategory` SensitiveSecret/Wallet/DotEnv/Code/Tmp/Other + 4 布尔位 network_egress / persistence_mech / cleanup_mech / sensitive_file_hint）；隐私安全：不存原始 input
+  - `sequence/detector.rs`（322 行）：3 条启发式 IN-SEQ-* 全 severity=High，**仅 StatusBar 通知**（PRD §9 #15 不引入 Block 路径）：
+    - `IN-SEQ-01-RECON-EXFIL`：FileRead+SensitiveSecret 之后 network_egress
+    - `IN-SEQ-02-CLEANUP-AFTER-ATTACK`：Shell+network_egress 之后 cleanup_mech
+    - `IN-SEQ-03-PERSISTENCE-CHAIN`：3 次 persistence_mech=true 跨**不同 tool_name**
+- **`SessionState.sequence_window` + `InboundFilter` 公开方法**：
+  - `record_tool_use_into_sequence(tool_name, input, rule_hits)`：feature off 时是 no-op
+  - `detect_sequence_hits()`：返回 IN-SEQ-* 命中
+  - feature off 时 SessionState 不含 sequence_window 字段，零运行时开销
+- **daemon 双路径接入**（PRD §5.7.4 + §9 #16）：
+  - 新 helper `record_into_sequence_and_detect`（daemon.rs）：3 处 tool_use 完成路径都调
+  - SSE 路径（`forward_with_inbound_inspection`）→ `path_label = "sse"`
+  - Anthropic JSON 路径（`handle_anthropic_json_inbound`）→ `path_label = "anthropic-json"`
+  - OpenAI JSON 路径（`handle_openai_json_inbound`）→ `path_label = "openai-json"`
+  - 命中 IN-SEQ-* 仅 `tracing::info!(target: "sequence_alert", ...)`，**不阻断**（PRD §9 #15）
+- **cargo features**：
+  - `crates/sieve-core/Cargo.toml`：`sequence_detection = []`（默认关闭）
+  - `crates/sieve-cli/Cargo.toml`：`sequence_detection = ["sieve-core/sequence_detection"]`（默认关闭）
+
+### Test
+
+- `cargo test --workspace --no-fail-fast`（feature off）：**610 passed / 1 failed（已知 doctor 竞态，单跑通过）/ 3 ignored**
+- `cargo test -p sieve-core --features sequence_detection`：169 passed（含 4 个序列 + InboundFilter 集成测试）
+- `cargo test -p sieve-cli --features sequence_detection --no-fail-fast`：207 passed（仍仅 doctor 竞态 1 失败）
+- `cargo build --features sieve-cli/sequence_detection`：成功；`cargo clippy --workspace --all-targets --features sieve-cli/sequence_detection -- -D warnings`：clean
+- 默认配置 + feature on 配置 fmt + clippy 全 clean
+
+### Deferred to Week 9 / v2.1
+
+- IN-SEQ-* 命中接入 IPC StatusBar 通知 + audit 写入（v2.1）
+- e2e 测试矩阵（PRD §9 #16）：mock 攻击序列在 4 类 content-type 组合下都触发 IN-SEQ-*（Week 9 dataset 落地后做）
+- 行为序列升级 Block 类的 ADR 评审（v2.1，需真实付费用户连续 4 周 ≥ 50 个序列样本 + FP rate < 0.5%，PRD §9 #15 升级触发条件）
+- ML 分类器训练（v2.1+）
+
+---
+
 ## [v2.0-alpha-A-integration] - 2026-05-01
 
 ### 背景
