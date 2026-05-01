@@ -184,8 +184,9 @@ flowchart LR
 | **sieve-hook**<br/>（独立 crate，独立二进制） | Claude Code PreToolUse hook 入口；启动 < 50ms；读 pending 文件；TTY y/n 倒计时；写 decisions 文件；exit 0/1 | `~/.sieve/pending/` 目录 | `~/.sieve/decisions/` 文件 + exit code | `serde_json`、`fd-lock`（最小依赖，禁止引入 vectorscan / rusqlite） |
 | **sieve-cli**<br/>（入口 crate） | 入口 / 配置加载 / `sieve setup` / `sieve doctor` / `sieve uninstall`（macOS only）/ 审计日志（SQLite）/ launchd 守护 | CLI args + `config.toml` | 启动 daemon / 管理命令输出 | `anyhow`（仅此 crate 允许）、`rusqlite`、`clap` |
 | **协议适配层 `protocol/openai.rs`**<br/>（`sieve-core`，**v1.5 新增**） | 解析 OpenAI Chat Completions API 请求/响应；将 delta / function_call / tool_calls 映射到 `UnifiedMessage`；处理 `data: [DONE]` 流结束标记 | 原始 HTTP/JSON 字节流（OpenAI 协议格式） | `UnifiedMessage`（与 anthropic.rs 输出一致，下游 Filter Pipeline 无感知） | `serde`、`sonic-rs`（与 anthropic.rs 共用） |
+| **sieve-policy**<br/>（独立 crate，**v2.0 Phase A 新增**） | 用户规则系统：加载 `~/.sieve/rules/user.toml` + 11 类安全约束 lint + 与系统规则合并（LayeredEngine） + 灰名单管理（`~/.sieve/decisions/`，含 Critical 锁三道防线） + `sieve rules edit` $EDITOR pipeline | `user.toml` + IPC reload 信号 | 用户规则 MatchEngine 实例（`Option<U>` 包装；加载失败时 None） + 灰名单查询 API | `sieve-rules`（trait）、`sieve-ipc`、`fd-lock`、`tempfile` |
 
-> **关联决策**：协议适配层设计见 [ADR-018](./ADR-018-openai-protocol-adaptation.md)（OpenAI 协议适配，由子代理 G2 撰写）。
+> **关联决策**：协议适配层设计见 [ADR-018](./ADR-018-openai-protocol-adaptation.md)。用户规则系统 + 三态决策 + 规则引擎抽象见 [ADR-020](./ADR-020-user-rules-system.md) / [ADR-021](./ADR-021-tri-state-decision-and-graylist.md) / [ADR-024](./ADR-024-rules-engine-abstraction.md)（v2.0 Phase A）。
 
 > **Native GUI App**（SwiftUI，常驻菜单栏、HIPS 弹窗、Preset 设置面板）在独立仓库 **`sieve-gui-macos`**，不在本 workspace。两仓库的协调契约是 `sieve-ipc` crate 中 IPC 协议版本（`v1` 起），详见 [ADR-012](./ADR-012-native-gui-app-phase1.md) + [ADR-013](./ADR-013-ipc-protocol.md)。
 
@@ -269,6 +270,9 @@ flowchart LR
 剩余 6 条漏拦记录在 `tasks/2026-05-01-public-attack-replay-report.md`，多数为 vectorscan 能力边界外（JS 语义分析 / RAG 投毒无 payload 特征 / 纯社工邮件不在 LLM 流量内）。
 
 ### 5.2 规则引擎 stopwords 全文搜索机制（v1.5.1 新增）
+
+> **v2.0 升级**（详见 [ADR-024](./ADR-024-rules-engine-abstraction.md)）：MatchEngine trait `scan(&[u8])` 接口将在 v2.0 Phase A 升级为 `scan(ScanRequest) -> ScanReport`，带上下文（direction / protocol / content_kind / tool_name / source_agent / caller_exe），让规则知道自己在哪条路径生效。LayeredEngine 包装系统规则 + 用户规则两层引擎，合并顺序保证用户规则不能 suppress 系统 Critical（PRD §9 #14）。
+
 
 `is_excluded(matched_text, full_context, rule)` 在 `allowlist_stopwords` 命中时，**在完整上下文中搜索停用词**而非仅在 7-20 字节的命中片段。这让短命中（`eval $`、`rm -rf /`、`systemctl enable`）能识别教学/合法场景：
 
