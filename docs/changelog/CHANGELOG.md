@@ -11,6 +11,70 @@
 
 ---
 
+## [v2.0-hips-readiness] - 2026-05-01 [BREAKING]
+
+### 背景
+
+依据 [HIPS Readiness Assessment](../review/2026-05-01-hips-readiness-assessment.md) 评估"Sieve 当前 HIPS 70%"，启动**完整 HIPS（Host-based Intrusion Prevention System）改造**。目标 GA 时达到 HIPS 90%。GA Week 12 时间表不变，Phase A（Week 5-8）+ Phase B（Week 9-12）拆分。
+
+经历 4 轮 review feedback：用户 feedback #1/#2 + 自查 feedback #3 范围瘦身 + codex review feedback #4（9 Must + 3 Should 全部落地），详见 [PRD v2.0 §15 changelog](../prd/sieve-prd-v2.0.md#v15--v20-changelog) + [docs/review/2026-05-01-codex-review-prd-v2.0.md](../review/2026-05-01-codex-review-prd-v2.0.md)。
+
+### Added
+
+- **PRD v2.0**：[docs/prd/sieve-prd-v2.0.md](../prd/sieve-prd-v2.0.md)（932 行，HIPS 改造全套设计）
+- **6 个新 ADR**（v2.0 核心决策）：
+  - [ADR-020](../design/ADR-020-user-rules-system.md) 用户规则系统
+  - [ADR-021](../design/ADR-021-tri-state-decision-and-graylist.md) 三态决策 + 灰名单 + Critical 锁
+  - [ADR-022](../design/ADR-022-behavior-sequence-window.md) 行为序列联动窗口
+  - [ADR-023](../design/ADR-023-process-context-audit.md) 进程上下文记录
+  - [ADR-024](../design/ADR-024-rules-engine-abstraction.md) 规则引擎抽象
+  - [ADR-025](../design/ADR-025-content-type-routing-matrix.md) content-type 路由矩阵
+- **新增 1 个 crate**：`sieve-policy`（用户规则加载 + lint + 灰名单 + $EDITOR pipeline，Phase A 落地）
+- **3 条新硬约束**（PRD v2.0 §9）：
+  - **#14 用户规则 fail-safe**：用户规则错误绝不影响系统规则功能；用户规则只能 High Ask/Warn/Mark，不能 override 系统 Critical
+  - **#15 行为序列保守起步 + GA 默认关闭**：IN-SEQ-* 仅 StatusBar 通知 + `[features] sequence_detection = false` 默认关闭 + GA 营销不承诺
+  - **#16 content-type 路由矩阵硬约束**（v1.5.4 P0 教训永久化）：所有新增入站功能必须有集成测试覆盖 4 类组合（Anthropic SSE/JSON × OpenAI SSE/stream=false JSON）
+- **3 条新检测项**（v2.0 Phase B beta）：IN-SEQ-01-RECON-EXFIL / IN-SEQ-02-CLEANUP-AFTER-ATTACK / IN-SEQ-03-PERSISTENCE-CHAIN
+- **三态决策灰名单 schema**：`~/.sieve/decisions/<digest>.json`（0600 权限 + atomic rename + no-follow symlink + 所有变更写 audit.db）
+- **进程上下文 audit 字段**：`caller_pid` + `caller_exe`（cwd/ppid 推 v2.1）
+- **行为序列窗口结构化特征**：`tool_class` / `path_category` / `network_egress` / `persistence_mech` / `cleanup_mech` / `sensitive_file_hint`
+- **LayeredEngine 合并顺序约束**：系统 Critical 命中立即返回；非 Critical → 追加用户规则 hits（"user:" 前缀）；用户规则不能 suppress 系统命中
+- **`sieve rules` 4 个核心子命令**（Phase A）：`edit`（调 $EDITOR + lint pipeline）/ `list` / `disable` / `enable`
+
+### Changed [BREAKING]
+
+- **PRD §9 硬约束从 13 条扩展到 16 条**（v1.5 → v2.0），新增 #14/#15/#16 详见 .cursorrules §二
+- **`docs/requirements/PRD-sieve.md` 指针**从 v1.5 升级到 v2.0
+- **`.cursorrules` §二** 同步 16 条硬约束 + §3.3 加 sieve-policy crate 边界
+- **MatchEngine trait 接口**（v2.0 Phase A 实施时落地）：`scan(&[u8])` → `scan(ScanRequest) -> ScanReport`，调用方需迁移传递上下文（direction / protocol / content_kind / tool_name / source_agent / caller_exe）
+- **IPC 协议扩展**（ADR-013）：`sieve.request_decision` 加 `allow_remember: bool`（daemon 计算）+ `sieve.decision_response` 加 `remember: bool` + `context_hint: Option<String>`，daemon 收到 remember=true 必须二次校验 critical_lock
+
+### Decisions（v2.0 review 后撤回的方案）
+
+- **撤回 sieve-interceptor crate / 拦截引擎抽象**：v2.0 第一版只做 macOS，daemon.rs 当前形态就是事实上的 MacOSInterceptor，强行抽象成 trait 收益要 v2.1+ 多平台时才用得上 → 推 v2.1（PRD §6.4）
+- **撤回 ratatui TUI 规则编辑器**：改 `$EDITOR` + lint pipeline，工程量从 5-7 天降到 1-2 天 → GUI 推 v2.1
+- **撤回 AI 辅助生成规则**：v2.0 不引入云端 LLM 依赖 → v2.1 评估（OQ-V20-05）
+- **撤回 caller_cwd / caller_ppid 字段**：macOS 需 entitlements + 用户授权弹安全提示，部署摩擦大 → 推 v2.1
+
+### Phase 拆分
+
+- **Phase A（Week 5-8）**：用户规则 + 三态 ask（含 Critical 锁）+ 规则引擎抽象 + 进程上下文记录 + `$EDITOR` 编辑器
+- **Phase B（Week 9-12，beta 默认关闭）**：行为序列窗口 + 3 条 IN-SEQ-* 启发式 + 双路径不变量
+- **GA Week 12** ship features：用户规则 + `$EDITOR` 编辑 + 三态 ask + 进程上下文 + 行为序列 beta opt-in
+
+### 风险登记新增 8 条
+
+R-V20-01~08（用户规则被诱导加白 / 行为序列 FP 失控 / 灰名单绕过 Critical / content-type 路由回归 / 用户规则资源耗尽 / 进程归因错误 / Phase A 范围过载 / 行为序列串会话），详见 PRD v2.0 §12。
+
+### Migration
+
+- 现有 v1.5 系统规则 / 规则文件 / 拦截 pipeline **完全兼容**，v2.0 是叠加扩展不是替换
+- 用户无 user.toml 时 daemon 行为与 v1.5 一致（系统规则全功能）
+- IPC 客户端不实现 `allow_remember` 字段时 daemon 按 v1.5 行为处理（兼容默认 false）
+- audit.db schema migration v1 → v2（自动加 caller_pid/exe 字段，旧记录 NULL）
+
+---
+
 ## [v1.5.4-non-streaming-json-inbound-fix] - 2026-05-01
 
 ### 背景

@@ -109,6 +109,16 @@ v1.4 将入站规则按 disposition 分为两类，拦截行为不同：
 - 用户**拒绝** / 超时 → `sieve.decision_response deny` → 代理注入 `sieve_blocked` event + 关闭流（fail-closed）
 - GUI 进程失联（30s 无响应）→ 代理超时 → fail-closed
 
+**v2.0 IPC 协议扩展**（详见 [ADR-021](../design/ADR-021-tri-state-decision-and-graylist.md) 三态决策）：
+
+- `sieve.request_decision` 新增字段：
+  - `allow_remember: bool` —— **daemon 端计算**该值（不让 GUI 决定）。当 `rule_id` 在 `critical_lock::FAIL_CLOSED_RULES` 时强制 false（PRD §9 #3 + ADR-007 fail-closed 不被绕过）
+- `sieve.decision_response` 新增字段：
+  - `remember: bool` —— GUI 用户在弹窗勾选 "永久允许"。daemon 收到 true 时**必须二次校验** rule_id 是否允许 Remember；不允许则忽略 + 写 audit ERROR
+  - `context_hint: Option<String>` —— GUI 表单输入的备注（"Vitalik 地址 read-only balanceOf 调用" 等），写入灰名单 JSON
+- 灰名单存储：`~/.sieve/decisions/<digest>.json`（文件名 hex digest，0600 权限，atomic rename，no-follow symlink；所有变更写 audit.db）
+- 内置 Critical 规则的 GUI 弹窗 Remember checkbox **必须 disabled+灰显**，tooltip 解释"内置 Critical 规则保护核心安全场景，不允许永久绕过"
+
 **出站 AutoRedact（OUT-01~05/06/08/11/12）**：
 - 请求 body 中敏感内容自动脱敏替换，**不返 426**，直接转发到上游，上游响应直通
 - 状态栏静默通知（不打断用户流程，[PRD §9 第 13 条](../prd/sieve-prd-v1.5.md)）

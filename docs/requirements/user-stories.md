@@ -400,6 +400,58 @@
 
 ---
 
+### US-22：高级用户编辑自定义规则（v2.0 Phase A）
+
+**作为** 已付费 6 个月、想"再严一档"的 P0/P1 客户，**我希望** 用 `sieve rules edit` 在熟悉的编辑器（vim/nano/code）里加自定义规则文件，**以便** 拦下我项目里的特定钓鱼模式（如 EIP-712 permit deadline=0），同时不破坏 Sieve 系统规则的拦截覆盖。
+
+**关联**：[PRD v2.0 §4.7 场景 G + §5.5 用户规则系统](../prd/sieve-prd-v2.0.md#5.5-用户规则系统-v2.0-新增) / [ADR-020](../design/ADR-020-user-rules-system.md)
+**优先级**：P0（v2.0 Phase A 必达）
+**验收标准**：
+
+1. `sieve rules edit` 调用 `$EDITOR`（fallback vim/nano）打开 user.toml；保存关闭后自动 lint + atomic backup + reload
+2. 11 类安全约束 lint 通过才能写入；违规时 stderr 打印行号 + 原因 + 保留原文件
+3. 用户规则**只能** High Ask/Warn/Mark，不能 Block / HookTerminal / 与系统规则冲突 / 设 Critical
+4. 用户规则**不能 override 系统 Critical 命中**（LayeredEngine 合并顺序保证：系统 Critical 先行，立即返回，不评估用户规则）
+5. user.toml 文件损坏时 daemon 仍正常启动 + 系统规则全功能（PRD §9 #14 fail-safe）
+6. `sieve rules disable <id>` 一键关闭单条用户规则（不删除）
+
+---
+
+### US-23：进程上下文记录用于 audit 追溯（v2.0 Phase A）
+
+**作为** Sieve 高级用户 / 安全工程师，**我希望** 当 Sieve 拦截某次工具调用时，audit.db 能记录哪个进程（PID + exe path）发起了请求，**以便** 我能定位是哪个 agent / 子进程出问题（特别是 multi-agent 嵌套场景）。
+
+**关联**：[PRD v2.0 §5.6 进程上下文记录](../prd/sieve-prd-v2.0.md#5.6-进程上下文记录-v2.0-phase-a-新增) / [ADR-023](../design/ADR-023-process-context-audit.md)
+**优先级**：P1（v2.0 Phase A 必达）
+**验收标准**：
+
+1. audit.db events 表加 `caller_pid` + `caller_exe` 两个字段（cwd / ppid 推 v2.1，避免 macOS entitlements 摩擦）
+2. macOS 走 `proc_pidinfo` + `proc_pidpath` 系统 API（不 shell out `lsof -i`，OQ-V20-02 决策）
+3. PID → CallerInfo 走 LRU cache 30s（同一调用方多次请求复用）
+4. 反查失败（权限不足等）→ 字段 NULL，daemon 不阻塞
+5. 反查耗时 < 1ms（hot path 性能预算）
+6. 数据**仅本地存储**（audit.db），不上传 doskey 服务器（PRD §11）
+
+---
+
+### US-24：行为序列检测（v2.0 Phase B beta，闭测用户主动 opt-in）
+
+**作为** 闭测期 / dogfood 用户，**我希望** 在 `~/.sieve/config.toml` 设 `[features] sequence_detection = true` 主动开启行为序列检测，**以便** 当 LLM 在 5 分钟内做出经典 kill chain（如 `Read(.env)` → `curl POST` → `rm`）时，状态栏给我提醒，而不是等单次规则命中。
+
+**关联**：[PRD v2.0 §5.7 行为序列联动 + §9 #15 保守起步](../prd/sieve-prd-v2.0.md#5.7-行为序列联动-v2.0-phase-b-beta-功能默认关闭) / [ADR-022](../design/ADR-022-behavior-sequence-window.md)
+**优先级**：P1（v2.0 Phase B MVP，**GA 默认关闭**）
+**验收标准**：
+
+1. 配置 `[features] sequence_detection = false` **GA 默认值**——闭测用户主动 opt-in（GA 营销不承诺行为序列）
+2. 滑动窗口默认 N=10 / TTL=5min；ToolUseRecord 存结构化安全特征（tool_class / path_category / network_egress / persistence_mech / cleanup_mech / sensitive_file_hint），不存原始 input
+3. 3 条 IN-SEQ-* 启发式触发（RECON-EXFIL / CLEANUP-AFTER-ATTACK / PERSISTENCE-CHAIN）
+4. 命中**仅触发 StatusBar 通知**（"过去 5 分钟内有可疑动作链 X"）—— **不引入新 Block 路径**（PRD §9 #15）
+5. 序列窗口更新点必须同时覆盖 SSE 路径 + JSON 路径（PRD §9 #16 / §5.7.4 双路径不变量）
+6. 单个会话独立 ToolUseSequence 实例（防止跨会话 FP，R-V20-08）
+7. 升级为 Block 类需走新 ADR + 4 周 ≥ 50 样本 + FP < 0.5%
+
+---
+
 ## 未覆盖的 Phase 2 故事
 
 以下故事属于 [PRD §5.1 / §5.2 Phase 2](../prd/sieve-prd-v1.5.md#5-功能需求) 范围，**Phase 1 不实现**，待真有用户需求 + 第二个商业化客户主动要时启动：
