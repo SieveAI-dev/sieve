@@ -10,7 +10,7 @@
 use sieve_rules::engine::{MatchEngine, VectorscanEngine};
 use sieve_rules::loader::{load_inbound_rules, load_outbound_rules};
 use sieve_rules::manifest::Severity;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn rules_dir() -> PathBuf {
     let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -64,9 +64,9 @@ fn read_samples(dir: &PathBuf) -> Vec<(PathBuf, String)> {
 }
 
 /// 递归读取目录及所有子目录下的 .txt 文件。
-fn read_samples_recursive(root: &PathBuf) -> Vec<(PathBuf, String)> {
+fn read_samples_recursive(root: &Path) -> Vec<(PathBuf, String)> {
     let mut samples = Vec::new();
-    let mut stack = vec![root.clone()];
+    let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
         if let Ok(entries) = std::fs::read_dir(&dir) {
             for entry in entries.flatten() {
@@ -96,11 +96,19 @@ fn bucket_for(path: &std::path::Path) -> String {
     let s = path.to_string_lossy();
     if let Some(idx) = s.find("/benign-near/") {
         let rest = &s[idx + "/benign-near/".len()..];
-        return rest.split('/').next().unwrap_or("benign-near-unknown").to_string();
+        return rest
+            .split('/')
+            .next()
+            .unwrap_or("benign-near-unknown")
+            .to_string();
     }
     if let Some(idx) = s.find("/attacks-by-fear/") {
         let rest = &s[idx + "/attacks-by-fear/".len()..];
-        return rest.split('/').next().unwrap_or("attacks-by-fear-unknown").to_string();
+        return rest
+            .split('/')
+            .next()
+            .unwrap_or("attacks-by-fear-unknown")
+            .to_string();
     }
     if s.contains("/benign/") {
         return "benign-generic".to_string();
@@ -140,7 +148,9 @@ fn benign_dataset_critical_fp_rate_below_threshold() {
         load_inbound_rules(&rules_dir().join("inbound.toml")).expect("load inbound rules");
 
     let mut benigns = read_samples_recursive(&bench_data_dir().join("benign"));
-    benigns.extend(read_samples_recursive(&bench_data_dir().join("benign-near")));
+    benigns.extend(read_samples_recursive(
+        &bench_data_dir().join("benign-near"),
+    ));
     let total = benigns.len();
     assert!(
         total >= 500,
@@ -218,7 +228,12 @@ fn benign_dataset_critical_fp_rate_below_threshold() {
     println!("\n=== Benign Dataset FP Rate Report ===");
     println!("Total benign samples: {total}");
     println!("Critical FP hits: {fp_count}");
-    println!("Overall FP rate: {}/{} = {:.4}%", fp_count, total, fp_rate * 100.0);
+    println!(
+        "Overall FP rate: {}/{} = {:.4}%",
+        fp_count,
+        total,
+        fp_rate * 100.0
+    );
 
     println!("\n--- Per-bucket breakdown ---");
     for (bucket, (bucket_total, bucket_fp, _)) in &per_bucket {
@@ -227,9 +242,7 @@ fn benign_dataset_critical_fp_rate_below_threshold() {
         } else {
             0.0
         };
-        println!(
-            "  {bucket:<40} {bucket_fp:>4}/{bucket_total:<4} = {bucket_rate:.2}%"
-        );
+        println!("  {bucket:<40} {bucket_fp:>4}/{bucket_total:<4} = {bucket_rate:.2}%");
     }
 
     if !fp_details.is_empty() {
@@ -262,7 +275,9 @@ fn attack_dataset_recall_rate() {
     let inbound = build_inbound_engine();
 
     let mut attacks = read_samples_recursive(&bench_data_dir().join("attacks"));
-    attacks.extend(read_samples_recursive(&bench_data_dir().join("attacks-by-fear")));
+    attacks.extend(read_samples_recursive(
+        &bench_data_dir().join("attacks-by-fear"),
+    ));
     let total_raw = attacks.len();
     assert!(
         total_raw >= 500,
@@ -344,9 +359,7 @@ fn attack_dataset_recall_rate() {
         } else {
             0.0
         };
-        println!(
-            "  {bucket:<40} {bucket_hit:>4}/{bucket_total:<4} = {bucket_rate:.2}%"
-        );
+        println!("  {bucket:<40} {bucket_hit:>4}/{bucket_total:<4} = {bucket_rate:.2}%");
     }
 
     if !missed.is_empty() {
@@ -404,7 +417,10 @@ fn public_replay_recall_rate() {
     let mut all_missed: Vec<String> = Vec::new();
 
     println!("\n=== Public Attack Replay Recall Report (方案 C, 2026-05-01) ===");
-    println!("{:<30} {:>8} {:>8} {:>10}", "Subdir", "Total", "Hits", "Recall%");
+    println!(
+        "{:<30} {:>8} {:>8} {:>10}",
+        "Subdir", "Total", "Hits", "Recall%"
+    );
     println!("{}", "-".repeat(60));
 
     for subdir in &subdirs {
@@ -430,7 +446,10 @@ fn public_replay_recall_rate() {
         }
 
         let recall_pct = hits as f64 / total as f64 * 100.0;
-        println!("{:<30} {:>8} {:>8} {:>9.1}%", subdir, total, hits, recall_pct);
+        println!(
+            "{:<30} {:>8} {:>8} {:>9.1}%",
+            subdir, total, hits, recall_pct
+        );
         grand_total += total;
         grand_hits += hits;
         all_missed.extend(missed);
