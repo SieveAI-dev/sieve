@@ -2422,6 +2422,43 @@ async fn forward_with_openai_inbound_inspection(
 /// 移入 hold_detections 而非 hook_detections，从而走 GUI hold 分支。
 ///
 /// 关联 ADR-019 §chain_depth 升级策略、PRD v1.5 §6.5。
+/// PRD v2.0 §5.7.4 双路径不变量：从 SSE / JSON 任一路径完成 tool_use 后调本 helper
+/// 把 record 加入序列窗口并跑 IN-SEQ-* 启发式。
+///
+/// 默认 cargo feature `sequence_detection` 关闭时（GA 默认形态，PRD §9 #15），
+/// `record_tool_use_into_sequence` 与 `detect_sequence_hits` 均为 no-op，本函数零开销。
+///
+/// 命中仅 tracing::info 通知（`target = "sequence_alert"`），**不引入新 Block 路径**
+/// （PRD §9 #15 硬约束）。GUI StatusBar 通知 + audit 写入推 v2.1。
+fn record_into_sequence_and_detect(
+    inbound_filter: &sieve_core::pipeline::inbound::InboundFilter,
+    tool: &sieve_core::CompletedToolCall,
+    rule_hits: &[sieve_core::Detection],
+    path_label: &'static str,
+) {
+    let rule_ids: Vec<String> = rule_hits.iter().map(|d| d.rule_id.clone()).collect();
+    if let Err(e) = inbound_filter.record_tool_use_into_sequence(&tool.name, &tool.input, rule_ids)
+    {
+        tracing::warn!(path = path_label, error = %e, "sequence_window record failed");
+        return;
+    }
+    match inbound_filter.detect_sequence_hits() {
+        Ok(hits) if !hits.is_empty() => {
+            for h in &hits {
+                tracing::info!(
+                    target: "sequence_alert",
+                    path = path_label,
+                    rule_id = %h.rule_id,
+                    description = %h.description,
+                    "IN-SEQ-* sequence detection hit (StatusBar notify, no block per PRD §9 #15)"
+                );
+            }
+        }
+        Ok(_) => {}
+        Err(e) => tracing::warn!(path = path_label, error = %e, "sequence_window detect failed"),
+    }
+}
+
 fn classify_inbound_detections(
     events: &[sieve_core::sse::parser::SseEvent],
     inbound_filter: &mut sieve_core::pipeline::inbound::InboundFilter,
@@ -2442,7 +2479,11 @@ fn classify_inbound_detections(
         }
         match aggregator.process(evt) {
             Ok(Some(tool)) => match inbound_filter.on_tool_use_complete(&tool) {
-                Ok(hits) => all_hits.extend(hits),
+                Ok(hits) => {
+                    // PRD §5.7.4 双路径不变量：SSE 路径接入序列窗口（feature off 时是 no-op）
+                    record_into_sequence_and_detect(inbound_filter, &tool, &hits, "sse");
+                    all_hits.extend(hits);
+                }
                 Err(e) => tracing::warn!(error = %e, "inbound on_tool_use_complete error"),
             },
             Ok(None) => {}
@@ -2709,6 +2750,13 @@ async fn handle_anthropic_json_inbound(
 
             match inbound_filter.on_tool_use_complete(&completed) {
                 Ok(hits) => {
+                    // PRD §5.7.4 双路径不变量：Anthropic JSON 路径接入序列窗口
+                    record_into_sequence_and_detect(
+                        &inbound_filter,
+                        &completed,
+                        &hits,
+                        "anthropic-json",
+                    );
                     for mut d in hits {
                         match &d.action {
                             sieve_core::detection::Action::Block => {
@@ -2844,6 +2892,13 @@ async fn handle_openai_json_inbound(
 
                 match inbound_filter.on_tool_use_complete(&completed) {
                     Ok(hits) => {
+                        // PRD §5.7.4 双路径不变量：OpenAI JSON 路径接入序列窗口
+                        record_into_sequence_and_detect(
+                            &inbound_filter,
+                            &completed,
+                            &hits,
+                            "openai-json",
+                        );
                         for mut d in hits {
                             match &d.action {
                                 sieve_core::detection::Action::Block => {

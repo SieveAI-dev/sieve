@@ -13,6 +13,13 @@ publish = false
 name = "sieve"
 path = "src/main.rs"
 
+[features]
+# v2.0 Phase B beta：行为序列检测，默认关闭（PRD §9 #15）。
+# 调用方通过 `cargo build --features sequence_detection` 启用，
+# 触发 sieve-core 内 SessionState.sequence_window + 3 条 IN-SEQ-* 启发式。
+default = []
+sequence_detection = ["sieve-core/sequence_detection"]
+
 [dependencies]
 sieve-core = { path = "../sieve-core" }
 sieve-rules = { path = "../sieve-rules" }

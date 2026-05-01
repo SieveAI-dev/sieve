@@ -17,6 +17,7 @@ pub mod forwarder;
 pub mod fuzz_helpers;
 pub mod pipeline;
 pub mod protocol;
+pub mod sequence;
 pub mod skill_install_guard;
 pub mod sse;
 pub mod tool_use_aggregator;
