@@ -22,7 +22,7 @@ pub use protocol::{
     AuditDbSnapshot, CancelReason, DecisionAction, DecisionRequest, DecisionResponse,
     DefaultOnTimeout, DetectionPayload, Disposition, EvaluateContentKind, EvaluateDirection,
     EvaluateMatch, EvaluateRecommendation, EvaluateRequest, EvaluateResult, GraylistEntrySummary,
-    GraylistSnapshot, HealthRequest, HealthResult, IpcSnapshot, ListGraylistRequest,
+    GraylistSnapshot, HealthRequest, HealthResult, HelloParams, IpcSnapshot, ListGraylistRequest,
     ListGraylistResult, ListenSnapshot, NotifyKind, OriginHop, PausedChangedNotify,
     PresetChangedNotify, PresetOverride, PresetSnapshot, RejectedOverride, ReloadConfigRequest,
     ReloadConfigResult, ReloadUserRules, RemoveGraylistRequest, RemoveGraylistResult,
@@ -31,7 +31,7 @@ pub use protocol::{
     Severity, SourceAgent, StatusBarNotify, UiPhase,
 };
 pub use socket_client::send_reload_user_rules_oneshot;
-pub use socket_server::{ControlError, ControlPlaneRequest, IpcServer};
+pub use socket_server::{ControlError, ControlPlaneRequest, HelloBuilder, IpcServer};
 
 #[cfg(test)]
 mod tests {

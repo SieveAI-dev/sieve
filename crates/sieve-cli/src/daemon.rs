@@ -648,6 +648,17 @@ pub async fn run(
             user_rules_count: arc_swap::ArcSwap::from_pointee(0),
             last_reload: arc_swap::ArcSwap::from_pointee(None),
         });
+        // SPEC-005 §3：注入 sieve.hello 握手通知所需静态信息。
+        // daemon_boot_id 在本次启动时生成一次，整生命周期不变。
+        let hello_builder = sieve_ipc::HelloBuilder {
+            daemon_boot_id: uuid::Uuid::new_v4(),
+            daemon_version: env!("CARGO_PKG_VERSION").to_owned(),
+            audit_db_user_version: audit_store.schema_version(),
+            started_at: chrono::Utc::now(),
+            preset: format!("{:?}", cfg.preset).to_lowercase(),
+        };
+        ipc_srv.set_hello_builder(hello_builder).await;
+
         crate::daemon_control_plane::spawn_control_plane_handler(
             Arc::clone(ipc_srv),
             Arc::clone(&audit_store),

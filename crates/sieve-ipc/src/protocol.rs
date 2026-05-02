@@ -614,6 +614,28 @@ pub struct RemoveGraylistResult {
 
 // ── v2.1 daemon → GUI notifications ──────────────────────────────────────────
 
+/// `sieve.hello` 握手通知参数（daemon → GUI，每次连接的第一条出站消息）。
+///
+/// 关联：SPEC-005 §3（握手协议）。
+/// GUI 收到后应校验 `protocol_version == "v2"`，不兼容时关闭连接。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HelloParams {
+    /// IPC 协议版本，当前固定为 `"v2"`。
+    pub protocol_version: String,
+    /// daemon 二进制版本（来自 Cargo.toml）。
+    pub daemon_version: String,
+    /// 当前是否处于暂停状态。
+    pub paused: bool,
+    /// 当前生效的 preset 名称（如 `"default"` / `"paranoid"` / `"custom"`）。
+    pub preset: String,
+    /// daemon 已运行秒数（启动时刻到连接时刻）。
+    pub uptime_seconds: u64,
+    /// audit.db 的 PRAGMA user_version（schema 版本）。
+    pub audit_db_user_version: u32,
+    /// daemon 本次启动时生成的唯一 UUID（整生命周期不变）。
+    pub daemon_boot_id: Uuid,
+}
+
 /// `sieve.preset_changed` 通知（daemon → GUI fan-out）。
 ///
 /// 关联：ADR-013 §S.3 / SPEC-002 §9.2。
