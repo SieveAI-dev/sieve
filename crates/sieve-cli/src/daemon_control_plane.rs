@@ -753,7 +753,7 @@ mod tests {
                 port: 11453,
             },
             daemon_version: "test".to_owned(),
-            protocol_version: "v1".to_owned(),
+            protocol_version: "v2".to_owned(),
             audit_db_path: PathBuf::from("/tmp/test_audit.db"),
             decisions_dir: PathBuf::from("/tmp/test_decisions"),
             user_rules_path: None,

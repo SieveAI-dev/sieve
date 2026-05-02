@@ -1,6 +1,6 @@
 # Sieve daemon · 进度
 
-> 上次更新：2026-05-02
+> 上次更新：2026-05-03
 > 当前阶段：**v2.0 协议代码改造**（SPEC-005 v2 r5 冻结 → 拉齐 sieve-ipc 实现）
 > 唯一进度真实源——任何任务完成必须更新本文件。
 
@@ -12,6 +12,7 @@
 
 ## ✅ 已完成（按时间倒序）
 
+- **2026-05-03** P1-6 协议版本号 v1 → v2（生产代码 2 处 + 测试夹具 2 处，测试全绿）
 - **2026-05-02** SPEC-005 v2 协议 r5 冻结 review 通过（`docs/review/2026-05-02-codex-spec-005-review-r5.md`），可进入代码改造
 - **2026-05-02** SPEC-005 v2 vs 代码 gap 分析完成（_gap-spec005-vs-code.md，已并入下方"下一步"清单后将删除）
 - **2026-05-02** tasks/ 与 docs/review/ 文档大扫除：12 份过期 todo/status/report + 17 份历史 codex review 全部归档到 `_archive/`，建立 PROGRESS.md 单一进度真实源
@@ -50,7 +51,7 @@ _无。等用户选定下一步执行哪一组 P0 后填入。建议每次最多
 - [ ] **[P1-3]** `HealthResult.paused` 拆为 `paused: bool` + 独立 `paused_until: Option<DateTime<Utc>>`（§9.5）
 - [ ] **[P1-4]** `DecisionResponse` 加 `ui_phase_when_clicked: Option<UiPhase>`（§6.2.1, §5.10）
 - [ ] **[P1-5]** `sieve.request_decision` 拆 wire DTO（§6.0, §6.1）— 字段展开 + `merged: true` + `received_at_daemon`；这是改造工作量最大的一项
-- [ ] **[P1-6]** `protocol_version` 字符串全部 `"v1"` → `"v2"`（含 `tests/control_plane_dispatch.rs:52,142`）
+- [x] **[P1-6]** `protocol_version` 字符串全部 `"v1"` → `"v2"`（含 `tests/control_plane_dispatch.rs:52,142`）（2026-05-03 完成）
 - [ ] **[P1-7]** `NotifyKind` 加 `HookTerminal` 变体（§5.9）
 - [ ] **[P1-8]** JSON 解析失败返回 `-32700 parse_error` 而非静默 return（§1.3.1, §12.2）— 加 `PARSE_ERROR` 常量
 - [ ] **[P1-9]** `sieve.set_paused` 响应前强制 fan-out（§10.0.1）— 改 `ControlPlaneRequest` 回执结构，让 `forward_reply` 在写 result 前先 broadcast
