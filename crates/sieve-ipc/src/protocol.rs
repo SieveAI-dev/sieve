@@ -13,7 +13,8 @@ use uuid::Uuid;
 pub struct StatusBarNotify {
     /// 全局唯一通知 ID（UUIDv7，便于追踪 + 去重）。
     pub notify_id: Uuid,
-    /// 创建时间（UTC）。
+    /// 创建时间（UTC，毫秒精度 + Z 后缀，SPEC-005 §4A）。
+    #[serde(serialize_with = "crate::ts_serde::serialize_utc_millis")]
     pub created_at: DateTime<Utc>,
     /// 通知类型枚举。
     pub kind: NotifyKind,
@@ -99,7 +100,8 @@ pub struct OriginHop {
     pub agent: SourceAgent,
     /// 此 hop 做了什么：user_input / delegate / skill_invoke / channel_message
     pub action: String,
-    /// 此跳发生的时间（UTC）。
+    /// 此跳发生的时间（UTC，SPEC-005 §4A）。
+    #[serde(serialize_with = "crate::ts_serde::serialize_utc_millis")]
     pub timestamp: DateTime<Utc>,
 }
 
@@ -184,7 +186,8 @@ pub struct DetectionPayload {
 pub struct DecisionRequest {
     /// 全局唯一请求 ID（UUIDv7，含时间戳，便于排序和 stale 检测）。
     pub request_id: Uuid,
-    /// 请求创建时间（UTC）。hook 侧用于 stale 检测（> 10 分钟视为过期）。
+    /// 请求创建时间（UTC，SPEC-005 §4A）。hook 侧用于 stale 检测（> 10 分钟视为过期）。
+    #[serde(serialize_with = "crate::ts_serde::serialize_utc_millis")]
     pub created_at: DateTime<Utc>,
     /// 用户响应超时时长（秒）。范围 30–120，由规则配置决定。
     pub timeout_seconds: u32,
@@ -301,7 +304,8 @@ pub struct DecisionResponse {
     pub request_id: Uuid,
     /// 决策动作。
     pub decision: DecisionAction,
-    /// 决策时间（UTC）。
+    /// 决策时间（UTC，SPEC-005 §4A）。
+    #[serde(serialize_with = "crate::ts_serde::serialize_utc_millis")]
     pub decided_at: DateTime<Utc>,
     /// `true` 表示用户主动操作，`false` 表示超时默认。
     pub by_user: bool,
@@ -361,8 +365,8 @@ pub struct SetPausedRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SetPausedResult {
     pub paused: bool,
-    /// 暂停截止时间（UTC）；`paused=false` 时为 None。
-    #[serde(default)]
+    /// 暂停截止时间（UTC，SPEC-005 §4A）；`paused=false` 时为 None。
+    #[serde(default, serialize_with = "crate::ts_serde::serialize_opt_utc_millis")]
     pub paused_until: Option<DateTime<Utc>>,
     /// 受暂停影响的 disposition 集合（Critical 锁规则的 disposition 永不出现在此列表）。
     pub applies_to: Vec<String>,
@@ -378,6 +382,7 @@ pub struct SetPresetRequest {
 /// `sieve.set_preset` 响应。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SetPresetResult {
+    #[serde(serialize_with = "crate::ts_serde::serialize_utc_millis")]
     pub applied_at: DateTime<Utc>,
 }
 
@@ -419,9 +424,10 @@ pub struct ReloadConfigRequest {}
 /// `sieve.reload_config` 响应。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReloadConfigResult {
+    #[serde(serialize_with = "crate::ts_serde::serialize_utc_millis")]
     pub reloaded_at: DateTime<Utc>,
-    pub system_rules_count: usize,
-    pub user_rules_count: usize,
+    pub system_rules_count: u32,
+    pub user_rules_count: u32,
     /// 用户规则 lint 错误清单（仅警告，不阻断）。
     pub user_rules_errors: Vec<String>,
 }
@@ -457,22 +463,23 @@ pub struct AuditDbSnapshot {
 /// 规则集快照（health 子结构）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RulesSnapshot {
-    pub system_count: usize,
-    pub user_count: usize,
+    pub system_count: u32,
+    pub user_count: u32,
+    #[serde(default, serialize_with = "crate::ts_serde::serialize_opt_utc_millis")]
     pub last_reload: Option<DateTime<Utc>>,
 }
 
 /// 灰名单快照（health 子结构）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraylistSnapshot {
-    pub active_count: usize,
+    pub active_count: u32,
 }
 
 /// IPC 状态快照（health 子结构）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IpcSnapshot {
-    pub connected_clients: usize,
-    pub total_decisions_inflight: usize,
+    pub connected_clients: u32,
+    pub total_decisions_inflight: u32,
 }
 
 /// `sieve.health` 响应。
@@ -480,13 +487,14 @@ pub struct IpcSnapshot {
 pub struct HealthResult {
     pub daemon_version: String,
     pub protocol_version: String,
+    #[serde(serialize_with = "crate::ts_serde::serialize_utc_millis")]
     pub started_at: DateTime<Utc>,
     pub uptime_seconds: u64,
     pub preset: PresetSnapshot,
     /// 当前是否处于暂停状态（SPEC-005 §9.5）。
     pub paused: bool,
-    /// 暂停截止时间（UTC）；`paused=false` 时为 None。
-    #[serde(default)]
+    /// 暂停截止时间（UTC，SPEC-005 §4A）；`paused=false` 时为 None。
+    #[serde(default, serialize_with = "crate::ts_serde::serialize_opt_utc_millis")]
     pub paused_until: Option<DateTime<Utc>>,
     pub listen: ListenSnapshot,
     pub audit_db: AuditDbSnapshot,
@@ -522,8 +530,13 @@ pub enum EvaluateDirection {
 pub struct EvaluateRequest {
     pub direction: EvaluateDirection,
     pub content_kind: EvaluateContentKind,
-    /// `"claude-code"` | `"openclaw"` | `"hermes"` | `"unknown"`。
-    pub source_agent: String,
+    /// 触发此次 evaluate 的上游 agent（SPEC-005 §5.7）。
+    ///
+    /// 旧版本发来 `"claude-code"` 字符串时，serde 无法匹配任何 SourceAgent 变体，
+    /// 因为 `SourceAgent` 使用 snake_case（`"claude"` / `"open_claw"` 等）。
+    /// 为保持向后兼容，字段类型维持为 `SourceAgent`；旧 GUI 应更新为 `"claude"`。
+    #[serde(default)]
+    pub source_agent: SourceAgent,
     pub payload: String,
 }
 
@@ -559,6 +572,7 @@ pub struct EvaluateRecommendation {
 /// `sieve.evaluate` 响应。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EvaluateResult {
+    #[serde(serialize_with = "crate::ts_serde::serialize_utc_millis")]
     pub evaluated_at: DateTime<Utc>,
     pub matches: Vec<EvaluateMatch>,
     /// 未命中的规则 ID 抽样（不保证完整列表）。
@@ -652,6 +666,7 @@ pub struct PresetChangedNotify {
     /// 仅 `mode == "custom"` 时有意义；其他模式可为空 map。
     #[serde(default)]
     pub overrides: std::collections::HashMap<String, PresetOverride>,
+    #[serde(serialize_with = "crate::ts_serde::serialize_utc_millis")]
     pub changed_at: DateTime<Utc>,
     /// `"cli"` | `"gui"` | `"config_reload"`。
     pub source: String,
@@ -670,8 +685,8 @@ pub struct PresetChangedNotify {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PausedChangedNotify {
     pub paused: bool,
-    /// 暂停截止时间（UTC）；未暂停时为 None。
-    #[serde(default)]
+    /// 暂停截止时间（UTC，SPEC-005 §4A）；未暂停时为 None。
+    #[serde(default, serialize_with = "crate::ts_serde::serialize_opt_utc_millis")]
     pub paused_until: Option<DateTime<Utc>>,
     /// `"user_request"` | `"auto_resumed"` | `"daemon_restart"`。
     pub reason: String,

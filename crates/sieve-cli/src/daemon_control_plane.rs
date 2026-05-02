@@ -496,8 +496,8 @@ async fn handle_reload_config(
 
     Ok(ReloadConfigResult {
         reloaded_at: now,
-        system_rules_count: **state.system_rules_count.load(),
-        user_rules_count: outcome.rule_count,
+        system_rules_count: (**state.system_rules_count.load()) as u32,
+        user_rules_count: outcome.rule_count as u32,
         user_rules_errors: outcome.user_rules_errors,
     })
 }
@@ -544,16 +544,16 @@ async fn handle_health(
             events_today: 0,
         },
         rules: RulesSnapshot {
-            system_count: **state.system_rules_count.load(),
-            user_count: **state.user_rules_count.load(),
+            system_count: (**state.system_rules_count.load()) as u32,
+            user_count: (**state.user_rules_count.load()) as u32,
             last_reload: **state.last_reload.load(),
         },
         graylist: GraylistSnapshot {
-            active_count: graylist_count,
+            active_count: graylist_count as u32,
         },
         ipc: IpcSnapshot {
-            connected_clients: ipc.connected_clients(),
-            total_decisions_inflight: ipc.inflight_decisions().await,
+            connected_clients: ipc.connected_clients() as u32,
+            total_decisions_inflight: ipc.inflight_decisions().await as u32,
         },
     })
 }
@@ -591,7 +591,12 @@ async fn handle_evaluate(
         protocol: Protocol::Anthropic,
         content_kind,
         tool_name: None,
-        source_agent: Some(params.source_agent.as_str()),
+        source_agent: Some(match &params.source_agent {
+            sieve_ipc::SourceAgent::Claude => "claude",
+            sieve_ipc::SourceAgent::OpenClaw => "openclaw",
+            sieve_ipc::SourceAgent::Hermes => "hermes",
+            sieve_ipc::SourceAgent::Unknown => "unknown",
+        }),
         caller_exe: None,
     };
 

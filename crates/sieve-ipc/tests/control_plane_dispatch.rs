@@ -205,7 +205,7 @@ async fn evaluate_oversized_payload_rejected() {
         serde_json::json!({
             "direction": "outbound",
             "content_kind": "raw_text",
-            "source_agent": "claude-code",
+            "source_agent": "claude",
             "payload": big_payload,
         }),
         "req-4",

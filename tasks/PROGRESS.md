@@ -12,6 +12,7 @@
 
 ## ✅ 已完成（按时间倒序）
 
+- **2026-05-03** P2 字段类型/序列化对齐（P2-1 usize→u32 + P2-3 Timestamp millis+Z + P2-6 EvaluateRequest.source_agent String→SourceAgent enum）
 - **2026-05-03** P1-NEW GUI→daemon error response 按段位清理 pending（-32100~99 段清理 pending decision channel，防泄漏；集成测试验证 -32100 → fallback 不 hang）
 - **2026-05-03** P1-10 fan-out write 加 2s bounded timeout（handle_connection 写方向 tokio::time::timeout(2s)；超时/EPIPE/ECONNRESET/EBADF 视为失联）
 - **2026-05-03** P1-9 set_paused/set_preset 响应前强制 fan-out（BroadcastPlan 枚举 + ControlPlaneRequest mutating reply 携带 BroadcastPlan + forward_reply_with_broadcast 先广播再写 result + 集成测试双 mock GUI 验证顺序）
@@ -79,12 +80,12 @@ _无。等用户选定下一步执行哪一组 P0 后填入。建议每次最多
 
 ### P2 风格 / 可读性
 
-- [ ] **[P2-1]** `*_count` 字段类型 `usize` → `u32`（§9.4 等）
-- [ ] **[P2-2]** P1-5 wire DTO 拆分时把 `created_at` 命名为 `received_at_daemon`
-- [ ] **[P2-3]** Timestamp 序列化保证 `Z` 后缀 + 毫秒精度（§4A）
-- [ ] **[P2-4]** 多 issue 合并形式（`merged: true` + `issues[]`）实现（§6.1.2, §6.2.2）
+- [x] **[P2-1]** `*_count` 字段类型 `usize` → `u32`（§9.4 等）（2026-05-03 完成）
+- [ ] **[P2-2]** P1-5 wire DTO 拆分时把 `created_at` 命名为 `received_at_daemon`（依赖 P1-5，跳过，随 P1-5 wire DTO 拆分时一并处理）
+- [x] **[P2-3]** Timestamp 序列化保证 `Z` 后缀 + 毫秒精度（§4A）（2026-05-03 完成，新增 ts_serde.rs）
+- [ ] **[P2-4]** 多 issue 合并形式（`merged: true` + `issues[]`）实现（§6.1.2, §6.2.2）（依赖 P1-5，跳过，随 P1-5 wire DTO 拆分时一并处理）
 - [ ] **[P2-5]** 建立 `tests/fixtures/v2/` + `tests/schema_v2_fixtures.rs`（17 method × 3 = 51 条最低门槛，§14.1）
-- [ ] **[P2-6]** `EvaluateRequest.source_agent` 改 `SourceAgent` enum（§5.7）— 测试中废弃 `"claude-code"`
+- [x] **[P2-6]** `EvaluateRequest.source_agent` 改 `SourceAgent` enum（§5.7）— 测试中废弃 `"claude-code"`（2026-05-03 完成）
 
 ### 双侧契约同步点（必须与 sieve-gui-macos 仓库 PROGRESS 同步推进）
 
