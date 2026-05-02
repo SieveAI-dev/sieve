@@ -490,7 +490,8 @@ async fn handle_health(
     state: &Arc<RuntimeState>,
 ) -> Result<HealthResult, ControlError> {
     let preset_snapshot = state.preset.load_full();
-    let paused = state.paused_now();
+    let paused_until_val = state.paused_now();
+    let paused_bool = paused_until_val.is_some();
 
     let audit_db_path = state.audit_db_path.clone();
     let audit_db_size = std::fs::metadata(&audit_db_path)
@@ -513,7 +514,8 @@ async fn handle_health(
             mode: preset_snapshot.mode.clone(),
             overrides: preset_snapshot.overrides.clone(),
         },
-        paused,
+        paused: paused_bool,
+        paused_until: paused_until_val,
         listen: state.listen.clone(),
         audit_db: AuditDbSnapshot {
             path: audit_db_path.display().to_string(),

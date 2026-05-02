@@ -45,7 +45,8 @@ fn spawn_mock_daemon(server: Arc<IpcServer>) {
                             mode: "default".to_owned(),
                             overrides: Default::default(),
                         },
-                        paused: None,
+                        paused: false,
+                        paused_until: None,
                         listen: ListenSnapshot {
                             addr: "127.0.0.1".to_owned(),
                             port: 11453,

@@ -478,9 +478,11 @@ pub struct HealthResult {
     pub started_at: DateTime<Utc>,
     pub uptime_seconds: u64,
     pub preset: PresetSnapshot,
-    /// 暂停截止时间；未暂停时为 None。
+    /// 当前是否处于暂停状态（SPEC-005 §9.5）。
+    pub paused: bool,
+    /// 暂停截止时间（UTC）；`paused=false` 时为 None。
     #[serde(default)]
-    pub paused: Option<DateTime<Utc>>,
+    pub paused_until: Option<DateTime<Utc>>,
     pub listen: ListenSnapshot,
     pub audit_db: AuditDbSnapshot,
     pub rules: RulesSnapshot,
