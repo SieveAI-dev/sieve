@@ -523,3 +523,94 @@ async fn set_paused_fan_out_before_result() {
 
     observer_task.abort();
 }
+
+/// SPEC-005 §12.4 / P1-NEW：GUI→daemon error response 在 -32100~99 段时清理 pending decision。
+///
+/// mock GUI 发送 request_decision 给一个正在等待的 pending，然后发回 -32100 error response；
+/// 验证 pending channel 被清理（request_decision 收到 Err，走 fallback，不 hang）。
+#[tokio::test]
+async fn gui_error_response_clears_pending_decision() {
+    use sieve_ipc::{DecisionRequest, DefaultOnTimeout, SourceAgent};
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use uuid::Uuid;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let socket_path = tmp.path().join("ipc.sock");
+    let server = start_server(&socket_path).await;
+    // 不 spawn mock daemon（不消费 control_rx）
+
+    // GUI 客户端连接
+    let path_for_gui = socket_path.clone();
+    let request_id = Uuid::now_v7();
+    let request_id_str = request_id.to_string();
+
+    let gui_task = tokio::spawn(async move {
+        let stream = tokio::net::UnixStream::connect(&path_for_gui)
+            .await
+            .unwrap();
+        let (read_half, mut write_half) = stream.into_split();
+        let mut lines = BufReader::new(read_half).lines();
+
+        // 跳过所有 notifications（hello 等），等到收到 sieve.request_decision
+        loop {
+            let line = tokio::time::timeout(Duration::from_secs(3), lines.next_line())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+            if v["method"].as_str() == Some("sieve.request_decision") {
+                break;
+            }
+        }
+
+        // 回复 -32100 error（GUI 拒绝此 decision）
+        let err_resp = serde_json::json!({
+            "jsonrpc": "2.0",
+            "error": { "code": -32100, "message": "decision_rejected" },
+            "id": request_id_str,
+        });
+        let mut payload = serde_json::to_string(&err_resp).unwrap();
+        payload.push('\n');
+        write_half.write_all(payload.as_bytes()).await.unwrap();
+
+        // 保持连接直到 task 被 abort
+        let _ = write_half.flush().await;
+        let _write_half = write_half;
+        loop {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(40)).await;
+
+    // 发起 request_decision（应在 GUI 回复 -32100 后快速 fallback）
+    let req = DecisionRequest {
+        request_id,
+        created_at: chrono::Utc::now(),
+        timeout_seconds: 30,
+        default_on_timeout: DefaultOnTimeout::Block,
+        detections: vec![],
+        source_agent: SourceAgent::Unknown,
+        origin_chain: vec![],
+        source_channel: None,
+        explicit_chain_depth: None,
+        allow_remember: false,
+    };
+
+    // timeout 设为 500ms；GUI 会在 request 到达后立即回复 -32100，
+    // pending channel 被 drop → request_decision 收到 Err → fallback（Block）。
+    let resp = tokio::time::timeout(
+        Duration::from_millis(500),
+        server.request_decision(req, Duration::from_secs(30)),
+    )
+    .await
+    .expect("request_decision should not hang after GUI sends -32100 error");
+
+    // fallback decision 是 Block（default_on_timeout）
+    assert!(
+        resp.is_ok(),
+        "request_decision should return fallback: {resp:?}"
+    );
+
+    gui_task.abort();
+}
