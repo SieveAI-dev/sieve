@@ -42,6 +42,28 @@ pub enum IpcError {
     /// 对端发送了无法识别的 JSON-RPC method 或响应格式异常。
     #[error("unexpected json-rpc response: {0}")]
     UnexpectedResponse(String),
+
+    /// 收到超大帧（SPEC-005 §1.3.1），连接已关闭。禁止在此处记录 payload。
+    #[error("oversize frame: {size_bytes} bytes")]
+    OversizeFrame { size_bytes: usize },
+
+    /// partial remainder 超过 1 MiB 无 newline（SPEC-005 §1.3.1），连接已关闭。
+    #[error("oversize remainder: {size_bytes} bytes")]
+    OversizeRemainder { size_bytes: usize },
+}
+
+impl From<crate::frame_reader::FrameError> for IpcError {
+    fn from(e: crate::frame_reader::FrameError) -> Self {
+        match e {
+            crate::frame_reader::FrameError::OversizeFrame { size_bytes } => {
+                Self::OversizeFrame { size_bytes }
+            }
+            crate::frame_reader::FrameError::OversizeRemainder { size_bytes } => {
+                Self::OversizeRemainder { size_bytes }
+            }
+            crate::frame_reader::FrameError::Io(e) => Self::Socket(e),
+        }
+    }
 }
 
 /// JSON-RPC 2.0 错误码常量（ADR-013 Supplement 2026-05-02 §S.2）。

@@ -25,12 +25,18 @@ fd-lock = { workspace = true }
 ed25519-dalek = { version = "2", default-features = false, features = ["std", "rand_core"] }
 # Base64 编码/解码，用于 header 签名字段序列化。
 base64 = "0.22"
+# bytes：BytesMut 用于 FrameReader 的可增长缓冲区（SPEC-005 §1.3.1）。
+bytes = { workspace = true }
+# memchr：SIMD 加速的 \n 扫描，用于帧接收算法（SPEC-005 §1.3.1）。
+memchr = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
 tokio = { workspace = true, features = ["full", "test-util"] }
 # 测试用随机数生成（生成 Ed25519 密钥对用于 roundtrip 测试）。
 rand = "0.8"
+# tokio-test：AsyncRead mock builder，用于 FrameReader 边界测试。
+tokio-test = "0.4"
 
 [lints]
 workspace = true

@@ -44,6 +44,7 @@ fd-lock = "4"
 clap = { version = "4", features = ["derive"] }
 arc-swap = "1"
 serial_test = "3"
+memchr = "2"
 
 [workspace.lints.clippy]
 # 1.88 起 clippy 把 `uninlined_format_args` 提到 style 默认 warn。这是纯排版偏好，

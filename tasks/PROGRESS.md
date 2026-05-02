@@ -12,6 +12,7 @@
 
 ## ✅ 已完成（按时间倒序）
 
+- **2026-05-03** P0-1 帧读取改用 FrameReader + memchr（新增 frame_reader.rs，替换 socket_server + socket_client 两处 BufReader::lines()，AuditEvent::IpcOversizeFrame，5 个边界测试）
 - **2026-05-03** P0-2 sieve.hello 握手通知（HelloParams 7 字段 + HelloBuilder + handle_connection 首帧发 hello + daemon 注入 + 集成测试）
 - **2026-05-03** P0-3 sieve.heartbeat 25s 心跳（handle_connection 写方向 interval(25s) + 重置 + 帧格式单元测试）
 - **2026-05-03** P0-5 socket 文件权限 0600 + 父目录 0700（IpcServer::bind + ensure_dirs + 单元测试）
@@ -37,7 +38,7 @@ _无。等用户选定下一步执行哪一组 P0 后填入。建议每次最多
 
 ### P0 阻塞合规（必须先完成，否则与 v2 GUI 无法互操作）
 
-- [ ] **[P0-1]** 帧读取替换无界 `BufReader::lines()` → `read_buf` + 手动 `memchr`（§1.3.1）
+- [x] **[P0-1]** 帧读取替换无界 `BufReader::lines()` → `read_buf` + 手动 `memchr`（§1.3.1）（2026-05-03 完成）
   - 文件：`crates/sieve-ipc/src/socket_server.rs:8,627` + `socket_client.rs:52`
   - 补充：单帧 > 1 MiB 关连接 + remainder > 1 MiB 关 + audit `ipc_oversize_frame` + 解析失败不关连接
 - [x] **[P0-2]** 实现 `sieve.hello` 握手通知（§3）（2026-05-03 完成）

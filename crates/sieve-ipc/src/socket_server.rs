@@ -5,7 +5,9 @@ use std::time::Duration;
 
 use arc_swap::ArcSwap;
 use chrono::{DateTime, Utc};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::AsyncWriteExt;
+
+use crate::frame_reader::FrameReader;
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tracing::{debug, error, info, warn};
@@ -678,7 +680,8 @@ async fn handle_connection(stream: UnixStream, ctx: ConnectionContext) -> Result
     info!("GUI client connected");
 
     let (read_half, mut write_half) = stream.into_split();
-    let mut lines = BufReader::new(read_half).lines();
+    // SPEC-005 §1.3.1：用 FrameReader（read_buf + memchr）替代无界 BufReader::lines()。
+    let mut frame_reader = FrameReader::new(read_half);
 
     // SPEC-005 §3：连接建立后第一条出站消息必须是 sieve.hello notification。
     if let Some(builder) = hello_builder {
@@ -734,19 +737,41 @@ async fn handle_connection(stream: UnixStream, ctx: ConnectionContext) -> Result
     loop {
         tokio::select! {
             // 读方向：GUI 发来 decision_response 或控制面 request。
-            line_result = lines.next_line() => {
-                match line_result? {
-                    None => {
-                        // GUI 关闭连接。
+            // SPEC-005 §1.3.1：read_frame 返回完整帧（不含尾部 \n）。
+            // OversizeFrame / OversizeRemainder → ? 向上传播，handle_connection 返回 Err，
+            // run() 的 spawn task 中打 error 日志并关闭连接（MUST 约束）。
+            frame_result = frame_reader.read_frame() => {
+                match frame_result {
+                    Err(e) => {
+                        // 超限：SPEC-005 §1.3.1 MUST 关连接；size_bytes 不含 payload。
+                        warn!(
+                            size_bytes = match &e {
+                                crate::frame_reader::FrameError::OversizeFrame { size_bytes }
+                                | crate::frame_reader::FrameError::OversizeRemainder { size_bytes } => *size_bytes,
+                                _ => 0,
+                            },
+                            "IPC oversize frame; closing connection"
+                        );
+                        return Err(IpcError::from(e));
+                    }
+                    Ok(None) => {
+                        // GUI 关闭连接（EOF）。
                         info!("GUI client closed connection");
                         break;
                     }
-                    Some(line) => {
-                        let line = line.trim().to_owned();
+                    Ok(Some(raw_bytes)) => {
+                        // §1.3.1 第 5 条：parse_and_dispatch 失败不关连接。
+                        let line = match std::str::from_utf8(&raw_bytes) {
+                            Ok(s) => s.trim().to_owned(),
+                            Err(_) => {
+                                warn!("received non-UTF8 IPC frame; ignoring");
+                                continue;
+                            }
+                        };
                         if line.is_empty() {
                             continue;
                         }
-                        debug!(raw = %line, "received IPC message from GUI");
+                        debug!("received IPC message from GUI");
                         dispatch_message(&line, &pending, &reload_tx, &control_tx, &write_tx).await;
                     }
                 }
