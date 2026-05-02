@@ -12,6 +12,7 @@
 
 ## ✅ 已完成（按时间倒序）
 
+- **2026-05-03** P0-5 socket 文件权限 0600 + 父目录 0700（IpcServer::bind + ensure_dirs + 单元测试）
 - **2026-05-03** P1-4 `DecisionResponse` 加 `ui_phase_when_clicked: Option<UiPhase>` + `UiPhase` 枚举（snake_case `"blue"/"orange"/"red"`）+ v2 fixture 单元测试 minimal/full/null_optional 三档（§14.1）；同步修复 sieve-hook `protocol.rs` + 全 workspace 构造调用
 - **2026-05-03** 第 3 组错误码段位 daemon 端复核：已对齐 SPEC-005 §12.4（daemon→GUI -32000~99 / GUI→daemon -32100~99 段位区分清晰；-32100~102 接收侧处理属 P1 新功能，非本次范围）
 - **2026-05-03** P0-4 `request_decision` 方法名补 `sieve.` 前缀（socket_server.rs:546 + lib.rs:354 测试同步）
@@ -44,7 +45,7 @@ _无。等用户选定下一步执行哪一组 P0 后填入。建议每次最多
   - `handle_connection` 写方向加 `tokio::time::interval(25s)`，任何出站帧重置定时器
 - [x] **[P0-4]** `request_decision` 方法名补 `sieve.` 前缀（§11）（2026-05-03 完成）
   - `socket_server.rs:546` 改 `"sieve.request_decision"`，与 GUI P0 同步
-- [ ] **[P0-5]** Socket 文件权限设 `0600`（§1.1）
+- [x] **[P0-5]** Socket 文件权限设 `0600`（§1.1）（2026-05-03 完成）
   - `IpcServer::bind` 后 `set_permissions(0o600)`；`ensure_dirs` 把 sieve_home 设 `0700`
 
 ### P1 字段/行为偏差

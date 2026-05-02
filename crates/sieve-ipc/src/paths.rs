@@ -39,9 +39,35 @@ pub fn ipc_socket_path(base: &std::path::Path) -> PathBuf {
 /// 确保所有子目录存在，不存在时递归创建。
 ///
 /// 幂等——多次调用安全。
+///
+/// SPEC-005 §1.1：`sieve_home`（`~/.sieve/`）目录权限设为 `0700`，
+/// 防止其他本地用户读取 socket 和 pending 文件。
 pub fn ensure_dirs(base: &std::path::Path) -> Result<(), IpcError> {
+    // 先确保根目录存在，再设权限。
+    std::fs::create_dir_all(base)?;
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(base, std::fs::Permissions::from_mode(0o700))?;
+    }
     for dir in [pending_dir(base), decisions_dir(base), locks_dir(base)] {
         std::fs::create_dir_all(&dir)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// SPEC-005 §1.1：ensure_dirs 应将 sieve_home 目录权限设为 0700。
+    #[test]
+    fn ensure_dirs_sets_home_permissions_0700() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let base = dir.path().join("sieve_home");
+        ensure_dirs(&base).expect("ensure_dirs");
+        let meta = std::fs::metadata(&base).expect("metadata");
+        let mode = meta.permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700, "sieve_home 应为 0700，实际为 {mode:o}");
+    }
 }

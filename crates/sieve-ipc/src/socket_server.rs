@@ -200,6 +200,11 @@ impl IpcServer {
             std::fs::remove_file(&socket_path)?;
         }
         let listener = UnixListener::bind(&socket_path)?;
+        // SPEC-005 §1.1：socket 文件权限必须为 0600，防止其他用户访问。
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o600))?;
+        }
         let (reload_tx, reload_rx) = mpsc::channel::<ReloadUserRules>(RELOAD_CHANNEL_CAPACITY);
         let (control_tx, control_rx) =
             mpsc::channel::<ControlPlaneRequest>(CONTROL_CHANNEL_CAPACITY);
@@ -1196,5 +1201,17 @@ mod tests {
         );
         assert_eq!(resp.decision, DecisionAction::Deny);
         assert!(!resp.by_user, "fallback 不应标记为 by_user");
+    }
+
+    /// SPEC-005 §1.1：bind 后 socket 文件权限必须为 0600。
+    #[tokio::test]
+    async fn bind_sets_socket_permissions_0600() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempdir().expect("tempdir");
+        let socket_path = dir.path().join("ipc.sock");
+        let (_server, _listener) = IpcServer::bind(socket_path.clone()).expect("bind");
+        let meta = std::fs::metadata(&socket_path).expect("metadata");
+        let mode = meta.permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "socket 文件应为 0600，实际为 {mode:o}");
     }
 }
