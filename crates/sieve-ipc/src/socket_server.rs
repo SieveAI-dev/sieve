@@ -13,6 +13,23 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
+/// oversize 帧事件类型（SPEC-005 §1.3.1）。
+///
+/// 注入 audit 回调时用于区分超限来源。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OversizeKind {
+    /// 单帧 > 1 MiB（含 \n）。
+    Frame,
+    /// partial remainder > 1 MiB 且无 newline。
+    Remainder,
+}
+
+/// oversize 帧 audit 回调函数类型。
+///
+/// daemon 层注入此 callback，用于将 oversize 事件写入 audit SQLite 而不引入
+/// sieve-ipc → sieve-cli 的循环依赖。
+pub type OversizeCallback = Arc<dyn Fn(OversizeKind, usize) + Send + Sync>;
+
 use crate::{
     error::{rpc_codes, IpcError},
     protocol::{
@@ -217,6 +234,11 @@ pub struct IpcServer {
     /// daemon 启动后通过 [`Self::set_hello_builder`] 注入；连接前为 `None`。
     /// 若未设置则跳过握手（保持向后兼容，测试场景可不设置）。
     hello_builder: Arc<Mutex<Option<HelloBuilder>>>,
+    /// oversize 帧 audit 回调（SPEC-005 §1.3.1）。
+    ///
+    /// daemon 层通过 [`Self::set_oversize_callback`] 注入，用于写 `AuditEvent::IpcOversizeFrame`
+    /// 而不引入 sieve-ipc → sieve-cli 循环依赖。未注入时只打 warn! log。
+    oversize_callback: Arc<std::sync::Mutex<Option<OversizeCallback>>>,
 }
 
 impl IpcServer {
@@ -247,6 +269,7 @@ impl IpcServer {
             control_rx: Arc::new(Mutex::new(Some(control_rx))),
             paused_until: Arc::new(ArcSwap::from_pointee(None)),
             hello_builder: Arc::new(Mutex::new(None)),
+            oversize_callback: Arc::new(std::sync::Mutex::new(None)),
         };
         Ok((server, listener))
     }
@@ -291,6 +314,18 @@ impl IpcServer {
     /// 并在连接建立后发送第一条消息 `sieve.hello`。
     pub async fn set_hello_builder(&self, builder: HelloBuilder) {
         *self.hello_builder.lock().await = Some(builder);
+    }
+
+    /// 注入 oversize 帧 audit 回调（SPEC-005 §1.3.1）。
+    ///
+    /// daemon 启动时调用一次；之后每个连接遇到 oversize frame/remainder 时都会调用此 callback，
+    /// 用于写 `AuditEvent::IpcOversizeFrame` 到 SQLite。未注入时只打 warn! log。
+    ///
+    /// sieve-ipc 不依赖 sieve-cli，通过此 callback 反转依赖。
+    pub fn set_oversize_callback(&self, cb: OversizeCallback) {
+        if let Ok(mut guard) = self.oversize_callback.lock() {
+            *guard = Some(cb);
+        }
     }
 
     /// 设置 / 清除暂停截止时间。
@@ -380,6 +415,9 @@ impl IpcServer {
                     // 握手信息快照（SPEC-005 §3）。
                     let hello_builder = self.hello_builder.lock().await.clone();
                     let paused_until = Arc::clone(&self.paused_until);
+                    // oversize callback 快照（SPEC-005 §1.3.1）。
+                    let oversize_callback =
+                        self.oversize_callback.lock().ok().and_then(|g| g.clone());
 
                     // 为新连接创建 mpsc 通道：发送端注册到 gui_writers，接收端传给 handle_connection。
                     // 同时 clone 一份发送端给 handle_connection 用，让控制面响应能路由回当前连接。
@@ -406,6 +444,7 @@ impl IpcServer {
                             control_tx,
                             hello_builder,
                             paused_until,
+                            oversize_callback,
                         };
                         if let Err(e) = handle_connection(stream, ctx).await {
                             error!("IPC connection error: {e}");
@@ -665,6 +704,8 @@ struct ConnectionContext {
     control_tx: mpsc::Sender<ControlPlaneRequest>,
     hello_builder: Option<HelloBuilder>,
     paused_until: Arc<ArcSwap<Option<DateTime<Utc>>>>,
+    /// oversize 帧 audit 回调（SPEC-005 §1.3.1）。
+    oversize_callback: Option<OversizeCallback>,
 }
 
 async fn handle_connection(stream: UnixStream, ctx: ConnectionContext) -> Result<(), IpcError> {
@@ -676,6 +717,7 @@ async fn handle_connection(stream: UnixStream, ctx: ConnectionContext) -> Result
         control_tx,
         hello_builder,
         paused_until,
+        oversize_callback,
     } = ctx;
     info!("GUI client connected");
 
@@ -744,14 +786,20 @@ async fn handle_connection(stream: UnixStream, ctx: ConnectionContext) -> Result
                 match frame_result {
                     Err(e) => {
                         // 超限：SPEC-005 §1.3.1 MUST 关连接；size_bytes 不含 payload。
-                        warn!(
-                            size_bytes = match &e {
-                                crate::frame_reader::FrameError::OversizeFrame { size_bytes }
-                                | crate::frame_reader::FrameError::OversizeRemainder { size_bytes } => *size_bytes,
-                                _ => 0,
-                            },
-                            "IPC oversize frame; closing connection"
-                        );
+                        let (kind, size_bytes) = match &e {
+                            crate::frame_reader::FrameError::OversizeFrame { size_bytes } => {
+                                (OversizeKind::Frame, *size_bytes)
+                            }
+                            crate::frame_reader::FrameError::OversizeRemainder { size_bytes } => {
+                                (OversizeKind::Remainder, *size_bytes)
+                            }
+                            _ => (OversizeKind::Frame, 0),
+                        };
+                        warn!(size_bytes, "IPC oversize frame; closing connection");
+                        // 若已注入 audit callback，调用写入 AuditEvent::IpcOversizeFrame。
+                        if let Some(ref cb) = oversize_callback {
+                            cb(kind, size_bytes);
+                        }
                         return Err(IpcError::from(e));
                     }
                     Ok(None) => {
