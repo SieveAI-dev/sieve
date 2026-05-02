@@ -32,7 +32,9 @@ pub use protocol::{
     Severity, SourceAgent, StatusBarNotify, UiPhase,
 };
 pub use socket_client::send_reload_user_rules_oneshot;
-pub use socket_server::{ControlError, ControlPlaneRequest, HelloBuilder, IpcServer};
+pub use socket_server::{
+    ControlError, ControlPlaneRequest, HelloBuilder, IpcServer, OversizeCallback, OversizeKind,
+};
 
 #[cfg(test)]
 mod tests {

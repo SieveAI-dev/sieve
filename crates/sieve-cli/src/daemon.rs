@@ -659,6 +659,35 @@ pub async fn run(
         };
         ipc_srv.set_hello_builder(hello_builder).await;
 
+        // SPEC-005 §1.3.1：注入 oversize 帧 audit 回调，避免 sieve-ipc → sieve-cli 循环依赖。
+        {
+            let audit_for_oversize = Arc::clone(&audit_store);
+            let cb: sieve_ipc::OversizeCallback =
+                std::sync::Arc::new(move |kind, size_bytes: usize| {
+                    let kind_str = match kind {
+                        sieve_ipc::OversizeKind::Frame => "frame",
+                        sieve_ipc::OversizeKind::Remainder => "remainder",
+                    };
+                    let event = crate::audit::AuditEvent::IpcOversizeFrame {
+                        peer: "ipc_socket".to_owned(),
+                        size_bytes: size_bytes as u64,
+                        closed_at_ms: chrono::Utc::now().timestamp_millis(),
+                    };
+                    tracing::warn!(
+                        kind = kind_str,
+                        size_bytes,
+                        "IPC oversize frame audit written"
+                    );
+                    let store = Arc::clone(&audit_for_oversize);
+                    tokio::spawn(async move {
+                        if let Err(e) = store.append(event).await {
+                            tracing::warn!(error = %e, "audit write for oversize frame failed");
+                        }
+                    });
+                });
+            ipc_srv.set_oversize_callback(cb);
+        }
+
         crate::daemon_control_plane::spawn_control_plane_handler(
             Arc::clone(ipc_srv),
             Arc::clone(&audit_store),
