@@ -1039,6 +1039,40 @@ async fn dispatch_message(
             message = %err_obj.message,
             "GUI returned rpc error"
         );
+        // SPEC-005 §12.4 / P1-NEW：GUI→daemon error response 按段位处理 pending。
+        // -32100~-32199 段：GUI 拒绝/取消某个 pending decision（如 -32100 DecisionRejected）。
+        // 应清理对应 pending decision channel，避免泄漏（request_decision 会阻塞直到超时）。
+        if (-32199..=-32100).contains(&err_obj.code) {
+            // id 字段包含被拒绝的原始 request id（如果 GUI 协议正确实现的话）。
+            // 尝试从 rpc.id 解析 Uuid，匹配 pending map。
+            let maybe_uuid: Option<uuid::Uuid> =
+                rpc.id.as_str().and_then(|s| s.parse().ok()).or_else(|| {
+                    rpc.id.as_u64().and_then(|_| None) // u64 id 不是 Uuid，跳过
+                });
+            if let Some(request_id) = maybe_uuid {
+                let mut map = pending.lock().await;
+                if let Some(tx) = map.remove(&request_id) {
+                    // 通知等待方：GUI 拒绝/取消，走 fallback（Err -> timeout fallback）。
+                    drop(tx); // tx drop → rx.await 返回 Err(RecvError) → fallback
+                    warn!(
+                        code = err_obj.code,
+                        %request_id,
+                        "GUI rejected/cancelled pending decision; dropping channel (§12.4)"
+                    );
+                } else {
+                    warn!(
+                        code = err_obj.code,
+                        %request_id,
+                        "GUI returned -32100~99 error but no matching pending request"
+                    );
+                }
+            } else {
+                warn!(
+                    code = err_obj.code,
+                    "GUI returned -32100~99 error without parseable Uuid id; cannot clean pending"
+                );
+            }
+        }
         return;
     }
 

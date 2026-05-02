@@ -12,6 +12,7 @@
 
 ## ✅ 已完成（按时间倒序）
 
+- **2026-05-03** P1-NEW GUI→daemon error response 按段位清理 pending（-32100~99 段清理 pending decision channel，防泄漏；集成测试验证 -32100 → fallback 不 hang）
 - **2026-05-03** P1-10 fan-out write 加 2s bounded timeout（handle_connection 写方向 tokio::time::timeout(2s)；超时/EPIPE/ECONNRESET/EBADF 视为失联）
 - **2026-05-03** P1-9 set_paused/set_preset 响应前强制 fan-out（BroadcastPlan 枚举 + ControlPlaneRequest mutating reply 携带 BroadcastPlan + forward_reply_with_broadcast 先广播再写 result + 集成测试双 mock GUI 验证顺序）
 - **2026-05-03** P1-8 JSON 解析失败返回 -32700 parse_error 不关闭连接（dispatch_message 改静默 return → write_error_response；集成测试验证连接保持）
@@ -73,8 +74,8 @@ _无。等用户选定下一步执行哪一组 P0 后填入。建议每次最多
 - [x] **[P1-8]** JSON 解析失败返回 `-32700 parse_error` 而非静默 return（§1.3.1, §12.2）— 加 `PARSE_ERROR` 常量（2026-05-03 完成）
 - [x] **[P1-9]** `sieve.set_paused` 响应前强制 fan-out（§10.0.1）— 改 `ControlPlaneRequest` 回执结构，让 `forward_reply` 在写 result 前先 broadcast（2026-05-03 完成，方案 A）
 - [x] **[P1-10]** fan-out 写入加 2 秒 bounded write timeout（§10.0.1）— EPIPE/ECONNRESET/EBADF 视为失联（2026-05-03 完成）
-- [ ] **[P1-NEW pending-leak]** GUI→daemon error response 按段位处理 pending（§12.4 + 子代理 2026-05-03 发现）
-  - `socket_server.rs:760` 收到 -32100~ 段时应清理 pending decision，而非直接 log+return
+- [x] **[P1-NEW pending-leak]** GUI→daemon error response 按段位处理 pending（§12.4 + 子代理 2026-05-03 发现）（2026-05-03 完成）
+  - dispatch_message 收到 -32100~-32199 段时，drop pending channel → fallback，防泄漏
 
 ### P2 风格 / 可读性
 
