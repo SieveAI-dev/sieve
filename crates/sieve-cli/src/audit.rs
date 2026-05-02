@@ -518,6 +518,13 @@ impl AuditStore {
         })
     }
 
+    /// 返回当前 SQLite schema 版本（PRAGMA user_version）。
+    ///
+    /// 供 sieve.hello 握手通知填充 `audit_db_user_version` 字段（SPEC-005 §3）。
+    pub fn schema_version(&self) -> u32 {
+        CURRENT_SCHEMA_VERSION
+    }
+
     /// 异步写入一条审计事件（spawn_blocking + Mutex 串行化）。
     ///
     /// # Errors

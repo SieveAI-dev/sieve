@@ -12,6 +12,7 @@
 
 ## ✅ 已完成（按时间倒序）
 
+- **2026-05-03** P0-2 sieve.hello 握手通知（HelloParams 7 字段 + HelloBuilder + handle_connection 首帧发 hello + daemon 注入 + 集成测试）
 - **2026-05-03** P0-3 sieve.heartbeat 25s 心跳（handle_connection 写方向 interval(25s) + 重置 + 帧格式单元测试）
 - **2026-05-03** P0-5 socket 文件权限 0600 + 父目录 0700（IpcServer::bind + ensure_dirs + 单元测试）
 - **2026-05-03** P1-4 `DecisionResponse` 加 `ui_phase_when_clicked: Option<UiPhase>` + `UiPhase` 枚举（snake_case `"blue"/"orange"/"red"`）+ v2 fixture 单元测试 minimal/full/null_optional 三档（§14.1）；同步修复 sieve-hook `protocol.rs` + 全 workspace 构造调用
@@ -39,7 +40,7 @@ _无。等用户选定下一步执行哪一组 P0 后填入。建议每次最多
 - [ ] **[P0-1]** 帧读取替换无界 `BufReader::lines()` → `read_buf` + 手动 `memchr`（§1.3.1）
   - 文件：`crates/sieve-ipc/src/socket_server.rs:8,627` + `socket_client.rs:52`
   - 补充：单帧 > 1 MiB 关连接 + remainder > 1 MiB 关 + audit `ipc_oversize_frame` + 解析失败不关连接
-- [ ] **[P0-2]** 实现 `sieve.hello` 握手通知（§3）
+- [x] **[P0-2]** 实现 `sieve.hello` 握手通知（§3）（2026-05-03 完成）
   - 新增 `HelloParams` struct（`protocol_version="v2"` / `daemon_version` / `paused` / `preset` / `uptime_seconds` / `audit_db_user_version` / `daemon_boot_id`）
   - 在 `handle_connection` 起始处作为第一条出站消息发送
 - [x] **[P0-3]** 实现 `sieve.heartbeat` 25 秒心跳（§4）（2026-05-03 完成）

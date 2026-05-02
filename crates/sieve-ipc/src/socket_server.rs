@@ -27,6 +27,25 @@ use crate::{
 /// pending map：request_id → oneshot 发送端，等待 GUI 回复。
 type PendingMap = Arc<Mutex<HashMap<Uuid, oneshot::Sender<DecisionResponse>>>>;
 
+/// daemon 启动时注入 IpcServer 的握手信息，用于构造 `sieve.hello` 通知。
+///
+/// 静态字段（整生命周期不变）存此处；动态字段（paused/uptime）在 `handle_connection`
+/// 中按时刻计算。关联：SPEC-005 §3。
+#[derive(Debug, Clone)]
+pub struct HelloBuilder {
+    /// daemon 本次启动时生成的唯一 UUID（整生命周期不变）。
+    pub daemon_boot_id: Uuid,
+    /// daemon 版本（来自 `env!("CARGO_PKG_VERSION")`）。
+    pub daemon_version: String,
+    /// audit.db PRAGMA user_version（schema 版本号）。
+    pub audit_db_user_version: u32,
+    /// daemon 启动时刻（UTC），用于计算 uptime_seconds。
+    pub started_at: DateTime<Utc>,
+    /// 当前 preset 名称（如 `"default"` / `"paranoid"` / `"custom"`）。
+    /// handle_connection 时读快照，之后 preset 变更会广播 PresetChangedNotify。
+    pub preset: String,
+}
+
 /// 控制面错误（IPC handler 内部用，序列化为 JSON-RPC ErrorObject）。
 ///
 /// 关联：ADR-013 §S.2 错误码段。
@@ -191,6 +210,11 @@ pub struct IpcServer {
     /// `None` = 未暂停；`Some(t)` 且 `t > now` = 暂停中。
     /// daemon 控制面 handler 通过 [`Self::set_paused_until`] 同步。
     paused_until: Arc<ArcSwap<Option<DateTime<Utc>>>>,
+    /// sieve.hello 握手通知所需静态信息（SPEC-005 §3）。
+    ///
+    /// daemon 启动后通过 [`Self::set_hello_builder`] 注入；连接前为 `None`。
+    /// 若未设置则跳过握手（保持向后兼容，测试场景可不设置）。
+    hello_builder: Arc<Mutex<Option<HelloBuilder>>>,
 }
 
 impl IpcServer {
@@ -220,6 +244,7 @@ impl IpcServer {
             control_tx,
             control_rx: Arc::new(Mutex::new(Some(control_rx))),
             paused_until: Arc::new(ArcSwap::from_pointee(None)),
+            hello_builder: Arc::new(Mutex::new(None)),
         };
         Ok((server, listener))
     }
@@ -256,6 +281,14 @@ impl IpcServer {
             .send(trigger)
             .await
             .map_err(|_| IpcError::FileLock("reload channel closed".to_owned()))
+    }
+
+    /// 注入 sieve.hello 握手通知所需静态信息（SPEC-005 §3）。
+    ///
+    /// daemon 启动时调用一次；此后每个新连接的 `handle_connection` 会读取此快照
+    /// 并在连接建立后发送第一条消息 `sieve.hello`。
+    pub async fn set_hello_builder(&self, builder: HelloBuilder) {
+        *self.hello_builder.lock().await = Some(builder);
     }
 
     /// 设置 / 清除暂停截止时间。
@@ -342,6 +375,9 @@ impl IpcServer {
                     let gui_writers = Arc::clone(&self.gui_writers);
                     let reload_tx = self.reload_tx.clone();
                     let control_tx = self.control_tx.clone();
+                    // 握手信息快照（SPEC-005 §3）。
+                    let hello_builder = self.hello_builder.lock().await.clone();
+                    let paused_until = Arc::clone(&self.paused_until);
 
                     // 为新连接创建 mpsc 通道：发送端注册到 gui_writers，接收端传给 handle_connection。
                     // 同时 clone 一份发送端给 handle_connection 用，让控制面响应能路由回当前连接。
@@ -360,17 +396,16 @@ impl IpcServer {
                     }
 
                     tokio::spawn(async move {
-                        if let Err(e) = handle_connection(
-                            stream,
+                        let ctx = ConnectionContext {
                             pending,
-                            gui_writers.clone(),
-                            conn_tx,
-                            rx,
+                            write_tx: conn_tx,
+                            write_rx: rx,
                             reload_tx,
                             control_tx,
-                        )
-                        .await
-                        {
+                            hello_builder,
+                            paused_until,
+                        };
+                        if let Err(e) = handle_connection(stream, ctx).await {
                             error!("IPC connection error: {e}");
                         }
                         // 连接断开：gui_writers 中对应的 sender 已 drop（rx drop 时发送端关闭），
@@ -620,19 +655,70 @@ impl IpcServer {
 ///
 /// 任一方向出错（GUI 断线 / 写失败）都会退出；`write_rx` drop 后其对应的
 /// `Sender` 在 `gui_writers` Vec 中下次 broadcast 时自动清理（lazy 策略）。
-async fn handle_connection(
-    stream: UnixStream,
+struct ConnectionContext {
     pending: PendingMap,
-    _gui_writers: GuiWriters,
     write_tx: mpsc::Sender<String>,
-    mut write_rx: mpsc::Receiver<String>,
+    write_rx: mpsc::Receiver<String>,
     reload_tx: mpsc::Sender<ReloadUserRules>,
     control_tx: mpsc::Sender<ControlPlaneRequest>,
-) -> Result<(), IpcError> {
+    hello_builder: Option<HelloBuilder>,
+    paused_until: Arc<ArcSwap<Option<DateTime<Utc>>>>,
+}
+
+async fn handle_connection(stream: UnixStream, ctx: ConnectionContext) -> Result<(), IpcError> {
+    let ConnectionContext {
+        pending,
+        write_tx,
+        mut write_rx,
+        reload_tx,
+        control_tx,
+        hello_builder,
+        paused_until,
+    } = ctx;
     info!("GUI client connected");
 
     let (read_half, mut write_half) = stream.into_split();
     let mut lines = BufReader::new(read_half).lines();
+
+    // SPEC-005 §3：连接建立后第一条出站消息必须是 sieve.hello notification。
+    if let Some(builder) = hello_builder {
+        let paused = {
+            let snap = paused_until.load();
+            match snap.as_ref().as_ref() {
+                Some(until) => *until > Utc::now(),
+                None => false,
+            }
+        };
+        let uptime_seconds = (Utc::now() - builder.started_at).num_seconds().max(0) as u64;
+        let params = crate::protocol::HelloParams {
+            protocol_version: "v2".to_owned(),
+            daemon_version: builder.daemon_version,
+            paused,
+            preset: builder.preset,
+            uptime_seconds,
+            audit_db_user_version: builder.audit_db_user_version,
+            daemon_boot_id: builder.daemon_boot_id,
+        };
+        let notification = crate::protocol::jsonrpc::Request {
+            jsonrpc: "2.0".to_owned(),
+            method: "sieve.hello".to_owned(),
+            params: Some(serde_json::to_value(&params).unwrap_or(serde_json::Value::Null)),
+            id: None,
+        };
+        match serde_json::to_string(&notification) {
+            Ok(mut frame) => {
+                frame.push('\n');
+                if let Err(e) = write_half.write_all(frame.as_bytes()).await {
+                    warn!("failed to send sieve.hello: {e}");
+                    return Ok(());
+                }
+                debug!("sent sieve.hello to new GUI client");
+            }
+            Err(e) => {
+                warn!("failed to serialize sieve.hello: {e}");
+            }
+        }
+    }
 
     // SPEC-005 §4：25 秒内无出站消息时发送 sieve.heartbeat notification；
     // 任何出站帧（包括心跳本身）都重置计时器。
@@ -1234,6 +1320,65 @@ mod tests {
         );
         assert_eq!(resp.decision, DecisionAction::Deny);
         assert!(!resp.by_user, "fallback 不应标记为 by_user");
+    }
+
+    /// SPEC-005 §3：连接建立后第一条出站消息必须是 sieve.hello，含全部 7 个必填字段。
+    #[tokio::test]
+    async fn hello_is_first_message_after_connect() {
+        use tokio::io::{AsyncBufReadExt, BufReader as TokioBufReader};
+        use tokio::net::UnixStream;
+
+        let dir = tempdir().expect("tempdir");
+        let socket_path = dir.path().join("ipc.sock");
+        let (server, listener) = IpcServer::bind(socket_path.clone()).expect("bind");
+        let server = Arc::new(server);
+
+        let boot_id = Uuid::now_v7();
+        let started_at = Utc::now();
+        server
+            .set_hello_builder(HelloBuilder {
+                daemon_boot_id: boot_id,
+                daemon_version: "0.0.0-test".to_owned(),
+                audit_db_user_version: 2,
+                started_at,
+                preset: "default".to_owned(),
+            })
+            .await;
+
+        let srv = Arc::clone(&server);
+        tokio::spawn(async move { srv.run(listener).await });
+
+        // 给 server 一点时间启动。
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        // 客户端连接并读第一帧。
+        let stream = UnixStream::connect(&socket_path).await.expect("connect");
+        let mut lines = TokioBufReader::new(stream).lines();
+        let first_line = tokio::time::timeout(Duration::from_secs(2), lines.next_line())
+            .await
+            .expect("timeout waiting for sieve.hello")
+            .expect("io error")
+            .expect("connection closed before hello");
+
+        let val: serde_json::Value =
+            serde_json::from_str(&first_line).expect("hello must be valid JSON");
+        assert_eq!(val["jsonrpc"], "2.0");
+        assert_eq!(
+            val["method"], "sieve.hello",
+            "첫 번째 메시지는 sieve.hello 여야 함"
+        );
+        let params = val.get("params").expect("hello must have params");
+        assert_eq!(params["protocol_version"], "v2");
+        assert!(params.get("daemon_version").is_some());
+        assert!(params.get("paused").is_some());
+        assert!(params.get("preset").is_some());
+        assert!(params.get("uptime_seconds").is_some());
+        assert!(params.get("audit_db_user_version").is_some());
+        assert_eq!(
+            params["daemon_boot_id"],
+            boot_id.to_string(),
+            "daemon_boot_id 必须与注入值一致"
+        );
     }
 
     /// SPEC-005 §4：heartbeat_frame 必须是合法 JSON-RPC 通知 + method = sieve.heartbeat + 无 params。
