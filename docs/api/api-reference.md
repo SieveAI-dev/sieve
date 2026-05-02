@@ -560,6 +560,22 @@ v1.4 双层防御引入两种弹窗协议，退出码语义分别描述：
 
 ### 6.2 GUI App 决策协议（GUI 类规则，IPC 通道 A）
 
+> **权威规格已迁移到 [SPEC-005](../specs/SPEC-005-ipc-protocol.md)**（IPC 协议 v2，2026-05-02 起生效）。本节保留为索引：
+>
+> - 握手 `sieve.hello`、心跳 `sieve.heartbeat`、通用枚举（snake_case lowercase）：[SPEC-005 §3–§5](../specs/SPEC-005-ipc-protocol.md)
+> - `sieve.request_decision` 单 issue + 多 issue 合并 schema：[SPEC-005 §6.1](../specs/SPEC-005-ipc-protocol.md#61-sieverequest_decisiondaemon--gui-request)
+> - `sieve.decision_response` 单 / 合并响应：[SPEC-005 §6.2](../specs/SPEC-005-ipc-protocol.md#62-sievedecision_responsegui--daemon-response)
+> - `sieve.request_decision_canceled` 取消通知：[SPEC-005 §6.3](../specs/SPEC-005-ipc-protocol.md#63-sieverequest_decision_canceleddaemon--gui-fan-out-notification)
+>
+> **关键约束（不重复 schema，仅强调）**：
+> - `default_on_timeout` 取值为 snake_case `"block"` / `"allow"` / `"redact"`；Critical 强制 `"block"`
+> - `decision` 取值为 `"allow"` / `"deny"`；`"redact_and_allow"` 仅用于 daemon 内部及 `request_decision_canceled.auto_decision`
+> - `allow_remember = false` 时 daemon 收到 `remember=true` 必须二次校验 + 写 audit ERROR（PRD §5.4.2 三道防线之防线二）
+> - GUI 超时（120s）→ daemon 侧 oneshot 超时触发 `default_on_timeout=block`，记录 `user_decision: "timeout"`
+> - 协议方法名一律带 `sieve.` 前缀（v1 中无前缀的 `request_decision` 已在 v2 弃用）
+
+以下为 v1 历史描述，仅供回看；**与 SPEC-005 不一致时一律以 SPEC-005 为准**：
+
 GUI App 是**常驻进程**，无 exit code 概念。决策通过 JSON-RPC 2.0 Unix socket 返回：
 
 ```json
@@ -604,6 +620,17 @@ GUI App 是**常驻进程**，无 exit code 概念。决策通过 JSON-RPC 2.0 U
 | `context_hint` | Option\<String\> | `null` | **v2.0 新增**，`#[serde(default)]`。GUI 弹窗中用户输入的备注（如 "Vitalik 地址 read-only balanceOf 调用"），写入灰名单 entry；旧客户端不发此字段兼容 null |
 
 ### 6.3 IPC 单向通知（v2.0/v2.1 新增）
+
+> **权威规格已迁移到 [SPEC-005](../specs/SPEC-005-ipc-protocol.md)**。本节保留为索引：
+>
+> - `sieve.notify_status_bar`（daemon → GUI fan-out）：[SPEC-005 §7](../specs/SPEC-005-ipc-protocol.md#7-状态栏通知sievenotify_status_bar)，NotifyKind 见 [SPEC-005 §5.9](../specs/SPEC-005-ipc-protocol.md#59-notify_kindnotify_status_barkind)
+> - `sieve.reload_user_rules`（CLI → daemon）：[SPEC-005 §8](../specs/SPEC-005-ipc-protocol.md#8-cli--daemon-单向sievereload_user_rules)
+> - `sieve.preset_changed` / `sieve.paused_changed`（daemon → GUI fan-out）：[SPEC-005 §10](../specs/SPEC-005-ipc-protocol.md#10-暂停与-preset-状态广播daemon--gui-fan-out-notification)
+> - GUI 控制面方法（`sieve.set_paused` / `set_preset` / `set_preset_overrides` / `reload_config` / `health` / `evaluate` / `list_graylist` / `remove_graylist`）：[SPEC-005 §9](../specs/SPEC-005-ipc-protocol.md#9-gui-控制面方法gui--daemon-requestresponse)
+> - 错误码体系（双向段位划分，daemon → GUI 用 `-32000~-32099`，GUI → daemon 用 `-32100~-32199`）：[SPEC-005 §12](../specs/SPEC-005-ipc-protocol.md#12-错误码体系)
+> - 完整方法名清单：[SPEC-005 §11](../specs/SPEC-005-ipc-protocol.md#11-完整方法名清单速查)
+
+以下为 v1 历史描述，**与 SPEC-005 不一致时一律以 SPEC-005 为准**：
 
 除双向 JSON-RPC 请求/响应外，sieve-ipc v2.0 引入两类单向通知消息，用于 daemon → GUI 的状态推送和 CLI → daemon 的触发信号。
 
