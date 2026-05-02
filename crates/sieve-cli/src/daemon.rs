@@ -630,7 +630,7 @@ pub async fn run(
                 port: cfg.port,
             },
             daemon_version: env!("CARGO_PKG_VERSION").to_owned(),
-            protocol_version: "v1".to_owned(),
+            protocol_version: "v2".to_owned(),
             audit_db_path: cfg
                 .audit_db_path()
                 .unwrap_or_else(|_| std::path::PathBuf::from("~/.sieve/audit.db")),

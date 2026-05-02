@@ -38,7 +38,7 @@ fn spawn_mock_daemon(server: Arc<IpcServer>) {
                 ControlPlaneRequest::Health { params: _, reply } => {
                     let _ = reply.send(Ok(HealthResult {
                         daemon_version: "test".to_owned(),
-                        protocol_version: "v1".to_owned(),
+                        protocol_version: "v2".to_owned(),
                         started_at: chrono::Utc::now(),
                         uptime_seconds: 1,
                         preset: sieve_ipc::PresetSnapshot {
@@ -139,7 +139,7 @@ async fn health_round_trip() {
     let resp = rpc_call(&socket_path, "sieve.health", serde_json::json!({}), "req-2").await;
 
     assert!(resp.get("error").is_none(), "should succeed: {resp}");
-    assert_eq!(resp["result"]["protocol_version"], "v1");
+    assert_eq!(resp["result"]["protocol_version"], "v2");
     assert_eq!(resp["result"]["listen"]["port"], 11453);
 }
 
