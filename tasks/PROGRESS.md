@@ -12,6 +12,7 @@
 
 ## ✅ 已完成（按时间倒序）
 
+- **2026-05-03** 善后 修复 pre-existing flake canary_token_hits_out01_in_local_engine（路径硬编码 → CARGO_MANIFEST_DIR 相对路径，测试已通过验证）
 - **2026-05-03** P0-1 帧读取改用 FrameReader + memchr（新增 frame_reader.rs，替换 socket_server + socket_client 两处 BufReader::lines()，AuditEvent::IpcOversizeFrame，5 个边界测试）
 - **2026-05-03** P0-2 sieve.hello 握手通知（HelloParams 7 字段 + HelloBuilder + handle_connection 首帧发 hello + daemon 注入 + 集成测试）
 - **2026-05-03** P0-3 sieve.heartbeat 25s 心跳（handle_connection 写方向 interval(25s) + 重置 + 帧格式单元测试）
