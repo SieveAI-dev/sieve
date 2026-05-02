@@ -11,6 +11,26 @@
 
 ---
 
+## [v2.1-gui-control-plane-spec] - 2026-05-02
+
+### 背景
+
+sieve-gui-macos PRD v1.0 起草后，需要 GUI 通过 IPC 操控 daemon 的运行时状态（暂停 / preset 切换 / 灰名单管理 / health 查询 / 沙箱评估）。本次仅扩展协议规格，工程落地随 Week 5 GUI HIPS 主流程一起 ship。
+
+### Added — 文档
+
+- 独立仓库 `sieve-gui-macos/docs/prd/sieve-gui-macos-prd-v1.0.md`：GUI 仓库的根 PRD（菜单栏 / HIPS 弹窗 / 设置 / 历史 / 调试 / Onboarding / IPC 契约 / Critical 锁防线三的 GUI 端约束）
+- `docs/design/ADR-013-ipc-protocol.md` Supplement 2026-05-02：通道 A 新增 11 个方法 / 通知（`set_paused` / `set_preset` / `set_preset_overrides` / `reload_config` / `health` / `evaluate` / `list_graylist` / `remove_graylist` / `preset_changed` / `paused_changed` / `request_decision_canceled`）；含完整 schema、错误码、Critical 锁在 `set_preset_overrides` 路径的强校验
+- `docs/specs/SPEC-002-hips-popup-behavior.md` §9 新增：暂停状态下的弹窗触发矩阵（Critical 锁仍弹）/ preset 切换对 hold 中弹窗的影响（不动正在显示的）/ `request_decision_canceled` 的 GUI UI 行为（自动关弹 + 历史标记）/ 多 GUI 实例的 broadcast 与 `resolved_by_peer` 取消原因
+
+### Notes
+
+- 协议版本号保持 `v1`（仅扩展方法，未引入 breaking change）
+- SPEC-001 不需要更新——新方法全部走 socket 通道 A，不沾文件锁通道 B 边界
+- 落地任务清单见 ADR-013 §S.7（Week 5 起跟 GUI HIPS 主流程同步实现）
+
+---
+
 ## [v2.1-alpha-engineering] - 2026-05-01
 
 ### 背景
