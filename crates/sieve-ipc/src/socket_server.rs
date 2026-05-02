@@ -859,6 +859,8 @@ async fn handle_connection(stream: UnixStream, ctx: ConnectionContext) -> Result
             }
 
             // 写方向：主代理 push request_decision 给 GUI（含控制面响应回执）。
+            // SPEC-005 §10.0.1：fan-out write 加 2 秒 bounded write timeout；
+            // 超时 / EPIPE / ECONNRESET / EBADF 视为失联，退出 handle_connection。
             msg = write_rx.recv() => {
                 match msg {
                     None => {
@@ -867,24 +869,53 @@ async fn handle_connection(stream: UnixStream, ctx: ConnectionContext) -> Result
                         break;
                     }
                     Some(payload) => {
-                        if let Err(e) = write_half.write_all(payload.as_bytes()).await {
-                            warn!("failed to write to GUI socket: {e}");
-                            break;
+                        let write_res = tokio::time::timeout(
+                            Duration::from_secs(2),
+                            write_half.write_all(payload.as_bytes()),
+                        )
+                        .await;
+                        match write_res {
+                            Err(_elapsed) => {
+                                warn!("GUI write timeout (2s); disconnecting");
+                                break;
+                            }
+                            Ok(Err(e)) => {
+                                // EPIPE / ECONNRESET / EBADF 等均视为失联。
+                                warn!("failed to write to GUI socket: {e}; disconnecting");
+                                break;
+                            }
+                            Ok(Ok(())) => {
+                                // 出站帧重置心跳计时器。
+                                heartbeat_interval
+                                    .reset_after(Duration::from_secs(HEARTBEAT_INTERVAL_SECS));
+                            }
                         }
-                        // 出站帧重置心跳计时器。
-                        heartbeat_interval.reset_after(Duration::from_secs(HEARTBEAT_INTERVAL_SECS));
                     }
                 }
             }
 
             // 心跳：25 秒无出站消息时发送 sieve.heartbeat notification（SPEC-005 §4）。
+            // 同样包 2 秒 write timeout（SPEC-005 §10.0.1 fan-out timeout 适用所有写路径）。
             _ = heartbeat_interval.tick() => {
                 let frame = heartbeat_frame();
-                if let Err(e) = write_half.write_all(frame.as_bytes()).await {
-                    warn!("failed to write heartbeat to GUI socket: {e}");
-                    break;
+                let write_res = tokio::time::timeout(
+                    Duration::from_secs(2),
+                    write_half.write_all(frame.as_bytes()),
+                )
+                .await;
+                match write_res {
+                    Err(_elapsed) => {
+                        warn!("GUI heartbeat write timeout (2s); disconnecting");
+                        break;
+                    }
+                    Ok(Err(e)) => {
+                        warn!("failed to write heartbeat to GUI socket: {e}; disconnecting");
+                        break;
+                    }
+                    Ok(Ok(())) => {
+                        debug!("sent sieve.heartbeat to GUI");
+                    }
                 }
-                debug!("sent sieve.heartbeat to GUI");
             }
         }
     }
