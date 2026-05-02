@@ -12,6 +12,7 @@
 
 ## ✅ 已完成（按时间倒序）
 
+- **2026-05-03** P1-4 `DecisionResponse` 加 `ui_phase_when_clicked: Option<UiPhase>` + `UiPhase` 枚举（snake_case `"blue"/"orange"/"red"`）+ v2 fixture 单元测试 minimal/full/null_optional 三档（§14.1）；同步修复 sieve-hook `protocol.rs` + 全 workspace 构造调用
 - **2026-05-03** 第 3 组错误码段位 daemon 端复核：已对齐 SPEC-005 §12.4（daemon→GUI -32000~99 / GUI→daemon -32100~99 段位区分清晰；-32100~102 接收侧处理属 P1 新功能，非本次范围）
 - **2026-05-03** P0-4 `request_decision` 方法名补 `sieve.` 前缀（socket_server.rs:546 + lib.rs:354 测试同步）
 - **2026-05-03** P1-6 协议版本号 v1 → v2（生产代码 2 处 + 测试夹具 2 处，测试全绿）
@@ -51,13 +52,15 @@ _无。等用户选定下一步执行哪一组 P0 后填入。建议每次最多
 - [ ] **[P1-1]** `SetPausedResult.until` → `paused_until`（§9.1, §10.2）— 含 `PausedChangedNotify`
 - [ ] **[P1-2]** `PresetChangedNotify` + `PausedChangedNotify` 加 `origin_request_id: Option<Uuid>`（§10.0–10.2）
 - [ ] **[P1-3]** `HealthResult.paused` 拆为 `paused: bool` + 独立 `paused_until: Option<DateTime<Utc>>`（§9.5）
-- [ ] **[P1-4]** `DecisionResponse` 加 `ui_phase_when_clicked: Option<UiPhase>`（§6.2.1, §5.10）
+- [x] **[P1-4]** `DecisionResponse` 加 `ui_phase_when_clicked: Option<UiPhase>`（§6.2.1, §5.10）（2026-05-03 完成）
 - [ ] **[P1-5]** `sieve.request_decision` 拆 wire DTO（§6.0, §6.1）— 字段展开 + `merged: true` + `received_at_daemon`；这是改造工作量最大的一项
 - [x] **[P1-6]** `protocol_version` 字符串全部 `"v1"` → `"v2"`（含 `tests/control_plane_dispatch.rs:52,142`）（2026-05-03 完成）
 - [ ] **[P1-7]** `NotifyKind` 加 `HookTerminal` 变体（§5.9）
 - [ ] **[P1-8]** JSON 解析失败返回 `-32700 parse_error` 而非静默 return（§1.3.1, §12.2）— 加 `PARSE_ERROR` 常量
 - [ ] **[P1-9]** `sieve.set_paused` 响应前强制 fan-out（§10.0.1）— 改 `ControlPlaneRequest` 回执结构，让 `forward_reply` 在写 result 前先 broadcast
 - [ ] **[P1-10]** fan-out 写入加 2 秒 bounded write timeout（§10.0.1）— EPIPE/ECONNRESET/EBADF 视为失联
+- [ ] **[P1-NEW pending-leak]** GUI→daemon error response 按段位处理 pending（§12.4 + 子代理 2026-05-03 发现）
+  - `socket_server.rs:760` 收到 -32100~ 段时应清理 pending decision，而非直接 log+return
 
 ### P2 风格 / 可读性
 

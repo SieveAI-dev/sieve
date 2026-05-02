@@ -188,6 +188,7 @@ async fn gated_request_decision(
         by_user: false,
         remember: false,
         context_hint: None,
+        ui_phase_when_clicked: None,
     })
 }
 

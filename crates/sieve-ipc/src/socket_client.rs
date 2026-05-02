@@ -80,6 +80,7 @@ impl IpcClient {
                 by_user: true,
                 remember: false,
                 context_hint: None,
+                ui_phase_when_clicked: None,
             };
             let rpc_resp = jsonrpc::Response {
                 jsonrpc: "2.0".to_owned(),

@@ -1132,6 +1132,7 @@ fn make_timeout_fallback(
         by_user: false,
         remember: false,
         context_hint: None,
+        ui_phase_when_clicked: None,
     }
 }
 

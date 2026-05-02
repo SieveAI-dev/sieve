@@ -28,7 +28,7 @@ pub use protocol::{
     ReloadConfigResult, ReloadUserRules, RemoveGraylistRequest, RemoveGraylistResult,
     RequestDecisionCanceledNotify, RulesSnapshot, SetPausedRequest, SetPausedResult,
     SetPresetOverridesRequest, SetPresetOverridesResult, SetPresetRequest, SetPresetResult,
-    Severity, SourceAgent, StatusBarNotify,
+    Severity, SourceAgent, StatusBarNotify, UiPhase,
 };
 pub use socket_client::send_reload_user_rules_oneshot;
 pub use socket_server::{ControlError, ControlPlaneRequest, IpcServer};
@@ -166,6 +166,7 @@ mod tests {
             by_user: true,
             remember: false,
             context_hint: None,
+            ui_phase_when_clicked: None,
         };
 
         let json = serde_json::to_string(&resp).expect("serialize");
@@ -461,6 +462,7 @@ mod file_tests {
             by_user: true,
             remember: false,
             context_hint: None,
+            ui_phase_when_clicked: None,
         };
 
         let path = write_decision(&resp, tmp.path()).unwrap();
@@ -505,6 +507,7 @@ mod file_tests {
                 by_user: true,
                 remember: false,
                 context_hint: None,
+                ui_phase_when_clicked: None,
             };
             write_decision(&resp, &base_clone).unwrap();
         });
@@ -751,6 +754,7 @@ mod socket_tests {
                                 by_user: true,
                                 remember: false,
                                 context_hint: None,
+                                ui_phase_when_clicked: None,
                             };
                             let rpc_resp = jsonrpc::Response {
                                 jsonrpc: "2.0".to_owned(),

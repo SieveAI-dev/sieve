@@ -251,6 +251,7 @@ mod tests {
                     by_user: true,
                     remember: false,
                     context_hint: None,
+                    ui_phase_when_clicked: None,
                 })
                 .await;
         });
@@ -294,6 +295,7 @@ mod tests {
                     by_user: true,
                     remember: false,
                     context_hint: None,
+                    ui_phase_when_clicked: None,
                 })
                 .await;
         });
@@ -403,6 +405,7 @@ mod tests {
                     by_user: true,
                     remember: false,
                     context_hint: None,
+                    ui_phase_when_clicked: None,
                 })
                 .await;
         });
@@ -509,6 +512,7 @@ mod tests {
                     by_user: true,
                     remember: true,
                     context_hint: Some("用户确认：已核对地址".into()),
+                    ui_phase_when_clicked: None,
                 })
                 .await;
         });
