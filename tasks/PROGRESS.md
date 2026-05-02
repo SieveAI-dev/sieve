@@ -12,6 +12,7 @@
 
 ## ✅ 已完成（按时间倒序）
 
+- **2026-05-03** P1-7 NotifyKind 加 HookTerminal 变体（snake_case hook_terminal，SPEC-005 §5.9）
 - **2026-05-03** P1-3 HealthResult.paused 拆为 paused: bool + paused_until: Option<DateTime<Utc>>（对齐 SPEC-005 §9.5 字段表语义）
 - **2026-05-03** P1-2 PresetChangedNotify + PausedChangedNotify 加 origin_request_id: Option<Uuid>（SPEC-005 §10.0.2，GUI 识别本地回声；P1-9 实现后透传真实 request_id）
 - **2026-05-03** P1-1 SetPausedResult/PausedChangedNotify 字段 until → paused_until（serde wire 同步对齐 SPEC-005 §9.1 §10.2）
@@ -65,7 +66,7 @@ _无。等用户选定下一步执行哪一组 P0 后填入。建议每次最多
 - [x] **[P1-4]** `DecisionResponse` 加 `ui_phase_when_clicked: Option<UiPhase>`（§6.2.1, §5.10）（2026-05-03 完成）
 - [ ] **[P1-5]** `sieve.request_decision` 拆 wire DTO（§6.0, §6.1）— 字段展开 + `merged: true` + `received_at_daemon`；这是改造工作量最大的一项
 - [x] **[P1-6]** `protocol_version` 字符串全部 `"v1"` → `"v2"`（含 `tests/control_plane_dispatch.rs:52,142`）（2026-05-03 完成）
-- [ ] **[P1-7]** `NotifyKind` 加 `HookTerminal` 变体（§5.9）
+- [x] **[P1-7]** `NotifyKind` 加 `HookTerminal` 变体（§5.9）（2026-05-03 完成）
 - [ ] **[P1-8]** JSON 解析失败返回 `-32700 parse_error` 而非静默 return（§1.3.1, §12.2）— 加 `PARSE_ERROR` 常量
 - [ ] **[P1-9]** `sieve.set_paused` 响应前强制 fan-out（§10.0.1）— 改 `ControlPlaneRequest` 回执结构，让 `forward_reply` 在写 result 前先 broadcast
 - [ ] **[P1-10]** fan-out 写入加 2 秒 bounded write timeout（§10.0.1）— EPIPE/ECONNRESET/EBADF 视为失联
