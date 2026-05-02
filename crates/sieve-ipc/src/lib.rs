@@ -12,6 +12,7 @@ pub mod pending_file;
 pub mod protocol;
 pub mod socket_client;
 pub mod socket_server;
+pub mod ts_serde;
 
 // 常用类型直接 re-export，调用方无需深层 import。
 pub use error::IpcError;
@@ -319,7 +320,7 @@ mod tests {
         assert_eq!(agent, SourceAgent::OpenClaw);
     }
 
-    /// OriginHop 时间戳以 RFC3339 格式序列化。
+    /// OriginHop 时间戳以 RFC3339 + 毫秒精度 + Z 后缀序列化（SPEC-005 §4A）。
     #[test]
     fn origin_hop_timestamp_rfc3339() {
         let ts = chrono::DateTime::parse_from_rfc3339("2026-04-27T12:34:56Z")
@@ -331,9 +332,10 @@ mod tests {
             timestamp: ts,
         };
         let json = serde_json::to_string(&hop).expect("serialize");
+        // P2-3：序列化必须含毫秒精度和 Z 后缀（整秒补 .000Z）
         assert!(
-            json.contains("2026-04-27T12:34:56Z"),
-            "timestamp should be RFC3339, got: {json}"
+            json.contains("2026-04-27T12:34:56.000Z"),
+            "timestamp should be RFC3339 millis+Z (§4A), got: {json}"
         );
         let decoded: OriginHop = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(decoded.timestamp, ts);
