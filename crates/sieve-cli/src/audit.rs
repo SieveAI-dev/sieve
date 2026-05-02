@@ -161,6 +161,67 @@ pub enum AuditEvent {
         #[serde(default)]
         trigger_id: Option<String>,
     },
+    // ── v2.1 GUI 控制面（ADR-013 Supplement 2026-05-02）─────────────────────
+    /// 操作被 critical_lock 拒绝（防线二的非 graylist 出口，如 set_preset_overrides）。
+    CriticalLockBlocked {
+        rule_id: String,
+        /// `"ipc_set_overrides"` | `"ipc_response"` | `"cli"` | …
+        source: String,
+    },
+    /// preset 模式变化（CLI / GUI / config_reload 触发）。
+    PresetChanged {
+        from_mode: String,
+        to_mode: String,
+        /// `"cli"` | `"gui"` | `"config_reload"`。
+        source: String,
+    },
+    /// 单条 preset override 应用成功。
+    PresetOverrideApplied {
+        rule_id: String,
+        timeout_seconds: u32,
+        /// `"block"` | `"allow"` | `"redact"`。
+        default_on_timeout: String,
+        source: String,
+    },
+    /// 单条 preset override 被拒绝。
+    PresetOverrideRejected {
+        rule_id: String,
+        /// `"critical_lock"` | `"unknown_rule"` | `"invalid_value"`。
+        reason: String,
+        source: String,
+    },
+    /// 暂停状态被设置或清除。
+    PausedSet {
+        /// 暂停截止时间 RFC3339；None = 立刻恢复。
+        #[serde(default)]
+        until: Option<String>,
+        source: String,
+    },
+    /// `sieve.toml` + 用户规则 reload 完成。
+    ConfigReloaded {
+        user_rules_errors_count: usize,
+        source: String,
+    },
+    /// 灰名单条目被删除（用户主动 / 过期）。
+    GraylistRemoved {
+        fingerprint: String,
+        rule_id: String,
+        /// `"gui_user_action"` | `"cli"` | `"expired"`。
+        removed_by: String,
+    },
+    /// 暂停期间命中非 Critical 规则触发自动处置，跳过弹窗（SPEC-002 §9.1）。
+    ///
+    /// 与 paused 状态绑定的特殊审计事件——记录"用户暂停时被 Sieve 替我拒了什么"，
+    /// 让用户在恢复后能查询暂停期间发生的事件。
+    AutoDecidedPaused {
+        /// 触发的所有 rule_id（多条命中时逗号分隔）。
+        rule_ids: String,
+        /// 应用的决策：`"allow"` | `"deny"` | `"redact_and_allow"`。
+        decision: String,
+        request_id: String,
+        #[serde(default)]
+        caller: CallerContext,
+    },
 }
 
 impl AuditEvent {
@@ -176,8 +237,16 @@ impl AuditEvent {
             | Self::GraylistCriticalRejected { .. }
             | Self::GraylistHit { .. }
             | Self::GraylistAddFailed { .. }
-            | Self::SequenceHit { .. } => "inbound",
-            Self::UserRulesReloaded { .. } => "system",
+            | Self::SequenceHit { .. }
+            | Self::AutoDecidedPaused { .. } => "inbound",
+            Self::UserRulesReloaded { .. }
+            | Self::CriticalLockBlocked { .. }
+            | Self::PresetChanged { .. }
+            | Self::PresetOverrideApplied { .. }
+            | Self::PresetOverrideRejected { .. }
+            | Self::PausedSet { .. }
+            | Self::ConfigReloaded { .. }
+            | Self::GraylistRemoved { .. } => "system",
         }
     }
 
@@ -193,8 +262,16 @@ impl AuditEvent {
             | Self::GraylistCriticalRejected { rule_id, .. }
             | Self::GraylistHit { rule_id, .. }
             | Self::GraylistAddFailed { rule_id, .. }
-            | Self::SequenceHit { rule_id, .. } => rule_id,
+            | Self::SequenceHit { rule_id, .. }
+            | Self::CriticalLockBlocked { rule_id, .. }
+            | Self::PresetOverrideApplied { rule_id, .. }
+            | Self::PresetOverrideRejected { rule_id, .. }
+            | Self::GraylistRemoved { rule_id, .. } => rule_id,
+            Self::AutoDecidedPaused { rule_ids, .. } => rule_ids,
             Self::UserRulesReloaded { .. } => "system.user_rules_reload",
+            Self::PresetChanged { .. } => "system.preset_changed",
+            Self::PausedSet { .. } => "system.paused_set",
+            Self::ConfigReloaded { .. } => "system.config_reloaded",
         }
     }
 
@@ -211,7 +288,15 @@ impl AuditEvent {
             | Self::GraylistHit { .. }
             | Self::GraylistAddFailed { .. }
             | Self::SequenceHit { .. }
-            | Self::UserRulesReloaded { .. } => "info",
+            | Self::UserRulesReloaded { .. }
+            | Self::PresetChanged { .. }
+            | Self::PresetOverrideApplied { .. }
+            | Self::PresetOverrideRejected { .. }
+            | Self::PausedSet { .. }
+            | Self::ConfigReloaded { .. }
+            | Self::GraylistRemoved { .. }
+            | Self::AutoDecidedPaused { .. } => "info",
+            Self::CriticalLockBlocked { .. } => "critical",
         }
     }
 
@@ -229,13 +314,22 @@ impl AuditEvent {
             Self::GraylistAddFailed { .. } => "graylist_add_failed",
             Self::SequenceHit { .. } => "sequence_hit",
             Self::UserRulesReloaded { .. } => "user_rules_reloaded",
+            Self::CriticalLockBlocked { .. } => "critical_lock_blocked",
+            Self::PresetChanged { .. } => "preset_changed",
+            Self::PresetOverrideApplied { .. } => "preset_override_applied",
+            Self::PresetOverrideRejected { .. } => "preset_override_rejected",
+            Self::PausedSet { .. } => "paused_set",
+            Self::ConfigReloaded { .. } => "config_reloaded",
+            Self::GraylistRemoved { .. } => "graylist_removed",
+            Self::AutoDecidedPaused { .. } => "auto_decided_paused",
         }
     }
 
     fn decision(&self) -> Option<&str> {
         match self {
             Self::InboundDecisionResolved { decision, .. }
-            | Self::DecisionMade { decision, .. } => Some(decision),
+            | Self::DecisionMade { decision, .. }
+            | Self::AutoDecidedPaused { decision, .. } => Some(decision),
             _ => None,
         }
     }
@@ -251,8 +345,17 @@ impl AuditEvent {
             | Self::GraylistAdded { request_id, .. }
             | Self::GraylistCriticalRejected { request_id, .. }
             | Self::GraylistHit { request_id, .. }
-            | Self::GraylistAddFailed { request_id, .. } => request_id,
-            Self::SequenceHit { .. } | Self::UserRulesReloaded { .. } => "",
+            | Self::GraylistAddFailed { request_id, .. }
+            | Self::AutoDecidedPaused { request_id, .. } => request_id,
+            Self::SequenceHit { .. }
+            | Self::UserRulesReloaded { .. }
+            | Self::CriticalLockBlocked { .. }
+            | Self::PresetChanged { .. }
+            | Self::PresetOverrideApplied { .. }
+            | Self::PresetOverrideRejected { .. }
+            | Self::PausedSet { .. }
+            | Self::ConfigReloaded { .. }
+            | Self::GraylistRemoved { .. } => "",
         }
     }
 
@@ -280,8 +383,16 @@ impl AuditEvent {
             | Self::GraylistCriticalRejected { caller, .. }
             | Self::GraylistHit { caller, .. }
             | Self::GraylistAddFailed { caller, .. }
-            | Self::SequenceHit { caller, .. } => caller.pid,
-            Self::UserRulesReloaded { .. } => None,
+            | Self::SequenceHit { caller, .. }
+            | Self::AutoDecidedPaused { caller, .. } => caller.pid,
+            Self::UserRulesReloaded { .. }
+            | Self::CriticalLockBlocked { .. }
+            | Self::PresetChanged { .. }
+            | Self::PresetOverrideApplied { .. }
+            | Self::PresetOverrideRejected { .. }
+            | Self::PausedSet { .. }
+            | Self::ConfigReloaded { .. }
+            | Self::GraylistRemoved { .. } => None,
         }
     }
 
@@ -298,8 +409,16 @@ impl AuditEvent {
             | Self::GraylistCriticalRejected { caller, .. }
             | Self::GraylistHit { caller, .. }
             | Self::GraylistAddFailed { caller, .. }
-            | Self::SequenceHit { caller, .. } => caller.exe.as_deref(),
-            Self::UserRulesReloaded { .. } => None,
+            | Self::SequenceHit { caller, .. }
+            | Self::AutoDecidedPaused { caller, .. } => caller.exe.as_deref(),
+            Self::UserRulesReloaded { .. }
+            | Self::CriticalLockBlocked { .. }
+            | Self::PresetChanged { .. }
+            | Self::PresetOverrideApplied { .. }
+            | Self::PresetOverrideRejected { .. }
+            | Self::PausedSet { .. }
+            | Self::ConfigReloaded { .. }
+            | Self::GraylistRemoved { .. } => None,
         }
     }
 }

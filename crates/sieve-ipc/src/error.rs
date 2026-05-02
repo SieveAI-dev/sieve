@@ -43,3 +43,33 @@ pub enum IpcError {
     #[error("unexpected json-rpc response: {0}")]
     UnexpectedResponse(String),
 }
+
+/// JSON-RPC 2.0 错误码常量（ADR-013 Supplement 2026-05-02 §S.2）。
+///
+/// 标准段（-32700 ~ -32600）保留给 JSON-RPC 协议本身；
+/// -32000 ~ -32099 为 Sieve 自定义实现段。
+pub mod rpc_codes {
+    // ── JSON-RPC 标准段 ────────────────────────────────────────
+    /// 请求无效（缺字段 / 类型错）。
+    pub const INVALID_REQUEST: i64 = -32600;
+    /// 方法未找到。
+    pub const METHOD_NOT_FOUND: i64 = -32601;
+    /// 参数无效。
+    pub const INVALID_PARAMS: i64 = -32602;
+    /// 服务端内部错误。
+    pub const INTERNAL_ERROR: i64 = -32603;
+
+    // ── Sieve 自定义段（ADR-013 §S.2）──────────────────────────
+    /// 客户端协议版本不被接受。
+    pub const PROTOCOL_VERSION_MISMATCH: i64 = -32000;
+    /// 操作触碰 critical_lock 名单（ADR-021 防线二）。
+    pub const CRITICAL_LOCK_VIOLATED: i64 = -32001;
+    /// daemon 忙（reload / restart 进行中）。
+    pub const DAEMON_BUSY: i64 = -32002;
+    /// payload 超过 evaluate 64KB 上限。
+    pub const PAYLOAD_TOO_LARGE: i64 = -32003;
+    /// list / remove graylist 找不到目标 fingerprint。
+    pub const UNKNOWN_FINGERPRINT: i64 = -32004;
+    /// 当前 paused 状态不允许此操作（保留，目前为空集）。
+    pub const UNSUPPORTED_IN_PAUSED: i64 = -32005;
+}

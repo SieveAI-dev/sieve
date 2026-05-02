@@ -3,7 +3,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::Utc;
+use arc_swap::ArcSwap;
+use chrono::{DateTime, Utc};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{mpsc, oneshot, Mutex};
@@ -11,15 +12,111 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::{
-    error::IpcError,
+    error::{rpc_codes, IpcError},
     protocol::{
-        DecisionAction, DecisionRequest, DecisionResponse, DefaultOnTimeout, ReloadUserRules,
+        CancelReason, DecisionAction, DecisionRequest, DecisionResponse, DefaultOnTimeout,
+        EvaluateRequest, EvaluateResult, HealthRequest, HealthResult, ListGraylistRequest,
+        ListGraylistResult, PausedChangedNotify, PresetChangedNotify, ReloadConfigRequest,
+        ReloadConfigResult, ReloadUserRules, RemoveGraylistRequest, RemoveGraylistResult,
+        RequestDecisionCanceledNotify, SetPausedRequest, SetPausedResult,
+        SetPresetOverridesRequest, SetPresetOverridesResult, SetPresetRequest, SetPresetResult,
         StatusBarNotify,
     },
 };
 
 /// pending map：request_id → oneshot 发送端，等待 GUI 回复。
 type PendingMap = Arc<Mutex<HashMap<Uuid, oneshot::Sender<DecisionResponse>>>>;
+
+/// 控制面错误（IPC handler 内部用，序列化为 JSON-RPC ErrorObject）。
+///
+/// 关联：ADR-013 §S.2 错误码段。
+#[derive(Debug, Clone)]
+pub struct ControlError {
+    pub code: i64,
+    pub message: String,
+    pub data: Option<serde_json::Value>,
+}
+
+impl ControlError {
+    pub fn new(code: i64, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+            data: None,
+        }
+    }
+
+    pub fn with_data(mut self, data: serde_json::Value) -> Self {
+        self.data = Some(data);
+        self
+    }
+
+    pub fn invalid_params(message: impl Into<String>) -> Self {
+        Self::new(rpc_codes::INVALID_PARAMS, message)
+    }
+
+    pub fn internal(message: impl Into<String>) -> Self {
+        Self::new(rpc_codes::INTERNAL_ERROR, message)
+    }
+
+    pub fn payload_too_large(message: impl Into<String>) -> Self {
+        Self::new(rpc_codes::PAYLOAD_TOO_LARGE, message)
+    }
+
+    pub fn unknown_fingerprint(fingerprint: impl Into<String>) -> Self {
+        let fp = fingerprint.into();
+        Self::new(
+            rpc_codes::UNKNOWN_FINGERPRINT,
+            format!("unknown fingerprint: {fp}"),
+        )
+    }
+}
+
+/// 控制面请求（GUI → daemon，由 IPC server 反序列化后通过 mpsc 发到 daemon）。
+///
+/// 每条请求携带 `oneshot::Sender` 用于回执（daemon 处理完写入），
+/// IPC server 收到回执后序列化为 JSON-RPC response 写回 GUI socket。
+///
+/// 关联：ADR-013 Supplement 2026-05-02 §S.4。
+pub enum ControlPlaneRequest {
+    SetPaused {
+        params: SetPausedRequest,
+        reply: oneshot::Sender<Result<SetPausedResult, ControlError>>,
+    },
+    SetPreset {
+        params: SetPresetRequest,
+        reply: oneshot::Sender<Result<SetPresetResult, ControlError>>,
+    },
+    SetPresetOverrides {
+        params: SetPresetOverridesRequest,
+        reply: oneshot::Sender<Result<SetPresetOverridesResult, ControlError>>,
+    },
+    ReloadConfig {
+        params: ReloadConfigRequest,
+        reply: oneshot::Sender<Result<ReloadConfigResult, ControlError>>,
+    },
+    Health {
+        params: HealthRequest,
+        reply: oneshot::Sender<Result<HealthResult, ControlError>>,
+    },
+    Evaluate {
+        params: EvaluateRequest,
+        reply: oneshot::Sender<Result<EvaluateResult, ControlError>>,
+    },
+    ListGraylist {
+        params: ListGraylistRequest,
+        reply: oneshot::Sender<Result<ListGraylistResult, ControlError>>,
+    },
+    RemoveGraylist {
+        params: RemoveGraylistRequest,
+        reply: oneshot::Sender<Result<RemoveGraylistResult, ControlError>>,
+    },
+}
+
+/// 控制面 channel 容量。
+///
+/// 容量 32：预期单 GUI 突发并发 ≤ 5（设置面板批量改 + health 轮询），32 留足余量。
+const CONTROL_CHANNEL_CAPACITY: usize = 32;
 
 /// reload 通知 channel 容量。
 ///
@@ -81,6 +178,16 @@ pub struct IpcServer {
     reload_tx: mpsc::Sender<ReloadUserRules>,
     /// reload 通知接收端（`Option` 包装以支持 `take` 一次性移交给 daemon task）。
     reload_rx: Arc<Mutex<Option<mpsc::Receiver<ReloadUserRules>>>>,
+    /// 控制面请求发送端（GUI 控制面 8 个方法的反序列化结果汇聚到此 channel）。
+    control_tx: mpsc::Sender<ControlPlaneRequest>,
+    /// 控制面接收端（daemon 通过 `control_rx()` 取出，单独 task 消费）。
+    control_rx: Arc<Mutex<Option<mpsc::Receiver<ControlPlaneRequest>>>>,
+    /// 暂停截止时间（hot path 直接读，避免跨 crate 取 RuntimeState）。
+    ///
+    /// 关联：ADR-013 §S.4 set_paused / SPEC-002 §9.1。
+    /// `None` = 未暂停；`Some(t)` 且 `t > now` = 暂停中。
+    /// daemon 控制面 handler 通过 [`Self::set_paused_until`] 同步。
+    paused_until: Arc<ArcSwap<Option<DateTime<Utc>>>>,
 }
 
 impl IpcServer {
@@ -94,14 +201,97 @@ impl IpcServer {
         }
         let listener = UnixListener::bind(&socket_path)?;
         let (reload_tx, reload_rx) = mpsc::channel::<ReloadUserRules>(RELOAD_CHANNEL_CAPACITY);
+        let (control_tx, control_rx) =
+            mpsc::channel::<ControlPlaneRequest>(CONTROL_CHANNEL_CAPACITY);
         let server = Self {
             socket_path,
             pending: Arc::new(Mutex::new(HashMap::new())),
             gui_writers: Arc::new(std::sync::Mutex::new(Vec::new())),
             reload_tx,
             reload_rx: Arc::new(Mutex::new(Some(reload_rx))),
+            control_tx,
+            control_rx: Arc::new(Mutex::new(Some(control_rx))),
+            paused_until: Arc::new(ArcSwap::from_pointee(None)),
         };
         Ok((server, listener))
+    }
+
+    /// 取出控制面接收端（只能调用一次，之后返回 None）。
+    ///
+    /// daemon 应在启动时调用，spawn task 监听控制面请求：
+    ///
+    /// ```ignore
+    /// if let Some(mut rx) = server.control_rx().await {
+    ///     tokio::spawn(async move {
+    ///         while let Some(req) = rx.recv().await {
+    ///             match req {
+    ///                 ControlPlaneRequest::Health { params, reply } => { ... }
+    ///                 // ...
+    ///             }
+    ///         }
+    ///     });
+    /// }
+    /// ```
+    pub async fn control_rx(&self) -> Option<mpsc::Receiver<ControlPlaneRequest>> {
+        self.control_rx.lock().await.take()
+    }
+
+    /// 内部触发用户规则 reload（控制面 `sieve.reload_config` 复用此通道）。
+    ///
+    /// 与外部 `send_reload_user_rules_oneshot` 等价，但走进程内 mpsc 而非 socket。
+    /// 关联：ADR-013 Supplement §S.4 sieve.reload_config。
+    pub async fn trigger_user_rules_reload(
+        &self,
+        trigger: ReloadUserRules,
+    ) -> Result<(), IpcError> {
+        self.reload_tx
+            .send(trigger)
+            .await
+            .map_err(|_| IpcError::FileLock("reload channel closed".to_owned()))
+    }
+
+    /// 设置 / 清除暂停截止时间。
+    ///
+    /// `None` = 立即恢复；`Some(t)` = 暂停至 `t`（UTC）。daemon 控制面 handler 在
+    /// [`crate::ControlPlaneRequest::SetPaused`] 处理后调用此方法同步给 hot path。
+    pub fn set_paused_until(&self, until: Option<DateTime<Utc>>) {
+        self.paused_until.store(Arc::new(until));
+    }
+
+    /// 查询当前是否处于暂停状态（hot path lock-free 读）。
+    ///
+    /// 自动恢复：若 `paused_until` 已过期则原地清空并返回 false。
+    /// 关联：SPEC-002 §9.1（暂停期间非 Critical 弹窗跳过）。
+    pub fn is_paused(&self) -> bool {
+        let snap = self.paused_until.load();
+        match snap.as_ref().as_ref() {
+            Some(until) => {
+                if *until > Utc::now() {
+                    true
+                } else {
+                    // 自动恢复——避免下次重复检查
+                    self.paused_until.store(Arc::new(None));
+                    false
+                }
+            }
+            None => false,
+        }
+    }
+
+    /// 当前 paused_until 快照（health 报告用）。
+    pub fn paused_until_snapshot(&self) -> Option<DateTime<Utc>> {
+        let snap = self.paused_until.load();
+        snap.as_ref().as_ref().copied().filter(|t| *t > Utc::now())
+    }
+
+    /// 当前已连接的 GUI 客户端数量（health snapshot 用）。
+    pub fn connected_clients(&self) -> usize {
+        self.gui_writers.lock().map(|w| w.len()).unwrap_or(0)
+    }
+
+    /// 当前 inflight 的决策请求数量（health snapshot 用）。
+    pub async fn inflight_decisions(&self) -> usize {
+        self.pending.lock().await.len()
     }
 
     /// 取出 reload 通知接收端（只能调用一次，之后返回 None）。
@@ -143,10 +333,13 @@ impl IpcServer {
                     let pending = Arc::clone(&self.pending);
                     let gui_writers = Arc::clone(&self.gui_writers);
                     let reload_tx = self.reload_tx.clone();
+                    let control_tx = self.control_tx.clone();
 
                     // 为新连接创建 mpsc 通道：发送端注册到 gui_writers，接收端传给 handle_connection。
+                    // 同时 clone 一份发送端给 handle_connection 用，让控制面响应能路由回当前连接。
                     // oneshot client（如 reload）连接短暂，断开后 try_send 自动清理其 sender。
                     let (tx, rx) = mpsc::channel::<String>(32);
+                    let conn_tx = tx.clone();
                     {
                         let mut writers = gui_writers.lock().expect("gui_writers lock poisoned");
                         writers.push(tx);
@@ -159,9 +352,16 @@ impl IpcServer {
                     }
 
                     tokio::spawn(async move {
-                        if let Err(e) =
-                            handle_connection(stream, pending, gui_writers.clone(), rx, reload_tx)
-                                .await
+                        if let Err(e) = handle_connection(
+                            stream,
+                            pending,
+                            gui_writers.clone(),
+                            conn_tx,
+                            rx,
+                            reload_tx,
+                            control_tx,
+                        )
+                        .await
                         {
                             error!("IPC connection error: {e}");
                         }
@@ -191,34 +391,70 @@ impl IpcServer {
     ///
     /// 关联：PRD v2.0 §5.7（行为序列 StatusBar 通知）+ PRD v2.1 §5.4.3（多 GUI 客户端）+ ADR-013。
     pub fn broadcast_status_bar(&self, notify: StatusBarNotify) {
-        // 构造 JSON-RPC 2.0 通知（无 id = fire-and-forget）。
+        let label = format!("status_bar notify_id={}", notify.notify_id);
+        self.broadcast_method("sieve.notify_status_bar", &notify, &label);
+    }
+
+    /// 向**所有**已连接的 GUI 广播 preset 变更通知。
+    ///
+    /// 关联：ADR-013 Supplement §S.3 / SPEC-002 §9.2。
+    pub fn broadcast_preset_changed(&self, notify: PresetChangedNotify) {
+        let label = format!("preset_changed mode={}", notify.mode);
+        self.broadcast_method("sieve.preset_changed", &notify, &label);
+    }
+
+    /// 向**所有**已连接的 GUI 广播 paused 状态变更通知。
+    ///
+    /// 关联：ADR-013 Supplement §S.3 / SPEC-002 §9.1。
+    pub fn broadcast_paused_changed(&self, notify: PausedChangedNotify) {
+        let label = format!("paused_changed paused={}", notify.paused);
+        self.broadcast_method("sieve.paused_changed", &notify, &label);
+    }
+
+    /// 向**所有**已连接的 GUI 广播 request_decision 取消通知。
+    ///
+    /// 关联：ADR-013 Supplement §S.3 / SPEC-002 §9.3 / §9.4。
+    pub fn broadcast_request_decision_canceled(&self, notify: RequestDecisionCanceledNotify) {
+        let label = format!("request_decision_canceled request_id={}", notify.request_id);
+        self.broadcast_method("sieve.request_decision_canceled", &notify, &label);
+    }
+
+    /// 通用 fan-out 广播（所有 broadcast_* 方法的共用实现）。
+    ///
+    /// 行为与 broadcast_status_bar 历史实现一致：
+    /// - 无 GUI 连接时静默丢弃 + debug 日志。
+    /// - `try_send`：Closed → 移除（lazy 清理）；Full → 保留（背压）。
+    /// - 持 `std::sync::Mutex` 锁短暂、无 await。
+    fn broadcast_method<T: serde::Serialize>(&self, method: &str, params: &T, label: &str) {
         let notification = crate::protocol::jsonrpc::Request {
             jsonrpc: "2.0".to_owned(),
-            method: "sieve.notify_status_bar".to_owned(),
-            params: match serde_json::to_value(&notify) {
+            method: method.to_owned(),
+            params: match serde_json::to_value(params) {
                 Ok(v) => Some(v),
                 Err(e) => {
-                    warn!(notify_id = %notify.notify_id, "failed to serialize StatusBarNotify: {e}");
+                    warn!(method, label, "failed to serialize broadcast params: {e}");
                     return;
                 }
             },
-            id: None, // 单向通知，无 id。
+            id: None,
         };
 
         let mut payload = match serde_json::to_string(&notification) {
             Ok(s) => s,
             Err(e) => {
-                warn!("failed to serialize notify JSON-RPC frame: {e}");
+                warn!(method, "failed to serialize JSON-RPC frame: {e}");
                 return;
             }
         };
         payload.push('\n');
 
-        // 持 std::sync::Mutex 锁（短暂，无 await），drain + try_send + 重建 Vec。
         let mut writers = self.gui_writers.lock().expect("gui_writers lock poisoned");
 
         if writers.is_empty() {
-            debug!(notify_id = %notify.notify_id, "broadcast_status_bar: no GUI clients connected; dropping");
+            debug!(
+                method,
+                label, "broadcast: no GUI clients connected; dropping"
+            );
             return;
         }
 
@@ -234,13 +470,14 @@ impl IpcServer {
                     alive.push(sender);
                 }
                 Err(mpsc::error::TrySendError::Full(_)) => {
-                    // 通道暂时满（背压），保留 sender，不视为断线。
-                    debug!(notify_id = %notify.notify_id, "GUI writer channel full (backpressure); retaining sender");
+                    debug!(method, label, "GUI writer channel full; retaining sender");
                     alive.push(sender);
                 }
                 Err(mpsc::error::TrySendError::Closed(_)) => {
-                    // GUI 已断线，丢弃此 sender（lazy 清理）。
-                    debug!(notify_id = %notify.notify_id, "GUI client sender closed; removing from gui_writers");
+                    debug!(
+                        method,
+                        label, "GUI client sender closed; removing from gui_writers"
+                    );
                     removed += 1;
                 }
             }
@@ -249,14 +486,18 @@ impl IpcServer {
 
         if removed > 0 {
             debug!(
-                notify_id = %notify.notify_id,
+                method,
+                label,
                 sent,
                 removed,
                 alive = writers.len(),
-                "broadcast_status_bar: cleaned up dead GUI clients"
+                "broadcast: cleaned up dead GUI clients"
             );
         } else {
-            debug!(notify_id = %notify.notify_id, sent, "broadcast_status_bar: delivered to all GUI clients");
+            debug!(
+                method,
+                label, sent, "broadcast: delivered to all GUI clients"
+            );
         }
     }
 
@@ -319,12 +560,24 @@ impl IpcServer {
             Ok(Err(_)) => {
                 // oneshot sender 已丢弃（handle_connection 因断线退出），走超时兜底。
                 warn!(%request_id, "decision sender dropped (GUI disconnected); fallback");
+                // 不广播 cancel（GUI 已断，没人能收到通知；其他可能存在的 GUI 实例
+                // 也不会收到，因 pending 已清空）。
                 Ok(make_timeout_fallback(request_id, default_on_timeout))
             }
             Err(_elapsed) => {
-                // 超时，清理 pending map。
+                // 超时，清理 pending map + 广播取消通知给所有 GUI（SPEC-002 §9.3）。
                 self.pending.lock().await.remove(&request_id);
                 warn!(%request_id, "decision timeout");
+                let auto_decision = match default_on_timeout {
+                    DefaultOnTimeout::Block => DecisionAction::Deny,
+                    DefaultOnTimeout::Allow => DecisionAction::Allow,
+                    DefaultOnTimeout::Redact => DecisionAction::RedactAndAllow,
+                };
+                self.broadcast_request_decision_canceled(RequestDecisionCanceledNotify {
+                    request_id,
+                    reason: CancelReason::Timeout,
+                    auto_decision,
+                });
                 Ok(make_timeout_fallback(request_id, default_on_timeout))
             }
         }
@@ -352,8 +605,10 @@ async fn handle_connection(
     stream: UnixStream,
     pending: PendingMap,
     _gui_writers: GuiWriters,
+    write_tx: mpsc::Sender<String>,
     mut write_rx: mpsc::Receiver<String>,
     reload_tx: mpsc::Sender<ReloadUserRules>,
+    control_tx: mpsc::Sender<ControlPlaneRequest>,
 ) -> Result<(), IpcError> {
     info!("GUI client connected");
 
@@ -362,7 +617,7 @@ async fn handle_connection(
 
     loop {
         tokio::select! {
-            // 读方向：GUI 发来 decision_response。
+            // 读方向：GUI 发来 decision_response 或控制面 request。
             line_result = lines.next_line() => {
                 match line_result? {
                     None => {
@@ -376,12 +631,12 @@ async fn handle_connection(
                             continue;
                         }
                         debug!(raw = %line, "received IPC message from GUI");
-                        dispatch_message(&line, &pending, &reload_tx).await;
+                        dispatch_message(&line, &pending, &reload_tx, &control_tx, &write_tx).await;
                     }
                 }
             }
 
-            // 写方向：主代理 push request_decision 给 GUI。
+            // 写方向：主代理 push request_decision 给 GUI（含控制面响应回执）。
             msg = write_rx.recv() => {
                 match msg {
                     None => {
@@ -417,11 +672,13 @@ async fn handle_connection(
     Ok(())
 }
 
-/// 解析一行 JSON-RPC 消息，区分 decision response 与单向通知并分别派发。
+/// 解析一行 JSON-RPC 消息，区分 decision response、单向通知、控制面 request 并分别派发。
 async fn dispatch_message(
     line: &str,
     pending: &PendingMap,
     reload_tx: &mpsc::Sender<ReloadUserRules>,
+    control_tx: &mpsc::Sender<ControlPlaneRequest>,
+    write_tx: &mpsc::Sender<String>,
 ) {
     // 先尝试解析为通用 JSON Value，从 method 字段判断消息类型。
     let val: serde_json::Value = match serde_json::from_str(line) {
@@ -434,12 +691,47 @@ async fn dispatch_message(
 
     // 有 method 字段 = 通知（Notification）或请求（Request）。
     if let Some(method) = val.get("method").and_then(|v| v.as_str()) {
-        match method {
+        let method = method.to_owned();
+        let id = val.get("id").cloned();
+        let params = val
+            .get("params")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+
+        match method.as_str() {
+            // ── 单向通知（无 id）────────────────────────────────────
             "sieve.reload_user_rules" => {
                 dispatch_notification_line(line, reload_tx).await;
             }
+            // ── v2.1 控制面 request（有 id）─────────────────────────
+            "sieve.set_paused"
+            | "sieve.set_preset"
+            | "sieve.set_preset_overrides"
+            | "sieve.reload_config"
+            | "sieve.health"
+            | "sieve.evaluate"
+            | "sieve.list_graylist"
+            | "sieve.remove_graylist" => {
+                let Some(id) = id else {
+                    warn!(method = %method, "control-plane method requires id; treating as notification dropped");
+                    return;
+                };
+                dispatch_control_plane(method.as_str(), params, id, control_tx, write_tx).await;
+            }
             other => {
-                warn!(method = other, "received unknown IPC method; ignoring");
+                // 未知 method：有 id 时回 -32601；无 id 时静默忽略。
+                if let Some(id) = id {
+                    let err = ControlError::new(
+                        rpc_codes::METHOD_NOT_FOUND,
+                        format!("method not found: {other}"),
+                    );
+                    write_error_response(id, err, write_tx).await;
+                } else {
+                    warn!(
+                        method = other,
+                        "received unknown IPC notification; ignoring"
+                    );
+                }
             }
         }
         return;
@@ -480,6 +772,303 @@ async fn dispatch_message(
                 warn!("failed to deserialize DecisionResponse: {e}");
             }
         }
+    }
+}
+
+/// 控制面 method 路由：反序列化 params → 发 ControlPlaneRequest → 等回执 → 写回 GUI。
+async fn dispatch_control_plane(
+    method: &str,
+    params: serde_json::Value,
+    id: serde_json::Value,
+    control_tx: &mpsc::Sender<ControlPlaneRequest>,
+    write_tx: &mpsc::Sender<String>,
+) {
+    /// 反序列化 params；缺失时使用 Default 值。
+    fn parse_params<T: serde::de::DeserializeOwned + Default>(
+        v: serde_json::Value,
+    ) -> Result<T, ControlError> {
+        if v.is_null() {
+            return Ok(T::default());
+        }
+        serde_json::from_value(v).map_err(|e| ControlError::invalid_params(e.to_string()))
+    }
+
+    /// 反序列化 params；缺失时报 invalid_params。
+    fn require_params<T: serde::de::DeserializeOwned>(
+        v: serde_json::Value,
+    ) -> Result<T, ControlError> {
+        if v.is_null() {
+            return Err(ControlError::invalid_params("params required"));
+        }
+        serde_json::from_value(v).map_err(|e| ControlError::invalid_params(e.to_string()))
+    }
+
+    match method {
+        "sieve.set_paused" => {
+            let p: SetPausedRequest = match require_params(params) {
+                Ok(p) => p,
+                Err(e) => return write_error_response(id, e, write_tx).await,
+            };
+            let (reply, rx) = oneshot::channel();
+            if control_tx
+                .send(ControlPlaneRequest::SetPaused { params: p, reply })
+                .await
+                .is_err()
+            {
+                return write_error_response(
+                    id,
+                    ControlError::internal("daemon control channel closed"),
+                    write_tx,
+                )
+                .await;
+            }
+            forward_reply::<SetPausedResult>(id, rx, write_tx).await;
+        }
+        "sieve.set_preset" => {
+            let p: SetPresetRequest = match require_params(params) {
+                Ok(p) => p,
+                Err(e) => return write_error_response(id, e, write_tx).await,
+            };
+            let (reply, rx) = oneshot::channel();
+            if control_tx
+                .send(ControlPlaneRequest::SetPreset { params: p, reply })
+                .await
+                .is_err()
+            {
+                return write_error_response(
+                    id,
+                    ControlError::internal("daemon control channel closed"),
+                    write_tx,
+                )
+                .await;
+            }
+            forward_reply::<SetPresetResult>(id, rx, write_tx).await;
+        }
+        "sieve.set_preset_overrides" => {
+            let p: SetPresetOverridesRequest = match parse_params(params) {
+                Ok(p) => p,
+                Err(e) => return write_error_response(id, e, write_tx).await,
+            };
+            let (reply, rx) = oneshot::channel();
+            if control_tx
+                .send(ControlPlaneRequest::SetPresetOverrides { params: p, reply })
+                .await
+                .is_err()
+            {
+                return write_error_response(
+                    id,
+                    ControlError::internal("daemon control channel closed"),
+                    write_tx,
+                )
+                .await;
+            }
+            forward_reply::<SetPresetOverridesResult>(id, rx, write_tx).await;
+        }
+        "sieve.reload_config" => {
+            let p: ReloadConfigRequest = match parse_params(params) {
+                Ok(p) => p,
+                Err(e) => return write_error_response(id, e, write_tx).await,
+            };
+            let (reply, rx) = oneshot::channel();
+            if control_tx
+                .send(ControlPlaneRequest::ReloadConfig { params: p, reply })
+                .await
+                .is_err()
+            {
+                return write_error_response(
+                    id,
+                    ControlError::internal("daemon control channel closed"),
+                    write_tx,
+                )
+                .await;
+            }
+            forward_reply::<ReloadConfigResult>(id, rx, write_tx).await;
+        }
+        "sieve.health" => {
+            let p: HealthRequest = match parse_params(params) {
+                Ok(p) => p,
+                Err(e) => return write_error_response(id, e, write_tx).await,
+            };
+            let (reply, rx) = oneshot::channel();
+            if control_tx
+                .send(ControlPlaneRequest::Health { params: p, reply })
+                .await
+                .is_err()
+            {
+                return write_error_response(
+                    id,
+                    ControlError::internal("daemon control channel closed"),
+                    write_tx,
+                )
+                .await;
+            }
+            forward_reply::<HealthResult>(id, rx, write_tx).await;
+        }
+        "sieve.evaluate" => {
+            let p: EvaluateRequest = match require_params(params) {
+                Ok(p) => p,
+                Err(e) => return write_error_response(id, e, write_tx).await,
+            };
+            // payload 上限 64KB（ADR-013 §S.4）。
+            const PAYLOAD_LIMIT: usize = 64 * 1024;
+            if p.payload.len() > PAYLOAD_LIMIT {
+                return write_error_response(
+                    id,
+                    ControlError::payload_too_large(format!(
+                        "payload {} bytes exceeds {PAYLOAD_LIMIT} byte limit",
+                        p.payload.len()
+                    )),
+                    write_tx,
+                )
+                .await;
+            }
+            let (reply, rx) = oneshot::channel();
+            if control_tx
+                .send(ControlPlaneRequest::Evaluate { params: p, reply })
+                .await
+                .is_err()
+            {
+                return write_error_response(
+                    id,
+                    ControlError::internal("daemon control channel closed"),
+                    write_tx,
+                )
+                .await;
+            }
+            forward_reply::<EvaluateResult>(id, rx, write_tx).await;
+        }
+        "sieve.list_graylist" => {
+            let p: ListGraylistRequest = match parse_params(params) {
+                Ok(p) => p,
+                Err(e) => return write_error_response(id, e, write_tx).await,
+            };
+            let (reply, rx) = oneshot::channel();
+            if control_tx
+                .send(ControlPlaneRequest::ListGraylist { params: p, reply })
+                .await
+                .is_err()
+            {
+                return write_error_response(
+                    id,
+                    ControlError::internal("daemon control channel closed"),
+                    write_tx,
+                )
+                .await;
+            }
+            forward_reply::<ListGraylistResult>(id, rx, write_tx).await;
+        }
+        "sieve.remove_graylist" => {
+            let p: RemoveGraylistRequest = match require_params(params) {
+                Ok(p) => p,
+                Err(e) => return write_error_response(id, e, write_tx).await,
+            };
+            let (reply, rx) = oneshot::channel();
+            if control_tx
+                .send(ControlPlaneRequest::RemoveGraylist { params: p, reply })
+                .await
+                .is_err()
+            {
+                return write_error_response(
+                    id,
+                    ControlError::internal("daemon control channel closed"),
+                    write_tx,
+                )
+                .await;
+            }
+            forward_reply::<RemoveGraylistResult>(id, rx, write_tx).await;
+        }
+        other => {
+            // 不会到达此分支（外层 match 已穷举）。
+            write_error_response(
+                id,
+                ControlError::new(
+                    rpc_codes::METHOD_NOT_FOUND,
+                    format!("control-plane method not implemented: {other}"),
+                ),
+                write_tx,
+            )
+            .await;
+        }
+    }
+}
+
+/// 等待 daemon 通过 oneshot 返回回执，序列化为 JSON-RPC response 写回 GUI。
+async fn forward_reply<T: serde::Serialize>(
+    id: serde_json::Value,
+    rx: oneshot::Receiver<Result<T, ControlError>>,
+    write_tx: &mpsc::Sender<String>,
+) {
+    match rx.await {
+        Ok(Ok(value)) => match serde_json::to_value(&value) {
+            Ok(result) => write_success_response(id, result, write_tx).await,
+            Err(e) => {
+                write_error_response(
+                    id,
+                    ControlError::internal(format!("serialize result failed: {e}")),
+                    write_tx,
+                )
+                .await;
+            }
+        },
+        Ok(Err(err)) => write_error_response(id, err, write_tx).await,
+        Err(_) => {
+            // daemon 端 reply sender 被 drop 而未 send（handler panic / 提前退出）。
+            write_error_response(
+                id,
+                ControlError::internal("daemon dropped reply without responding"),
+                write_tx,
+            )
+            .await;
+        }
+    }
+}
+
+async fn write_success_response(
+    id: serde_json::Value,
+    result: serde_json::Value,
+    write_tx: &mpsc::Sender<String>,
+) {
+    let resp = crate::protocol::jsonrpc::Response {
+        jsonrpc: "2.0".to_owned(),
+        result: Some(result),
+        error: None,
+        id,
+    };
+    write_jsonrpc_frame(resp, write_tx).await;
+}
+
+async fn write_error_response(
+    id: serde_json::Value,
+    err: ControlError,
+    write_tx: &mpsc::Sender<String>,
+) {
+    let resp = crate::protocol::jsonrpc::Response {
+        jsonrpc: "2.0".to_owned(),
+        result: None,
+        error: Some(crate::protocol::jsonrpc::ErrorObject {
+            code: err.code,
+            message: err.message,
+            data: err.data,
+        }),
+        id,
+    };
+    write_jsonrpc_frame(resp, write_tx).await;
+}
+
+async fn write_jsonrpc_frame(
+    resp: crate::protocol::jsonrpc::Response,
+    write_tx: &mpsc::Sender<String>,
+) {
+    let mut payload = match serde_json::to_string(&resp) {
+        Ok(s) => s,
+        Err(e) => {
+            warn!("failed to serialize JSON-RPC response: {e}");
+            return;
+        }
+    };
+    payload.push('\n');
+    if write_tx.send(payload).await.is_err() {
+        debug!("write_tx closed; control-plane response dropped");
     }
 }
 

@@ -19,11 +19,19 @@ pub use origin_header::{
     OriginHeaderError, SIEVE_ORIGIN_PUBLIC_KEY,
 };
 pub use protocol::{
-    DecisionAction, DecisionRequest, DecisionResponse, DefaultOnTimeout, DetectionPayload,
-    Disposition, NotifyKind, OriginHop, ReloadUserRules, Severity, SourceAgent, StatusBarNotify,
+    AuditDbSnapshot, CancelReason, DecisionAction, DecisionRequest, DecisionResponse,
+    DefaultOnTimeout, DetectionPayload, Disposition, EvaluateContentKind, EvaluateDirection,
+    EvaluateMatch, EvaluateRecommendation, EvaluateRequest, EvaluateResult, GraylistEntrySummary,
+    GraylistSnapshot, HealthRequest, HealthResult, IpcSnapshot, ListGraylistRequest,
+    ListGraylistResult, ListenSnapshot, NotifyKind, OriginHop, PausedChangedNotify,
+    PresetChangedNotify, PresetOverride, PresetSnapshot, RejectedOverride, ReloadConfigRequest,
+    ReloadConfigResult, ReloadUserRules, RemoveGraylistRequest, RemoveGraylistResult,
+    RequestDecisionCanceledNotify, RulesSnapshot, SetPausedRequest, SetPausedResult,
+    SetPresetOverridesRequest, SetPresetOverridesResult, SetPresetRequest, SetPresetResult,
+    Severity, SourceAgent, StatusBarNotify,
 };
 pub use socket_client::send_reload_user_rules_oneshot;
-pub use socket_server::IpcServer;
+pub use socket_server::{ControlError, ControlPlaneRequest, IpcServer};
 
 #[cfg(test)]
 mod tests {

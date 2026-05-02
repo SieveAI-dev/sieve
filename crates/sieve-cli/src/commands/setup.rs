@@ -1930,18 +1930,23 @@ launchd_plist_path = "{launchd_plist}"
     #[cfg(test)]
     mod tests_rollback {
         use super::*;
+        use std::sync::Mutex;
         use tempfile::tempdir;
+
+        // 模块级共享 ENV_LOCK：所有 HOME 环境变量改写测试串行执行。
+        // 历史 bug：之前每个 `#[test]` 函数内各声明一个 `static ENV_LOCK`，但 Rust 中
+        // fn 内 `static` 是 fn 自己的独立 item，跨 fn 不共享 → 并发 cargo test 时多个
+        // 测试同时改 $HOME，CI 上偶发 setup_context_rollback_deletes_new_file 失败。
+        // 修复：提到 mod 级别，所有测试共用同一把锁。
+        static ENV_LOCK: Mutex<()> = Mutex::new(());
 
         // ── 测试 #5：rollback 确实恢复备份文件 ──────────────────────────────────
         // R5-#1 修复验证：backup 存在时 rollback 从备份恢复
         #[test]
         #[allow(unsafe_code)] // 测试隔离需要临时覆盖 HOME env var
         fn setup_context_rollback_restores_settings() {
-            use std::sync::Mutex;
-
-            // env var 修改需要串行
-            static ENV_LOCK: Mutex<()> = Mutex::new(());
-            let _guard = ENV_LOCK.lock().unwrap();
+            // env var 修改需要串行（共用 mod 级 ENV_LOCK，避免与 fn-内 static 不互斥）
+            let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
             let dir = tempdir().unwrap();
             let backup_dir = dir.path().join("backups").join("2026-01-01");
@@ -1990,10 +1995,8 @@ launchd_plist_path = "{launchd_plist}"
         #[test]
         #[allow(unsafe_code)] // 测试隔离需要临时覆盖 HOME env var
         fn setup_context_rollback_deletes_new_file() {
-            use std::sync::Mutex;
-
-            static ENV_LOCK: Mutex<()> = Mutex::new(());
-            let _guard = ENV_LOCK.lock().unwrap();
+            // 共用 mod 级 ENV_LOCK 与上一个测试串行，避免 $HOME 并发 race
+            let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
             let dir = tempdir().unwrap();
             let backup_dir = dir.path().join("backups").join("2026-01-01");

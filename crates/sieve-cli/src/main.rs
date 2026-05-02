@@ -22,6 +22,7 @@ mod cli;
 mod commands;
 mod config;
 mod daemon;
+mod daemon_control_plane;
 mod embedded_rules;
 mod engine_adapter;
 pub mod process_context;
