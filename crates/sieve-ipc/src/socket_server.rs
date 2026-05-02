@@ -110,6 +110,21 @@ impl ControlError {
     }
 }
 
+/// 变更类请求（set_paused / set_preset / set_preset_overrides）的 fan-out 计划。
+///
+/// daemon 处理完 mutating request 后，通过 reply channel 返回结果 **同时** 携带此结构，
+/// IPC server 层在写 result 之前先 fan-out 所有通知（SPEC-005 §10.0.1）。
+///
+/// 避免在 daemon 层直接 `try_send` 广播（可能因通道满而丢失），改为在 IPC server 层
+/// `send`（await）逐一写入，保证 result 发出前所有 GUI 都已入队。
+#[derive(Debug)]
+pub enum BroadcastPlan {
+    /// 广播 `sieve.paused_changed` 通知。
+    PausedChanged(PausedChangedNotify),
+    /// 广播 `sieve.preset_changed` 通知。
+    PresetChanged(PresetChangedNotify),
+}
+
 /// 控制面请求（GUI → daemon，由 IPC server 反序列化后通过 mpsc 发到 daemon）。
 ///
 /// 每条请求携带 `oneshot::Sender` 用于回执（daemon 处理完写入），
@@ -117,17 +132,22 @@ impl ControlError {
 ///
 /// 关联：ADR-013 Supplement 2026-05-02 §S.4。
 pub enum ControlPlaneRequest {
+    /// SPEC-005 §10.0.1：reply 携带 BroadcastPlan，IPC server 先 fan-out 再写 result。
     SetPaused {
         params: SetPausedRequest,
-        reply: oneshot::Sender<Result<SetPausedResult, ControlError>>,
+        reply: oneshot::Sender<Result<(SetPausedResult, Option<BroadcastPlan>), ControlError>>,
     },
+    /// SPEC-005 §10.0.1：reply 携带 BroadcastPlan，IPC server 先 fan-out 再写 result。
     SetPreset {
         params: SetPresetRequest,
-        reply: oneshot::Sender<Result<SetPresetResult, ControlError>>,
+        reply: oneshot::Sender<Result<(SetPresetResult, Option<BroadcastPlan>), ControlError>>,
     },
+    /// SPEC-005 §10.0.1：reply 携带 BroadcastPlan，IPC server 先 fan-out 再写 result。
     SetPresetOverrides {
         params: SetPresetOverridesRequest,
-        reply: oneshot::Sender<Result<SetPresetOverridesResult, ControlError>>,
+        reply: oneshot::Sender<
+            Result<(SetPresetOverridesResult, Option<BroadcastPlan>), ControlError>,
+        >,
     },
     ReloadConfig {
         params: ReloadConfigRequest,
@@ -435,6 +455,7 @@ impl IpcServer {
                         }
                     }
 
+                    let gui_writers_for_ctx = Arc::clone(&gui_writers);
                     tokio::spawn(async move {
                         let ctx = ConnectionContext {
                             pending,
@@ -445,6 +466,7 @@ impl IpcServer {
                             hello_builder,
                             paused_until,
                             oversize_callback,
+                            gui_writers: gui_writers_for_ctx,
                         };
                         if let Err(e) = handle_connection(stream, ctx).await {
                             error!("IPC connection error: {e}");
@@ -706,6 +728,8 @@ struct ConnectionContext {
     paused_until: Arc<ArcSwap<Option<DateTime<Utc>>>>,
     /// oversize 帧 audit 回调（SPEC-005 §1.3.1）。
     oversize_callback: Option<OversizeCallback>,
+    /// 所有 GUI 客户端写通道（fan-out 广播用）。
+    gui_writers: GuiWriters,
 }
 
 async fn handle_connection(stream: UnixStream, ctx: ConnectionContext) -> Result<(), IpcError> {
@@ -718,6 +742,7 @@ async fn handle_connection(stream: UnixStream, ctx: ConnectionContext) -> Result
         hello_builder,
         paused_until,
         oversize_callback,
+        gui_writers: gui_writers_clone,
     } = ctx;
     info!("GUI client connected");
 
@@ -820,7 +845,15 @@ async fn handle_connection(stream: UnixStream, ctx: ConnectionContext) -> Result
                             continue;
                         }
                         debug!("received IPC message from GUI");
-                        dispatch_message(&line, &pending, &reload_tx, &control_tx, &write_tx).await;
+                        dispatch_message(
+                            &line,
+                            &pending,
+                            &reload_tx,
+                            &control_tx,
+                            &write_tx,
+                            &gui_writers_clone,
+                        )
+                        .await;
                     }
                 }
             }
@@ -880,6 +913,7 @@ async fn dispatch_message(
     reload_tx: &mpsc::Sender<ReloadUserRules>,
     control_tx: &mpsc::Sender<ControlPlaneRequest>,
     write_tx: &mpsc::Sender<String>,
+    gui_writers: &GuiWriters,
 ) {
     // 先尝试解析为通用 JSON Value，从 method 字段判断消息类型。
     // SPEC-005 §1.3.1 §12.2：JSON 解析失败必须返回 -32700 parse_error，不关闭连接。
@@ -930,7 +964,15 @@ async fn dispatch_message(
                     warn!(method = %method, "control-plane method requires id; treating as notification dropped");
                     return;
                 };
-                dispatch_control_plane(method.as_str(), params, id, control_tx, write_tx).await;
+                dispatch_control_plane(
+                    method.as_str(),
+                    params,
+                    id,
+                    control_tx,
+                    write_tx,
+                    gui_writers,
+                )
+                .await;
             }
             other => {
                 // 未知 method：有 id 时回 -32601；无 id 时静默忽略。
@@ -990,12 +1032,16 @@ async fn dispatch_message(
 }
 
 /// 控制面 method 路由：反序列化 params → 发 ControlPlaneRequest → 等回执 → 写回 GUI。
+///
+/// SPEC-005 §10.0.1：set_paused / set_preset / set_preset_overrides 必须先 fan-out 通知
+/// 所有 GUI，再返回 result 给请求方。
 async fn dispatch_control_plane(
     method: &str,
     params: serde_json::Value,
     id: serde_json::Value,
     control_tx: &mpsc::Sender<ControlPlaneRequest>,
     write_tx: &mpsc::Sender<String>,
+    gui_writers: &GuiWriters,
 ) {
     /// 反序列化 params；缺失时使用 Default 值。
     fn parse_params<T: serde::de::DeserializeOwned + Default>(
@@ -1036,7 +1082,8 @@ async fn dispatch_control_plane(
                 )
                 .await;
             }
-            forward_reply::<SetPausedResult>(id, rx, write_tx).await;
+            // SPEC-005 §10.0.1：先 fan-out 再写 result。
+            forward_reply_with_broadcast::<SetPausedResult>(id, rx, write_tx, gui_writers).await;
         }
         "sieve.set_preset" => {
             let p: SetPresetRequest = match require_params(params) {
@@ -1056,7 +1103,8 @@ async fn dispatch_control_plane(
                 )
                 .await;
             }
-            forward_reply::<SetPresetResult>(id, rx, write_tx).await;
+            // SPEC-005 §10.0.1：先 fan-out 再写 result。
+            forward_reply_with_broadcast::<SetPresetResult>(id, rx, write_tx, gui_writers).await;
         }
         "sieve.set_preset_overrides" => {
             let p: SetPresetOverridesRequest = match parse_params(params) {
@@ -1076,7 +1124,9 @@ async fn dispatch_control_plane(
                 )
                 .await;
             }
-            forward_reply::<SetPresetOverridesResult>(id, rx, write_tx).await;
+            // SPEC-005 §10.0.1：先 fan-out 再写 result。
+            forward_reply_with_broadcast::<SetPresetOverridesResult>(id, rx, write_tx, gui_writers)
+                .await;
         }
         "sieve.reload_config" => {
             let p: ReloadConfigRequest = match parse_params(params) {
@@ -1227,6 +1277,78 @@ async fn forward_reply<T: serde::Serialize>(
         Ok(Err(err)) => write_error_response(id, err, write_tx).await,
         Err(_) => {
             // daemon 端 reply sender 被 drop 而未 send（handler panic / 提前退出）。
+            write_error_response(
+                id,
+                ControlError::internal("daemon dropped reply without responding"),
+                write_tx,
+            )
+            .await;
+        }
+    }
+}
+
+/// SPEC-005 §10.0.1：mutating request（set_paused / set_preset / set_preset_overrides）专用。
+///
+/// 等待 daemon 回执（携带 `BroadcastPlan`），先 fan-out 所有 GUI 通知（send 等待入队），
+/// 再向请求方写 result response。保证 result 发出前所有 GUI 已入队通知。
+async fn forward_reply_with_broadcast<T: serde::Serialize>(
+    id: serde_json::Value,
+    rx: oneshot::Receiver<Result<(T, Option<BroadcastPlan>), ControlError>>,
+    write_tx: &mpsc::Sender<String>,
+    gui_writers: &GuiWriters,
+) {
+    match rx.await {
+        Ok(Ok((value, broadcast_plan))) => {
+            // Step 1：执行 fan-out（先广播，后 result）。
+            if let Some(plan) = broadcast_plan {
+                let (method, payload) = match plan {
+                    BroadcastPlan::PausedChanged(notify) => {
+                        ("sieve.paused_changed", serde_json::to_value(&notify).ok())
+                    }
+                    BroadcastPlan::PresetChanged(notify) => {
+                        ("sieve.preset_changed", serde_json::to_value(&notify).ok())
+                    }
+                };
+                if let Some(params) = payload {
+                    let notification = crate::protocol::jsonrpc::Request {
+                        jsonrpc: "2.0".to_owned(),
+                        method: method.to_owned(),
+                        params: Some(params),
+                        id: None,
+                    };
+                    if let Ok(mut frame) = serde_json::to_string(&notification) {
+                        frame.push('\n');
+                        // fan-out：send（await）到所有已连接 GUI。
+                        let senders: Vec<mpsc::Sender<String>> =
+                            gui_writers.lock().map(|g| g.clone()).unwrap_or_default();
+                        for sender in &senders {
+                            // send 是 await（非 try_send），保证通知入队后再写 result。
+                            // 通道关闭（GUI 已断线）时忽略错误。
+                            let _ = sender.send(frame.clone()).await;
+                        }
+                        debug!(
+                            method,
+                            gui_count = senders.len(),
+                            "fan-out broadcast before result (§10.0.1)"
+                        );
+                    }
+                }
+            }
+            // Step 2：写 result 给请求方。
+            match serde_json::to_value(&value) {
+                Ok(result) => write_success_response(id, result, write_tx).await,
+                Err(e) => {
+                    write_error_response(
+                        id,
+                        ControlError::internal(format!("serialize result failed: {e}")),
+                        write_tx,
+                    )
+                    .await;
+                }
+            }
+        }
+        Ok(Err(err)) => write_error_response(id, err, write_tx).await,
+        Err(_) => {
             write_error_response(
                 id,
                 ControlError::internal("daemon dropped reply without responding"),

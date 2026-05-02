@@ -8,7 +8,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use sieve_ipc::error::rpc_codes;
-use sieve_ipc::{ControlPlaneRequest, HealthResult, IpcServer, ListenSnapshot, SetPausedResult};
+use sieve_ipc::{
+    BroadcastPlan, ControlPlaneRequest, HealthResult, IpcServer, ListenSnapshot,
+    PausedChangedNotify, SetPausedResult,
+};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
@@ -29,11 +32,22 @@ fn spawn_mock_daemon(server: Arc<IpcServer>) {
         while let Some(req) = rx.recv().await {
             match req {
                 ControlPlaneRequest::SetPaused { params, reply } => {
-                    let _ = reply.send(Ok(SetPausedResult {
-                        paused: params.minutes > 0,
+                    let paused = params.minutes > 0;
+                    let broadcast = Some(BroadcastPlan::PausedChanged(PausedChangedNotify {
+                        paused,
                         paused_until: None,
+                        reason: "user_request".to_owned(),
                         applies_to: vec!["AutoRedact".to_owned()],
+                        origin_request_id: None,
                     }));
+                    let _ = reply.send(Ok((
+                        SetPausedResult {
+                            paused,
+                            paused_until: None,
+                            applies_to: vec!["AutoRedact".to_owned()],
+                        },
+                        broadcast,
+                    )));
                 }
                 ControlPlaneRequest::Health { params: _, reply } => {
                     let _ = reply.send(Ok(HealthResult {
@@ -76,7 +90,10 @@ fn spawn_mock_daemon(server: Arc<IpcServer>) {
     });
 }
 
-/// 通过 GUI mock 发送 JSON-RPC request，返回收到的第一条 response。
+/// 通过 GUI mock 发送 JSON-RPC request，返回收到的第一条 **response**（跳过 notification 帧）。
+///
+/// 服务端可能先发 hello notification（无 id）和 fan-out broadcast 通知，再发 response；
+/// 此函数跳过所有带 method 字段的帧，只返回第一条不带 method 的帧（即 response）。
 async fn rpc_call(
     socket_path: &std::path::Path,
     method: &str,
@@ -97,12 +114,18 @@ async fn rpc_call(
     write_half.write_all(payload.as_bytes()).await.unwrap();
 
     let mut lines = BufReader::new(read_half).lines();
-    let line = tokio::time::timeout(Duration::from_secs(2), lines.next_line())
-        .await
-        .expect("rpc timeout")
-        .unwrap()
-        .expect("connection closed");
-    serde_json::from_str(&line).unwrap()
+    loop {
+        let line = tokio::time::timeout(Duration::from_secs(3), lines.next_line())
+            .await
+            .expect("rpc timeout")
+            .unwrap()
+            .expect("connection closed");
+        let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+        // 跳过 notification 帧（有 method 字段 = hello/heartbeat/fan-out broadcast）
+        if v.get("method").is_none() {
+            return v;
+        }
+    }
 }
 
 /// 控制面 method 全链路：dispatch_message 路由 sieve.set_paused → control_rx → reply → GUI 收到。
@@ -385,4 +408,118 @@ async fn control_channel_closed_returns_internal_error() {
 
     let err = &resp["error"];
     assert_eq!(err["code"], rpc_codes::INTERNAL_ERROR);
+}
+
+/// SPEC-005 §10.0.1：set_paused 响应前强制 fan-out——mock 第二个 GUI 客户端必须先收到
+/// paused_changed 通知，请求方才收到 set_paused result。
+#[tokio::test]
+async fn set_paused_fan_out_before_result() {
+    use sieve_ipc::ControlPlaneRequest;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let socket_path = tmp.path().join("ipc.sock");
+    let server = start_server(&socket_path).await;
+
+    // mock daemon：收到 SetPaused 后回复带 BroadcastPlan。
+    let server_for_daemon = Arc::clone(&server);
+    tokio::spawn(async move {
+        let mut rx = server_for_daemon.control_rx().await.unwrap();
+        while let Some(req) = rx.recv().await {
+            if let ControlPlaneRequest::SetPaused { params, reply } = req {
+                let paused = params.minutes > 0;
+                let broadcast = Some(BroadcastPlan::PausedChanged(PausedChangedNotify {
+                    paused,
+                    paused_until: None,
+                    reason: "user_request".to_owned(),
+                    applies_to: vec!["AutoRedact".to_owned()],
+                    origin_request_id: None,
+                }));
+                let _ = reply.send(Ok((
+                    SetPausedResult {
+                        paused,
+                        paused_until: None,
+                        applies_to: vec!["AutoRedact".to_owned()],
+                    },
+                    broadcast,
+                )));
+            }
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    // 第二个 GUI（观察者），只接收通知。
+    let path_for_observer = socket_path.clone();
+    let (obs_tx, mut obs_rx) = tokio::sync::mpsc::channel::<String>(8);
+    let observer_task = tokio::spawn(async move {
+        let stream = tokio::net::UnixStream::connect(&path_for_observer)
+            .await
+            .unwrap();
+        let (read_half, _write_half) = stream.into_split(); // 持有 _write_half，避免 EOF 触发服务端连接断开
+        let mut lines = BufReader::new(read_half).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            let _ = obs_tx.send(line).await;
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(30)).await;
+
+    // 请求方：发 set_paused，等待 result。
+    let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
+    let (read_half, mut write_half) = stream.into_split();
+    let mut req_lines = BufReader::new(read_half).lines();
+
+    let req = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "sieve.set_paused",
+        "params": { "minutes": 30 },
+        "id": "fan-out-test",
+    });
+    let mut payload = serde_json::to_string(&req).unwrap();
+    payload.push('\n');
+    write_half.write_all(payload.as_bytes()).await.unwrap();
+
+    // 读取 result（跳过 hello notification）。
+    let result_line = loop {
+        let line = tokio::time::timeout(Duration::from_secs(3), req_lines.next_line())
+            .await
+            .expect("timeout waiting for set_paused result")
+            .unwrap()
+            .expect("connection closed");
+        let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+        if v.get("method").is_some() {
+            // notification（hello 等），跳过
+            continue;
+        }
+        break line;
+    };
+
+    let result_val: serde_json::Value = serde_json::from_str(&result_line).unwrap();
+    assert!(
+        result_val.get("error").is_none(),
+        "set_paused should succeed: {result_val}"
+    );
+    assert_eq!(result_val["id"], "fan-out-test");
+
+    // 验证观察者 GUI 已在某时刻收到 paused_changed 通知。
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(500);
+    let mut got_paused_changed = false;
+    while tokio::time::Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_millis(100), obs_rx.recv()).await {
+            Ok(Some(line)) => {
+                let v: serde_json::Value = serde_json::from_str(&line).unwrap_or_default();
+                if v["method"].as_str() == Some("sieve.paused_changed") {
+                    assert_eq!(v["params"]["paused"], true);
+                    got_paused_changed = true;
+                    break;
+                }
+            }
+            _ => break,
+        }
+    }
+    assert!(
+        got_paused_changed,
+        "observer GUI must receive paused_changed notification (§10.0.1)"
+    );
+
+    observer_task.abort();
 }

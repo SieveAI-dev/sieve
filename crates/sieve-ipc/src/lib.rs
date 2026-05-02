@@ -33,7 +33,8 @@ pub use protocol::{
 };
 pub use socket_client::send_reload_user_rules_oneshot;
 pub use socket_server::{
-    ControlError, ControlPlaneRequest, HelloBuilder, IpcServer, OversizeCallback, OversizeKind,
+    BroadcastPlan, ControlError, ControlPlaneRequest, HelloBuilder, IpcServer, OversizeCallback,
+    OversizeKind,
 };
 
 #[cfg(test)]
