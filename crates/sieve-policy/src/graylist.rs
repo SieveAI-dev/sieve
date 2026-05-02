@@ -167,6 +167,112 @@ pub fn lookup(dir: &Path, fingerprint: &str) -> PolicyResult<Option<GraylistEntr
     Ok(Some(entry))
 }
 
+/// 列出目录下所有灰名单条目（按 added_at 倒序）。
+///
+/// 实现细节：
+/// - 仅枚举 `<dir>` 顶层 `*.json` 文件，不递归子目录。
+/// - 对每个文件做 no-follow symlink 校验 + fingerprint 重新计算校验；
+///   损坏 / 篡改 / 解析失败的文件**跳过**（写 WARN 日志），不抛错——
+///   保证一个坏文件不会让整个 list 操作失败（GUI list_graylist 调用方期望 fail-soft）。
+/// - 返回结果按 `added_at` 倒序（最近添加的在前）。
+///
+/// 关联：ADR-013 §S.4 sieve.list_graylist。
+pub fn list_entries(dir: &Path) -> PolicyResult<Vec<GraylistEntry>> {
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    // no-follow symlink 校验
+    let meta = dir.symlink_metadata()?;
+    if meta.file_type().is_symlink() {
+        return Err(PolicyError::SymlinkRejected(format!(
+            "decisions directory is a symlink: {:?}",
+            dir
+        )));
+    }
+
+    let mut entries: Vec<GraylistEntry> = Vec::new();
+    for entry in std::fs::read_dir(dir)? {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(e) => {
+                tracing::warn!("graylist: read_dir entry failed: {e}");
+                continue;
+            }
+        };
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(ext) = path.extension().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if ext != "json" {
+            continue;
+        }
+
+        // no-follow symlink 校验
+        let item_meta = match path.symlink_metadata() {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::warn!("graylist: stat {} failed: {e}", path.display());
+                continue;
+            }
+        };
+        if item_meta.file_type().is_symlink() {
+            tracing::warn!(
+                "graylist: skipping symlink {} (no-follow policy)",
+                path.display()
+            );
+            continue;
+        }
+
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!("graylist: read {} failed: {e}", path.display());
+                continue;
+            }
+        };
+        let parsed: GraylistEntry = match serde_json::from_str(&content) {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!("graylist: parse {} failed: {e}", path.display());
+                continue;
+            }
+        };
+
+        // fingerprint 完整性校验：重新计算并与文件名一致
+        let computed = compute_fingerprint(&parsed.fingerprint_inputs);
+        if computed != parsed.fingerprint {
+            tracing::warn!(
+                "graylist: fingerprint mismatch for {} (stored={}, computed={}); skipping",
+                path.display(),
+                parsed.fingerprint,
+                computed
+            );
+            continue;
+        }
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default();
+        if stem != parsed.fingerprint {
+            tracing::warn!(
+                "graylist: filename {} does not match fingerprint {}; skipping",
+                stem,
+                parsed.fingerprint
+            );
+            continue;
+        }
+
+        entries.push(parsed);
+    }
+
+    entries.sort_by(|a, b| b.added_at.cmp(&a.added_at));
+    Ok(entries)
+}
+
 /// 删除灰名单条目。
 ///
 /// 返回 `true` 表示文件存在并已删除，`false` 表示文件不存在（幂等）。

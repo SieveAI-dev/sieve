@@ -110,6 +110,87 @@ fn detection_rule_ids<'a>(detections: &'a [&sieve_core::Detection]) -> Vec<&'a s
     detections.iter().map(|d| d.rule_id.as_str()).collect()
 }
 
+/// 暂停状态感知的 `request_decision`（SPEC-002 §9.1）。
+///
+/// 行为：
+/// 1. 若有任意 detection 命中 `critical_lock::FAIL_CLOSED_RULES` → 照常弹窗（暂停不影响 Critical）。
+/// 2. 否则若 daemon 处于暂停状态 → **跳过 GUI 弹窗**，按 `default_on_timeout` 自动决策，
+///    写 `AuditEvent::AutoDecidedPaused`，返回合成 response（`by_user=false`）。
+/// 3. 否则 → 直接调 `IpcServer::request_decision`。
+///
+/// 关联：PRD v2.0 §9 #3 #8（Critical 不可暂停）、SPEC-002 §9.1（paused 弹窗矩阵）。
+async fn gated_request_decision(
+    ipc: &Arc<sieve_ipc::IpcServer>,
+    audit: &Arc<crate::audit::AuditStore>,
+    caller: &Option<crate::process_context::CallerInfo>,
+    req: sieve_ipc::DecisionRequest,
+    timeout: std::time::Duration,
+) -> Result<sieve_ipc::DecisionResponse, sieve_ipc::IpcError> {
+    let any_critical = req
+        .detections
+        .iter()
+        .any(|d| sieve_rules::critical_lock::is_fail_closed(&d.rule_id));
+
+    if any_critical || !ipc.is_paused() {
+        return ipc.request_decision(req, timeout).await;
+    }
+
+    // 暂停 + 全部非 Critical → 自动决策
+    let auto_action = match req.default_on_timeout {
+        sieve_ipc::DefaultOnTimeout::Block => sieve_ipc::DecisionAction::Deny,
+        sieve_ipc::DefaultOnTimeout::Allow => sieve_ipc::DecisionAction::Allow,
+        sieve_ipc::DefaultOnTimeout::Redact => sieve_ipc::DecisionAction::RedactAndAllow,
+    };
+    let decision_str = match auto_action {
+        sieve_ipc::DecisionAction::Allow => "allow",
+        sieve_ipc::DecisionAction::Deny => "deny",
+        sieve_ipc::DecisionAction::RedactAndAllow => "redact_and_allow",
+    };
+    let rule_ids = req
+        .detections
+        .iter()
+        .map(|d| d.rule_id.clone())
+        .collect::<Vec<_>>()
+        .join(",");
+    let request_id_str = req.request_id.to_string();
+
+    tracing::info!(
+        request_id = %req.request_id,
+        rule_ids = %rule_ids,
+        decision = decision_str,
+        "paused → 跳过弹窗，自动按 default_on_timeout 处置（SPEC-002 §9.1）"
+    );
+
+    let caller_ctx = crate::audit::CallerContext {
+        pid: caller.as_ref().map(|c| c.pid),
+        exe: caller
+            .as_ref()
+            .and_then(|c| c.exe.as_ref())
+            .map(|p| p.display().to_string()),
+    };
+    let event = crate::audit::AuditEvent::AutoDecidedPaused {
+        rule_ids,
+        decision: decision_str.to_owned(),
+        request_id: request_id_str,
+        caller: caller_ctx,
+    };
+    let store = Arc::clone(audit);
+    tokio::spawn(async move {
+        if let Err(e) = store.append(event).await {
+            tracing::warn!(error = %e, "audit append AutoDecidedPaused failed");
+        }
+    });
+
+    Ok(sieve_ipc::DecisionResponse {
+        request_id: req.request_id,
+        decision: auto_action,
+        decided_at: chrono::Utc::now(),
+        by_user: false,
+        remember: false,
+        context_hint: None,
+    })
+}
+
 /// 写灰名单条目，二次校验 Critical 锁（PRD v2.0 §5.4.2 二次校验）。
 ///
 /// 调用时机：daemon 收到 `DecisionResponse { decision=Allow, remember=true }` 之后。
@@ -533,6 +614,48 @@ pub async fn run(
         }
     };
 
+    // v2.1 §S.4：启动控制面 handler（GUI → daemon 8 个方法 + 3 个广播）。
+    //
+    // 关联：ADR-013 Supplement 2026-05-02 / SPEC-002 §9。
+    if let Some(ref ipc_srv) = ipc_server {
+        let runtime_state = Arc::new(crate::daemon_control_plane::RuntimeState {
+            paused_until: arc_swap::ArcSwap::from_pointee(None),
+            preset: arc_swap::ArcSwap::from_pointee(crate::daemon_control_plane::RuntimePreset {
+                mode: format!("{:?}", cfg.preset).to_lowercase(),
+                overrides: std::collections::HashMap::new(),
+            }),
+            started_at: chrono::Utc::now(),
+            listen: sieve_ipc::ListenSnapshot {
+                addr: cfg.bind_addr.clone(),
+                port: cfg.port,
+            },
+            daemon_version: env!("CARGO_PKG_VERSION").to_owned(),
+            protocol_version: "v1".to_owned(),
+            audit_db_path: cfg
+                .audit_db_path()
+                .unwrap_or_else(|_| std::path::PathBuf::from("~/.sieve/audit.db")),
+            decisions_dir: sieve_ipc::paths::sieve_home()
+                .map(|h| h.join("decisions"))
+                .unwrap_or_else(|_| std::path::PathBuf::from("~/.sieve/decisions")),
+            user_rules_path: sieve_ipc::paths::sieve_home()
+                .ok()
+                .map(|h| h.join("rules").join("user.toml")),
+            system_rules_count: arc_swap::ArcSwap::from_pointee({
+                use sieve_rules::engine::MatchEngine;
+                outbound_layered.rule_count() + inbound_layered.rule_count()
+            }),
+            user_rules_count: arc_swap::ArcSwap::from_pointee(0),
+            last_reload: arc_swap::ArcSwap::from_pointee(None),
+        });
+        crate::daemon_control_plane::spawn_control_plane_handler(
+            Arc::clone(ipc_srv),
+            Arc::clone(&audit_store),
+            runtime_state,
+            Arc::clone(&outbound_layered),
+            Arc::clone(&inbound_layered),
+        );
+    }
+
     // v2.1 §5.5.5：启动 reload listener（zero-downtime hot swap，PRD §9 #14 fail-safe）。
     // daemon 监听 IpcServer::reload_rx 的用户规则 reload 请求：
     // 1. 重新读 user.toml + lint + 编译出站/入站 UserEngine
@@ -551,71 +674,15 @@ pub async fn run(
             let inbound_layered_for_reload = Arc::clone(&inbound_layered);
             tokio::spawn(async move {
                 while let Some(req) = reload_rx.recv().await {
-                    let trigger_id_str = req.trigger_id.map(|id| id.to_string());
-                    tracing::info!(
-                        trigger_id = ?trigger_id_str,
-                        "收到用户规则 reload 请求（PRD §5.5.5）"
+                    // 调用提取的共用函数（与 control plane sieve.reload_config 共享同一逻辑）
+                    let _outcome = perform_user_rules_reload(
+                        user_rules_path_for_reload.as_deref(),
+                        &outbound_layered_for_reload,
+                        &inbound_layered_for_reload,
+                        &ipc_for_reload,
+                        &audit_for_reload,
+                        req.trigger_id,
                     );
-
-                    // 重新读取 + lint + 编译两个方向的用户引擎（fail-safe：失败保留旧引擎）
-                    let reload_result = reload_user_engines(user_rules_path_for_reload.as_deref());
-
-                    let (notify_kind, notify_title, notify_detail, success, rule_count, err_msg) =
-                        match reload_result {
-                            Ok((outbound_eng, inbound_eng, count)) => {
-                                // v2.1 zero-downtime hot swap：原子替换用户引擎，无需重启 daemon
-                                outbound_layered_for_reload.swap_user(outbound_eng);
-                                inbound_layered_for_reload.swap_user(inbound_eng);
-                                tracing::info!(
-                                    rule_count = count,
-                                    "用户规则 hot swap 完成，立即生效（PRD §5.5.5）"
-                                );
-                                (
-                                    sieve_ipc::protocol::NotifyKind::UserRulesReloaded,
-                                    format!("用户规则已 hot reload（{count} 条）"),
-                                    Some("已立即生效，无需重启 daemon".to_owned()),
-                                    true,
-                                    Some(count),
-                                    None,
-                                )
-                            }
-                            Err(e) => {
-                                tracing::warn!(error = %e, "用户规则重新加载失败（保留旧引擎）");
-                                (
-                                    sieve_ipc::protocol::NotifyKind::UserRulesLoadFailed,
-                                    "用户规则加载失败".to_owned(),
-                                    Some(e.to_string()),
-                                    false,
-                                    None,
-                                    Some(e.to_string()),
-                                )
-                            }
-                        };
-
-                    let notify = sieve_ipc::protocol::StatusBarNotify {
-                        notify_id: uuid::Uuid::now_v7(),
-                        created_at: chrono::Utc::now(),
-                        kind: notify_kind,
-                        title: notify_title,
-                        detail: notify_detail,
-                        rule_id: None,
-                        auto_dismiss_seconds: 5,
-                    };
-                    ipc_for_reload.broadcast_status_bar(notify);
-
-                    // audit 写入（fail-soft）
-                    let event = crate::audit::AuditEvent::UserRulesReloaded {
-                        success,
-                        rule_count,
-                        error: err_msg,
-                        trigger_id: trigger_id_str,
-                    };
-                    let audit_clone = Arc::clone(&audit_for_reload);
-                    tokio::spawn(async move {
-                        if let Err(e) = audit_clone.append(event).await {
-                            tracing::warn!(error = %e, "audit append UserRulesReloaded failed");
-                        }
-                    });
                 }
             });
         }
@@ -700,6 +767,112 @@ pub async fn run(
 /// - `Some(engine)` 即编译通过的用户引擎，调用方直接调用 `swap_user` 生效
 ///
 /// 任何错误（lint 违规 / SIEVE_HOME 未设置）返回 `Err`（fail-safe：daemon 保留旧引擎）。
+/// 用户规则 reload 一次的结果（PRD §5.5.5 / ADR-013 §S.4 reload_config）。
+#[derive(Debug, Clone)]
+pub(crate) struct ReloadOutcome {
+    /// 当前调用方未消费 `success` 字段（成功 / 失败可由 `user_rules_errors.is_empty()` 间接判定），
+    /// 但保留供未来扩展（如分级 audit）使用。
+    #[allow(dead_code)]
+    pub success: bool,
+    pub rule_count: usize,
+    pub user_rules_errors: Vec<String>,
+}
+
+/// 执行一次用户规则 reload 完整流程（lint + 编译 + hot swap + 广播 + audit）。
+///
+/// 既被 IPC `sieve.reload_user_rules` notification listener 调用（向后兼容），
+/// 也被 control plane `sieve.reload_config` 直接同步调用（拿 errors 同步返回）。
+///
+/// 行为与原内联闭包等价：
+/// - 成功 → swap_user + 推 `NotifyKind::UserRulesReloaded` + 写 audit success
+/// - 失败 → 不动当前引擎 + 推 `NotifyKind::UserRulesLoadFailed` + 写 audit failure
+///
+/// 关联：PRD v2.0 §5.5.5 / §9 #14 fail-safe。
+pub(crate) fn perform_user_rules_reload(
+    user_rules_path: Option<&std::path::Path>,
+    outbound_layered: &Arc<
+        sieve_rules::engine::LayeredEngine<
+            sieve_rules::engine::VectorscanEngine,
+            sieve_policy::engine::UserEngine,
+        >,
+    >,
+    inbound_layered: &Arc<
+        sieve_rules::engine::LayeredEngine<
+            sieve_rules::engine::VectorscanEngine,
+            sieve_policy::engine::UserEngine,
+        >,
+    >,
+    ipc: &Arc<sieve_ipc::IpcServer>,
+    audit: &Arc<crate::audit::AuditStore>,
+    trigger_id: Option<uuid::Uuid>,
+) -> ReloadOutcome {
+    let trigger_id_str = trigger_id.map(|id| id.to_string());
+    tracing::info!(
+        trigger_id = ?trigger_id_str,
+        "执行用户规则 reload（PRD §5.5.5）"
+    );
+
+    let reload_result = reload_user_engines(user_rules_path);
+    let (notify_kind, notify_title, notify_detail, success, rule_count, err_msg) =
+        match reload_result {
+            Ok((outbound_eng, inbound_eng, count)) => {
+                outbound_layered.swap_user(outbound_eng);
+                inbound_layered.swap_user(inbound_eng);
+                tracing::info!(rule_count = count, "用户规则 hot swap 完成（PRD §5.5.5）");
+                (
+                    sieve_ipc::protocol::NotifyKind::UserRulesReloaded,
+                    format!("用户规则已 hot reload（{count} 条）"),
+                    Some("已立即生效，无需重启 daemon".to_owned()),
+                    true,
+                    count,
+                    None,
+                )
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "用户规则重新加载失败（保留旧引擎）");
+                (
+                    sieve_ipc::protocol::NotifyKind::UserRulesLoadFailed,
+                    "用户规则加载失败".to_owned(),
+                    Some(e.to_string()),
+                    false,
+                    0,
+                    Some(e.to_string()),
+                )
+            }
+        };
+
+    let notify = sieve_ipc::protocol::StatusBarNotify {
+        notify_id: uuid::Uuid::now_v7(),
+        created_at: chrono::Utc::now(),
+        kind: notify_kind,
+        title: notify_title,
+        detail: notify_detail,
+        rule_id: None,
+        auto_dismiss_seconds: 5,
+    };
+    ipc.broadcast_status_bar(notify);
+
+    // audit 写入（fail-soft）
+    let event = crate::audit::AuditEvent::UserRulesReloaded {
+        success,
+        rule_count: if success { Some(rule_count) } else { None },
+        error: err_msg.clone(),
+        trigger_id: trigger_id_str,
+    };
+    let audit_clone = Arc::clone(audit);
+    tokio::spawn(async move {
+        if let Err(e) = audit_clone.append(event).await {
+            tracing::warn!(error = %e, "audit append UserRulesReloaded failed");
+        }
+    });
+
+    ReloadOutcome {
+        success,
+        rule_count,
+        user_rules_errors: err_msg.into_iter().collect(),
+    }
+}
+
 fn reload_user_engines(
     user_rules_path: Option<&std::path::Path>,
 ) -> anyhow::Result<(
@@ -986,7 +1159,14 @@ async fn proxy_inner(
                 };
 
                 let timeout_dur = std::time::Duration::from_secs(u64::from(timeout_seconds).max(1));
-                let outcome = ipc_server.request_decision(ipc_req, timeout_dur).await;
+                let outcome = gated_request_decision(
+                    ipc_server,
+                    &ctx.audit,
+                    &ctx.caller,
+                    ipc_req,
+                    timeout_dur,
+                )
+                .await;
 
                 match outcome {
                     Ok(resp) => match resp.decision {
@@ -1251,7 +1431,14 @@ async fn proxy_inner(
 
                 // 出站 hold：无 SSE keep-alive，直接 await 决策
                 let timeout_dur = std::time::Duration::from_secs(u64::from(timeout_seconds).max(1));
-                let outcome = ipc_server.request_decision(ipc_req, timeout_dur).await;
+                let outcome = gated_request_decision(
+                    ipc_server,
+                    &ctx.audit,
+                    &ctx.caller,
+                    ipc_req,
+                    timeout_dur,
+                )
+                .await;
 
                 match outcome {
                     Ok(resp) => match resp.decision {
@@ -1750,7 +1937,9 @@ async fn proxy_openai(
             };
 
             let timeout_dur = std::time::Duration::from_secs(u64::from(timeout_seconds).max(1));
-            let outcome = ipc_server.request_decision(ipc_req, timeout_dur).await;
+            let outcome =
+                gated_request_decision(ipc_server, &audit_store, &caller, ipc_req, timeout_dur)
+                    .await;
 
             match outcome {
                 Ok(resp) => match resp.decision {

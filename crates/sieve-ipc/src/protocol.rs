@@ -305,6 +305,342 @@ pub struct DecisionResponse {
     pub context_hint: Option<String>,
 }
 
+// ── v2.1 GUI 控制面方法（ADR-013 Supplement 2026-05-02）──────────────────────
+//
+// 所有方法走 JSON-RPC 2.0 over Unix socket（通道 A）。GUI → daemon 为请求/响应；
+// daemon → GUI 为 fan-out notification。完整规格见 ADR-013 §S.1-S.4。
+
+/// `sieve.set_paused` 请求参数。
+///
+/// `minutes ∈ [0, 60]`：0 = 立刻恢复；上限 60（防止"事实上的关闭"）。
+/// Critical 锁规则不受暂停影响（[PRD v2.0 §9 #3 #8]）。
+///
+/// 关联：ADR-013 §S.4 / SPEC-002 §9.1。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetPausedRequest {
+    pub minutes: u32,
+}
+
+/// `sieve.set_paused` 响应。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetPausedResult {
+    pub paused: bool,
+    /// 暂停截止时间（UTC）；`paused=false` 时为 None。
+    #[serde(default)]
+    pub until: Option<DateTime<Utc>>,
+    /// 受暂停影响的 disposition 集合（Critical 锁规则的 disposition 永不出现在此列表）。
+    pub applies_to: Vec<String>,
+}
+
+/// `sieve.set_preset` 请求参数。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetPresetRequest {
+    /// `"strict"` | `"default"` | `"relaxed"` | `"custom"`。
+    pub mode: String,
+}
+
+/// `sieve.set_preset` 响应。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetPresetResult {
+    pub applied_at: DateTime<Utc>,
+}
+
+/// 单条 preset override（custom preset 下逐规则覆盖）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PresetOverride {
+    pub timeout_seconds: u32,
+    /// `"block"` | `"allow"` | `"redact"`。
+    pub default_on_timeout: String,
+}
+
+/// `sieve.set_preset_overrides` 请求参数。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SetPresetOverridesRequest {
+    /// rule_id → override 映射。
+    pub overrides: std::collections::HashMap<String, PresetOverride>,
+}
+
+/// 单条被拒绝的 override。
+///
+/// `reason ∈ { "critical_lock" | "unknown_rule" | "invalid_value" }`（ADR-013 §S.4）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RejectedOverride {
+    pub rule_id: String,
+    pub reason: String,
+}
+
+/// `sieve.set_preset_overrides` 响应。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetPresetOverridesResult {
+    pub applied: Vec<String>,
+    pub rejected: Vec<RejectedOverride>,
+}
+
+/// `sieve.reload_config` 请求参数（空对象）。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ReloadConfigRequest {}
+
+/// `sieve.reload_config` 响应。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReloadConfigResult {
+    pub reloaded_at: DateTime<Utc>,
+    pub system_rules_count: usize,
+    pub user_rules_count: usize,
+    /// 用户规则 lint 错误清单（仅警告，不阻断）。
+    pub user_rules_errors: Vec<String>,
+}
+
+/// `sieve.health` 请求参数（空对象）。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct HealthRequest {}
+
+/// preset 快照（health 子结构）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PresetSnapshot {
+    pub mode: String,
+    pub overrides: std::collections::HashMap<String, PresetOverride>,
+}
+
+/// 监听地址快照（health 子结构）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListenSnapshot {
+    pub addr: String,
+    pub port: u16,
+}
+
+/// audit.db 快照（health 子结构）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditDbSnapshot {
+    pub path: String,
+    pub size_bytes: u64,
+    pub schema_version: u32,
+    pub events_total: u64,
+    pub events_today: u64,
+}
+
+/// 规则集快照（health 子结构）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RulesSnapshot {
+    pub system_count: usize,
+    pub user_count: usize,
+    pub last_reload: Option<DateTime<Utc>>,
+}
+
+/// 灰名单快照（health 子结构）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraylistSnapshot {
+    pub active_count: usize,
+}
+
+/// IPC 状态快照（health 子结构）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IpcSnapshot {
+    pub connected_clients: usize,
+    pub total_decisions_inflight: usize,
+}
+
+/// `sieve.health` 响应。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HealthResult {
+    pub daemon_version: String,
+    pub protocol_version: String,
+    pub started_at: DateTime<Utc>,
+    pub uptime_seconds: u64,
+    pub preset: PresetSnapshot,
+    /// 暂停截止时间；未暂停时为 None。
+    #[serde(default)]
+    pub paused: Option<DateTime<Utc>>,
+    pub listen: ListenSnapshot,
+    pub audit_db: AuditDbSnapshot,
+    pub rules: RulesSnapshot,
+    pub graylist: GraylistSnapshot,
+    pub ipc: IpcSnapshot,
+}
+
+/// evaluate sandbox 的内容种类。
+///
+/// 跟 `sieve_rules::ContentKind` 对应，IPC 层独立定义避免循环依赖。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvaluateContentKind {
+    RawText,
+    ToolUseInput,
+    ModelResponse,
+}
+
+/// evaluate sandbox 的方向。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvaluateDirection {
+    Outbound,
+    Inbound,
+}
+
+/// `sieve.evaluate` 请求参数。
+///
+/// payload 上限 64KB（daemon 端校验），超过返回 -32003 payload_too_large。
+/// 关联：ADR-013 §S.4。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EvaluateRequest {
+    pub direction: EvaluateDirection,
+    pub content_kind: EvaluateContentKind,
+    /// `"claude-code"` | `"openclaw"` | `"hermes"` | `"unknown"`。
+    pub source_agent: String,
+    pub payload: String,
+}
+
+/// 单条 evaluate 命中。
+///
+/// **敏感数据保护**：critical_lock 规则命中时，`matched_pattern_summary` 仅含规则类型摘要
+/// （如 "BIP39 with checksum match"），daemon 端**禁止**回填 matched_canonical 或原 payload 片段。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EvaluateMatch {
+    pub rule_id: String,
+    /// `"system"` | `"user"`。
+    pub rule_kind: String,
+    /// `"critical"` | `"high"` | `"medium"` | `"low"`。
+    pub severity: String,
+    pub disposition: Disposition,
+    pub matched_pattern_summary: String,
+    pub fields_triggered: Vec<String>,
+    /// `"allow"` | `"deny"` | `"redact_and_allow"`，daemon 模拟决策。
+    pub would_decision: String,
+    #[serde(default)]
+    pub would_recommendation: Option<EvaluateRecommendation>,
+}
+
+/// evaluate 的 daemon 推荐结果。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EvaluateRecommendation {
+    pub decision: String,
+    /// `"high"` | `"medium"` | `"low"`。
+    pub confidence: String,
+    pub reason: String,
+}
+
+/// `sieve.evaluate` 响应。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EvaluateResult {
+    pub evaluated_at: DateTime<Utc>,
+    pub matches: Vec<EvaluateMatch>,
+    /// 未命中的规则 ID 抽样（不保证完整列表）。
+    #[serde(default)]
+    pub no_match: Vec<String>,
+}
+
+/// `sieve.list_graylist` 请求参数。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ListGraylistRequest {
+    /// 分页大小（None = 默认 50）。
+    #[serde(default)]
+    pub limit: Option<u32>,
+    /// 分页游标（None = 第一页）。
+    #[serde(default)]
+    pub cursor: Option<String>,
+}
+
+/// 灰名单条目摘要（去敏感字段）。
+///
+/// **隐私保护**：daemon 返回时**不**包含 `fingerprint_inputs.matched_canonical`，避免 GUI
+/// 间接拿到敏感片段。完整 inputs 查看路径推 v2.1。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraylistEntrySummary {
+    pub fingerprint: String,
+    pub rule_id: String,
+    /// `"system"` | `"user"`。
+    pub rule_kind: String,
+    /// unix ms。
+    pub added_at: i64,
+    pub added_by: String,
+    #[serde(default)]
+    pub context_hint: Option<String>,
+    pub match_count_since: u64,
+    /// unix ms（None = 永不过期）。
+    #[serde(default)]
+    pub expires_at: Option<i64>,
+}
+
+/// `sieve.list_graylist` 响应。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListGraylistResult {
+    pub entries: Vec<GraylistEntrySummary>,
+    #[serde(default)]
+    pub next_cursor: Option<String>,
+}
+
+/// `sieve.remove_graylist` 请求参数。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemoveGraylistRequest {
+    pub fingerprint: String,
+}
+
+/// `sieve.remove_graylist` 响应。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemoveGraylistResult {
+    pub removed: bool,
+    pub audit_event_id: String,
+}
+
+// ── v2.1 daemon → GUI notifications ──────────────────────────────────────────
+
+/// `sieve.preset_changed` 通知（daemon → GUI fan-out）。
+///
+/// 关联：ADR-013 §S.3 / SPEC-002 §9.2。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PresetChangedNotify {
+    pub mode: String,
+    /// 仅 `mode == "custom"` 时有意义；其他模式可为空 map。
+    #[serde(default)]
+    pub overrides: std::collections::HashMap<String, PresetOverride>,
+    pub changed_at: DateTime<Utc>,
+    /// `"cli"` | `"gui"` | `"config_reload"`。
+    pub source: String,
+}
+
+/// `sieve.paused_changed` 通知（daemon → GUI fan-out）。
+///
+/// `applies_to` **永远不包含** Critical 锁规则的 disposition——暂停不影响内置 Critical 拦截。
+/// 关联：ADR-013 §S.3 / SPEC-002 §9.1。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PausedChangedNotify {
+    pub paused: bool,
+    /// 暂停截止时间（UTC）；未暂停时为 None。
+    #[serde(default)]
+    pub until: Option<DateTime<Utc>>,
+    /// `"user_request"` | `"auto_resumed"` | `"daemon_restart"`。
+    pub reason: String,
+    pub applies_to: Vec<String>,
+}
+
+/// `sieve.request_decision_canceled` 取消原因。
+///
+/// 关联：ADR-013 §S.3 / SPEC-002 §9.3 / §9.4。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CancelReason {
+    /// daemon 侧倒计时已到。
+    Timeout,
+    /// 上游连接断开。
+    UpstreamDisconnected,
+    /// 灰名单或重复抑制策略命中后提前决策。
+    DuplicateSuppressed,
+    /// daemon 正在关停。
+    DaemonShutdown,
+    /// 多 GUI 场景下另一 GUI 已答复。
+    ResolvedByPeer,
+}
+
+/// `sieve.request_decision_canceled` 通知（daemon → GUI fan-out）。
+///
+/// GUI 收到后必须按 SPEC-002 §9.3 处理：未弹窗则移除排队，已弹窗则关闭并显示浮层。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RequestDecisionCanceledNotify {
+    pub request_id: Uuid,
+    pub reason: CancelReason,
+    /// daemon 已应用的 default_on_timeout 结果。
+    pub auto_decision: DecisionAction,
+}
+
 // ── JSON-RPC 2.0 envelope ────────────────────────────────────────────────────
 
 /// JSON-RPC 2.0 协议封装。
