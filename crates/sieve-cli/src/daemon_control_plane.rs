@@ -258,6 +258,7 @@ async fn handle_set_paused(
         paused_until: until,
         reason: "user_request".to_owned(),
         applies_to: paused_applies_to(),
+        origin_request_id: None, // P1-9 实现后透传 GUI request_id
     });
 
     // audit
@@ -306,6 +307,7 @@ async fn handle_set_preset(
         overrides: new_preset.overrides.clone(),
         changed_at: now,
         source: "gui".to_owned(),
+        origin_request_id: None, // P1-9 实现后透传 GUI request_id
     });
 
     let event = AuditEvent::PresetChanged {
@@ -429,6 +431,7 @@ async fn handle_set_preset_overrides(
         overrides: new_overrides,
         changed_at: Utc::now(),
         source: "gui".to_owned(),
+        origin_request_id: None, // P1-9 实现后透传 GUI request_id
     });
 
     Ok(SetPresetOverridesResult { applied, rejected })

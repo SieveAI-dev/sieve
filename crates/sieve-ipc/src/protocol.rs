@@ -648,6 +648,12 @@ pub struct PresetChangedNotify {
     pub changed_at: DateTime<Utc>,
     /// `"cli"` | `"gui"` | `"config_reload"`。
     pub source: String,
+    /// 触发本次变更的原始 GUI 请求 ID（SPEC-005 §10.0.2）。
+    ///
+    /// GUI 触发的 mutating request → 填对应 request id；CLI/daemon 自身触发 → `None`。
+    /// GUI 端可据此识别"本地回声"（自己发的 set_preset 导致的广播，无需弹窗）。
+    #[serde(default)]
+    pub origin_request_id: Option<Uuid>,
 }
 
 /// `sieve.paused_changed` 通知（daemon → GUI fan-out）。
@@ -663,6 +669,12 @@ pub struct PausedChangedNotify {
     /// `"user_request"` | `"auto_resumed"` | `"daemon_restart"`。
     pub reason: String,
     pub applies_to: Vec<String>,
+    /// 触发本次变更的原始 GUI 请求 ID（SPEC-005 §10.0.2）。
+    ///
+    /// GUI 触发的 mutating request → 填对应 request id；CLI/daemon 自身触发 → `None`。
+    /// GUI 端可据此识别"本地回声"，避免重复展示操作确认。
+    #[serde(default)]
+    pub origin_request_id: Option<Uuid>,
 }
 
 /// `sieve.request_decision_canceled` 取消原因。
