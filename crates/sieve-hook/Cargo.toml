@@ -40,3 +40,6 @@ features = ["html_reports"]
 [[bench]]
 name = "hook_startup"
 harness = false
+
+[lints]
+workspace = true

@@ -283,8 +283,9 @@ fn check_pattern_compile_limits(entry: &UserRuleEntry, violations: &mut Vec<Lint
                     ),
                 });
             }
-            // db size 暂无 vectorscan_rs API，此处记录 TODO（Week 6 跟进）
-            // TODO(Week 6): 等 vectorscan_rs 暴露 hs_database_size() 后补充 1MB 上限校验
+            // 编译产物 db size 上限：vectorscan_rs 尚未暴露 `hs_database_size()`，
+            // 短期用编译耗时 100ms 作为 db 大小的代理指标兜底。真实 1MB cap 校验
+            // 等上游 API 出来后再补；行动跟踪在 tasks/v2-pending.md TODO-EXT-1。
         }
     }
 }

@@ -1,5 +1,8 @@
 [toolchain]
-channel = "1.87.0"
+# 2026-05-02：1.88+ 是最新 cargo-deny（≥ 0.18.4）支持 CVSS 4.0 advisory
+# 解析所需的最低 rustc。workspace 的 `rust-version` (MSRV) 仍保留 1.87，
+# 以便下游使用旧 rustc 编译；本地与 CI 都使用 1.88 工具链。
+channel = "1.88.0"
 components = ["rustfmt", "clippy"]
 targets = [
     "aarch64-apple-darwin",

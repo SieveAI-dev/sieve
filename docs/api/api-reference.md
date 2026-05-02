@@ -783,7 +783,7 @@ sieve rules enable <rule_id>
 
 ## 7. X-Sieve-Origin Header 协议（v1.5 新增）
 
-> 本章对应 PRD v1.5 §6.5 + [ADR-019](../design/ADR-019-x-sieve-origin-header.md)，描述 sub-agent 嵌套调用链的 header 协议。
+> 本章对应 PRD v2.0 §6.5 + [ADR-019](../design/ADR-019-x-sieve-origin-header.md)，描述 sub-agent 嵌套调用链的 header 协议。
 
 ### 7.1 Header 格式
 

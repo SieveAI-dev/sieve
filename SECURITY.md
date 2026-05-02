@@ -1,7 +1,7 @@
 # Sieve 安全策略
 
-> Sieve 是 LLM 流量层的安全代理（[PRD §1.1](docs/prd/sieve-prd-v1.5.md#11-一句话)），自身被攻陷会摧毁产品定位。
-> "自证清白"是产品安全承诺的核心叙事（[PRD §1.2 第 4 句](docs/prd/sieve-prd-v1.5.md#12-四句话核心叙事v13-加第-4-句) + [ADR-006](docs/design/ADR-006-sigstore-reproducible-build.md)）。
+> Sieve 是 LLM 流量层的安全代理（[PRD §1.1](docs/prd/sieve-prd-v2.0.md#11-一句话)），自身被攻陷会摧毁产品定位。
+> "自证清白"是产品安全承诺的核心叙事（[PRD §1.2 第 4 句](docs/prd/sieve-prd-v2.0.md#12-四句话核心叙事v13-加第-4-句) + [ADR-006](docs/design/ADR-006-sigstore-reproducible-build.md)）。
 >
 > **请不要在 GitHub Issues 公开报告 Sieve 自身的安全漏洞。** 走下方私有渠道。
 
@@ -41,7 +41,7 @@
 | 修复或缓解（按严重程度） | Critical: 7 天 / High: 30 天 / Medium: 90 天 |
 | 公开 advisory | 修复发布后 30 天内 |
 
-> doskey 是[redacted]（[PRD §1.4](docs/prd/sieve-prd-v1.5.md#14-项目性质--法律实体v13-修订)），上述 SLA 已考虑 1 人响应能力。如涉及**当前正在被利用 + 资产损失风险**，请在邮件标题加 `[URGENT]`，doskey 会优先响应。
+> doskey 是[redacted]（[PRD §1.4](docs/prd/sieve-prd-v2.0.md#14-项目性质--法律实体v13-修订)），上述 SLA 已考虑 1 人响应能力。如涉及**当前正在被利用 + 资产损失风险**，请在邮件标题加 `[URGENT]`，doskey 会优先响应。
 
 ---
 
@@ -59,9 +59,9 @@
 以下不构成 Sieve 安全漏洞：
 
 - **用户配置错误**：如试图把 `[server].bind_address` 改成 `0.0.0.0`（配置层会拒绝启动）
-- **中转站 / 上游 API 漏洞**：不在 Sieve 责任范围（这恰恰是 Sieve 检测的对象，[PRD §1.2 第 1 句](docs/prd/sieve-prd-v1.5.md#12-四句话核心叙事v13-加第-4-句)）
+- **中转站 / 上游 API 漏洞**：不在 Sieve 责任范围（这恰恰是 Sieve 检测的对象，[PRD §1.2 第 1 句](docs/prd/sieve-prd-v2.0.md#12-四句话核心叙事v13-加第-4-句)）
 - **钱包 / 浏览器扩展钓鱼**：Sieve 是认知摩擦层，不是钱包安全产品
-- **检测规则的误报 / 漏报**（除非违反 [PRD §6.5 误报率预算](docs/prd/sieve-prd-v1.5.md#65-误报率预算)）：误报治理走 [`.sieveignore`](docs/api/api-reference.md) 与 GitHub Issue 普通流程
+- **检测规则的误报 / 漏报**（除非违反 [PRD §6.5 误报率预算](docs/prd/sieve-prd-v2.0.md#65-误报率预算)）：误报治理走 [`.sieveignore`](docs/api/api-reference.md) 与 GitHub Issue 普通流程
 - **使用过期 / 未签名的二进制**：用户责任在安装时验证 [sigstore 签名](docs/guides/deployment.md#3-二进制签名验证必做)
 
 ---
@@ -122,6 +122,6 @@ sieve --config ~/.sieve/config.toml
 - [ADR-003: 完全本地运行，绝不联网做 token verifier](docs/design/ADR-003-local-only-no-cloud-verifier.md)
 - [ADR-006: Sigstore 签名 + Reproducible Build + 透明日志](docs/design/ADR-006-sigstore-reproducible-build.md)
 - [ADR-007: Critical 等级 fail-closed 强制确认](docs/design/ADR-007-fail-closed-critical-actions.md)
-- [PRD §9 工程硬约束](docs/prd/sieve-prd-v1.5.md#9-工程上必须做对的硬约束)
-- [PRD §11 法律与合规边界](docs/prd/sieve-prd-v1.5.md#11-法律与合规边界)
+- [PRD §9 工程硬约束](docs/prd/sieve-prd-v2.0.md#9-工程上必须做对的硬约束)
+- [PRD §11 法律与合规边界](docs/prd/sieve-prd-v2.0.md#11-法律与合规边界)
 - [部署指南 §3 二进制签名验证](docs/guides/deployment.md#3-二进制签名验证必做)

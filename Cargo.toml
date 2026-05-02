@@ -43,6 +43,13 @@ chrono = { version = "0.4", default-features = false, features = ["serde", "cloc
 fd-lock = "4"
 clap = { version = "4", features = ["derive"] }
 arc-swap = "1"
+serial_test = "3"
+
+[workspace.lints.clippy]
+# 1.88 起 clippy 把 `uninlined_format_args` 提到 style 默认 warn。这是纯排版偏好，
+# 与正确性无关；项目已有大量 `format!("{:?}", x)` 形式的代码，集中 inline 仅会带来
+# 大量无意义 diff 且抢走真实问题的注意力。允许保留两种风格。
+uninlined_format_args = "allow"
 
 [profile.release]
 codegen-units = 1

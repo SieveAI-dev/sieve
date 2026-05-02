@@ -1,8 +1,8 @@
 # Sieve · Cursor 项目规则
 
-> 本文件是 Sieve 项目的 Cursor 工作规则，分两层：**文档规则**（沿用用户级 `.cursorrules` 模板骨架）+ **Sieve 工程硬约束**（来自 PRD v1.5 §9 与项目级共识）。
+> 本文件是 Sieve 项目的 Cursor 工作规则，分两层：**文档规则**（沿用用户级 `.cursorrules` 模板骨架）+ **Sieve 工程硬约束**（来自 PRD v2.0 §9 与项目级共识）。
 >
-> 当前项目状态：**设计阶段（Pre-Code）**，所有约束按"将开始写代码"语境提前生效。
+> **当前项目状态：v2.0 + v2.1 代码 100% 落地（2026-05-01），进入 dogfood 准备阶段**，所有约束按生产语境强制执行。
 
 ---
 
@@ -13,7 +13,7 @@
 1. **改代码前必须先读** `@docs/` 中相关文档（需求 → 设计 → API），不盲目重构
 2. **完成代码修改后必须更新所有关联文档**，禁止单独更新一个文档而忽略关联文档
 3. **临时文档**使用前缀 `_temp-` 或 `_draft-`，存放于 `docs/_temp/`，**任务完成后 24 小时内删除或归档**
-4. PRD v1.5 全文不复制到其他文档，所有跨文档引用一律使用相对路径链接
+4. PRD v2.0 全文不复制到其他文档，所有跨文档引用一律使用相对路径链接
 
 ### 1.2 文档位置约定
 
@@ -43,7 +43,7 @@ docs/
 ```
 README.md
   ↓ 链接到
-docs/requirements/PRD-sieve.md → docs/prd/sieve-prd-v1.5.md（活动版本）
+docs/requirements/PRD-sieve.md → docs/prd/sieve-prd-v2.0.md（活动版本）
   ↓ 关联
 docs/design/architecture.md
   ↓ 约束
@@ -109,7 +109,7 @@ docs/changelog/CHANGELOG.md
 
 ### 3.3 模块边界
 
-按 PRD §6 分五个 crate：
+按 PRD §6 分六个 crate：
 
 | crate | 职责 | 不允许做 |
 |-------|------|---------|
@@ -137,7 +137,7 @@ docs/changelog/CHANGELOG.md
 | 明确需求 | 直接给方案 + 必要文档更新清单 |
 | 模糊需求 | 引用相关 PRD/设计文档 + 给最可能方案 + 1 个关键追问 |
 | 破坏性操作（删文件、改 schema、重构 crate 边界） | **先确认后执行**，给出回退方案 |
-| 涉及 PRD §9 十三条硬约束 | **任何放宽都必须显式让用户确认**，默认不允许 |
+| 涉及 PRD §9 十六条硬约束 | **任何放宽都必须显式让用户确认**，默认不允许 |
 
 ---
 
@@ -145,7 +145,7 @@ docs/changelog/CHANGELOG.md
 
 - [ ] `cargo fmt --check` + `cargo clippy -- -D warnings` 通过
 - [ ] 涉及 SSE / 规则 / 工具调用判定的改动有对应 fuzz / 单元测试
-- [ ] PRD §9 十三条硬约束未被绕过
+- [ ] PRD §9 十六条硬约束未被绕过
 - [ ] CHANGELOG 已更新（依赖升级 / 行为变更 / 检测项 ID 变化必记）
 - [ ] 关联文档（requirements / design / api）已同步
 - [ ] 临时文档（`_temp-` / `_draft-`）已清理或归档
@@ -155,6 +155,6 @@ docs/changelog/CHANGELOG.md
 ## 参考
 
 - 项目入口：[README.md](./README.md)
-- 当前活动 PRD：[docs/prd/sieve-prd-v1.5.md](./docs/prd/sieve-prd-v1.5.md)
+- 当前活动 PRD：[docs/prd/sieve-prd-v2.0.md](./docs/prd/sieve-prd-v2.0.md)
 - 需求入口：[docs/requirements/PRD-sieve.md](./docs/requirements/PRD-sieve.md)
 - 用户故事：[docs/requirements/user-stories.md](./docs/requirements/user-stories.md)

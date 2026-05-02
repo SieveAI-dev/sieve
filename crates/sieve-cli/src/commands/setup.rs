@@ -5,9 +5,12 @@
 //! ## 架构
 //!
 //! `AgentAdapter` trait 抽象每家 agent 的配置注入接口（SPEC-004 §4）：
-//! - `ClaudeAdapter`：沿用 SPEC-003 已有逻辑（`~/.claude/settings.json` + launchd plist）
-//! - `OpenClawAdapter`：stub + 完整接口；Week 7 实测后补真实写入（SPEC-004 §10 TBD-01）
-//! - `HermesAdapter`：stub + 完整接口；Week 7 实测后补真实写入（SPEC-004 §10 TBD-02）
+//! - `ClaudeAdapter`：`~/.claude/settings.json` + launchd plist（SPEC-003）
+//! - `OpenClawAdapter`：`~/.openclaw/openclaw.json` + provider base_url 重写（SPEC-004 §6）
+//! - `HermesAdapter`：`~/.hermes/config.yaml` 模型 base_url 重写（SPEC-004 §7）
+//!
+//! `skill_install_guard` 的真实样本固化仍在 dogfood 期跟进（v2-pending TODO-DOGFOOD-1），
+//! 不影响 setup 配置写入路径本身。
 //!
 //! ## 主流程（SPEC-004 §2.1）
 //!
@@ -1596,23 +1599,48 @@ pub(crate) mod macos {
             ));
         }
 
-        // ── 6. 跑 doctor 验证（仅对 Claude；其他 agent 为 stub，跳过）
+        // ── 6. 对每个已成功 apply 的 agent 跑 doctor 验证
         //
-        // doctor 失败时，用保存的 ctx（含 written_files）回滚 Claude 的实际写入。
-        let claude_ctx_idx = applied_ctxs
-            .iter()
-            .position(|(k, _)| *k == AgentKind::Claude);
-        if let Some(idx) = claude_ctx_idx {
-            println!("\n[sieve setup] 正在验证 Claude Code 安装…");
-            let claude_adapter = ClaudeAdapter::new(home_path.clone(), backup_dir.clone())?;
-            if let Err(doctor_err) = claude_adapter.doctor_check() {
-                eprintln!("[sieve setup] doctor 验证失败，正在自动回滚 Claude…");
-                applied_ctxs[idx].1.rollback();
-                return Err(anyhow!(
-                    "setup 已自动回滚（doctor 验证失败：{}）；请检查 doctor 报告",
-                    doctor_err
-                ));
+        // R10-#5 / P1-3：之前只验证 Claude，OpenClaw / Hermes 的写入不做同级 doctor，
+        // 一旦配置写坏就只能等 dogfood 阶段才暴露。现在为每个 applied agent 重建对应
+        // adapter，逐个 doctor_check。任一失败时**只回滚该 agent**（其他 agent 的成功
+        // 不受影响），并返回非零；多个 agent 失败时累加错误信息。
+        //
+        // `SIEVE_SKIP_SETUP_DOCTOR=1`：仅集成测试用，跳过 doctor 让"配置注入"类
+        // 单元测试不依赖 launchctl 实际能加载 daemon。生产路径**不应**设置此变量。
+        if std::env::var("SIEVE_SKIP_SETUP_DOCTOR").as_deref() == Ok("1") {
+            eprintln!("[setup] SIEVE_SKIP_SETUP_DOCTOR=1 检测到，跳过 doctor 验证（仅测试场景）");
+            return Ok(());
+        }
+        let mut doctor_errors: Vec<String> = Vec::new();
+        for (kind, ctx) in applied_ctxs.iter_mut() {
+            let adapter: Box<dyn AgentAdapter> = match kind {
+                AgentKind::Claude => {
+                    Box::new(ClaudeAdapter::new(home_path.clone(), backup_dir.clone())?)
+                }
+                AgentKind::Openclaw => Box::new(OpenClawAdapter::new(home_path.clone())),
+                AgentKind::Hermes => Box::new(HermesAdapter::new(home_path.clone())),
+            };
+            println!("\n[sieve setup] 正在验证 {} 安装…", kind);
+            match adapter.doctor_check() {
+                Ok(_report) => {
+                    println!("[sieve setup] ✅ {} doctor 通过", kind);
+                }
+                Err(e) => {
+                    eprintln!("[sieve setup] ❌ {} doctor 失败：{e}", kind);
+                    eprintln!("[sieve setup] 正在回滚 {} 的改动…", kind);
+                    ctx.rollback();
+                    doctor_errors.push(format!("{kind}: {e}"));
+                }
             }
+        }
+
+        if !doctor_errors.is_empty() {
+            return Err(anyhow!(
+                "setup 部分 agent doctor 验证失败，对应改动已自动回滚：\n  - {}\n\
+                 其他 agent 的成功配置已保留；如需重试：sieve setup --agent <name>",
+                doctor_errors.join("\n  - ")
+            ));
         }
 
         Ok(())

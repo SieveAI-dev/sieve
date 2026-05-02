@@ -336,8 +336,10 @@ impl MatchEngine for VectorscanEngine {
     }
 
     fn compiled_pattern_size_bytes(&self) -> usize {
-        // vectorscan_rs 暂未暴露 db size API；返回 0 作为占位，
-        // lint 阶段通过编译时间上限（100ms）间接控制 db 大小（PRD §5.5.3-B）。
+        // vectorscan_rs 暂未暴露 `hs_database_size()`，无法精确测量 compiled DB 体积；
+        // 返回 0 作占位，由 lint 阶段编译时间 100ms 上限（PRD §5.5.3-B）兜底间接限流。
+        // 上游暴露 API 后此处与 sieve-policy/src/lint.rs 同步补 1MB 真值校验
+        //（跟踪：tasks/v2-pending.md TODO-EXT-1）。
         0
     }
 

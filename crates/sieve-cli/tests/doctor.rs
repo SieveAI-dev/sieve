@@ -651,7 +651,11 @@ fn sieve_bin_for_doctor() -> Option<PathBuf> {
 // 用临时 TCP listener 模拟 daemon 在 11453 监听；
 // 同时创建有效的 openclaw.json（baseUrl 已指向 Sieve URL）。
 // 期望 doctor exit 0（OpenClaw 所有检查通过）。
+//
+// `#[serial(daemon_port_11453)]`：T1 / T2 / T3 共用 11453 端口，并行跑会出现
+// T1 已绑定 11453 → T2 把 daemon 当成"在线"误判通过的竞态。串行执行隔离。
 #[test]
+#[serial_test::serial(daemon_port_11453)]
 fn r10_5_t1_doctor_openclaw_with_daemon_and_config_passes() {
     use std::net::TcpListener;
     use tempfile::tempdir;
@@ -712,6 +716,7 @@ fn r10_5_t1_doctor_openclaw_with_daemon_and_config_passes() {
 // 但不绑定 11453 端口（daemon 未跑）。
 // 期望 doctor exit 非零，确认 all_passed 正确设为 false。
 #[test]
+#[serial_test::serial(daemon_port_11453)]
 fn r10_5_t2_doctor_openclaw_daemon_not_running_exits_nonzero() {
     use std::net::TcpStream;
     use tempfile::tempdir;
@@ -770,6 +775,7 @@ fn r10_5_t2_doctor_openclaw_daemon_not_running_exits_nonzero() {
 
 // R10-#5-T3: --agent hermes daemon 未跑 → exit 1
 #[test]
+#[serial_test::serial(daemon_port_11453)]
 fn r10_5_t3_doctor_hermes_daemon_not_running_exits_nonzero() {
     use std::net::TcpStream;
     use tempfile::tempdir;

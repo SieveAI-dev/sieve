@@ -88,6 +88,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Fuzz sse_parser (60s)
         run: cargo +nightly fuzz run -s none sse_parser -- -max_total_time=60
+      - name: Fuzz sse_parser_openai (60s)
+        # Phase 1 已接 OpenAI 协议（PRD §9 #9 + ADR-018），SSE 边界 fuzz 必须覆盖
+        # OpenAI 分支（PRD §9 #5）。target 见 fuzz/fuzz_targets/sse_parser_openai.rs。
+        run: cargo +nightly fuzz run -s none sse_parser_openai -- -max_total_time=60
       - name: Fuzz tool_use_aggregator (60s)
         run: cargo +nightly fuzz run -s none tool_use_aggregator -- -max_total_time=60
       - name: Fuzz inbound_filter (60s)

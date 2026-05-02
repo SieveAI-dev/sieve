@@ -1,6 +1,6 @@
 ---
 name: Feature 请求
-about: 提议新功能或改进（必须先验证不与 PRD §9 十条硬约束冲突）
+about: 提议新功能或改进（必须先验证不与 PRD §9 十六条硬约束冲突）
 title: "[FEAT] "
 labels: enhancement
 assignees: doskey
@@ -24,8 +24,8 @@ assignees: doskey
 
 请勾选并说明：
 
-- [ ] 已查阅 [PRD v1.3](../../docs/prd/sieve-prd-v1.3.md)
-- [ ] 已确认**不与 PRD §9 十条硬约束冲突**（如冲突，本 issue 默认拒绝）
+- [ ] 已查阅 [PRD v2.0](../../docs/prd/sieve-prd-v2.0.md)
+- [ ] 已确认**不与 PRD §9 十六条硬约束冲突**（如冲突，本 issue 默认拒绝）
 - [ ] 已确认**不属于 PRD §3.3 不服务客群**（企业 CISO / 散户 / 国内政企 / 纯 web2 / 中国大陆境内 to-C）
 
 该提议属于（任选一）：
@@ -52,4 +52,4 @@ assignees: doskey
 - [ ] 提议不要求"上传样本到云端" / "联网 verify" / "关闭 Critical 拦截"等违反 PRD §9 的行为
 - [ ] 提议不增加非 Rust 二进制依赖（[ADR-001](../../docs/design/ADR-001-rust-tech-stack.md)）
 
-> 一人项目（[PRD §1.4](../../docs/prd/sieve-prd-v1.3.md#14-项目性质--法律实体v13-修订)），doskey 会按 [Roadmap](../../tasks/roadmap.md) 节奏评估。Phase 2 功能默认推到 Week 13+ 慢节奏维护期。
+> 一人项目（[PRD §1.4](../../docs/requirements/PRD-sieve.md)），doskey 会按 [Roadmap](../../tasks/roadmap.md) 节奏评估。Phase 2 功能默认推到 Week 13+ 慢节奏维护期。

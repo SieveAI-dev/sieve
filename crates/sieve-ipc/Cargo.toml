@@ -31,3 +31,6 @@ tempfile = "3"
 tokio = { workspace = true, features = ["full", "test-util"] }
 # 测试用随机数生成（生成 Ed25519 密钥对用于 roundtrip 测试）。
 rand = "0.8"
+
+[lints]
+workspace = true
