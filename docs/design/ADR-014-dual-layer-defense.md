@@ -6,7 +6,7 @@
 
 > 决策日期：2026-04-28
 > 范围：Phase 1 入站检测的拦截实现路径
-> 关联 PRD：[v1.4 §6.7、§9 第 11 条](../prd/sieve-prd-v1.5.md)
+> 关联 PRD：[v1.4 §6.7、§9 第 11 条](../prd/_archive/sieve-prd-v1.5.md)
 > 关联 ADR：Partially supersedes [ADR-007](./ADR-007-fail-closed-critical-actions.md) §Week 3 落地范围（截流实现部分）
 
 ---
@@ -143,8 +143,8 @@ Week 3 落地的 `build_sieve_blocked_sse()` 对 Hook 类规则的调用**必须
 
 ## 相关文档
 
-- [PRD-sieve v1.4 §6.7](../prd/sieve-prd-v1.5.md) —— 双层防御架构
-- [PRD-sieve v1.4 §9 第 11 条](../prd/sieve-prd-v1.5.md) —— "不伪造协议字段"硬约束
+- [PRD-sieve v1.4 §6.7](../prd/_archive/sieve-prd-v1.5.md) —— 双层防御架构
+- [PRD-sieve v1.4 §9 第 11 条](../prd/_archive/sieve-prd-v1.5.md) —— "不伪造协议字段"硬约束
 - [ADR-007](./ADR-007-fail-closed-critical-actions.md) —— fail-closed 原则（本 ADR 修改实现路径，不改原则）
 - [ADR-013](./ADR-013-ipc-protocol.md) —— IPC 协议（双通道机制）
 - [ADR-015](./ADR-015-sieve-setup-tool.md) —— sieve setup（hook 注册 onError: block 的载体）

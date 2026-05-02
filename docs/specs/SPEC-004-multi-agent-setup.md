@@ -1,8 +1,9 @@
 # SPEC-004: multi-agent setup 配置注入规格
 
 > Version: v1.0 — 2026-04-28
-> 关联 ADR：ADR-015（sieve setup 工具基础）、ADR-018（OpenAI 协议适配，候选）、ADR-019（X-Sieve-Origin header 协议，候选）
-> 关联 PRD：v1.5 §6.6 §6.7 §10 Week 6
+> Status: Stable
+> 关联 ADR：ADR-015（sieve setup 工具基础）、ADR-018（OpenAI 协议适配）、ADR-019（X-Sieve-Origin header 协议）
+> 关联 PRD：v2.0 §6.6 §6.7 §10 Week 6（v1.5 引入）
 
 ---
 

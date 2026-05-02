@@ -495,7 +495,7 @@ JWT-like，**Ed25519 签名**（不用 RSA / HMAC）：
 - **完全离线验证**：本地公钥 + 签名校验，**不联网 verify**（详见 [ADR-003](./ADR-003-local-only-no-cloud-verifier.md)）；
 - 设备绑定：用 `device_id`（macOS：硬件 UUID hash / Linux：machine-id hash）+ `sub` 组合的本地 SQLite 记录；超过 `device_limit` 时 daemon 拒绝在新设备上启动；
 - 撤销机制：Phase 1 **不做** CRL —— [redacted]没有撤销基础设施，离线验证 + exp 已经覆盖 99% 场景；
-- **降级模式（降级触发 / license 失效）行为矩阵**——直接对齐 [PRD §7.1 + §9 #8](../prd/sieve-prd-v1.5.md#71-单一定价)：
+- **降级模式（降级触发 / license 失效）行为矩阵**——直接对齐 [PRD §7.1 + §9 #8](../prd/sieve-prd-v2.0.md#71-单一定价)：
   - **Critical**：**全部仍然 fail-closed 拦截**（包括出站 OUT-* 与入站 IN-CR-05 / IN-GEN-01~03 等所有 Critical 规则）。这是产品安全承诺，不是付费用户特权（详见 [ADR-007](./ADR-007-fail-closed-critical-actions.md)）；
   - **High**：从"弹窗 + 5 秒倒计时"降级为"仅审计记录，不弹窗"（即"只读警告"）；
   - **Medium / Low**：行为不变（本就静默 / 标记）；

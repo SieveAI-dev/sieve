@@ -6,7 +6,7 @@
 
 > 决策日期：2026-04-28
 > 范围：Phase 1 代理进程 ↔ GUI App 及代理进程 ↔ sieve-hook 两条 IPC 通道
-> 关联 PRD：[v1.4 §6.5、§10.1 Week 3 + Week 5](../prd/sieve-prd-v1.5.md)
+> 关联 PRD：[v1.4 §6.5、§10.1 Week 3 + Week 5](../prd/_archive/sieve-prd-v1.5.md)
 
 ---
 
@@ -536,7 +536,7 @@ GUI 收到后：(1) 若该 request_id 仍在排队 → 移除；(2) 若弹窗已
 
 ## 相关文档
 
-- [PRD-sieve v1.4 §6.5](../prd/sieve-prd-v1.5.md) —— IPC 协议选型
+- [PRD-sieve v1.4 §6.5](../prd/_archive/sieve-prd-v1.5.md) —— IPC 协议选型
 - [ADR-012](./ADR-012-native-gui-app-phase1.md) —— GUI App 独立仓库（IPC 是两仓库协调契约）
 - [ADR-014](./ADR-014-dual-layer-defense.md) —— 双层防御（哪些规则走哪条 IPC 通道）
 - [ADR-015](./ADR-015-sieve-setup-tool.md) —— sieve setup 负责创建 `~/.sieve/` 目录权限

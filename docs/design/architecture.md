@@ -2,7 +2,7 @@
 
 > **状态**：设计阶段 / 锁定执行
 > **文档版本**：v2.0 / 2026-05-01
-> **依据 PRD**：[docs/prd/sieve-prd-v2.0.md](../prd/sieve-prd-v2.0.md)（当前权威源）；v1.5 归档见 [docs/prd/sieve-prd-v1.5.md](../prd/sieve-prd-v1.5.md)
+> **依据 PRD**：[docs/prd/sieve-prd-v2.0.md](../prd/sieve-prd-v2.0.md)（当前权威源）；v1.5 归档见 [docs/prd/sieve-prd-v2.0.md](../prd/sieve-prd-v2.0.md)
 > **范围**：Phase 1（12 周 GA），v1.5 起适配 Claude Code + OpenClaw + Hermes 三家 AI agent；v2.0 起 HIPS 改造（用户规则系统 + 三态决策 + 灰名单 + 进程上下文 + 行为序列窗口）
 
 ---
@@ -291,7 +291,7 @@ flowchart LR
 
 调用点：`sieve-cli/engine_adapter.rs`（生产路径）+ `sieve-rules/tests/{inbound_rules,dataset_fp_rate}.rs`（测试）。
 
-参考：[PRD §6.5](../prd/sieve-prd-v1.5.md)。
+参考：[PRD §6.5](../prd/sieve-prd-v2.0.md)。
 
 ---
 
@@ -313,7 +313,7 @@ Phase 1 部署形态为 **macOS .dmg 安装包**，包含三件套：Native GUI 
 **v1.4 显式不做**：
 
 - ✅ macOS SwiftUI 独立进程（`sieve-gui-macos` 仓库）—— **已撤销**原 v1.3 中"❌ 桌面 GUI App（Electron / Tauri）"的否决；该否决只针对 webview 方案，不适用 native SwiftUI（详见 [ADR-012](./ADR-012-native-gui-app-phase1.md)）
-- ❌ 操作系统级 Network Extension / 本地 CA 注入 / MITM（推 Phase 3，[PRD §6.8 + §9 第 12 条](../prd/sieve-prd-v1.5.md)）
+- ❌ 操作系统级 Network Extension / 本地 CA 注入 / MITM（推 Phase 3，[PRD §6.8 + §9 第 12 条](../prd/sieve-prd-v2.0.md)）
 - ❌ Linux / Windows 平台支持（推 Phase 2，触发条件见 [ADR-004 §3](./ADR-004-anthropic-first-unified-interface.md)）
 - ❌ VS Code 插件 / 浏览器扩展
 - ❌ 修改 `~/.zshrc` / `~/.bashrc`（PATH 由 .dmg 安装包的 post-install script 处理，`sieve setup` 不写 shell rc，详见 [ADR-015](./ADR-015-sieve-setup-tool.md)）

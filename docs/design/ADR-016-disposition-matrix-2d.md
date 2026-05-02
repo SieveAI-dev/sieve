@@ -6,7 +6,7 @@
 
 > 决策日期：2026-04-28
 > 范围：规则 manifest 结构 + 处置矩阵编码 + UX 哲学分层
-> 关联 PRD：[v1.4 §5.3、§5.4、§9 第 13 条](../prd/sieve-prd-v1.5.md)
+> 关联 PRD：[v1.4 §5.3、§5.4、§9 第 13 条](../prd/_archive/sieve-prd-v1.5.md)
 
 ---
 
@@ -172,8 +172,8 @@ IN-CR-02/03/04 和 IN-GEN-01~03 虽然 `severity = "Critical"`，但 `dispositio
 
 ## 相关文档
 
-- [PRD-sieve v1.4 §5.3、§5.4](../prd/sieve-prd-v1.5.md) —— 处置矩阵二维化与超时策略表
-- [PRD-sieve v1.4 §9 第 13 条](../prd/sieve-prd-v1.5.md) —— "出站脱敏不打断"硬约束
+- [PRD-sieve v1.4 §5.3、§5.4](../prd/_archive/sieve-prd-v1.5.md) —— 处置矩阵二维化与超时策略表
+- [PRD-sieve v1.4 §9 第 13 条](../prd/_archive/sieve-prd-v1.5.md) —— "出站脱敏不打断"硬约束
 - [ADR-007](./ADR-007-fail-closed-critical-actions.md) —— fail-closed 原则（Critical 的 default_on_timeout 只能是 Block）
 - [ADR-014](./ADR-014-dual-layer-defense.md) —— disposition 驱动的双层 pipeline 分流
 - [data-model.md](./data-model.md) —— 处置矩阵编码与配置字段

@@ -49,7 +49,7 @@ Phase 1 GA 交付形态：**三件套 .dmg**（Native GUI App + 后台代理 + s
    sieve setup
    ```
 
-5. `setup` 自动完成以下操作（详见 [SPEC-003](../specs/SPEC-003-setup-doctor-uninstall.md)）：
+5. `setup` 自动完成以下操作（详见 [SPEC-003](../specs/SPEC-003-sieve-setup-tool.md)）：
    - 改写 Claude Code `settings.json`，注册 `PreToolUse` hook（sieve-hook 二进制）
    - 写入 `ANTHROPIC_BASE_URL=http://127.0.0.1:11453` 到 shell 配置
    - 注册 `~/Library/LaunchAgents/tools.sieve.agent.plist`，launchd 接管后台代理
@@ -57,7 +57,7 @@ Phase 1 GA 交付形态：**三件套 .dmg**（Native GUI App + 后台代理 + s
 6. `setup` 完成后自动执行 `sieve doctor` 验证所有组件就位
 
 > **Sieve 不提供 `curl ... | sh` 一键安装脚本。**
-> 远程脚本盲跑是 [PRD §9](../prd/sieve-prd-v1.5.md#9-工程上必须做对的硬约束) 反对的攻击面，自己不能反着做。
+> 远程脚本盲跑是 [PRD §9](../prd/sieve-prd-v2.0.md#9-工程上必须做对的硬约束) 反对的攻击面，自己不能反着做。
 
 > Homebrew tap（`brew install sieve`）推 Phase 2，当前不可用。
 
@@ -114,7 +114,7 @@ Phase 1 仅 macOS：
 
 ## 3. 二进制签名验证（**必做**）
 
-> Sieve 把"自证清白"作为产品定位的一部分（[PRD §1.2 第 4 句](../prd/sieve-prd-v1.5.md#12-四句话核心叙事v13-加第-4-句)）。**用户不应仅凭信任安装 Sieve，而应能自己验证它。**
+> Sieve 把"自证清白"作为产品定位的一部分（[PRD §1.2 第 4 句](../prd/sieve-prd-v2.0.md#12-四句话核心叙事v13-加第-4-句)）。**用户不应仅凭信任安装 Sieve，而应能自己验证它。**
 
 ### 3.1 sigstore / cosign 验证
 
@@ -182,7 +182,7 @@ shasum -a 256 ../Sieve-<version>.dmg
 **推荐方案**：`sieve setup` 自动处理，用户无需手动操作。
 
 `setup` 改写 Claude Code `~/.claude/settings.json`，插入：
-- `hooks.PreToolUse`：注册 sieve-hook 二进制路径（详见 [SPEC-003](../specs/SPEC-003-setup-doctor-uninstall.md)）
+- `hooks.PreToolUse`：注册 sieve-hook 二进制路径（详见 [SPEC-003](../specs/SPEC-003-sieve-setup-tool.md)）
 - `env.ANTHROPIC_BASE_URL`：写入 `http://127.0.0.1:11453`
 
 **备用方案（开发者 dogfood）**：手动 export 仍有效：
@@ -242,7 +242,7 @@ v1.4 起 CI 仅跑 macOS target（`aarch64-apple-darwin` + `x86_64-apple-darwin`
 
 ### 6.1 默认端口
 
-`11453`（[PRD §6.1](../prd/sieve-prd-v1.5.md#61-phase-1-单-agent-架构只-claude-code)）。
+`11453`（[PRD §6.1](../prd/sieve-prd-v2.0.md#61-phase-1-单-agent-架构只-claude-code)）。
 
 ### 6.2 端口被占用时
 
@@ -267,7 +267,7 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:21453
 - ❌ `0.0.0.0` —— Sieve 启动时 schema 校验会拒绝
 - ❌ 任何公网 IP / LAN IP —— 同上
 
-> Sieve 完全本地运行是产品承诺（[PRD §1.1](../prd/sieve-prd-v1.5.md#11-一句话) / [§9 #2](../prd/sieve-prd-v1.5.md#9-工程上必须做对的硬约束)），暴露公网会**摧毁产品定位**。
+> Sieve 完全本地运行是产品承诺（[PRD §1.1](../prd/sieve-prd-v2.0.md#11-一句话) / [§9 #2](../prd/sieve-prd-v2.0.md#9-工程上必须做对的硬约束)），暴露公网会**摧毁产品定位**。
 
 ---
 
@@ -293,7 +293,7 @@ SIEVE_LOG_LEVEL=debug sieve --config ~/.sieve/config.toml
 
 `~/.sieve/audit.db`（**append-only**）：
 
-- 仅存 fingerprint + 元信息，**绝不存原始 prompt 内容**（[PRD §11.3](../prd/sieve-prd-v1.5.md#113-开源策略) / API 参考 §2.2.3）
+- 仅存 fingerprint + 元信息，**绝不存原始 prompt 内容**（[PRD §11.3](../prd/sieve-prd-v2.0.md#113-开源策略) / API 参考 §2.2.3）
 - schema 详见 [data-model.md](../design/data-model.md)
 
 ### 7.3 查询 CLI
@@ -471,7 +471,7 @@ sieve self-rollback              # CLI 子命令，等价于：
 
 ## 9. 卸载
 
-推荐使用 `sieve uninstall`，按 `setup.log` 逐步回滚（详见 [SPEC-003](../specs/SPEC-003-setup-doctor-uninstall.md)）：
+推荐使用 `sieve uninstall`，按 `setup.log` 逐步回滚（详见 [SPEC-003](../specs/SPEC-003-sieve-setup-tool.md)）：
 
 ```bash
 # Step 1：dry-run 预览将要撤销的操作
@@ -536,21 +536,21 @@ enabled = false
 
 ### 11.2 正式版定价
 
-- **[redacted] / 月**（[PRD §7.1](../prd/sieve-prd-v1.5.md#71-单一定价)）
+- **[redacted] / 月**（[PRD §7.1](../prd/sieve-prd-v2.0.md#71-单一定价)）
 - **年付 [redacted]0**（省 2 个月）
-- 支付通道：[redacted]（USDC / USDT）双通道（[PRD §11.5.1](../prd/sieve-prd-v1.5.md#1151-公司主体与收款)）
+- 支付通道：[redacted]（USDC / USDT）双通道（[PRD §11.5.1](../prd/sieve-prd-v2.0.md#1151-公司主体与收款)）
 
 ### 11.3 降级模式（试用结束未付费）
 
-[PRD §7.1](../prd/sieve-prd-v1.5.md#71-单一定价) 描述的"只读警告"模式：
+[PRD §7.1](../prd/sieve-prd-v2.0.md#71-单一定价) 描述的"只读警告"模式：
 
-- ✅ **Critical 仍然阻断**（产品安全承诺，[PRD §9 #8](../prd/sieve-prd-v1.5.md#9-工程上必须做对的硬约束)）
+- ✅ **Critical 仍然阻断**（产品安全承诺，[PRD §9 #8](../prd/sieve-prd-v2.0.md#9-工程上必须做对的硬约束)）
 - ⚠ High / Medium / Low 仅记录，不弹窗、不警告
 - 不停止运行 —— 不让用户因为没付费而失去基本保护
 
 ### 11.4 License 验证流程
 
-- **本地 Ed25519 公钥** 验证 license key 签名 → **不联网 verify**（[PRD §9 #2](../prd/sieve-prd-v1.5.md#9-工程上必须做对的硬约束)）
+- **本地 Ed25519 公钥** 验证 license key 签名 → **不联网 verify**（[PRD §9 #2](../prd/sieve-prd-v2.0.md#9-工程上必须做对的硬约束)）
 - 公钥内置在二进制 + 落盘 `~/.sieve/keys/`
 - License 包含：邮箱、签发时间、过期时间、计划等级（trial / paid_monthly / paid_yearly）
 
@@ -656,7 +656,7 @@ launchctl load ~/Library/LaunchAgents/tools.sieve.agent.plist
 ## 相关文档
 
 - 项目入口：[../../README.md](../../README.md)
-- 当前活动 PRD：[../prd/sieve-prd-v1.5.md](../prd/sieve-prd-v1.5.md)
+- 当前活动 PRD：[../prd/sieve-prd-v2.0.md](../prd/sieve-prd-v2.0.md)
 - API 参考：[../api/api-reference.md](../api/api-reference.md)
 - 开发指南：[development.md](development.md)
 - 变更日志：[../changelog/CHANGELOG.md](../changelog/CHANGELOG.md)

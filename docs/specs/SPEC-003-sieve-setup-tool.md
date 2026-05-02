@@ -1,8 +1,9 @@
 # SPEC-003: sieve setup 工具行为规格
 
 > Version: v1.0 — 2026-04-28
+> Status: Stable
 > 关联 ADR：ADR-015（sieve setup 自动配置工具）
-> 关联 PRD：v1.4 §6.6、§10.1 Week 5
+> 关联 PRD：v2.0 §6.6、§10.1 Week 5（v1.4 引入）
 
 ---
 
