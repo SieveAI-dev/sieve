@@ -255,7 +255,7 @@ async fn handle_set_paused(
     // 广播给所有 GUI
     ipc.broadcast_paused_changed(PausedChangedNotify {
         paused,
-        until,
+        paused_until: until,
         reason: "user_request".to_owned(),
         applies_to: paused_applies_to(),
     });
@@ -269,7 +269,7 @@ async fn handle_set_paused(
 
     Ok(SetPausedResult {
         paused,
-        until,
+        paused_until: until,
         applies_to: paused_applies_to(),
     })
 }

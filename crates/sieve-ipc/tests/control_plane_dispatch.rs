@@ -31,7 +31,7 @@ fn spawn_mock_daemon(server: Arc<IpcServer>) {
                 ControlPlaneRequest::SetPaused { params, reply } => {
                     let _ = reply.send(Ok(SetPausedResult {
                         paused: params.minutes > 0,
-                        until: None,
+                        paused_until: None,
                         applies_to: vec!["AutoRedact".to_owned()],
                     }));
                 }

@@ -12,6 +12,7 @@
 
 ## ✅ 已完成（按时间倒序）
 
+- **2026-05-03** P1-1 SetPausedResult/PausedChangedNotify 字段 until → paused_until（serde wire 同步对齐 SPEC-005 §9.1 §10.2）
 - **2026-05-03** 善后 audit oversize callback 注入（IpcServer::set_oversize_callback + OversizeKind/OversizeCallback 类型 + daemon 层注入 closure 写 AuditEvent::IpcOversizeFrame）
 - **2026-05-03** 善后 修复 pre-existing flake canary_token_hits_out01_in_local_engine（路径硬编码 → CARGO_MANIFEST_DIR 相对路径，测试已通过验证）
 - **2026-05-03** P0-1 帧读取改用 FrameReader + memchr（新增 frame_reader.rs，替换 socket_server + socket_client 两处 BufReader::lines()，AuditEvent::IpcOversizeFrame，5 个边界测试）
@@ -40,6 +41,7 @@ _无。等用户选定下一步执行哪一组 P0 后填入。建议每次最多
 
 ### P0 阻塞合规（必须先完成，否则与 v2 GUI 无法互操作）
 
+- [x] **[P1-1]** `SetPausedResult.until` → `paused_until`（§9.1, §10.2）— 含 `PausedChangedNotify`（2026-05-03 完成）
 - [x] **[P0-1]** 帧读取替换无界 `BufReader::lines()` → `read_buf` + 手动 `memchr`（§1.3.1）（2026-05-03 完成）
   - 文件：`crates/sieve-ipc/src/socket_server.rs:8,627` + `socket_client.rs:52`
   - 补充：单帧 > 1 MiB 关连接 + remainder > 1 MiB 关 + audit `ipc_oversize_frame` + 解析失败不关连接
@@ -55,7 +57,7 @@ _无。等用户选定下一步执行哪一组 P0 后填入。建议每次最多
 
 ### P1 字段/行为偏差
 
-- [ ] **[P1-1]** `SetPausedResult.until` → `paused_until`（§9.1, §10.2）— 含 `PausedChangedNotify`
+- [x] **[P1-1]** `SetPausedResult.until` → `paused_until`（§9.1, §10.2）— 含 `PausedChangedNotify`（2026-05-03 完成）
 - [ ] **[P1-2]** `PresetChangedNotify` + `PausedChangedNotify` 加 `origin_request_id: Option<Uuid>`（§10.0–10.2）
 - [ ] **[P1-3]** `HealthResult.paused` 拆为 `paused: bool` + 独立 `paused_until: Option<DateTime<Utc>>`（§9.5）
 - [x] **[P1-4]** `DecisionResponse` 加 `ui_phase_when_clicked: Option<UiPhase>`（§6.2.1, §5.10）（2026-05-03 完成）
