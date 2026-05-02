@@ -31,7 +31,7 @@ pub struct StatusBarNotify {
 
 /// 状态栏通知类型。
 ///
-/// 关联：PRD v2.0 §5.7.2（SequenceHit）+ §9 #13（OutboundRedacted）+ §9 #14（UserRules*）。
+/// 关联：PRD v2.0 §5.7.2（SequenceHit）+ §9 #13（OutboundRedacted）+ §9 #14（UserRules*）+ SPEC-005 §5.9（HookTerminal）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NotifyKind {
@@ -43,6 +43,11 @@ pub enum NotifyKind {
     UserRulesLoadFailed,
     /// 用户规则 reload 成功（sieve rules edit 后 daemon 接收到 reload 通知并成功加载）。
     UserRulesReloaded,
+    /// hook 终端处置路径被触发（SPEC-005 §5.9）。
+    ///
+    /// daemon 在 PreToolUse hook 终端路径决策完成后推送此通知，让 GUI 状态栏
+    /// 显示"hook 已处理"事件（不打断工作流，5s 自动消失）。
+    HookTerminal,
     /// 其他通用提示。
     Generic,
 }

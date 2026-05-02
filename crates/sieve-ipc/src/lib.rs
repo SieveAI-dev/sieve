@@ -115,6 +115,7 @@ mod tests {
             (NotifyKind::OutboundRedacted, "outbound_redacted"),
             (NotifyKind::UserRulesLoadFailed, "user_rules_load_failed"),
             (NotifyKind::UserRulesReloaded, "user_rules_reloaded"),
+            (NotifyKind::HookTerminal, "hook_terminal"),
             (NotifyKind::Generic, "generic"),
         ];
         for (kind, expected) in cases {
