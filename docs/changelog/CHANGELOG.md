@@ -6,7 +6,7 @@
 版本号遵循 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)。
 
 > 当前状态：**Phase A dogfood 进行中**（Week 3 入站 Crypto 钩子完成）。第一个公开版本（v0.1.0）将随 Week 12 GA 发布。
-> 第一个公开版本（v0.1.0）将随 Week 12 GA 发布；详见 [PRD §10 12 周里程碑](../prd/sieve-prd-v1.3.md#10-12-周里程碑8-周-dogfood--4-周闭测)。
+> 第一个公开版本（v0.1.0）将随 Week 12 GA 发布；详见 [PRD §10 12 周里程碑](../prd/_archive/sieve-prd-v1.3.md#10-12-周里程碑8-周-dogfood--4-周闭测)。
 > v1 公开 API 在 Week 12 GA 后冻结，破坏性变更走 SemVer。冻结范围参见 [API 参考 - 接口冻结声明](../api/api-reference.md#接口冻结声明)。
 
 ---
@@ -999,9 +999,9 @@ PRD §9 #7 规定 Critical FP < 0.5%、Recall > 95% 是硬约束。Week 4 之前
   - Rust 项目骨架（`sieve-core` / `sieve-rules` / `sieve-cli` workspace）
   - `hyper` + `tokio` + `rustls` HTTP 反向代理跑通
   - 透明转发 Anthropic Messages API（`POST /v1/messages` 含 SSE，`POST /v1/messages/count_tokens`，`GET /v1/models`）
-  - `UnifiedMessage` 内部 schema（仅 Anthropic 实现，其他 provider 接口预留，[PRD §9 #9](../prd/sieve-prd-v1.3.md#9-工程上必须做对的硬约束)）
+  - `UnifiedMessage` 内部 schema（仅 Anthropic 实现，其他 provider 接口预留，[PRD §9 #9](../prd/_archive/sieve-prd-v1.3.md#9-工程上必须做对的硬约束)）
   - ~~GitHub repo 公开~~ — 已被 [ADR-011](../design/ADR-011-private-until-ga.md) 撤销，repo 保持私有至 Week 12 GA
-  - **🚨 sigstore 签名 pipeline + GitHub Actions reproducible build pipeline 必须 W1 跑通** —— [PRD §1.2 第 4 句](../prd/sieve-prd-v1.3.md#12-四句话核心叙事v13-加第-4-句) 自证清白叙事的物质基础
+  - **🚨 sigstore 签名 pipeline + GitHub Actions reproducible build pipeline 必须 W1 跑通** —— [PRD §1.2 第 4 句](../prd/_archive/sieve-prd-v1.3.md#12-四句话核心叙事v13-加第-4-句) 自证清白叙事的物质基础
 - **W2 出站 P0 规则（OUT-01 ~ OUT-12）**
   - OUT-01 OpenAI / Anthropic API key（前缀 + entropy + 占位符黑名单，FP < 0.1%）
   - OUT-02 AWS Access Key（`AKIA[0-9A-Z]{16}` + 排除官方示例，FP < 0.1%）
@@ -1011,7 +1011,7 @@ PRD §9 #7 规定 Critical FP < 0.5%、Recall > 95% 是硬约束。Week 4 之前
   - OUT-06 Ethereum 私钥（regex + entropy + 上下文，FP < 1%，**只能 High，不上 Critical**）
   - OUT-07 Bitcoin WIF（base58 + 双 SHA-256 校验位，FP < 0.001%）
   - OUT-08 Solana 私钥（base58 88 字符或 hex 64 字节，FP < 1%）
-  - **OUT-09 BIP39 助记词 + SHA-256 checksum 验证**（差异化点，FP < 0.05%；[PRD §9 #4](../prd/sieve-prd-v1.3.md#9-工程上必须做对的硬约束)）
+  - **OUT-09 BIP39 助记词 + SHA-256 checksum 验证**（差异化点，FP < 0.05%；[PRD §9 #4](../prd/_archive/sieve-prd-v1.3.md#9-工程上必须做对的硬约束)）
   - OUT-10 Keystore JSON（Web3 Secret Storage v3 schema，FP < 0.01%）
   - OUT-11 .env 文件特征（多行 KEY=VALUE 密度阈值，FP < 5%，仅 Medium）
   - OUT-12 数据库连接串（URI scheme + 用户名密码字段，FP < 0.5%）
@@ -1020,7 +1020,7 @@ PRD §9 #7 规定 Critical FP < 0.5%、Recall > 95% 是硬约束。Week 4 之前
 - **W3 入站 Crypto 钩子**
   - SSE Parser + `tool_use` Aggregator
   - **IN-CR-01 地址替换检测**（对话历史 `0x[a-fA-F0-9]{40}` 比对：相同放行 / 前 N 后 M 匹配标红 / Levenshtein ≤ 4 标黄）
-  - **IN-CR-05 签名工具 fail-closed**（`eth_sendTransaction` / `signTransaction` / `signMessage` / `signTypedData` 全部强制弹窗，YOLO mode 不可关闭，[PRD §9 #3](../prd/sieve-prd-v1.3.md#9-工程上必须做对的硬约束)）
+  - **IN-CR-05 签名工具 fail-closed**（`eth_sendTransaction` / `signTransaction` / `signMessage` / `signTypedData` 全部强制弹窗，YOLO mode 不可关闭，[PRD §9 #3](../prd/_archive/sieve-prd-v1.3.md#9-工程上必须做对的硬约束)）
   - **大量 SSE fuzz test** 覆盖 PRD §9 #5 列出的 6 类边界
 - **W4 入站通用 + 危险 tool call + benchmark 数据集**
   - IN-CR-02 危险工具调用（`bash` 含 `rm -rf` / `curl..|sh` / `eval(base64..)` / `sudo`）
@@ -1033,7 +1033,7 @@ PRD §9 #7 规定 Critical FP < 0.5%、Recall > 95% 是硬约束。Week 4 之前
   - IN-GEN-05 Prompt injection 反向（`<|im_start|>`、`[INST]`、`### System:`、`Ignore previous`）
   - 处置矩阵完整实现（Critical / High / Medium / Low → HTTP 行为映射，参见 [API 参考 §5](../api/api-reference.md#5-处置矩阵--http-行为)）
   - CLI 弹窗 + 命令行确认（fail-closed，超时按拒绝，参见 [API 参考 §6](../api/api-reference.md#6-cli-退出码--弹窗确认协议)）
-  - **Benchmark 数据集**（[PRD v1.3 §10.1 W4 修订](../prd/sieve-prd-v1.3.md#101-phase-adogfood-阶段week-1-8)）：
+  - **Benchmark 数据集**（[PRD v1.3 §10.1 W4 修订](../prd/_archive/sieve-prd-v1.3.md#101-phase-adogfood-阶段week-1-8)）：
     - 200-500 条合成攻击样本（UCSB 4 类攻击 + drainer 模式 + Pink Drainer 数字化绕过 + npm typosquat + `curl|sh` + eval base64）
     - 50-100 条真实 benign 会话回放（doskey 自己日常 Claude Code 工作录制）
     - canary 测试（假 BIP39、假地址、假 selector、假 .env，使用 honeypot 钱包私钥）
@@ -1041,17 +1041,17 @@ PRD §9 #7 规定 Critical FP < 0.5%、Recall > 95% 是硬约束。Week 4 之前
 - **W5 配置系统 + 14 天试用 + brew tap**
   - 完整 `config.toml` schema（参见 [API 参考 §3](../api/api-reference.md#3-配置文件-schema-sieveconfigtoml)）
   - 本地 SQLite append-only 审计日志（仅 fingerprint + 元信息，**不存原文**）
-  - License 验证 + 14 天试用机制（**本地 Ed25519 验证，不联网 verify**，[PRD §9 #2](../prd/sieve-prd-v1.3.md#9-工程上必须做对的硬约束)）
+  - License 验证 + 14 天试用机制（**本地 Ed25519 验证，不联网 verify**，[PRD §9 #2](../prd/_archive/sieve-prd-v1.3.md#9-工程上必须做对的硬约束)）
   - brew tap (`doskey/sieve`) + GitHub Releases 发布流水线
   - 本地管理 API（参见 [API 参考 §2](../api/api-reference.md#2-sieve-本地管理-api)）
 - **W6 doskey 自用 + 修 bug**
   - doskey 100% 时间用 Sieve 工作
-  - 性能 benchmark 验证 P99 < 20ms（[PRD §6.4](../prd/sieve-prd-v1.3.md#64-性能预算)）
+  - 性能 benchmark 验证 P99 < 20ms（[PRD §6.4](../prd/_archive/sieve-prd-v1.3.md#64-性能预算)）
   - macOS / Linux / Windows 二进制（macOS arm64 + Linux x86_64 为 Tier 1）
   - 收集 false positive，加 `.sieveignore` 默认条目
 - **W7-W8 高强度 dogfood**
   - 第一次签名规则库下发测试（Ed25519 验证 fail-closed）
-  - Stripe 接入 + license key 系统（**海外公司账号**，参见 [PRD §11.5.1](../prd/sieve-prd-v1.3.md#1151-公司主体与收款)）
+  - Stripe 接入 + license key 系统（**海外公司账号**，参见 [PRD §11.5.1](../prd/_archive/sieve-prd-v1.3.md#1151-公司主体与收款)）
   - 完成定义：doskey 用 Sieve 跑 2 周，无 P0 / P1 bug
 
 ### 计划中（Phase B 闭测, Week 9-12）
@@ -1059,7 +1059,7 @@ PRD §9 #7 规定 Critical FP < 0.5%、Recall > 95% 是硬约束。Week 4 之前
 #### 新增
 
 - **W9 闭测启动**
-  - 5 人闭测白名单（[PRD v1.3 §10.2 W9 修订](../prd/sieve-prd-v1.3.md#102-phase-b闭测阶段week-9-12)）：
+  - 5 人闭测白名单（[PRD v1.3 §10.2 W9 修订](../prd/_archive/sieve-prd-v1.3.md#102-phase-b闭测阶段week-9-12)）：
     - 高频 hackathon builder（ETHGlobal / Solana / 各 L2 hackathon 常客）
     - bug bounty hunter / 审计研究员（Code4rena / Sherlock / Immunefi 活跃用户）
     - 小团队 protocol engineer（< 10 人 protocol team）
@@ -1071,16 +1071,16 @@ PRD §9 #7 规定 Critical FP < 0.5%、Recall > 95% 是硬约束。Week 4 之前
   - 修闭测 bug
   - 起草 3 篇引爆文章：
     1. 中转站揭黑（实测复刻 UCSB 论文方法论）
-    2. **🆕 自证清白：Sieve 怎么证明自己不是新的 LiteLLM**（[PRD v1.3 §10.2 W10 修订](../prd/sieve-prd-v1.3.md#102-phase-b闭测阶段week-9-12)，把 §1.2 第 4 句讲透，后续所有营销围绕此 talking point）
+    2. **🆕 自证清白：Sieve 怎么证明自己不是新的 LiteLLM**（[PRD v1.3 §10.2 W10 修订](../prd/_archive/sieve-prd-v1.3.md#102-phase-b闭测阶段week-9-12)，把 §1.2 第 4 句讲透，后续所有营销围绕此 talking point）
     3. Pink Drainer 攻击复盘 + Sieve 怎么防
 - **W11 闭测扩大 + 数据合作接洽**
   - 闭测扩到 10 人（同样画像标准）
   - landing page（英文为主，中文次之）
-  - **数据合作优先于内容合作**（[PRD §13.2](../prd/sieve-prd-v1.3.md#132-数据侧合作清单v13-新增)）：
+  - **数据合作优先于内容合作**（[PRD §13.2](../prd/_archive/sieve-prd-v1.3.md#132-数据侧合作清单v13-新增)）：
     - 第一目标：Chaofan Shou (@Fried_rice) 顾问关系
     - 第二目标：慢雾 @evilcos misttrack-skills 数据合作
 - **W12 GA 发布（v0.1.0）**
-  - **代码开源（MIT）**（[PRD §11.3](../prd/sieve-prd-v1.3.md#113-开源策略)）
+  - **代码开源（MIT）**（[PRD §11.3](../prd/_archive/sieve-prd-v1.3.md#113-开源策略)）
   - 二进制 cosign 签名验证 + reproducible build 验证步骤公开（参见 [部署指南 §3](../guides/deployment.md#3-二进制签名验证必做)）
   - landing page 上线
   - 文章 1 + 2 同步发（中转站揭黑 + 自证清白）
@@ -1104,9 +1104,9 @@ PRD §9 #7 规定 Critical FP < 0.5%、Recall > 95% 是硬约束。Week 4 之前
 - Drainer 黑名单（Chainabuse + ScamSniffer 集成）
 - 协议白名单
 - Solidity 后门检测（Slither）
-- **MCP 拦截 IN-MCP-01~03**（[PRD v1.3 §5.2 修订](../prd/sieve-prd-v1.3.md#52-入站检测sieve-真正的护城河)，Phase 2 Week 16-20）
+- **MCP 拦截 IN-MCP-01~03**（[PRD v1.3 §5.2 修订](../prd/_archive/sieve-prd-v1.3.md#52-入站检测sieve-真正的护城河)，Phase 2 Week 16-20）
 - 桌面 App / VS Code 插件
-- OpenAI / Gemini / OpenRouter 协议适配（**第二个用户主动要才做**，[PRD §9 #9](../prd/sieve-prd-v1.3.md#9-工程上必须做对的硬约束)）
+- OpenAI / Gemini / OpenRouter 协议适配（**第二个用户主动要才做**，[PRD §9 #9](../prd/_archive/sieve-prd-v1.3.md#9-工程上必须做对的硬约束)）
 
 ---
 
@@ -1114,13 +1114,13 @@ PRD §9 #7 规定 Critical FP < 0.5%、Recall > 95% 是硬约束。Week 4 之前
 
 > Sieve 项目尚未发布二进制版本，但产品需求文档已迭代 4 版。每版日期 + 一句话差异：
 
-### [PRD v1.0](../prd/sieve-prd-v1.0.md) - 2026-04-26
+### [PRD v1.0](../prd/_archive/sieve-prd-v1.0.md) - 2026-04-26
 
 - 工程启动前 PRD，团队 SaaS 视角，覆盖完整商业计划
 - 一句话：双向检测的本地 LLM 流量代理，服务 crypto 开发者，反对中转站不可信
 - 状态：**已废弃**，被 v1.1 收敛
 
-### [PRD v1.1](../prd/sieve-prd-v1.1.md) - 2026-04-26
+### [PRD v1.1](../prd/_archive/sieve-prd-v1.1.md) - 2026-04-26
 
 - 个人项目版：从 v1.0 砍掉一半范围，定位从"独角兽备选"改为"个人产品 + 现金流 + IP 入口"
 - 关键改动：
@@ -1132,7 +1132,7 @@ PRD §9 #7 规定 Critical FP < 0.5%、Recall > 95% 是硬约束。Week 4 之前
   - 节奏：6-8 周冲 MVP + 慢节奏维护
 - 状态：**已废弃**，被 v1.2 第一性原理重写覆盖
 
-### [PRD v1.2](../prd/sieve-prd-v1.2.md) - 2026-04-26
+### [PRD v1.2](../prd/_archive/sieve-prd-v1.2.md) - 2026-04-26
 
 - 第一性原理修订版：用 12 条公理重新推导每个决策
 - 关键改动：
@@ -1143,7 +1143,7 @@ PRD §9 #7 规定 Critical FP < 0.5%、Recall > 95% 是硬约束。Week 4 之前
   - "Sieve 的本质不是 LLM 安全产品，是在不可逆动作前插入认知摩擦的保险工具"
 - 状态：**被 v1.3 取代**
 
-### [PRD v1.3](../prd/sieve-prd-v1.3.md) - 2026-04-26（**当前活动版本**）
+### [PRD v1.3](../prd/_archive/sieve-prd-v1.3.md) - 2026-04-26（**当前活动版本**）
 
 第一性原理 + 合规边界修订版，**锁定执行**。在 v1.2 基础上吸收 GPT-5.5 review 的 8 条改动：
 
@@ -1184,7 +1184,7 @@ PRD §9 #7 规定 Critical FP < 0.5%、Recall > 95% 是硬约束。Week 4 之前
   - `docs/guides/development.md` —— 开发指南首版（构建、测试、SSE fuzz、benchmark、规则编写、PR 流程）
   - `docs/guides/deployment.md` —— 部署与运维指南首版（安装、签名验证、服务运行、升级回滚、FAQ）
   - `docs/changelog/CHANGELOG.md` —— 本文件
-- 所有文档反映 [PRD v1.3](../prd/sieve-prd-v1.3.md) 设计意图，**未实现任何代码**
+- 所有文档反映 [PRD v1.3](../prd/_archive/sieve-prd-v1.3.md) 设计意图，**未实现任何代码**
 
 #### 文档审查与一致性修复（2026-04-27）
 
@@ -1221,9 +1221,9 @@ PRD §9 #7 规定 Critical FP < 0.5%、Recall > 95% 是硬约束。Week 4 之前
 - **新增** `.gitattributes` —— 强制 LF 行尾（reproducible build 跨平台一致性）+ GitHub linguist 语言识别（docs / prd / research 标记 vendored / documentation）+ 二进制文件标记
 - **新增** `SECURITY.md` —— 安全漏洞报告流程（email doskey.lee@gmail.com 临时渠道，security@sieve.tools 待 Week 6-8 商标定后启用）+ 24h/7d/30d 响应 SLA + 自身供应链承诺 + 不在范围清单
 - **新增** `LICENSE` —— 双轨许可说明：文档 **CC BY-NC-SA 4.0** / 代码 **MIT**（均在 Week 12 GA 时同步公开；[ADR-011](../design/ADR-011-private-until-ga.md)）
-- **新增** `.github/ISSUE_TEMPLATE/` —— bug_report / feature_request / **suspicious_sample**（[PRD §8.1](../prd/sieve-prd-v1.3.md#81-简化版) 用户公开提交可疑样本走这里）+ config.yml（指引安全漏洞走 SECURITY.md，紧急资产损失走 email）
+- **新增** `.github/ISSUE_TEMPLATE/` —— bug_report / feature_request / **suspicious_sample**（[PRD §8.1](../prd/_archive/sieve-prd-v1.3.md#81-简化版) 用户公开提交可疑样本走这里）+ config.yml（指引安全漏洞走 SECURITY.md，紧急资产损失走 email）
 - **新增** `.github/PULL_REQUEST_TEMPLATE.md` —— 对齐 [.cursorrules §五](../../.cursorrules) 自检清单 + PRD §9 硬约束验证 + 检测项变更模板 + Breaking Changes 流程
-- **新增** `.github/dependabot.yml` —— Cargo 周更（仅 patch / minor，major 走人工评估，对齐 [PRD §9 #6](../prd/sieve-prd-v1.3.md#9-工程上必须做对的硬约束) pinned dependencies）+ GitHub Actions 周更 + 关键依赖分组（tokio-stack / simd-stack / crypto-stack）
+- **新增** `.github/dependabot.yml` —— Cargo 周更（仅 patch / minor，major 走人工评估，对齐 [PRD §9 #6](../prd/_archive/sieve-prd-v1.3.md#9-工程上必须做对的硬约束) pinned dependencies）+ GitHub Actions 周更 + 关键依赖分组（tokio-stack / simd-stack / crypto-stack）
 
 仓库尚未 `git init`。doskey 完成审阅后可执行：
 ```bash
@@ -1241,7 +1241,7 @@ git push -u origin main
 ## 相关文档
 
 - 项目入口：[../../README.md](../../README.md)
-- 当前活动 PRD：[../prd/sieve-prd-v1.3.md](../prd/sieve-prd-v1.3.md)
+- 当前活动 PRD：[../prd/_archive/sieve-prd-v1.3.md](../prd/_archive/sieve-prd-v1.3.md)
 - API 参考：[../api/api-reference.md](../api/api-reference.md)
 - 开发指南：[../guides/development.md](../guides/development.md)
 - 部署指南：[../guides/deployment.md](../guides/deployment.md)

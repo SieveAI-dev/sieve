@@ -6,7 +6,7 @@
 
 > 决策日期：2026-04-28
 > 范围：Phase 1（12 周 GA）macOS GUI 架构；Windows/Linux GUI 推 Phase 2
-> 关联 PRD：[v1.4 §6.4、§6.6、§10.1 Week 5](../prd/sieve-prd-v1.5.md)
+> 关联 PRD：[v1.4 §6.4、§6.6、§10.1 Week 5](../prd/_archive/sieve-prd-v1.5.md)
 
 ---
 
@@ -109,8 +109,8 @@ Windows / Linux GUI 推 Phase 2，触发条件与 ADR-004 §3 第二适配器相
 
 ## 相关文档
 
-- [PRD-sieve v1.4 §6.4、§6.6](../prd/sieve-prd-v1.5.md) —— Native GUI App 架构决策
-- [PRD-sieve v1.4 §10.1 Week 5](../prd/sieve-prd-v1.5.md) —— GUI App 里程碑
+- [PRD-sieve v1.4 §6.4、§6.6](../prd/_archive/sieve-prd-v1.5.md) —— Native GUI App 架构决策
+- [PRD-sieve v1.4 §10.1 Week 5](../prd/_archive/sieve-prd-v1.5.md) —— GUI App 里程碑
 - [ADR-013](./ADR-013-ipc-protocol.md) —— IPC 协议（JSON-RPC Unix socket + 文件锁）
 - [ADR-014](./ADR-014-dual-layer-defense.md) —— 双层防御（GUI 类规则 hold 流 + GUI 弹窗）
 - [ADR-015](./ADR-015-sieve-setup-tool.md) —— sieve setup 自动配置（含 .dmg 安装链路）

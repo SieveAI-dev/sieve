@@ -6,7 +6,7 @@
 
 > 决策日期：2026-04-26
 > 范围：Sieve 全产品周期，所有版本；将写入 ToS
-> 关联 PRD：[v1.3 §5.3、§9.3、§9.8、§11.2](../prd/sieve-prd-v1.3.md)
+> 关联 PRD：[v1.3 §5.3、§9.3、§9.8、§11.2](../prd/_archive/sieve-prd-v1.3.md)
 
 ---
 
@@ -181,9 +181,9 @@ PRD §11.2 ToS 必须包含：
 
 ### 需要更新的文档
 
-- [PRD-sieve v1.3 §5.3](../prd/sieve-prd-v1.3.md) —— 处置矩阵（Critical "不可关闭"已写明）
-- [PRD-sieve v1.3 §9.3、§9.8](../prd/sieve-prd-v1.3.md) —— 工程硬约束第 3、8 条
-- [PRD-sieve v1.3 §11.2](../prd/sieve-prd-v1.3.md) —— ToS 必须加入本 ADR §4 的条款
+- [PRD-sieve v1.3 §5.3](../prd/_archive/sieve-prd-v1.3.md) —— 处置矩阵（Critical "不可关闭"已写明）
+- [PRD-sieve v1.3 §9.3、§9.8](../prd/_archive/sieve-prd-v1.3.md) —— 工程硬约束第 3、8 条
+- [PRD-sieve v1.3 §11.2](../prd/_archive/sieve-prd-v1.3.md) —— ToS 必须加入本 ADR §4 的条款
 - [data-model.md §3](./data-model.md) —— 处置矩阵编码已对齐
 - [data-model.md §5.1](./data-model.md) —— `severity_overrides` 字段说明已对齐"Critical 覆盖被忽略"
 - [data-model.md §4.4](./data-model.md) —— `.sieveignore` 加载行为已对齐"fail-closed 规则不能 ignore"
@@ -193,11 +193,11 @@ PRD §11.2 ToS 必须包含：
 
 ## 相关文档
 
-- [PRD-sieve v1.3 §5.3](../prd/sieve-prd-v1.3.md) —— 处置矩阵
-- [PRD-sieve v1.3 §9.3](../prd/sieve-prd-v1.3.md) —— 工程硬约束第 3 条（fail-closed High-Risk Tool Policy Gate）
-- [PRD-sieve v1.3 §9.8](../prd/sieve-prd-v1.3.md) —— 工程硬约束第 8 条（Critical 不可关）
-- [PRD-sieve v1.3 §11.2](../prd/sieve-prd-v1.3.md) —— ToS 条款
-- [PRD-sieve v1.3 §15.1](../prd/sieve-prd-v1.3.md) —— UCSB 论文 4 类攻击参考
+- [PRD-sieve v1.3 §5.3](../prd/_archive/sieve-prd-v1.3.md) —— 处置矩阵
+- [PRD-sieve v1.3 §9.3](../prd/_archive/sieve-prd-v1.3.md) —— 工程硬约束第 3 条（fail-closed High-Risk Tool Policy Gate）
+- [PRD-sieve v1.3 §9.8](../prd/_archive/sieve-prd-v1.3.md) —— 工程硬约束第 8 条（Critical 不可关）
+- [PRD-sieve v1.3 §11.2](../prd/_archive/sieve-prd-v1.3.md) —— ToS 条款
+- [PRD-sieve v1.3 §15.1](../prd/_archive/sieve-prd-v1.3.md) —— UCSB 论文 4 类攻击参考
 - [architecture.md](./architecture.md) —— Inbound Filter Pipeline 模块职责
 - [data-model.md](./data-model.md) —— 处置矩阵编码、配置、`.sieveignore` 行为
 - [ADR-002](./ADR-002-rule-engine-only-phase1.md) —— 规则引擎可解释性是 fail-closed 的前置条件

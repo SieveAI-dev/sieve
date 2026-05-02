@@ -1,7 +1,7 @@
 # Sieve 12 周里程碑 Roadmap
 
-> Source of truth: [PRD v1.5 §10](../docs/prd/sieve-prd-v1.5.md#10-12-周里程碑8-周-dogfood--4-周闭测)（Week 6-8 已按 v1.5 multi-agent 扩展重写）
-> 状态：**v2.0 + v2.1 代码 100% 落地（2026-05-01），进入 dogfood 准备阶段**。Phase A 全部代码任务完成，剩余 5 项非代码工作（见 tasks/status-2026-05-01.md）。
+> Source of truth: [PRD v2.0 §10](../docs/prd/sieve-prd-v2.0.md#10-12-周里程碑8-周-dogfood--4-周闭测)（v2.0 已锁定执行；本文中 v1.x 引用为历史快照，路径在 [`docs/prd/_archive/`](../docs/prd/_archive/)）
+> 状态：**v2.0 + v2.1 代码 100% 落地（2026-05-01），进入 dogfood 准备阶段**。Phase A 全部代码任务完成，剩余非代码工作详见 [`tasks/PROGRESS.md`](./PROGRESS.md)。
 >
 > 本文是 PRD §10 的执行视图，**任务粒度 / 验收标准** 跟随 PRD 同步更新；本文新增"依赖"列与"风险"列辅助调度。
 
@@ -89,7 +89,7 @@
 
 - [x] IN-CR-03 敏感路径访问（10 条规则：SSH / AWS / GCP / Solana / Ethereum keystore / GPG / netrc / macOS Keychain / dotenv，含 allowlist；high warn 级别。Week 5 接 5s 倒计时弹窗）
 - [x] IN-CR-04 持久化机制（9 条规则：shell rc / crontab / launchctl + LaunchAgents plist / systemctl + systemd unit / fish config / macOS Login Items；Critical block + fail-closed，全部进 `FAIL_CLOSED_RULES`，YOLO mode 不可关。附带 [BREAKING] 重命名旧 IN-CR-04 markdown exfil → IN-GEN-04）
-- [x] sieve-rules manifest 字段扩展：`disposition` / `timeout_seconds` / `default_on_timeout`（处置矩阵二维字段已落地，详见 [ADR-012](../docs/design/ADR-012-disposition-matrix.md)）
+- [x] sieve-rules manifest 字段扩展：`disposition` / `timeout_seconds` / `default_on_timeout`（处置矩阵二维字段已落地，详见 [ADR-016](../docs/design/ADR-016-disposition-matrix-2d.md)）
 - [x] sieve-ipc crate 骨架（IPC server Unix socket + GUI 通知协议，本周末完成）
 - [x] sieve-hook crate 骨架（Claude Code PreToolUse hook 二进制，本周末完成）
 - [ ] **【P0 必须 Week 4 关闭】非流式 JSON 响应里的 tool_use 入站检测**：当前 daemon 仅扫 `text/event-stream` SSE 流，非流式 `application/json` 响应里的 tool_use 整体绕过所有入站规则（IN-CR-02/03/04/05 / IN-GEN-* 全失效）。dogfood 实测发现，详见 [lessons.md](./lessons.md)。修复：daemon 按 response content-type 路由，JSON 路径解析 `AnthropicResponse.content[]` → 提取 tool_use → 走 `InboundFilter::on_tool_use_complete`，命中 fail-closed Critical 时把 body 替换为 `sieve_blocked` 等价 JSON。集成测试加非流式响应路径覆盖。
@@ -123,9 +123,9 @@
 - [x] **sieve-core pipeline 重构**：
   - `outbound_redact`：命中出站规则时改写 body bytes（替换 secret 为 `[REDACTED]`），而非仅返 426
   - `inbound_hook`：Hook 类规则（IN-CR-02/03/04/05）不修改 SSE 流，通过 IPC 通知 GUI
-  - `inbound_hold`：25s keep-alive comment 注入 + IPC 通知 GUI 等待审批（详见 [SPEC-002](../docs/specs/SPEC-002-inbound-hold.md)）
+  - `inbound_hold`：25s keep-alive comment 注入 + IPC 通知 GUI 等待审批（详见 [SPEC-002](../docs/specs/SPEC-002-hips-popup-behavior.md)）
 - [x] **sieve-cli 新子命令**：
-  - `sieve setup`：改写 Claude Code `settings.json` 注册 `PreToolUse` hook + 写 `ANTHROPIC_BASE_URL` + 写 launchd plist（详见 [SPEC-003](../docs/specs/SPEC-003-setup-doctor-uninstall.md)）
+  - `sieve setup`：改写 Claude Code `settings.json` 注册 `PreToolUse` hook + 写 `ANTHROPIC_BASE_URL` + 写 launchd plist（详见 [SPEC-003](../docs/specs/SPEC-003-sieve-setup-tool.md)）
   - `sieve doctor`：canary 拦截测试，验证 hook + daemon + IPC 全链路就位
   - `sieve uninstall`：按 `setup.log` 逐步回滚，dry-run / 确认 / 执行三阶段
   - `audit.rs`：接入 SQLite append-only 审计，schema 见 [data-model.md](../docs/design/data-model.md)
@@ -135,7 +135,7 @@
 - [ ] **三件套 .dmg 打包**：GUI App + 后台代理 + sieve-hook 合并成单 .dmg ← 阻塞 R10-#3 绝对路径 + GUI 独立仓库
 - **GUI App（独立仓库 `sieve-gui-macos`，由 doskey 平行开发）**：
   - 状态栏常驻图标 + 审批弹窗
-  - IPC 通道连接 sieve-ipc（[SPEC-001](../docs/specs/SPEC-001-ipc-protocol.md)）
+  - IPC 通道连接 sieve-ipc（[SPEC-001](../docs/specs/SPEC-001-sieve-hook-protocol.md) + [SPEC-005](../docs/specs/SPEC-005-ipc-protocol.md)）
   - 倒计时视觉（25s hold 剩余时间）
   - approve / reject / snooze 三个动作
 
@@ -455,10 +455,11 @@ Week 13+ 慢节奏维护 + Phase 2
 
 ## 相关文档
 
-- [PRD v1.4 §10](../docs/prd/sieve-prd-v1.5.md#10-12-周里程碑8-周-dogfood--4-周闭测)
-- [PRD v1.4 完整版](../docs/prd/sieve-prd-v1.5.md)
+- [PRD v2.0 §10](../docs/prd/sieve-prd-v2.0.md#10-12-周里程碑8-周-dogfood--4-周闭测)
+- [PRD v2.0 完整版](../docs/prd/sieve-prd-v2.0.md)
+- [PRD 历史版本（v1.0~v1.5）](../docs/prd/_archive/)
 - [Lessons](./lessons.md)
 - [README](../README.md)
-- [ADR 索引](../docs/design/ADR-INDEX.md)（待创建）
+- [ADR 索引](../docs/design/ADR-INDEX.md)
 - [.cursorrules](../.cursorrules)
 
