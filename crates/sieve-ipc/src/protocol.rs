@@ -358,7 +358,7 @@ pub struct SetPausedResult {
     pub paused: bool,
     /// 暂停截止时间（UTC）；`paused=false` 时为 None。
     #[serde(default)]
-    pub until: Option<DateTime<Utc>>,
+    pub paused_until: Option<DateTime<Utc>>,
     /// 受暂停影响的 disposition 集合（Critical 锁规则的 disposition 永不出现在此列表）。
     pub applies_to: Vec<String>,
 }
@@ -659,7 +659,7 @@ pub struct PausedChangedNotify {
     pub paused: bool,
     /// 暂停截止时间（UTC）；未暂停时为 None。
     #[serde(default)]
-    pub until: Option<DateTime<Utc>>,
+    pub paused_until: Option<DateTime<Utc>>,
     /// `"user_request"` | `"auto_resumed"` | `"daemon_restart"`。
     pub reason: String,
     pub applies_to: Vec<String>,
