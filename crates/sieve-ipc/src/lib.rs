@@ -351,13 +351,13 @@ mod tests {
     #[test]
     fn jsonrpc_call_includes_id() {
         let req = jsonrpc::Request::call(
-            "request_decision",
+            "sieve.request_decision",
             serde_json::json!({}),
             serde_json::Value::String("abc".to_owned()),
         );
         let json = serde_json::to_string(&req).unwrap();
         assert!(json.contains("\"id\""));
-        assert!(json.contains("\"request_decision\""));
+        assert!(json.contains("\"sieve.request_decision\""));
     }
 }
 

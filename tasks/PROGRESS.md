@@ -12,6 +12,8 @@
 
 ## ✅ 已完成（按时间倒序）
 
+- **2026-05-03** 第 3 组错误码段位 daemon 端复核：已对齐 SPEC-005 §12.4（daemon→GUI -32000~99 / GUI→daemon -32100~99 段位区分清晰；-32100~102 接收侧处理属 P1 新功能，非本次范围）
+- **2026-05-03** P0-4 `request_decision` 方法名补 `sieve.` 前缀（socket_server.rs:546 + lib.rs:354 测试同步）
 - **2026-05-03** P1-6 协议版本号 v1 → v2（生产代码 2 处 + 测试夹具 2 处，测试全绿）
 - **2026-05-02** SPEC-005 v2 协议 r5 冻结 review 通过（`docs/review/2026-05-02-codex-spec-005-review-r5.md`），可进入代码改造
 - **2026-05-02** SPEC-005 v2 vs 代码 gap 分析完成（_gap-spec005-vs-code.md，已并入下方"下一步"清单后将删除）
@@ -39,7 +41,7 @@ _无。等用户选定下一步执行哪一组 P0 后填入。建议每次最多
   - 在 `handle_connection` 起始处作为第一条出站消息发送
 - [ ] **[P0-3]** 实现 `sieve.heartbeat` 25 秒心跳（§4）
   - `handle_connection` 写方向加 `tokio::time::interval(25s)`，任何出站帧重置定时器
-- [ ] **[P0-4]** `request_decision` 方法名补 `sieve.` 前缀（§11）
+- [x] **[P0-4]** `request_decision` 方法名补 `sieve.` 前缀（§11）（2026-05-03 完成）
   - `socket_server.rs:546` 改 `"sieve.request_decision"`，与 GUI P0 同步
 - [ ] **[P0-5]** Socket 文件权限设 `0600`（§1.1）
   - `IpcServer::bind` 后 `set_permissions(0o600)`；`ensure_dirs` 把 sieve_home 设 `0700`

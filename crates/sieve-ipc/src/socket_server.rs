@@ -543,7 +543,7 @@ impl IpcServer {
         // 3. 通过 mpsc 通道把请求推到 handle_connection 的写循环，
         //    再由写循环写入真正的 GUI socket 连接。
         let rpc_req = crate::protocol::jsonrpc::Request::call(
-            "request_decision",
+            "sieve.request_decision",
             serde_json::to_value(&req)?,
             serde_json::Value::String(request_id.to_string()),
         );
