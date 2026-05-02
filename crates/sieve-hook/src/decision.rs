@@ -57,6 +57,7 @@ pub fn write_decision(
         by_user: true,
         // Critical 规则 remember 强制 false（SPEC-001 §4.4）。
         remember: false,
+        ui_phase_when_clicked: None,
     };
 
     let json = serde_json::to_string_pretty(&resp).map_err(|e| e.to_string())?;

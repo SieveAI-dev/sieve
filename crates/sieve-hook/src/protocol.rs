@@ -35,6 +35,15 @@ pub struct DecisionRequest {
     pub detections: Vec<DetectionPayload>,
 }
 
+/// GUI 弹窗倒计时阶段（与 sieve-ipc UiPhase 字段对齐，SPEC-005 §5.10）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UiPhase {
+    Blue,
+    Orange,
+    Red,
+}
+
 /// 写入 decisions/<id>.json 的结构。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DecisionResponse {
@@ -43,4 +52,7 @@ pub struct DecisionResponse {
     pub decided_at: DateTime<Utc>,
     pub by_user: bool,
     pub remember: bool,
+    /// GUI 弹窗倒计时阶段，超时自动决策时为 `null`（SPEC-005 §5.10）。
+    #[serde(default)]
+    pub ui_phase_when_clicked: Option<UiPhase>,
 }

@@ -251,6 +251,27 @@ impl DecisionRequest {
     }
 }
 
+/// GUI 弹窗倒计时阶段（SPEC-005 §5.10）。
+///
+/// 记录用户点击决策按钮时弹窗所处的视觉紧迫阶段，便于后续审计分析
+/// "用户是在蓝色冷静期还是红色最后期限点的允许"。
+///
+/// - `blue`：倒计时充裕（> 2/3 剩余），低紧迫感；
+/// - `orange`：倒计时过半但未进入最后阶段；
+/// - `red`：倒计时最后阶段（< 1/3 剩余），高紧迫感。
+///
+/// 当弹窗 disposition ≠ `gui_popup` 时（如自动超时决策）此字段为 `null`。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UiPhase {
+    /// 倒计时充裕阶段，低紧迫感。
+    Blue,
+    /// 倒计时过半阶段，中等紧迫感。
+    Orange,
+    /// 倒计时最后阶段，高紧迫感。
+    Red,
+}
+
 /// 用户或超时产生的决策动作。
 ///
 /// 关联：SPEC-001 §3.3、ADR-014 §决策流程。
@@ -303,6 +324,16 @@ pub struct DecisionResponse {
     /// 关联：PRD v2.0 §5.4.2 灰名单 schema 中 context_hint 字段。
     #[serde(default)]
     pub context_hint: Option<String>,
+
+    // v2.1 新增字段
+    /// 用户点击决策按钮时弹窗所处的倒计时阶段（SPEC-005 §5.10）。
+    ///
+    /// - `"blue"` / `"orange"` / `"red"`：三个紧迫度阶段；
+    /// - `null`：disposition ≠ gui_popup 时（如超时自动决策）不适用。
+    ///
+    /// 旧 GUI 客户端不发此字段时，serde 默认为 `None`（向后兼容）。
+    #[serde(default)]
+    pub ui_phase_when_clicked: Option<UiPhase>,
 }
 
 // ── v2.1 GUI 控制面方法（ADR-013 Supplement 2026-05-02）──────────────────────

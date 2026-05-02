@@ -495,6 +495,7 @@ async fn mock_gui_respond_with_ready(
             by_user: true,
             remember: false,
             context_hint: None,
+            ui_phase_when_clicked: None,
         };
         let rpc_resp = sieve_ipc::protocol::jsonrpc::Response {
             jsonrpc: "2.0".to_owned(),
