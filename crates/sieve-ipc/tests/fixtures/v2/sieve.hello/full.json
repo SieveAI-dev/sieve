@@ -1,0 +1,13 @@
+{
+  "jsonrpc": "2.0",
+  "method": "sieve.hello",
+  "params": {
+    "protocol_version": "v2",
+    "daemon_version": "0.1.0",
+    "paused": false,
+    "preset": "default",
+    "uptime_seconds": 42,
+    "audit_db_user_version": 2,
+    "daemon_boot_id": "01900000-0000-7000-0000-000000000001"
+  }
+}

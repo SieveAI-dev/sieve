@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "paused": true,
+    "paused_until": "2026-05-03T13:00:00.000Z",
+    "applies_to": ["AutoRedact", "StatusBar", "Ask:non_critical"]
+  },
+  "id": "req-001"
+}

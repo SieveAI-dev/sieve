@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "paused": false,
+    "paused_until": null,
+    "applies_to": ["AutoRedact", "StatusBar", "Ask:non_critical"]
+  },
+  "id": "req-001"
+}
