@@ -5,6 +5,7 @@
 
 pub mod decision_file;
 pub mod error;
+pub mod frame_reader;
 pub mod origin_header;
 pub mod paths;
 pub mod pending_file;

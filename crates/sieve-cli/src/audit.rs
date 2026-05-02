@@ -222,6 +222,17 @@ pub enum AuditEvent {
         #[serde(default)]
         caller: CallerContext,
     },
+    /// IPC socket 收到超大帧，关闭连接（SPEC-005 §1.1 / §1.3.1）。
+    ///
+    /// **禁止**记录任何 raw payload；只记录 `peer / size_bytes / closed_at_ms`。
+    IpcOversizeFrame {
+        /// 对端标识（如 socket 路径或 peer addr；无法获取时为 `"unknown"`）。
+        peer: String,
+        /// 超限帧的字节数（完整帧含 `\n`，或 partial remainder 的字节数）。
+        size_bytes: u64,
+        /// 关闭连接的时间（unix 毫秒）。
+        closed_at_ms: i64,
+    },
 }
 
 impl AuditEvent {
@@ -246,7 +257,8 @@ impl AuditEvent {
             | Self::PresetOverrideRejected { .. }
             | Self::PausedSet { .. }
             | Self::ConfigReloaded { .. }
-            | Self::GraylistRemoved { .. } => "system",
+            | Self::GraylistRemoved { .. }
+            | Self::IpcOversizeFrame { .. } => "system",
         }
     }
 
@@ -272,6 +284,7 @@ impl AuditEvent {
             Self::PresetChanged { .. } => "system.preset_changed",
             Self::PausedSet { .. } => "system.paused_set",
             Self::ConfigReloaded { .. } => "system.config_reloaded",
+            Self::IpcOversizeFrame { .. } => "system.ipc_oversize_frame",
         }
     }
 
@@ -295,7 +308,8 @@ impl AuditEvent {
             | Self::PausedSet { .. }
             | Self::ConfigReloaded { .. }
             | Self::GraylistRemoved { .. }
-            | Self::AutoDecidedPaused { .. } => "info",
+            | Self::AutoDecidedPaused { .. }
+            | Self::IpcOversizeFrame { .. } => "info",
             Self::CriticalLockBlocked { .. } => "critical",
         }
     }
@@ -322,6 +336,7 @@ impl AuditEvent {
             Self::ConfigReloaded { .. } => "config_reloaded",
             Self::GraylistRemoved { .. } => "graylist_removed",
             Self::AutoDecidedPaused { .. } => "auto_decided_paused",
+            Self::IpcOversizeFrame { .. } => "ipc_oversize_frame",
         }
     }
 
@@ -355,7 +370,8 @@ impl AuditEvent {
             | Self::PresetOverrideRejected { .. }
             | Self::PausedSet { .. }
             | Self::ConfigReloaded { .. }
-            | Self::GraylistRemoved { .. } => "",
+            | Self::GraylistRemoved { .. }
+            | Self::IpcOversizeFrame { .. } => "",
         }
     }
 
@@ -392,7 +408,8 @@ impl AuditEvent {
             | Self::PresetOverrideRejected { .. }
             | Self::PausedSet { .. }
             | Self::ConfigReloaded { .. }
-            | Self::GraylistRemoved { .. } => None,
+            | Self::GraylistRemoved { .. }
+            | Self::IpcOversizeFrame { .. } => None,
         }
     }
 
@@ -418,7 +435,8 @@ impl AuditEvent {
             | Self::PresetOverrideRejected { .. }
             | Self::PausedSet { .. }
             | Self::ConfigReloaded { .. }
-            | Self::GraylistRemoved { .. } => None,
+            | Self::GraylistRemoved { .. }
+            | Self::IpcOversizeFrame { .. } => None,
         }
     }
 }

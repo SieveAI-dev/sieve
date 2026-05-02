@@ -1,11 +1,12 @@
 use std::path::Path;
 
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
 use uuid::Uuid;
 
 use crate::{
     error::IpcError,
+    frame_reader::FrameReader,
     protocol::{jsonrpc, DecisionResponse, ReloadUserRules},
 };
 
@@ -45,14 +46,16 @@ impl IpcClient {
     /// 从 socket 读取一条换行分隔的 JSON-RPC request（服务端推来的决策请求）。
     ///
     /// 主要用于 mock GUI 侧读取请求并回复。
+    /// 实现使用 FrameReader（SPEC-005 §1.3.1）代替无界 BufReader::lines()。
     pub async fn recv_request(&self) -> Result<serde_json::Value, IpcError> {
         let stream = UnixStream::connect(&self.socket_path).await?;
-        let reader = BufReader::new(stream);
-        let mut lines = reader.lines();
-        let line = lines.next_line().await?.ok_or_else(|| {
+        let mut reader = FrameReader::new(stream);
+        let raw = reader.read_frame().await?.ok_or_else(|| {
             IpcError::UnexpectedResponse("connection closed without data".to_owned())
         })?;
-        let val: serde_json::Value = serde_json::from_str(&line)?;
+        let line = std::str::from_utf8(&raw)
+            .map_err(|_| IpcError::UnexpectedResponse("non-UTF8 frame".to_owned()))?;
+        let val: serde_json::Value = serde_json::from_str(line)?;
         Ok(val)
     }
 
@@ -66,12 +69,15 @@ impl IpcClient {
         // 短暂重试以等待服务端就绪。
         let stream = retry_connect(&path, 5, std::time::Duration::from_millis(20)).await?;
         let (reader_half, mut writer_half) = stream.into_split();
-        let mut lines = BufReader::new(reader_half).lines();
+        let mut frame_reader = FrameReader::new(reader_half);
 
-        // 读一条请求（忽略内容，只要 request_id 匹配就回）。
-        while let Some(line) = lines.next_line().await? {
-            if line.trim().is_empty() {
-                continue;
+        // 读帧直到收到第一条非空帧（忽略内容，只要 request_id 匹配就回）。
+        while let Some(raw) = frame_reader.read_frame().await? {
+            // 跳过空帧和非 UTF-8 帧；收到任意有效帧即回复决策。
+            match std::str::from_utf8(&raw) {
+                Ok(s) if s.trim().is_empty() => continue,
+                Ok(_) => {}
+                Err(_) => continue,
             }
             let resp = DecisionResponse {
                 request_id,
