@@ -23,8 +23,8 @@
 
 - [ ] `cargo fmt --check` 通过
 - [ ] `cargo clippy --all-targets --all-features -- -D warnings` 通过
-- [ ] 涉及 SSE / 规则 / 工具调用判定的改动有对应 fuzz / 单元测试（[PRD §9 #5](../docs/prd/sieve-prd-v1.3.md#9-工程上必须做对的硬约束)）
-- [ ] **PRD §9 十条硬约束未被绕过**（任一处放宽必须显式说明并 doskey 批准）
+- [ ] 涉及 SSE / 规则 / 工具调用判定的改动有对应 fuzz / 单元测试（[PRD §9 #5](../docs/requirements/PRD-sieve.md)）
+- [ ] **PRD §9 十六条硬约束未被绕过**（任一处放宽必须显式说明并 doskey 批准）
 - [ ] CHANGELOG 已更新（依赖升级 / 行为变更 / 检测项 ID 变化必记）
 - [ ] 关联文档（requirements / design / api / guides）已同步
 - [ ] 临时文档（`_temp-` / `_draft-`）已清理或归档
@@ -48,14 +48,14 @@
 - 二进制大小变化:
 - 启动时间变化:
 
-> 性能预算见 [PRD §6.4](../docs/prd/sieve-prd-v1.3.md#64-性能预算)：P99 < 20ms / 内存 < 100 MB / 二进制 < 20 MB / 启动 < 500 ms。
+> 性能预算见 [PRD §6.4](../docs/requirements/PRD-sieve.md)：P99 < 20ms / 内存 < 100 MB / 二进制 < 20 MB / 启动 < 500 ms。
 
 ## Breaking Changes
 
 如果是 breaking change（影响接口 / 配置 schema / 检测项行为）：
 
 - [ ] CHANGELOG 已加 `[BREAKING]` 前缀
-- [ ] **如涉及 PRD §9 十条硬约束变化，已经 doskey 显式确认**（默认拒绝）
+- [ ] **如涉及 PRD §9 十六条硬约束变化，已经 doskey 显式确认**（默认拒绝）
 - [ ] 用户迁移路径已写明
 - [ ] PRD-sieve.md 版本演进表 + 对应 ADR 已同步
 

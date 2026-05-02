@@ -724,7 +724,7 @@ mod socket_tests {
                         }
                     }
                 }
-                s.unwrap_or_else(|| panic!("connect failed: {:?}", last_err))
+                s.unwrap_or_else(|| panic!("connect failed: {last_err:?}"))
             };
             let (read_half, mut write_half) = stream.into_split();
             let mut lines = BufReader::new(read_half).lines();

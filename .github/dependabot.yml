@@ -10,7 +10,7 @@ version: 2
 
 updates:
   # ─────────────────────────────────────────────────────────────────────────
-  # Cargo（Week 1 落地后生效；当前 Pre-Code，无 Cargo.toml）
+  # Cargo workspace 6 crate（v2.0 + v2.1 已落地）
   # ─────────────────────────────────────────────────────────────────────────
   - package-ecosystem: "cargo"
     directory: "/"
@@ -39,12 +39,10 @@ updates:
         patterns:
           - "tokio*"
           - "hyper*"
-          - "reqwest"
           - "rustls*"
       simd-stack:
         patterns:
           - "vectorscan-rs*"
-          - "sonic-rs*"
       crypto-stack:
         patterns:
           - "sha2"

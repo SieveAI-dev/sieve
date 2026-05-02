@@ -650,6 +650,7 @@ fn openclaw_apply_injects_sieve_source_channel_header() {
         .args(["setup", "--agent", "openclaw", "--yes"])
         .env("HOME", fake)
         .env("SIEVE_HOME", fake.join(".sieve"))
+        .env("SIEVE_SKIP_SETUP_DOCTOR", "1")
         .output()
         .expect("执行 sieve 失败");
 
@@ -703,6 +704,7 @@ fn hermes_apply_injects_delegation_base_url_fallback() {
         .args(["setup", "--agent", "hermes", "--yes"])
         .env("HOME", fake)
         .env("SIEVE_HOME", fake.join(".sieve"))
+        .env("SIEVE_SKIP_SETUP_DOCTOR", "1")
         .output()
         .expect("执行 sieve 失败");
 
@@ -780,6 +782,7 @@ fn f1_upstream_routes_json_contains_original_provider_urls() {
         .args(["setup", "--agent", "openclaw", "--yes"])
         .env("HOME", fake)
         .env("SIEVE_HOME", &sieve_home)
+        .env("SIEVE_SKIP_SETUP_DOCTOR", "1")
         .output()
         .expect("执行 sieve 失败");
 
@@ -863,6 +866,7 @@ fn f2_rules_deployed_to_sieve_home_on_setup() {
         .args(["setup", "--agent", "claude", "--yes"])
         .env("HOME", fake)
         .env("SIEVE_HOME", &sieve_home)
+        .env("SIEVE_SKIP_SETUP_DOCTOR", "1")
         // SIEVE_RULES_PATH 设为不存在路径，让 doctor canary 失败，触发回滚后 setup 以非零退出。
         // 但规则文件已在 install_shared_daemon 阶段写出，回滚时只删 sentinel + sieve.toml + plist。
         // 为了让测试不依赖 doctor 结果，这里改为不覆盖 SIEVE_RULES_PATH（使用部署的规则）。
@@ -939,6 +943,7 @@ fn f3_openclaw_setup_also_installs_daemon() {
         .args(["setup", "--agent", "openclaw", "--yes"])
         .env("HOME", fake)
         .env("SIEVE_HOME", &sieve_home)
+        .env("SIEVE_SKIP_SETUP_DOCTOR", "1")
         .output()
         .expect("执行 sieve 失败");
 
@@ -1010,6 +1015,7 @@ fn f3_sentinel_prevents_daemon_reinstall() {
         .args(["setup", "--agent", "openclaw", "--yes"])
         .env("HOME", fake)
         .env("SIEVE_HOME", &sieve_home)
+        .env("SIEVE_SKIP_SETUP_DOCTOR", "1")
         .output()
         .expect("执行 sieve 失败（第 1 次）");
 
@@ -1038,6 +1044,7 @@ fn f3_sentinel_prevents_daemon_reinstall() {
         .args(["setup", "--agent", "claude", "--yes"])
         .env("HOME", fake)
         .env("SIEVE_HOME", &sieve_home)
+        .env("SIEVE_SKIP_SETUP_DOCTOR", "1")
         .output()
         .expect("执行 sieve 失败（第 2 次）");
 
@@ -1090,6 +1097,7 @@ fn r10_openclaw_apply_writes_setup_log_entry() {
         .args(["setup", "--agent", "openclaw", "--yes"])
         .env("HOME", fake)
         .env("SIEVE_HOME", &sieve_home)
+        .env("SIEVE_SKIP_SETUP_DOCTOR", "1")
         .output()
         .expect("执行 sieve 失败");
 
@@ -1156,6 +1164,7 @@ fn r10_hermes_apply_writes_setup_log_entry() {
         .args(["setup", "--agent", "hermes", "--yes"])
         .env("HOME", fake)
         .env("SIEVE_HOME", &sieve_home)
+        .env("SIEVE_SKIP_SETUP_DOCTOR", "1")
         .output()
         .expect("执行 sieve 失败");
 
@@ -1219,6 +1228,7 @@ fn r10_uninstall_openclaw_restores_backup() {
         .args(["setup", "--agent", "openclaw", "--yes"])
         .env("HOME", fake)
         .env("SIEVE_HOME", &sieve_home)
+        .env("SIEVE_SKIP_SETUP_DOCTOR", "1")
         .output()
         .expect("执行 sieve setup 失败");
     assert!(
@@ -1283,6 +1293,7 @@ fn r10_uninstall_hermes_restores_backup() {
         .args(["setup", "--agent", "hermes", "--yes"])
         .env("HOME", fake)
         .env("SIEVE_HOME", &sieve_home)
+        .env("SIEVE_SKIP_SETUP_DOCTOR", "1")
         .output()
         .expect("执行 sieve setup 失败");
     assert!(

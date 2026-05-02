@@ -5,7 +5,8 @@
 //! - `list`：合并展示用户规则 + 系统规则数量
 //! - `disable <id>` / `enable <id>`：切换 user.toml 中规则的 `enabled` 字段
 //!
-//! daemon hot-reload 推 Week 6（v2.0 Phase A 仅做文件级操作）。
+//! 全部写入路径在改完 user.toml 后通过 `notify_daemon_reload` 通知 daemon 走
+//! v2.1 zero-downtime hot swap（daemon 未运行时静默跳过；用户无需重启）。
 
 use crate::cli::RulesCommand;
 use anyhow::{anyhow, bail, Context, Result};
@@ -192,42 +193,50 @@ fn run_edit_at(path: &Path) -> Result<()> {
     }
 
     // 4. 通知 daemon 重新加载用户规则（PRD §5.5.5 步骤 4）
-    // run_edit_at 是同步函数；用 tokio::runtime::Runtime::new() 跑一次 async 调用。
-    // socket 不存在（daemon 未运行）时静默跳过，不致命。
-    let socket_path = sieve_ipc::paths::sieve_home()
-        .ok()
-        .map(|h| sieve_ipc::paths::ipc_socket_path(&h));
-    if let Some(ref sp) = socket_path {
-        if sp.exists() {
-            let trigger_id = uuid::Uuid::now_v7();
-            let sp_clone = sp.clone();
-            match tokio::runtime::Runtime::new() {
-                Ok(rt) => match rt.block_on(sieve_ipc::send_reload_user_rules_oneshot(
-                    &sp_clone,
-                    Some(trigger_id),
-                )) {
-                    Ok(()) => {
-                        println!(
-                            "✅ 已通知 daemon 重新加载用户规则（trigger_id = {}）",
-                            trigger_id
-                        );
-                    }
-                    Err(e) => {
-                        eprintln!("⚠ 无法通知 daemon 重新加载（daemon 可能未运行）：{}", e);
-                    }
-                },
-                Err(e) => {
-                    eprintln!("⚠ 无法创建 tokio runtime 用于 reload 通知：{}", e);
-                }
-            }
-        }
-    }
+    notify_daemon_reload();
 
     println!(
         "✅ user.toml 通过 lint，{} 条规则已就绪",
         parsed.rules.len()
     );
     Ok(())
+}
+
+/// 通知 daemon 通过 IPC 重新加载用户规则；daemon 未运行 / runtime 创建失败时
+/// 静默跳过（仅打印告警），不视为致命错误。
+///
+/// `edit` / `enable` / `disable` 完成文件写入后都应调用此函数，避免出现
+/// "改了 user.toml 但 daemon 内存中规则集未刷新" 的不一致。
+fn notify_daemon_reload() {
+    let socket_path = sieve_ipc::paths::sieve_home()
+        .ok()
+        .map(|h| sieve_ipc::paths::ipc_socket_path(&h));
+    let Some(sp) = socket_path else {
+        return;
+    };
+    if !sp.exists() {
+        // daemon 未运行：该场景对 enable/disable 仍是预期路径，不打扰用户。
+        return;
+    }
+    let trigger_id = uuid::Uuid::now_v7();
+    match tokio::runtime::Runtime::new() {
+        Ok(rt) => {
+            match rt.block_on(sieve_ipc::send_reload_user_rules_oneshot(
+                &sp,
+                Some(trigger_id),
+            )) {
+                Ok(()) => {
+                    println!("✅ 已通知 daemon 重新加载用户规则（trigger_id = {trigger_id}）");
+                }
+                Err(e) => {
+                    eprintln!("⚠ 无法通知 daemon 重新加载（daemon 可能未运行）：{e}");
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("⚠ 无法创建 tokio runtime 用于 reload 通知：{e}");
+        }
+    }
 }
 
 /// 返回 PATH 上 `cmd` 的位置（仅用于 fallback 探测，不返完整路径）。
@@ -380,8 +389,10 @@ fn run_toggle_at(path: &Path, id: &str, enable: bool) -> Result<()> {
     }
 
     let action = if enable { "启用" } else { "禁用" };
-    println!("✅ 已{action}规则 {}", id);
-    println!("⚠ daemon hot-reload 待 Week 6 落地；本次改动需重启 daemon 才生效");
+    println!("✅ 已{action}规则 {id}");
+
+    // 通知 daemon hot-reload（v2.1 zero-downtime hot swap）；daemon 未运行时静默。
+    notify_daemon_reload();
     Ok(())
 }
 

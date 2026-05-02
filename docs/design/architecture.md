@@ -139,7 +139,7 @@ flowchart LR
         ProcCtx[进程上下文反查<br/>accept loop<br/>proc_listpids + 4-tuple<br/>→ RequestCtx]
         Proto[Protocol Layer<br/>Anthropic / OpenAI 适配]
         Out[Outbound Filter<br/>出站检测<br/>LayeredEngine]
-        Fwd[Upstream Forwarder<br/>reqwest + rustls]
+        Fwd[Upstream Forwarder<br/>hyper-rustls]
         InHook[inbound_hook.rs<br/>Hook 类：写 pending 文件]
         InHold[inbound_hold.rs<br/>GUI 类：hold SSE 流]
         Agg[Tool Use Aggregator<br/>+ AddressGuard<br/>+ ToolUseSequence 滑动窗口]
@@ -178,9 +178,9 @@ flowchart LR
 
 | 模块（crate）                  | 职责                                                                                                   | 输入                        | 输出                                              | 关键依赖                                                    |
 | ---------------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------- | ----------------------------------------------- | ------------------------------------------------------- |
-| **Protocol Layer**<br/>(`sieve-core`) | 解析 Anthropic Messages API 请求/响应；将原始 JSON 映射到 `UnifiedMessage`；接口预留 OpenAI/OpenRouter（不实现） | 原始 HTTP/JSON 字节流 | `UnifiedMessage` 结构 | `hyper 1.x`、`tokio`、`sonic-rs` |
+| **Protocol Layer**<br/>(`sieve-core`) | 解析 Anthropic Messages API 请求/响应；将原始 JSON 映射到 `UnifiedMessage`；接口预留 OpenAI/OpenRouter（不实现） | 原始 HTTP/JSON 字节流 | `UnifiedMessage` 结构 | `hyper 1.x`、`tokio`、`serde_json` |
 | **Outbound Filter Pipeline**<br/>(`sieve-rules`) | 对 outbound `UnifiedMessage` 执行 OUT-01~12 规则；产出 `Detection` 列表；按处置矩阵路由到 AutoRedact / GuiPopup / StatusBar | `UnifiedMessage` | `(UnifiedMessage_可能脱敏, Vec<Detection>, Disposition)` | `vectorscan-rs`、`bip39`、`bs58`、`hex`、`sha2`、`crc32fast` |
-| **Upstream Forwarder**<br/>(`sieve-core`) | 将（可能脱敏的）请求转发到上游；保持 SSE 长连接、TLS 终结、超时与重试 | 已检测的 outbound 请求 | 上游 SSE 字节流 | `reqwest`、`rustls`、`tokio` |
+| **Upstream Forwarder**<br/>(`sieve-core`) | 将（可能脱敏的）请求转发到上游；保持 SSE 长连接、TLS 终结、超时与重试 | 已检测的 outbound 请求 | 上游 SSE 字节流 | `hyper-rustls`、`tokio` |
 | **SSE Parser**<br/>(`sieve-core`) | 流式切分 `event:` / `data:` 行；处理半行 chunk、跨 chunk 分隔、C0 控制字符、多 event 粘包、提前断流 | 上游字节流 | 完整 SSE event 序列 | 自研 + `bytes` |
 | **Tool Use Aggregator**<br/>(`sieve-core`) | 聚合 `tool_use` block 直到 JSON 完整（partial-json-parser）；在工具调用边界触发 disposition 分流 | SSE event 序列 | 完整 `tool_use` 对象 + `Disposition` | 自研 partial JSON parser |
 | **inbound_hook.rs**<br/>(`sieve-core`) | Hook 类规则命中后写 `~/.sieve/pending/<id>.json`；**不修改 SSE 流**，原样透传给 Claude Code | `tool_use` 对象 + `HookTerminal` disposition | pending 文件 + 透传 SSE | `sieve-ipc`（IPC 通道 B） |
@@ -189,7 +189,7 @@ flowchart LR
 | **sieve-ipc**<br/>（独立 crate） | IPC 协议库：Unix socket JSON-RPC server（通道 A）、pending/decisions 文件 IO（通道 B）、`~/.sieve/` 目录管理 | `DecisionRequest` / `DecisionResponse` | IPC 消息收发 + 文件读写 | `tokio`、`serde_json`、`fd-lock`、`uuid` |
 | **sieve-hook**<br/>（独立 crate，独立二进制） | Claude Code PreToolUse hook 入口；启动 < 50ms；读 pending 文件；TTY y/n 倒计时；写 decisions 文件；exit 0/1 | `~/.sieve/pending/` 目录 | `~/.sieve/decisions/` 文件 + exit code | `serde_json`、`fd-lock`（最小依赖，禁止引入 vectorscan / rusqlite） |
 | **sieve-cli**<br/>（入口 crate） | 入口 / 配置加载 / `sieve setup` / `sieve doctor` / `sieve uninstall`（macOS only）/ 审计日志（SQLite）/ launchd 守护 | CLI args + `config.toml` | 启动 daemon / 管理命令输出 | `anyhow`（仅此 crate 允许）、`rusqlite`、`clap` |
-| **协议适配层 `protocol/openai.rs`**<br/>（`sieve-core`，**v1.5 新增**） | 解析 OpenAI Chat Completions API 请求/响应；将 delta / function_call / tool_calls 映射到 `UnifiedMessage`；处理 `data: [DONE]` 流结束标记 | 原始 HTTP/JSON 字节流（OpenAI 协议格式） | `UnifiedMessage`（与 anthropic.rs 输出一致，下游 Filter Pipeline 无感知） | `serde`、`sonic-rs`（与 anthropic.rs 共用） |
+| **协议适配层 `protocol/openai.rs`**<br/>（`sieve-core`，**v1.5 新增**） | 解析 OpenAI Chat Completions API 请求/响应；将 delta / function_call / tool_calls 映射到 `UnifiedMessage`；处理 `data: [DONE]` 流结束标记 | 原始 HTTP/JSON 字节流（OpenAI 协议格式） | `UnifiedMessage`（与 anthropic.rs 输出一致，下游 Filter Pipeline 无感知） | `serde`、`serde_json`（与 anthropic.rs 共用） |
 | **sieve-policy**<br/>（独立 crate，**v2.0 Phase A 新增**） | 用户规则系统：加载 `~/.sieve/rules/user.toml` + 11 类安全约束 lint + 与系统规则合并（`LayeredEngine`，`arc-swap` 热替换）+ 灰名单管理（`~/.sieve/decisions/`，含 Critical 锁三道防线）+ `sieve rules edit` $EDITOR pipeline；**禁做**：不直接做正则匹配（调 sieve-rules trait），不做网络 IO | `user.toml` + IPC reload 信号 | 用户规则 `MatchEngine` 实例（`Option<U>` 包装；加载失败时 None）+ 灰名单查询 API | `sieve-rules`（trait）、`sieve-ipc`、`fd-lock`、`tempfile`、`arc-swap` |
 
 > **关联决策**：协议适配层设计见 [ADR-018](./ADR-018-openai-protocol-adaptation.md)。用户规则系统 + 三态决策 + 规则引擎抽象见 [ADR-020](./ADR-020-user-rules-system.md) / [ADR-021](./ADR-021-tri-state-decision-and-graylist.md) / [ADR-024](./ADR-024-rules-engine-abstraction.md)（v2.0 Phase A）。行为序列窗口见 [ADR-022](./ADR-022-behavior-sequence-window.md)；进程上下文反查见 [ADR-023](./ADR-023-process-context-audit.md)；content-type 路由矩阵见 [ADR-025](./ADR-025-content-type-routing-matrix.md)（v2.1）。
@@ -205,7 +205,7 @@ flowchart LR
 
 | ID      | 决策                                        | 摘要                                                                                   | 链接                                                        |
 | ------- | ----------------------------------------- | ------------------------------------------------------------------------------------ | --------------------------------------------------------- |
-| ADR-001 | 选用 Rust 作为技术栈                             | hyper + tokio + rustls + vectorscan-rs + sonic-rs；Go regexp 慢 1000+ 倍，Python GIL 不可控 | [ADR-001](./ADR-001-rust-tech-stack.md)                   |
+| ADR-001 | 选用 Rust 作为技术栈                             | hyper + tokio + rustls + vectorscan-rs + serde_json；Go regexp 慢 1000+ 倍，Python GIL 不可控 | [ADR-001](./ADR-001-rust-tech-stack.md)                   |
 | ADR-002 | Phase 1 纯规则引擎，不引入本地 ML 模型                 | 三个独立论证：结构化优先 / 误报敏感 / 单人团队数据标注稀缺                                                     | [ADR-002](./ADR-002-rule-engine-only-phase1.md)           |
 | ADR-003 | 完全本地运行，绝不联网 verifier                      | 不上传 prompt、不上传 fingerprint、不做云端 token 校验                                             | [ADR-003](./ADR-003-local-only-no-cloud-verifier.md)      |
 | ADR-004 | Phase 1 只适配 Anthropic，UnifiedMessage 接口预留 | 公理 7：不为想象用户写代码；第二适配等真实付费用户主动提                                                        | [ADR-004](./ADR-004-anthropic-first-unified-interface.md) |
@@ -407,7 +407,7 @@ IN-CR-04 / IN-CR-05 / IN-GEN-* 一律被绕过。
 
 ## 10. Multi-Agent 扩展架构（v1.5 新增）
 
-> 本章对应 PRD v1.5 §6.1~6.7，描述三家 AI agent 适配的工程架构细节。v1.4 章节（§1~§9）保持不变，本章独立增补。
+> 本章对应 PRD v2.0 §6.1~6.7，描述三家 AI agent 适配的工程架构细节。v1.4 章节（§1~§9）保持不变，本章独立增补。
 
 ### 10.1 三家 agent 的拓扑差异
 

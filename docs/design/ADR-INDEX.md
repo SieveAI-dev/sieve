@@ -80,7 +80,7 @@
 **Proposed | Accepted | Deprecated | Superseded by ADR-XXX**
 > 决策日期：YYYY-MM-DD
 > 范围：...
-> 关联 PRD：[v1.5 §X](../prd/sieve-prd-v1.5.md)
+> 关联 PRD：[v2.0 §X](../prd/sieve-prd-v2.0.md)
 
 ## 背景
 ...
@@ -106,7 +106,7 @@
 
 - [架构](./architecture.md)
 - [数据模型](./data-model.md)
-- [PRD v1.5](../prd/sieve-prd-v1.5.md)
+- [PRD v2.0](../prd/sieve-prd-v2.0.md)
 - [API 参考](../api/api-reference.md)
 - [部署指南](../guides/deployment.md)
 

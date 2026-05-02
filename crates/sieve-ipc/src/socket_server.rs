@@ -507,7 +507,10 @@ impl IpcServer {
     ///
     /// - 如果没有 GUI 客户端连接：**立即 fallback**，不等超时。
     ///   （等超时无意义——没人能决策。）
-    /// - 如果 GUI 写通道已满或 GUI 进程崩溃（mpsc send 失败）：立即 fallback。
+    /// - 如果 GUI 写通道已满（背压）或 GUI 进程崩溃（`try_send` 返回 Full/Closed）：
+    ///   **立即 fallback**，不阻塞 SSE pipeline。**不用 `send().await`**——队列满会
+    ///   把 hot path 卡死直到 timeout 到期，期间整个 SSE 连接 hold 住，对用户体验
+    ///   而言相当于 daemon 死锁（known-issues-v1.4 P2-R10-#4）。
     /// - 如果 GUI 在 `timeout` 内回复：返回 GUI 的决策。
     /// - 如果超时：按 `default_on_timeout` 构造兜底响应，并从 pending map 清理。
     pub async fn request_decision(
@@ -547,10 +550,18 @@ impl IpcServer {
         let mut payload = serde_json::to_string(&rpc_req)?;
         payload.push('\n');
 
-        if let Err(_e) = sender.send(payload).await {
-            // GUI 写通道关闭（GUI 进程崩溃或通道满），立即 fallback。
-            warn!(%request_id, "GUI writer channel closed; immediate fallback");
+        // try_send 而非 send().await：避免 mpsc 队列满时阻塞 hot path（P2-R10-#4）。
+        // Full → 背压；Closed → 客户端已断。两者都立即降级，不让 SSE pipeline 等。
+        if let Err(e) = sender.try_send(payload) {
             self.pending.lock().await.remove(&request_id);
+            match e {
+                mpsc::error::TrySendError::Full(_) => {
+                    warn!(%request_id, "GUI writer channel full (backpressure); immediate fallback");
+                }
+                mpsc::error::TrySendError::Closed(_) => {
+                    warn!(%request_id, "GUI writer channel closed; immediate fallback");
+                }
+            }
             return Ok(make_timeout_fallback(request_id, default_on_timeout));
         }
 
@@ -1121,5 +1132,68 @@ fn make_timeout_fallback(
         by_user: false,
         remember: false,
         context_hint: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Instant;
+    use tempfile::tempdir;
+
+    fn dummy_request() -> DecisionRequest {
+        DecisionRequest {
+            request_id: Uuid::now_v7(),
+            created_at: Utc::now(),
+            timeout_seconds: 30,
+            default_on_timeout: DefaultOnTimeout::Block,
+            detections: vec![],
+            source_agent: Default::default(),
+            origin_chain: vec![],
+            source_channel: None,
+            explicit_chain_depth: None,
+            allow_remember: false,
+        }
+    }
+
+    /// 回归测试 P2-R10-#4：GUI 写队列已满时 `request_decision` 必须立即 fallback，
+    /// 不能用 `send().await` 把 hot path 阻塞到 timeout 到期。
+    #[tokio::test]
+    async fn request_decision_does_not_block_when_writer_full() {
+        let dir = tempdir().expect("tempdir");
+        let socket_path = dir.path().join("ipc.sock");
+        let (server, _listener) = IpcServer::bind(socket_path).expect("bind");
+
+        // 容量 1 的 mpsc，预先填满模拟 GUI 写队列背压。
+        let (tx, _rx) = mpsc::channel::<String>(1);
+        tx.try_send("占位".to_owned()).expect("first slot");
+        assert!(
+            matches!(
+                tx.try_send("满".to_owned()),
+                Err(mpsc::error::TrySendError::Full(_))
+            ),
+            "队列应已满"
+        );
+        server
+            .gui_writers
+            .lock()
+            .expect("gui_writers lock")
+            .push(tx);
+
+        // timeout 给到 60s——若实现回退到 send().await 会卡满 60s，测试会超时。
+        let req = dummy_request();
+        let start = Instant::now();
+        let resp = server
+            .request_decision(req, Duration::from_secs(60))
+            .await
+            .expect("request_decision");
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed < Duration::from_secs(1),
+            "队列满时应立即降级，实际耗时 {elapsed:?}"
+        );
+        assert_eq!(resp.decision, DecisionAction::Deny);
+        assert!(!resp.by_user, "fallback 不应标记为 by_user");
     }
 }

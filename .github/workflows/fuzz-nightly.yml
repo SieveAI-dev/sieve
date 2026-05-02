@@ -4,11 +4,12 @@ name: Fuzz Nightly (AFL++)
 # 例外：AFL++ fuzz 是 nightly 调研工具，不是发布支撑路径，保留 ubuntu-latest runner。
 # AFL++ 在 macOS 支持有限（部分 fork server 特性需要 Linux kernel），等 Phase 2 再评估迁移。
 
-# Week 3 暂禁(workflow_dispatch only)，Week 6+ 启用 schedule
+# 当前定位：**手动触发的 nightly 调研工具**，不是持续 fuzz 门禁。
+# 持续 fuzz 在 ci.yml fuzz-quick job（每次 PR/push 60s/target，含 OpenAI 分支）。
+# AFL++ 长跑 8h 仅在需要扩大 corpus / 探针深路径时手动触发；scheduled cron 留给
+# corpus 真正稳定 + 历史结果可用之后再开（避免 actions 配额浪费）。
 on:
   workflow_dispatch:
-  # schedule:
-  #   - cron: '0 2 * * 0'  # 每周日 02:00 UTC
 
 jobs:
   afl-fuzz:

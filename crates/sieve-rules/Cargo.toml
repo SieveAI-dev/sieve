@@ -56,3 +56,6 @@ harness = false
 [[bench]]
 name = "scan_with_user_rules"
 harness = false
+
+[lints]
+workspace = true

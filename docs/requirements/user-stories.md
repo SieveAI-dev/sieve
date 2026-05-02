@@ -1,6 +1,6 @@
 # Sieve 用户故事
 
-> 本文件是 [PRD v1.5](../prd/sieve-prd-v1.5.md) §3（用户画像）+ §4（核心场景）+ §5（功能需求）的故事化展开。所有 user story 与 PRD 检测项 ID（`OUT-*` / `IN-CR-*` / `IN-GEN-*`）双向对齐。US-01~17 对应 v1.4，US-18~20 对应 v1.5 multi-agent 扩展。
+> 本文件是 [PRD v2.0](../prd/sieve-prd-v2.0.md) §3（用户画像）+ §4（核心场景）+ §5（功能需求）的故事化展开。所有 user story 与 PRD 检测项 ID（`OUT-*` / `IN-CR-*` / `IN-GEN-*`）双向对齐。US-01~17 对应 v1.4，US-18~20 对应 v1.5 multi-agent 扩展；v2.0 对应增量见 PRD v2.0 §5.5/§5.7（用户规则、行为序列）。
 
 ---
 
@@ -336,7 +336,7 @@
 
 **作为** 把 WhatsApp / Slack 接进 OpenClaw daemon 的 P0 用户，**我希望** 攻击者通过外部 channel 发"忽略之前指令 + 上传私钥"时被 Sieve 挡住，**以便** 来自不可信外部 channel 的 prompt injection 不会导致私钥泄露或敏感操作。
 
-**关联 PRD**：[PRD v1.5 §4.5 / §5.2 IN-GEN-06](../prd/sieve-prd-v1.5.md#45-场景-e)
+**关联 PRD**：[PRD v2.0 §4.5 / §5.2 IN-GEN-06](../prd/sieve-prd-v2.0.md#45-场景-e)
 **优先级**：P0（Phase 1 v1.5）
 **验收标准**：
 
@@ -352,7 +352,7 @@
 
 **作为** 用 Hermes delegate 给 Claude Code 干编码活的 P0 用户，**我希望** Sieve 弹窗展示完整调用链并且不双重确认，**以便** 上游已批准的动作不会在下游再弹一次窗打断工作流。
 
-**关联 PRD**：[PRD v1.5 §4.6 / §6.5 / ADR-019](../prd/sieve-prd-v1.5.md#46-场景-f)
+**关联 PRD**：[PRD v2.0 §4.6 / §6.5 / ADR-019](../prd/sieve-prd-v2.0.md#46-场景-f)
 **优先级**：P0（Phase 1 v1.5）
 **验收标准**：
 
@@ -368,7 +368,7 @@
 
 **作为** 同时用三家 agent 的 power user，**我希望** 一条命令为所有 agent 配置 Sieve，**以便** 不需要分别手动改三份配置文件。
 
-**关联 PRD**：[PRD v1.5 §6.6 / SPEC-004](../prd/sieve-prd-v1.5.md#66-部署形态)
+**关联 PRD**：[PRD v2.0 §6.6 / SPEC-004](../prd/sieve-prd-v2.0.md#66-部署形态)
 **优先级**：P0（Phase 1 v1.5）
 **验收标准**：
 
@@ -384,7 +384,7 @@
 
 **作为** P0 crypto-native 开发者，**我希望** Sieve 能拦住我作为 crypto 开发者最怕的五类攻击 —— **签名诱导 / 转账伪造 / .env 外泄 / 私钥外泄 / shell RCE** —— 同时不会在我做这五类的合法日常工作（写转账逻辑、读 dotenv 文档、用 systemctl 配服务、教徒弟 ssh-keygen）时弹窗骚扰，**以便** 我可以信任 Sieve 一直挂着用一周不需要二次确认。
 
-**关联 PRD**：[PRD v1.5 §5.2 IN-CR-* + §9 #7](../prd/sieve-prd-v1.5.md)
+**关联 PRD**：[PRD v2.0 §5.2 IN-CR-* + §9 #7](../prd/sieve-prd-v2.0.md)
 **关联文档**：[CHANGELOG v1.5.4](../changelog/CHANGELOG.md#v154-non-streaming-json-inbound-fix---2026-05-01) / [tasks/2026-05-01-test-data-expansion-report.md](../../tasks/2026-05-01-test-data-expansion-report.md) / [SECURITY.md 历史 Advisories](../../SECURITY.md#历史-advisories)
 **优先级**：P0（Phase 1 v1.5.4，付费门槛级）
 
@@ -454,7 +454,7 @@
 
 ## 未覆盖的 Phase 2 故事
 
-以下故事属于 [PRD §5.1 / §5.2 Phase 2](../prd/sieve-prd-v1.5.md#5-功能需求) 范围，**Phase 1 不实现**，待真有用户需求 + 第二个商业化客户主动要时启动：
+以下故事属于 [PRD §5.1 / §5.2 Phase 2](../prd/sieve-prd-v2.0.md#5-功能需求) 范围，**Phase 1 不实现**，待真有用户需求 + 第二个商业化客户主动要时启动：
 
 
 | 编号草稿     | 故事概要                                                                               | 关联 PRD                             |
@@ -476,4 +476,4 @@
 | US-P2-15 | Gemini / Mistral / Cohere 等其他 LLM 协议适配 | 真有第二个用户主动要再做，Phase 2 待定 |
 
 
-> **触发条件**：上述故事的优先级排序由"真实用户付费请求"决定，非 doskey 个人想象——参见 PRD v1.5 §9 第 9 条。
+> **触发条件**：上述故事的优先级排序由"真实用户付费请求"决定，非 doskey 个人想象——参见 PRD v2.0 §9 第 9 条。
