@@ -124,6 +124,9 @@ const CONTROL_CHANNEL_CAPACITY: usize = 32;
 /// 积压超限说明 daemon reload handler 异常，此时丢弃最新通知优于阻塞 IPC server。
 const RELOAD_CHANNEL_CAPACITY: usize = 16;
 
+/// 心跳间隔（秒）。SPEC-005 §4 要求 25 秒内无出站消息时发送 sieve.heartbeat。
+const HEARTBEAT_INTERVAL_SECS: u64 = 25;
+
 /// GUI 客户端的写通道列表：支持多个并发 GUI 连接（fan-out 广播）。
 ///
 /// 每个 GUI 连接注册一个独立 `mpsc::Sender<String>`；broadcast 时顺序投递。
@@ -631,6 +634,17 @@ async fn handle_connection(
     let (read_half, mut write_half) = stream.into_split();
     let mut lines = BufReader::new(read_half).lines();
 
+    // SPEC-005 §4：25 秒内无出站消息时发送 sieve.heartbeat notification；
+    // 任何出站帧（包括心跳本身）都重置计时器。
+    // 用 `tokio::time::interval` + `reset()` 实现：初始 tick 立即到期，
+    // 但我们在 select! 里不会 await 它直到循环的第一次写方向或心跳分支——
+    // 改用 `interval_at(Instant::now() + 25s, 25s)` 保证连接建立后 25s 才首发。
+    let mut heartbeat_interval = tokio::time::interval_at(
+        tokio::time::Instant::now() + Duration::from_secs(HEARTBEAT_INTERVAL_SECS),
+        Duration::from_secs(HEARTBEAT_INTERVAL_SECS),
+    );
+    heartbeat_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
     loop {
         tokio::select! {
             // 读方向：GUI 发来 decision_response 或控制面 request。
@@ -665,8 +679,20 @@ async fn handle_connection(
                             warn!("failed to write to GUI socket: {e}");
                             break;
                         }
+                        // 出站帧重置心跳计时器。
+                        heartbeat_interval.reset_after(Duration::from_secs(HEARTBEAT_INTERVAL_SECS));
                     }
                 }
+            }
+
+            // 心跳：25 秒无出站消息时发送 sieve.heartbeat notification（SPEC-005 §4）。
+            _ = heartbeat_interval.tick() => {
+                let frame = heartbeat_frame();
+                if let Err(e) = write_half.write_all(frame.as_bytes()).await {
+                    warn!("failed to write heartbeat to GUI socket: {e}");
+                    break;
+                }
+                debug!("sent sieve.heartbeat to GUI");
             }
         }
     }
@@ -1121,6 +1147,13 @@ async fn dispatch_notification_line(line: &str, reload_tx: &mpsc::Sender<ReloadU
     }
 }
 
+/// 构造 `sieve.heartbeat` 通知帧（换行结尾，SPEC-005 §4）。
+///
+/// 格式：`{"jsonrpc":"2.0","method":"sieve.heartbeat"}\n`，无 params 字段。
+fn heartbeat_frame() -> String {
+    "{\"jsonrpc\":\"2.0\",\"method\":\"sieve.heartbeat\"}\n".to_owned()
+}
+
 fn make_timeout_fallback(
     request_id: Uuid,
     default_on_timeout: DefaultOnTimeout,
@@ -1201,6 +1234,22 @@ mod tests {
         );
         assert_eq!(resp.decision, DecisionAction::Deny);
         assert!(!resp.by_user, "fallback 不应标记为 by_user");
+    }
+
+    /// SPEC-005 §4：heartbeat_frame 必须是合法 JSON-RPC 通知 + method = sieve.heartbeat + 无 params。
+    #[test]
+    fn heartbeat_frame_format() {
+        let frame = heartbeat_frame();
+        assert!(frame.ends_with('\n'), "heartbeat frame 必须以换行结尾");
+        let val: serde_json::Value =
+            serde_json::from_str(frame.trim_end()).expect("heartbeat frame 必须是合法 JSON");
+        assert_eq!(val["jsonrpc"], "2.0", "jsonrpc 字段必须为 2.0");
+        assert_eq!(
+            val["method"], "sieve.heartbeat",
+            "method 必须为 sieve.heartbeat"
+        );
+        assert!(val.get("params").is_none(), "heartbeat 不应有 params 字段");
+        assert!(val.get("id").is_none(), "heartbeat 是通知，不应有 id 字段");
     }
 
     /// SPEC-005 §1.1：bind 后 socket 文件权限必须为 0600。
