@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "method": "sieve.set_paused",
+  "params": {
+    "minutes": 30
+  },
+  "id": "req-001"
+}

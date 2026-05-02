@@ -12,6 +12,7 @@
 
 ## ✅ 已完成（按时间倒序）
 
+- **2026-05-03** P2-5 tests/fixtures/v2/ 骨架（3 method × minimal/full/null_optional = 7 条 fixture；schema_v2_fixtures.rs 6 条测试通过；TODO 清单剩余 14 method）
 - **2026-05-03** P2 字段类型/序列化对齐（P2-1 usize→u32 + P2-3 Timestamp millis+Z + P2-6 EvaluateRequest.source_agent String→SourceAgent enum）
 - **2026-05-03** P1-NEW GUI→daemon error response 按段位清理 pending（-32100~99 段清理 pending decision channel，防泄漏；集成测试验证 -32100 → fallback 不 hang）
 - **2026-05-03** P1-10 fan-out write 加 2s bounded timeout（handle_connection 写方向 tokio::time::timeout(2s)；超时/EPIPE/ECONNRESET/EBADF 视为失联）
@@ -84,7 +85,7 @@ _无。等用户选定下一步执行哪一组 P0 后填入。建议每次最多
 - [ ] **[P2-2]** P1-5 wire DTO 拆分时把 `created_at` 命名为 `received_at_daemon`（依赖 P1-5，跳过，随 P1-5 wire DTO 拆分时一并处理）
 - [x] **[P2-3]** Timestamp 序列化保证 `Z` 后缀 + 毫秒精度（§4A）（2026-05-03 完成，新增 ts_serde.rs）
 - [ ] **[P2-4]** 多 issue 合并形式（`merged: true` + `issues[]`）实现（§6.1.2, §6.2.2）（依赖 P1-5，跳过，随 P1-5 wire DTO 拆分时一并处理）
-- [ ] **[P2-5]** 建立 `tests/fixtures/v2/` + `tests/schema_v2_fixtures.rs`（17 method × 3 = 51 条最低门槛，§14.1）
+- [x] **[P2-5]** 建立 `tests/fixtures/v2/` + `tests/schema_v2_fixtures.rs`（骨架：3 method × minimal/full/null = 6 条测试通过；剩余 14 method 待补至 51 条）（2026-05-03 完成骨架）
 - [x] **[P2-6]** `EvaluateRequest.source_agent` 改 `SourceAgent` enum（§5.7）— 测试中废弃 `"claude-code"`（2026-05-03 完成）
 
 ### 双侧契约同步点（必须与 sieve-gui-macos 仓库 PROGRESS 同步推进）
