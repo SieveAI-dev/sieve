@@ -295,6 +295,75 @@ async fn timeout_broadcasts_request_decision_canceled() {
     assert!(got_canceled, "timeout 必须广播 request_decision_canceled");
 }
 
+/// 非法 JSON 帧 → 收到 -32700 parse_error 且连接保持。
+///
+/// SPEC-005 §1.3.1 §12.2：JSON 解析失败不关闭连接，返回 -32700。
+#[tokio::test]
+async fn invalid_json_returns_parse_error_connection_kept() {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let socket_path = tmp.path().join("ipc.sock");
+    let server = start_server(&socket_path).await;
+    spawn_mock_daemon(Arc::clone(&server));
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
+    let (read_half, mut write_half) = stream.into_split();
+    let mut lines = BufReader::new(read_half).lines();
+
+    // 发非法 JSON
+    write_half.write_all(b"not valid json\n").await.unwrap();
+
+    // 跳过 hello 通知（第一帧）
+    let first = tokio::time::timeout(Duration::from_secs(2), lines.next_line())
+        .await
+        .expect("timeout")
+        .unwrap()
+        .expect("connection closed");
+    let first_val: serde_json::Value = serde_json::from_str(&first).unwrap();
+    // 如果第一帧是 hello notification，则读下一帧（parse_error response）
+    let error_line = if first_val.get("method").and_then(|v| v.as_str()) == Some("sieve.hello") {
+        tokio::time::timeout(Duration::from_secs(2), lines.next_line())
+            .await
+            .expect("timeout waiting for parse_error response")
+            .unwrap()
+            .expect("connection closed after invalid json")
+    } else {
+        first
+    };
+
+    let resp: serde_json::Value = serde_json::from_str(&error_line).unwrap();
+    let err = &resp["error"];
+    assert_eq!(
+        err["code"],
+        rpc_codes::PARSE_ERROR,
+        "non-JSON frame must return -32700, got: {resp}"
+    );
+
+    // 连接保持：发合法请求仍能收到响应
+    let req = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "sieve.health",
+        "params": {},
+        "id": "after-parse-error",
+    });
+    let mut payload = serde_json::to_string(&req).unwrap();
+    payload.push('\n');
+    write_half.write_all(payload.as_bytes()).await.unwrap();
+    let health_line = tokio::time::timeout(Duration::from_secs(2), lines.next_line())
+        .await
+        .expect("timeout waiting for health response")
+        .unwrap()
+        .expect("connection should still be open");
+    let health_resp: serde_json::Value = serde_json::from_str(&health_line).unwrap();
+    assert!(
+        health_resp.get("error").is_none(),
+        "health after parse_error should succeed: {health_resp}"
+    );
+    assert_eq!(health_resp["id"], "after-parse-error");
+}
+
 /// daemon control_rx 关闭时 → 客户端收到 internal_error。
 #[tokio::test]
 async fn control_channel_closed_returns_internal_error() {

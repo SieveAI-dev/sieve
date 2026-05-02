@@ -72,6 +72,8 @@ impl From<crate::frame_reader::FrameError> for IpcError {
 /// -32000 ~ -32099 为 Sieve 自定义实现段。
 pub mod rpc_codes {
     // ── JSON-RPC 标准段 ────────────────────────────────────────
+    /// JSON 解析失败（SPEC-005 §1.3.1 §12.2；不关闭连接）。
+    pub const PARSE_ERROR: i64 = -32700;
     /// 请求无效（缺字段 / 类型错）。
     pub const INVALID_REQUEST: i64 = -32600;
     /// 方法未找到。

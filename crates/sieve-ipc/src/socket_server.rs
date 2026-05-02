@@ -882,10 +882,23 @@ async fn dispatch_message(
     write_tx: &mpsc::Sender<String>,
 ) {
     // 先尝试解析为通用 JSON Value，从 method 字段判断消息类型。
+    // SPEC-005 §1.3.1 §12.2：JSON 解析失败必须返回 -32700 parse_error，不关闭连接。
+    // 尽力从原始 bytes 提取 id 字段（parse_error 时 id 可能无法获取，则用 null）。
     let val: serde_json::Value = match serde_json::from_str(line) {
         Ok(v) => v,
         Err(e) => {
-            warn!("failed to parse IPC frame: {e}");
+            warn!("failed to parse IPC frame as JSON: {e}");
+            // 尝试仅提取 id 字段（容错 partial parse）。
+            let fallback_id: serde_json::Value = serde_json::from_str::<serde_json::Value>(line)
+                .ok()
+                .and_then(|v| v.get("id").cloned())
+                .unwrap_or(serde_json::Value::Null);
+            write_error_response(
+                fallback_id,
+                ControlError::new(rpc_codes::PARSE_ERROR, format!("parse error: {e}")),
+                write_tx,
+            )
+            .await;
             return;
         }
     };
