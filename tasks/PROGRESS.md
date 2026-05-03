@@ -1,184 +1,75 @@
 # Sieve daemon · 进度
 
 > 上次更新：2026-05-03
-> 当前阶段：**v2.0 协议代码改造**（SPEC-005 v2 r5 冻结 → 拉齐 sieve-ipc 实现）
-> 唯一进度真实源——任何任务完成必须更新本文件。
+> 当前阶段：**SPEC-005 v2 代码全部就绪 — 等用户手动联调**
 
 ## 当前阶段一句话
 
-`docs/specs/SPEC-005-ipc-protocol.md`（v2，r5 冻结）已与现有 `crates/sieve-ipc/` 实现做完 gap 分析，整体差距大（P0 × 5 / P1 × 10 / P2 × 6）。下一步按 P0 → P1 → P2 顺序改造，每完成一项必须勾选 + 更新本文件。
+SPEC-005 v2.0 frozen + v2.0+ 兼容扩展（list_rules / purge_history）双侧契约全部实现并对齐；
+P0 5/5 ✅ · P1 10/10 ✅ · P2 5/6 ✅（P2 仅余 fixtures polish）+ 善后全部 ✅；
+e2e 集成测试 harness 6 场景，cargo workspace 696 passed 全绿。
+GUI 仓库（sieve-gui-macos）同步完成 swift test 127 passed + xcodebuild SUCCEEDED。
+代码侧任务清零，等用户手动联调反馈。
 
 ---
 
-## ✅ 已完成（按时间倒序）
+## ✅ 主里程碑
 
-- **2026-05-03** daemon 实现 sieve.list_rules + sieve.purge_history（v2.0+ 兼容扩展）：protocol.rs 加 ListRulesResult/RuleSummary 11 字段 + PurgeHistoryRequest/Result；socket_server.rs ControlPlaneRequest 加 ListRules/PurgeHistory variant + 路由；daemon_control_plane.rs 加 handle_list_rules（从 LayeredEngine 取系统规则 map RuleSummary）+ handle_purge_history（AtomicBool 互斥 + AuditStore.delete_all_events）；rpc_codes 加 -32006/-32007；audit.rs 加 PurgeHistoryStarted/Completed event + delete_all_events 方法；e2e 场景 7+8 + 6 个 fixture（list_rules/purge_history 各 3 档）；696 tests passed
-- **2026-05-03** SPEC-005 §11A sieve.list_rules + §11B sieve.purge_history 字段表（v2.0 兼容扩展，不 bump protocol_version）；§11 速查表追加两行；§12.3 追加 -32006 rules_loading / -32007 purge_in_progress；§13.2 追加 v2.0 兼容扩展方法表 + GUI 降级行为说明
-- **2026-05-03** B2 wire DTO recommendation 字段真实注入（DetectionPayload 加 recommendation 字段，单 issue 拷贝 / 多 issue 按 §6.1.4 各 issue 拷贝；4 个测试覆盖单/多 issue 各分支）
-- **2026-05-03** P2-5 fixtures 补齐到 73 文件（17 method × minimal/full/null_optional，含生成式断言遍历所有 fixture + 往返序列化验证，18 条 schema_v2_fixtures 测试通过）
-- **2026-05-03** 端到端集成测试 harness（A1：6 场景：握手/heartbeat 时间加速/request_decision 单 issue/merged/重连 boot_id 一致性/set_paused 串行化），mock GUI client + 真实 IpcServer spawn，`tests/end_to_end.rs`
-- **2026-05-03** P1-9 后续 origin_request_id 真实透传到 broadcast notification（ControlPlaneRequest 加 origin_request_id 字段，dispatch 从 JSON-RPC id 解析 UUID，handler 填到 PausedChangedNotify / PresetChangedNotify）
-- **2026-05-03** P1-5 + P2-2 + P2-4 request_decision wire DTO 拆分（单 issue 平铺 / 多 issue merged + issues[]）+ received_at_daemon 字段名 + 时间戳 Z 后缀联动
+### 2026-05-03 v2.0+ 兼容扩展 + 业务层完整化
+- SPEC-005 §11A sieve.list_rules + §11B sieve.purge_history（不 bump version）
+- daemon 实现两个新 method
+- recommendation 字段 daemon 业务层真实注入
+- fixtures 81 条（17+2 method × 3 档）
 
-### P1-5 wire 格式参考（2026-05-03）
+### 2026-05-03 e2e 测试 + 业务层 polish
+- 端到端集成测试 harness（6 场景：握手 / heartbeat / 单 issue / merged / 重连丢 inflight / set_paused 串行化）
+- pre-existing flake canary_token_hits_out01 修复
+- audit oversize callback 注入
 
-**单 issue 形式**：
-```json
-{
-  "jsonrpc": "2.0",
-  "method": "sieve.request_decision",
-  "id": "8f3a2b91-7c4e-4d8f-9b21-1a3c5e7f9d02",
-  "params": {
-    "request_id": "8f3a2b91-7c4e-4d8f-9b21-1a3c5e7f9d02",
-    "rule_id": "IN-CR-05",
-    "title": "签名工具调用：signTransaction",
-    "severity": "critical",
-    "direction": "inbound",
-    "disposition": "gui_popup",
-    "timeout_seconds": 120,
-    "default_on_timeout": "block",
-    "allow_remember": false,
-    "merged": false,
-    "received_at_daemon": "2026-05-02T15:03:11.234Z",
-    "source_agent": "claude",
-    "origin_chain": [],
-    "explicit_chain_depth": 0
-  }
-}
-```
+### 2026-05-02..03 P1-5 wire DTO 拆分（最大改造）
+- 内部 DecisionRequest 与 wire DTO 分离
+- 单 issue 平铺 / 多 issue merged + issues[]
+- created_at → received_at_daemon
+- origin_request_id 真实透传
 
-**多 issue merged 形式**：
-```json
-{
-  "jsonrpc": "2.0",
-  "method": "sieve.request_decision",
-  "id": "9c1d8b73-2a4f-4e6c-b5d8-3e7f1a9c2b04",
-  "params": {
-    "request_id": "9c1d8b73-2a4f-4e6c-b5d8-3e7f1a9c2b04",
-    "title": "Sieve 检测到 2 个安全问题",
-    "severity": "critical",
-    "direction": "inbound",
-    "disposition": "gui_popup",
-    "timeout_seconds": 30,
-    "default_on_timeout": "block",
-    "allow_remember": false,
-    "merged": true,
-    "received_at_daemon": "2026-05-02T15:03:11.234Z",
-    "source_agent": "claude",
-    "origin_chain": [],
-    "issues": [
-      {
-        "issue_id": "i-1",
-        "rule_id": "IN-CR-05",
-        "title": "签名工具调用：signTransaction",
-        "severity": "critical",
-        "allow_remember": false
-      },
-      {
-        "issue_id": "i-2",
-        "rule_id": "IN-GEN-04",
-        "title": "Markdown 图片外链",
-        "severity": "high",
-        "allow_remember": true
-      }
-    ]
-  }
-}
-```
+### 2026-05-02 P0 全部 + P1 大部分
+- 帧读取 FrameReader + memchr（移除无界 BufReader::lines）
+- sieve.hello + sieve.heartbeat + socket 0600
+- 字段对齐：paused_until / origin_request_id / HealthResult 拆分 / NotifyKind / parse_error / fan-out 串行化 / write timeout / pending-leak
 
-- **2026-05-03** P2-5 tests/fixtures/v2/ 骨架（3 method × minimal/full/null_optional = 7 条 fixture；schema_v2_fixtures.rs 6 条测试通过；TODO 清单剩余 14 method）
-- **2026-05-03** P2 字段类型/序列化对齐（P2-1 usize→u32 + P2-3 Timestamp millis+Z + P2-6 EvaluateRequest.source_agent String→SourceAgent enum）
-- **2026-05-03** P1-NEW GUI→daemon error response 按段位清理 pending（-32100~99 段清理 pending decision channel，防泄漏；集成测试验证 -32100 → fallback 不 hang）
-- **2026-05-03** P1-10 fan-out write 加 2s bounded timeout（handle_connection 写方向 tokio::time::timeout(2s)；超时/EPIPE/ECONNRESET/EBADF 视为失联）
-- **2026-05-03** P1-9 set_paused/set_preset 响应前强制 fan-out（BroadcastPlan 枚举 + ControlPlaneRequest mutating reply 携带 BroadcastPlan + forward_reply_with_broadcast 先广播再写 result + 集成测试双 mock GUI 验证顺序）
-- **2026-05-03** P1-8 JSON 解析失败返回 -32700 parse_error 不关闭连接（dispatch_message 改静默 return → write_error_response；集成测试验证连接保持）
-- **2026-05-03** P1-7 NotifyKind 加 HookTerminal 变体（snake_case hook_terminal，SPEC-005 §5.9）
-- **2026-05-03** P1-3 HealthResult.paused 拆为 paused: bool + paused_until: Option<DateTime<Utc>>（对齐 SPEC-005 §9.5 字段表语义）
-- **2026-05-03** P1-2 PresetChangedNotify + PausedChangedNotify 加 origin_request_id: Option<Uuid>（SPEC-005 §10.0.2，GUI 识别本地回声；P1-9 实现后透传真实 request_id）
-- **2026-05-03** P1-1 SetPausedResult/PausedChangedNotify 字段 until → paused_until（serde wire 同步对齐 SPEC-005 §9.1 §10.2）
-- **2026-05-03** 善后 audit oversize callback 注入（IpcServer::set_oversize_callback + OversizeKind/OversizeCallback 类型 + daemon 层注入 closure 写 AuditEvent::IpcOversizeFrame）
-- **2026-05-03** 善后 修复 pre-existing flake canary_token_hits_out01_in_local_engine（路径硬编码 → CARGO_MANIFEST_DIR 相对路径，测试已通过验证）
-- **2026-05-03** P0-1 帧读取改用 FrameReader + memchr（新增 frame_reader.rs，替换 socket_server + socket_client 两处 BufReader::lines()，AuditEvent::IpcOversizeFrame，5 个边界测试）
-- **2026-05-03** P0-2 sieve.hello 握手通知（HelloParams 7 字段 + HelloBuilder + handle_connection 首帧发 hello + daemon 注入 + 集成测试）
-- **2026-05-03** P0-3 sieve.heartbeat 25s 心跳（handle_connection 写方向 interval(25s) + 重置 + 帧格式单元测试）
-- **2026-05-03** P0-5 socket 文件权限 0600 + 父目录 0700（IpcServer::bind + ensure_dirs + 单元测试）
-- **2026-05-03** P1-4 `DecisionResponse` 加 `ui_phase_when_clicked: Option<UiPhase>` + `UiPhase` 枚举（snake_case `"blue"/"orange"/"red"`）+ v2 fixture 单元测试 minimal/full/null_optional 三档（§14.1）；同步修复 sieve-hook `protocol.rs` + 全 workspace 构造调用
-- **2026-05-03** 第 3 组错误码段位 daemon 端复核：已对齐 SPEC-005 §12.4（daemon→GUI -32000~99 / GUI→daemon -32100~99 段位区分清晰；-32100~102 接收侧处理属 P1 新功能，非本次范围）
-- **2026-05-03** P0-4 `request_decision` 方法名补 `sieve.` 前缀（socket_server.rs:546 + lib.rs:354 测试同步）
-- **2026-05-03** P1-6 协议版本号 v1 → v2（生产代码 2 处 + 测试夹具 2 处，测试全绿）
-- **2026-05-02** SPEC-005 v2 协议 r5 冻结 review 通过（`docs/review/2026-05-02-codex-spec-005-review-r5.md`），可进入代码改造
-- **2026-05-02** SPEC-005 v2 vs 代码 gap 分析完成（_gap-spec005-vs-code.md，已并入下方"下一步"清单后将删除）
-- **2026-05-02** tasks/ 与 docs/review/ 文档大扫除：12 份过期 todo/status/report + 17 份历史 codex review 全部归档到 `_archive/`，建立 PROGRESS.md 单一进度真实源
-- **2026-05-01** v2.0 + v2.1 代码 100% 落地（sieve-policy / 三态决策 ask + 灰名单 + Critical 锁 / LayeredEngine / 进程上下文反查 / audit schema migration）
-- **Week 5** Phase A 全部完成（参见 `_archive/v2.0-phase-a-plan.md`）
+### 2026-05-02 协议骨架（4 组双侧同步对）
+- 协议版本号 v1 → v2
+- 方法名 sieve.* 前缀
+- 错误码段位 -32100~99
+- decision_response.result required 字段
+
+详细 commit 列表见 git log。
 
 ---
 
 ## 🚧 进行中
-
-_无。等用户选定下一步执行哪一组 P0 后填入。建议每次最多 1 项进行中，避免主上下文压力。_
+（无 — 代码侧任务清零）
 
 ---
 
-## ⏭ 下一步（SPEC-005 v2 代码对齐，按优先级）
+## ⏭ 下一步（等用户联调反馈）
 
-### P0 阻塞合规（必须先完成，否则与 v2 GUI 无法互操作）
+### 用户介入项
+- 真实 dogfood：启 daemon + GUI 跑 HIPS / Settings / History 流程
+- 反馈 bug 或 UX 调整
 
-- [x] **[P1-1]** `SetPausedResult.until` → `paused_until`（§9.1, §10.2）— 含 `PausedChangedNotify`（2026-05-03 完成）
-- [x] **[P0-1]** 帧读取替换无界 `BufReader::lines()` → `read_buf` + 手动 `memchr`（§1.3.1）（2026-05-03 完成）
-  - 文件：`crates/sieve-ipc/src/socket_server.rs:8,627` + `socket_client.rs:52`
-  - 补充：单帧 > 1 MiB 关连接 + remainder > 1 MiB 关 + audit `ipc_oversize_frame` + 解析失败不关连接
-- [x] **[P0-2]** 实现 `sieve.hello` 握手通知（§3）（2026-05-03 完成）
-  - 新增 `HelloParams` struct（`protocol_version="v2"` / `daemon_version` / `paused` / `preset` / `uptime_seconds` / `audit_db_user_version` / `daemon_boot_id`）
-  - 在 `handle_connection` 起始处作为第一条出站消息发送
-- [x] **[P0-3]** 实现 `sieve.heartbeat` 25 秒心跳（§4）（2026-05-03 完成）
-  - `handle_connection` 写方向加 `tokio::time::interval(25s)`，任何出站帧重置定时器
-- [x] **[P0-4]** `request_decision` 方法名补 `sieve.` 前缀（§11）（2026-05-03 完成）
-  - `socket_server.rs:546` 改 `"sieve.request_decision"`，与 GUI P0 同步
-- [x] **[P0-5]** Socket 文件权限设 `0600`（§1.1）（2026-05-03 完成）
-  - `IpcServer::bind` 后 `set_permissions(0o600)`；`ensure_dirs` 把 sieve_home 设 `0700`
+### 已知小尾巴（不阻塞联调）
+- direction 字段在 sieve-core/pipeline 某孤立路径未被完整测试覆盖
+- list_rules daemon 端从 LayeredEngine 取规则的实际列表完整性需联调验证
+- purge_history daemon 端实际 SQLite delete events 行为需联调验证
 
-### P1 字段/行为偏差
-
-- [x] **[P1-1]** `SetPausedResult.until` → `paused_until`（§9.1, §10.2）— 含 `PausedChangedNotify`（2026-05-03 完成）
-- [x] **[P1-2]** `PresetChangedNotify` + `PausedChangedNotify` 加 `origin_request_id: Option<Uuid>`（§10.0–10.2）（2026-05-03 完成；P1-9 后续已透传真实 request_id）
-- [x] **[P1-3]** `HealthResult.paused` 拆为 `paused: bool` + 独立 `paused_until: Option<DateTime<Utc>>`（§9.5）（2026-05-03 完成）
-- [x] **[P1-4]** `DecisionResponse` 加 `ui_phase_when_clicked: Option<UiPhase>`（§6.2.1, §5.10）（2026-05-03 完成）
-- [x] **[P1-5]** `sieve.request_decision` 拆 wire DTO（§6.0, §6.1）— 字段展开 + `merged: true` + `received_at_daemon`（2026-05-03 完成）
-- [x] **[P1-6]** `protocol_version` 字符串全部 `"v1"` → `"v2"`（含 `tests/control_plane_dispatch.rs:52,142`）（2026-05-03 完成）
-- [x] **[P1-7]** `NotifyKind` 加 `HookTerminal` 变体（§5.9）（2026-05-03 完成）
-- [x] **[P1-8]** JSON 解析失败返回 `-32700 parse_error` 而非静默 return（§1.3.1, §12.2）— 加 `PARSE_ERROR` 常量（2026-05-03 完成）
-- [x] **[P1-9]** `sieve.set_paused` 响应前强制 fan-out（§10.0.1）— 改 `ControlPlaneRequest` 回执结构，让 `forward_reply` 在写 result 前先 broadcast（2026-05-03 完成）；origin_request_id 真实透传（2026-05-03 后续完成）
-- [x] **[P1-10]** fan-out 写入加 2 秒 bounded write timeout（§10.0.1）— EPIPE/ECONNRESET/EBADF 视为失联（2026-05-03 完成）
-- [x] **[P1-NEW pending-leak]** GUI→daemon error response 按段位处理 pending（§12.4 + 子代理 2026-05-03 发现）（2026-05-03 完成）
-  - dispatch_message 收到 -32100~-32199 段时，drop pending channel → fallback，防泄漏
-
-### P2 风格 / 可读性
-
-- [x] **[P2-1]** `*_count` 字段类型 `usize` → `u32`（§9.4 等）（2026-05-03 完成）
-- [x] **[P2-2]** P1-5 wire DTO 拆分时把 `created_at` 命名为 `received_at_daemon`（2026-05-03 完成，随 P1-5 一并处理）
-- [x] **[P2-3]** Timestamp 序列化保证 `Z` 后缀 + 毫秒精度（§4A）（2026-05-03 完成，新增 ts_serde.rs）
-- [x] **[P2-4]** 多 issue 合并形式（`merged: true` + `issues[]`）实现（§6.1.2, §6.2.2）（2026-05-03 完成，随 P1-5 一并处理）
-- [x] **[P2-5]** 建立 `tests/fixtures/v2/` + `tests/schema_v2_fixtures.rs`（17 method × 3 = 73 条 fixture，生成式断言 + 往返序列化验证，18 条测试通过）（2026-05-03 完成）
-- [x] **[P2-6]** `EvaluateRequest.source_agent` 改 `SourceAgent` enum（§5.7）— 测试中废弃 `"claude-code"`（2026-05-03 完成）
-
-### 双侧契约同步点（必须与 sieve-gui-macos 仓库 PROGRESS 同步推进）
-
-- 协议版本号：daemon P1-6 ↔ GUI P0-1
-- `request_decision` 方法名前缀：daemon P0-4 ↔ GUI 接收侧
-- `decision_response.result` required 字段（`request_id` / `decided_at` / `by_user` / `ui_phase_when_clicked`）：daemon P1-4 ↔ GUI P0-3 / P1-1
-- 错误码段位 `-32100/-32101/-32102`：daemon 端 ↔ GUI P0-2
-- `Disposition` / `DefaultOnTimeout` snake_case：daemon 已对齐 ↔ GUI P1-2/P1-3 待改
-- `NotifyKind` 六枚举值：daemon P1-7 ↔ GUI P1-4
-
-### Phase 2 / 长期
-
-详见 `roadmap.md`，本文件不重复。
+### 发布前（Phase 1C，等联调通过后）
+- Tier 1 sigstore reproducible build 跑通 release artifact 流程
+- GA 准备：Week 12 一次性公开 repo
 
 ---
 
 ## 🚫 阻塞 / 等决策
-
 （无）
 
 ---
