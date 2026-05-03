@@ -190,23 +190,36 @@ async fn dispatch_request(
     >,
 ) {
     match req {
-        ControlPlaneRequest::SetPaused { params, reply } => {
+        ControlPlaneRequest::SetPaused {
+            params,
+            origin_request_id,
+            reply,
+        } => {
             // SPEC-005 §10.0.1：IPC server 层收到 (result, BroadcastPlan) 后先 fan-out 再写 result。
-            let result = handle_set_paused(params, audit, state).await;
+            let result = handle_set_paused(params, origin_request_id, audit, state).await;
             // 同步给 IpcServer hot path（set_paused_until 必须在 reply.send 之前调用）。
             if let Ok((ref r, _)) = result {
                 ipc.set_paused_until(r.paused_until);
             }
             let _ = reply.send(result);
         }
-        ControlPlaneRequest::SetPreset { params, reply } => {
+        ControlPlaneRequest::SetPreset {
+            params,
+            origin_request_id,
+            reply,
+        } => {
             // SPEC-005 §10.0.1：同上。
-            let result = handle_set_preset(params, ipc, audit, state).await;
+            let result = handle_set_preset(params, origin_request_id, ipc, audit, state).await;
             let _ = reply.send(result);
         }
-        ControlPlaneRequest::SetPresetOverrides { params, reply } => {
+        ControlPlaneRequest::SetPresetOverrides {
+            params,
+            origin_request_id,
+            reply,
+        } => {
             // SPEC-005 §10.0.1：同上。
-            let result = handle_set_preset_overrides(params, ipc, audit, state).await;
+            let result =
+                handle_set_preset_overrides(params, origin_request_id, ipc, audit, state).await;
             let _ = reply.send(result);
         }
         ControlPlaneRequest::ReloadConfig { params: _, reply } => {
@@ -237,6 +250,7 @@ async fn dispatch_request(
 
 async fn handle_set_paused(
     params: sieve_ipc::SetPausedRequest,
+    origin_request_id: Option<Uuid>,
     audit: &Arc<AuditStore>,
     state: &Arc<RuntimeState>,
 ) -> Result<(SetPausedResult, Option<BroadcastPlan>), ControlError> {
@@ -263,12 +277,13 @@ async fn handle_set_paused(
     spawn_audit(audit, event);
 
     // SPEC-005 §10.0.1：广播由 IPC server 层在写 result 之前执行（BroadcastPlan 回传）。
+    // SPEC-005 §10.0.2：origin_request_id 透传，GUI 可据此识别本地回声。
     let broadcast = BroadcastPlan::PausedChanged(PausedChangedNotify {
         paused,
         paused_until: until,
         reason: "user_request".to_owned(),
         applies_to: paused_applies_to(),
-        origin_request_id: None,
+        origin_request_id,
     });
 
     Ok((
@@ -283,6 +298,7 @@ async fn handle_set_paused(
 
 async fn handle_set_preset(
     params: sieve_ipc::SetPresetRequest,
+    origin_request_id: Option<Uuid>,
     ipc: &Arc<IpcServer>,
     audit: &Arc<AuditStore>,
     state: &Arc<RuntimeState>,
@@ -316,12 +332,13 @@ async fn handle_set_preset(
     spawn_audit(audit, event);
 
     // SPEC-005 §10.0.1：广播由 IPC server 层在写 result 之前执行（BroadcastPlan 回传）。
+    // SPEC-005 §10.0.2：origin_request_id 透传，GUI 可据此识别本地回声。
     let broadcast = BroadcastPlan::PresetChanged(PresetChangedNotify {
         mode: new_preset.mode.clone(),
         overrides: new_preset.overrides.clone(),
         changed_at: now,
         source: "gui".to_owned(),
-        origin_request_id: None,
+        origin_request_id,
     });
 
     // set_preset 不需要同步 ipc（只有 paused_until 需要），但 hello_builder.preset 快照是启动时刻的，
@@ -333,6 +350,7 @@ async fn handle_set_preset(
 
 async fn handle_set_preset_overrides(
     params: sieve_ipc::SetPresetOverridesRequest,
+    origin_request_id: Option<Uuid>,
     ipc: &Arc<IpcServer>,
     audit: &Arc<AuditStore>,
     state: &Arc<RuntimeState>,
@@ -438,12 +456,13 @@ async fn handle_set_preset_overrides(
     }
 
     // SPEC-005 §10.0.1：广播由 IPC server 层在写 result 之前执行（BroadcastPlan 回传）。
+    // SPEC-005 §10.0.2：origin_request_id 透传，GUI 可据此识别本地回声。
     let broadcast = BroadcastPlan::PresetChanged(PresetChangedNotify {
         mode: new_preset.mode,
         overrides: new_overrides,
         changed_at: Utc::now(),
         source: "gui".to_owned(),
-        origin_request_id: None,
+        origin_request_id,
     });
 
     let _ = ipc; // 保留参数（ipc 在此函数不再直接 broadcast）
@@ -825,6 +844,7 @@ mod tests {
 
         let (result, _broadcast) = handle_set_preset_overrides(
             sieve_ipc::SetPresetOverridesRequest { overrides },
+            None,
             &ipc,
             &audit,
             &state,
@@ -859,9 +879,14 @@ mod tests {
         tokio::spawn(async move { ipc_run.run(listener).await });
 
         let state = make_test_state();
-        let err = handle_set_paused(sieve_ipc::SetPausedRequest { minutes: 120 }, &audit, &state)
-            .await
-            .unwrap_err();
+        let err = handle_set_paused(
+            sieve_ipc::SetPausedRequest { minutes: 120 },
+            None,
+            &audit,
+            &state,
+        )
+        .await
+        .unwrap_err();
 
         assert_eq!(err.code, sieve_ipc::error::rpc_codes::INVALID_PARAMS);
     }
