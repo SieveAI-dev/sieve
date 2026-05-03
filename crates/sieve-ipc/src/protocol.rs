@@ -174,6 +174,14 @@ pub struct DetectionPayload {
     pub one_line_summary: String,
     /// 扩展详情，结构由各规则自定义（GUI 侧渲染详细视图用）。
     pub details: serde_json::Value,
+    /// daemon 对本 issue 的处置推荐（SPEC-005 §6.1.4）。
+    ///
+    /// 格式：`{ "decision": "deny"|"allow", "confidence": "high"|"medium"|"low", "reason": String }`。
+    /// `None` 表示 daemon 对此 issue 无推荐（GUI 默认按钮为拒绝）。
+    ///
+    /// 旧版本不发此字段时 serde 默认 `None`（向后兼容）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recommendation: Option<serde_json::Value>,
 }
 
 // ── Request / Response ───────────────────────────────────────────────────────

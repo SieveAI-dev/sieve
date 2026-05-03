@@ -58,6 +58,7 @@ mod tests {
                 title: "危险 shell 命令".to_owned(),
                 one_line_summary: "检测到 rm -rf 命令".to_owned(),
                 details: serde_json::json!({ "command": "rm -rf /tmp" }),
+                recommendation: None,
             }],
             source_agent: sieve_ipc::SourceAgent::Unknown,
             origin_chain: vec![],

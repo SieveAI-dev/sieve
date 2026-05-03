@@ -198,7 +198,7 @@ impl RequestDecisionWireKind {
     /// `critical > high > medium > low`（按枚举 discriminant 反向）
     pub fn from_request(req: &DecisionRequest, direction: &str) -> Self {
         if req.detections.len() <= 1 {
-            let (rule_id, title, severity, disposition, context) =
+            let (rule_id, title, severity, disposition, context, recommendation) =
                 if let Some(d) = req.detections.first() {
                     (
                         d.rule_id.clone(),
@@ -211,6 +211,8 @@ impl RequestDecisionWireKind {
                         } else {
                             Some(d.details.clone())
                         },
+                        // 单 issue：直接拷贝 DetectionPayload.recommendation（§6.1.4 B2）
+                        d.recommendation.clone(),
                     )
                 } else {
                     // detections 空：降级占位符
@@ -219,6 +221,7 @@ impl RequestDecisionWireKind {
                         "Unknown".to_owned(),
                         "low".to_owned(),
                         "gui_popup".to_owned(),
+                        None,
                         None,
                     )
                 };
@@ -236,9 +239,8 @@ impl RequestDecisionWireKind {
                 merged: false,
                 received_at_daemon: req.created_at.to_rfc3339_opts(SecondsFormat::Millis, true),
                 context,
-                // `DetectionPayload` 暂无 recommendation 字段（§6.1.4）；
-                // 将来 daemon 可在此注入聚合推荐。
-                recommendation: None,
+                // 单 issue：从 DetectionPayload 拷贝 recommendation（§6.1.4 B2）
+                recommendation,
                 source_agent: source_agent_str(&req.source_agent).to_owned(),
                 origin_chain: req.origin_chain.clone(),
                 source_channel: req.source_channel.clone(),
@@ -277,7 +279,8 @@ impl RequestDecisionWireKind {
                     } else {
                         Some(d.details.clone())
                     },
-                    recommendation: None,
+                    // 每个 issue 的 recommendation 直接拷贝（§6.1.4 B2）
+                    recommendation: d.recommendation.clone(),
                 })
                 .collect();
 
@@ -349,6 +352,30 @@ mod tests {
             title: format!("{rule_id} 标题"),
             one_line_summary: "摘要".to_owned(),
             details: serde_json::json!({}),
+            recommendation: None,
+        }
+    }
+
+    /// 辅助：构造带 recommendation 的 DetectionPayload。
+    fn make_detection_with_rec(
+        rule_id: &str,
+        severity: Severity,
+        disposition: Disposition,
+        decision: &str,
+        confidence: &str,
+    ) -> DetectionPayload {
+        DetectionPayload {
+            rule_id: rule_id.to_owned(),
+            severity,
+            disposition,
+            title: format!("{rule_id} 标题"),
+            one_line_summary: "摘要".to_owned(),
+            details: serde_json::json!({}),
+            recommendation: Some(serde_json::json!({
+                "decision": decision,
+                "confidence": confidence,
+                "reason": format!("{rule_id} 推荐理由"),
+            })),
         }
     }
 
@@ -467,5 +494,115 @@ mod tests {
             ts[dot_pos + 1..].trim_end_matches('Z').len() == 3
         };
         assert!(has_millis, "timestamp must have 3-digit millis, got: {ts}");
+    }
+
+    // ── B2：recommendation 字段真实注入测试（§6.1.4）────────────────────────────
+
+    /// 单 issue 含 high confidence allow recommendation → wire recommendation 被拷贝。
+    #[test]
+    fn single_issue_with_high_confidence_recommendation_copied() {
+        let d = make_detection_with_rec(
+            "IN-CR-05",
+            Severity::Critical,
+            Disposition::GuiPopup,
+            "allow",
+            "high",
+        );
+        let req = make_req(vec![d]);
+        let wire = RequestDecisionWireKind::from_request(&req, "inbound");
+        let val = wire.to_value().expect("serialize");
+
+        let rec = val
+            .get("recommendation")
+            .expect("recommendation 必须存在（B2：有 recommendation 时拷贝）");
+        assert_eq!(rec["decision"].as_str(), Some("allow"));
+        assert_eq!(rec["confidence"].as_str(), Some("high"));
+    }
+
+    /// 单 issue 无 recommendation → wire recommendation 缺失（§6.1.4 可选字段）。
+    #[test]
+    fn single_issue_no_recommendation_absent_from_wire() {
+        let req = make_req(vec![make_detection(
+            "IN-CR-01",
+            Severity::Critical,
+            Disposition::GuiPopup,
+        )]);
+        let wire = RequestDecisionWireKind::from_request(&req, "inbound");
+        let val = wire.to_value().expect("serialize");
+
+        assert!(
+            val.get("recommendation").is_none(),
+            "无 recommendation 时 wire 中不应出现该字段（skip_serializing_if）"
+        );
+    }
+
+    /// 多 issue：各 issue 的 recommendation 被拷贝到 issues[] 各项。
+    #[test]
+    fn multi_issue_recommendations_copied_per_issue() {
+        let d1 = make_detection_with_rec(
+            "IN-CR-05",
+            Severity::Critical,
+            Disposition::GuiPopup,
+            "deny",
+            "high",
+        );
+        let d2 = make_detection_with_rec(
+            "IN-GEN-04",
+            Severity::High,
+            Disposition::GuiPopup,
+            "deny",
+            "medium",
+        );
+        let req = make_req(vec![d1, d2]);
+        let wire = RequestDecisionWireKind::from_request(&req, "inbound");
+        let val = wire.to_value().expect("serialize");
+
+        assert_eq!(val["merged"], true);
+        let issues = val["issues"].as_array().expect("issues must be array");
+        assert_eq!(issues.len(), 2);
+
+        // 每个 issue 的 recommendation 被正确拷贝
+        assert_eq!(
+            issues[0]["recommendation"]["decision"].as_str(),
+            Some("deny")
+        );
+        assert_eq!(
+            issues[0]["recommendation"]["confidence"].as_str(),
+            Some("high")
+        );
+        assert_eq!(
+            issues[1]["recommendation"]["decision"].as_str(),
+            Some("deny")
+        );
+        assert_eq!(
+            issues[1]["recommendation"]["confidence"].as_str(),
+            Some("medium")
+        );
+    }
+
+    /// 多 issue，部分 issue 无 recommendation → issues[] 中对应项无 recommendation 字段。
+    #[test]
+    fn multi_issue_missing_recommendation_absent_in_issues() {
+        let d1 = make_detection_with_rec(
+            "IN-CR-05",
+            Severity::Critical,
+            Disposition::GuiPopup,
+            "deny",
+            "high",
+        );
+        let d2 = make_detection("IN-GEN-04", Severity::High, Disposition::GuiPopup); // no recommendation
+        let req = make_req(vec![d1, d2]);
+        let wire = RequestDecisionWireKind::from_request(&req, "inbound");
+        let val = wire.to_value().expect("serialize");
+
+        let issues = val["issues"].as_array().expect("issues must be array");
+        assert!(
+            issues[0].get("recommendation").is_some(),
+            "issue 0 有 recommendation，应出现"
+        );
+        assert!(
+            issues[1].get("recommendation").is_none(),
+            "issue 1 无 recommendation，wire 中不应出现"
+        );
     }
 }

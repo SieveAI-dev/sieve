@@ -1177,6 +1177,7 @@ async fn proxy_inner(
                         title: format!("IN-CR-06 OpenClaw Skill Install 检测：{}", d.rule_id),
                         one_line_summary: d.evidence_truncated.clone(),
                         details: serde_json::json!({ "path": path }),
+                        recommendation: None,
                     })
                     .collect();
 
@@ -1450,6 +1451,7 @@ async fn proxy_inner(
                         title: format!("出站检测命中：{}", d.rule_id),
                         one_line_summary: d.evidence_truncated.clone(),
                         details: serde_json::json!({}),
+                        recommendation: None,
                     })
                     .collect();
 
@@ -1958,6 +1960,7 @@ async fn proxy_openai(
                     title: format!("出站检测命中{chain_note}：{}", d.rule_id),
                     one_line_summary: d.evidence_truncated.clone(),
                     details: serde_json::json!({ "chain_depth": chain_depth }),
+                    recommendation: None,
                 })
                 .collect();
 
@@ -2466,6 +2469,7 @@ async fn forward_with_inbound_inspection(
                                     title: format!("检测命中：{}", d.rule_id),
                                     one_line_summary: d.evidence_truncated.clone(),
                                     details: serde_json::json!({}),
+                                    recommendation: None,
                                 })
                                 .collect();
 
@@ -2850,6 +2854,7 @@ async fn forward_with_openai_inbound_inspection(
                                     title: format!("检测命中（openai）：{}", d.rule_id),
                                     one_line_summary: d.evidence_truncated.clone(),
                                     details: serde_json::json!({}),
+                                    recommendation: None,
                                 })
                                 .collect();
 
@@ -3272,6 +3277,7 @@ fn write_hook_pending_to(
             title: format!("检测命中：{}", d.rule_id),
             one_line_summary: d.evidence_truncated.clone(),
             details: serde_json::json!({}),
+            recommendation: None,
         }],
         // 修 R7-#3：注入真实 multi-agent 元数据（不再硬编码 Unknown/empty）
         source_agent: meta.source_agent,

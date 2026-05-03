@@ -220,6 +220,7 @@ mod dispatch_impl {
                     title: format!("检测命中：{}", d.rule_id),
                     one_line_summary: d.evidence_truncated.clone(),
                     details: serde_json::json!({}),
+                    recommendation: None,
                 })
                 .collect();
 
@@ -264,6 +265,7 @@ mod dispatch_impl {
                     title: format!("检测命中：{}", d.rule_id),
                     one_line_summary: d.evidence_truncated.clone(),
                     details: serde_json::json!({}),
+                    recommendation: None,
                 })
                 .collect();
 

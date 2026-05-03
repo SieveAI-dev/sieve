@@ -201,6 +201,7 @@ mod tests {
                 title: "地址替换检测".to_owned(),
                 one_line_summary: "检测到可疑地址替换".to_owned(),
                 details: serde_json::json!({}),
+                recommendation: None,
             }],
             source_agent: sieve_ipc::SourceAgent::Unknown,
             origin_chain: vec![],
