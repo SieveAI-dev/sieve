@@ -125,6 +125,7 @@ async fn gated_request_decision(
     caller: &Option<crate::process_context::CallerInfo>,
     req: sieve_ipc::DecisionRequest,
     timeout: std::time::Duration,
+    direction: &str,
 ) -> Result<sieve_ipc::DecisionResponse, sieve_ipc::IpcError> {
     let any_critical = req
         .detections
@@ -132,7 +133,7 @@ async fn gated_request_decision(
         .any(|d| sieve_rules::critical_lock::is_fail_closed(&d.rule_id));
 
     if any_critical || !ipc.is_paused() {
-        return ipc.request_decision(req, timeout).await;
+        return ipc.request_decision(req, timeout, direction).await;
     }
 
     // 暂停 + 全部非 Critical → 自动决策
@@ -1206,6 +1207,7 @@ async fn proxy_inner(
                     &ctx.caller,
                     ipc_req,
                     timeout_dur,
+                    "inbound",
                 )
                 .await;
 
@@ -1478,6 +1480,7 @@ async fn proxy_inner(
                     &ctx.caller,
                     ipc_req,
                     timeout_dur,
+                    "outbound",
                 )
                 .await;
 
@@ -1978,9 +1981,15 @@ async fn proxy_openai(
             };
 
             let timeout_dur = std::time::Duration::from_secs(u64::from(timeout_seconds).max(1));
-            let outcome =
-                gated_request_decision(ipc_server, &audit_store, &caller, ipc_req, timeout_dur)
-                    .await;
+            let outcome = gated_request_decision(
+                ipc_server,
+                &audit_store,
+                &caller,
+                ipc_req,
+                timeout_dur,
+                "outbound",
+            )
+            .await;
 
             match outcome {
                 Ok(resp) => match resp.decision {
@@ -2484,6 +2493,7 @@ async fn forward_with_inbound_inspection(
                                 Arc::clone(ipc_server),
                                 ipc_req,
                                 ka_tx,
+                                "inbound",
                             )
                             .await;
 
@@ -2866,6 +2876,7 @@ async fn forward_with_openai_inbound_inspection(
                                 Arc::clone(ipc_server),
                                 ipc_req,
                                 ka_tx,
+                                "inbound",
                             )
                             .await;
 

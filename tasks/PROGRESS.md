@@ -12,6 +12,74 @@
 
 ## ✅ 已完成（按时间倒序）
 
+- **2026-05-03** P1-5 + P2-2 + P2-4 request_decision wire DTO 拆分（单 issue 平铺 / 多 issue merged + issues[]）+ received_at_daemon 字段名 + 时间戳 Z 后缀联动
+
+### P1-5 wire 格式参考（2026-05-03）
+
+**单 issue 形式**：
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "sieve.request_decision",
+  "id": "8f3a2b91-7c4e-4d8f-9b21-1a3c5e7f9d02",
+  "params": {
+    "request_id": "8f3a2b91-7c4e-4d8f-9b21-1a3c5e7f9d02",
+    "rule_id": "IN-CR-05",
+    "title": "签名工具调用：signTransaction",
+    "severity": "critical",
+    "direction": "inbound",
+    "disposition": "gui_popup",
+    "timeout_seconds": 120,
+    "default_on_timeout": "block",
+    "allow_remember": false,
+    "merged": false,
+    "received_at_daemon": "2026-05-02T15:03:11.234Z",
+    "source_agent": "claude",
+    "origin_chain": [],
+    "explicit_chain_depth": 0
+  }
+}
+```
+
+**多 issue merged 形式**：
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "sieve.request_decision",
+  "id": "9c1d8b73-2a4f-4e6c-b5d8-3e7f1a9c2b04",
+  "params": {
+    "request_id": "9c1d8b73-2a4f-4e6c-b5d8-3e7f1a9c2b04",
+    "title": "Sieve 检测到 2 个安全问题",
+    "severity": "critical",
+    "direction": "inbound",
+    "disposition": "gui_popup",
+    "timeout_seconds": 30,
+    "default_on_timeout": "block",
+    "allow_remember": false,
+    "merged": true,
+    "received_at_daemon": "2026-05-02T15:03:11.234Z",
+    "source_agent": "claude",
+    "origin_chain": [],
+    "issues": [
+      {
+        "issue_id": "i-1",
+        "rule_id": "IN-CR-05",
+        "title": "签名工具调用：signTransaction",
+        "severity": "critical",
+        "allow_remember": false
+      },
+      {
+        "issue_id": "i-2",
+        "rule_id": "IN-GEN-04",
+        "title": "Markdown 图片外链",
+        "severity": "high",
+        "allow_remember": true
+      }
+    ]
+  }
+}
+```
+
 - **2026-05-03** P2-5 tests/fixtures/v2/ 骨架（3 method × minimal/full/null_optional = 7 条 fixture；schema_v2_fixtures.rs 6 条测试通过；TODO 清单剩余 14 method）
 - **2026-05-03** P2 字段类型/序列化对齐（P2-1 usize→u32 + P2-3 Timestamp millis+Z + P2-6 EvaluateRequest.source_agent String→SourceAgent enum）
 - **2026-05-03** P1-NEW GUI→daemon error response 按段位清理 pending（-32100~99 段清理 pending decision channel，防泄漏；集成测试验证 -32100 → fallback 不 hang）
@@ -70,7 +138,7 @@ _无。等用户选定下一步执行哪一组 P0 后填入。建议每次最多
 - [x] **[P1-2]** `PresetChangedNotify` + `PausedChangedNotify` 加 `origin_request_id: Option<Uuid>`（§10.0–10.2）（2026-05-03 完成，P1-9 前暂用 None）
 - [x] **[P1-3]** `HealthResult.paused` 拆为 `paused: bool` + 独立 `paused_until: Option<DateTime<Utc>>`（§9.5）（2026-05-03 完成）
 - [x] **[P1-4]** `DecisionResponse` 加 `ui_phase_when_clicked: Option<UiPhase>`（§6.2.1, §5.10）（2026-05-03 完成）
-- [ ] **[P1-5]** `sieve.request_decision` 拆 wire DTO（§6.0, §6.1）— 字段展开 + `merged: true` + `received_at_daemon`；这是改造工作量最大的一项
+- [x] **[P1-5]** `sieve.request_decision` 拆 wire DTO（§6.0, §6.1）— 字段展开 + `merged: true` + `received_at_daemon`（2026-05-03 完成）
 - [x] **[P1-6]** `protocol_version` 字符串全部 `"v1"` → `"v2"`（含 `tests/control_plane_dispatch.rs:52,142`）（2026-05-03 完成）
 - [x] **[P1-7]** `NotifyKind` 加 `HookTerminal` 变体（§5.9）（2026-05-03 完成）
 - [x] **[P1-8]** JSON 解析失败返回 `-32700 parse_error` 而非静默 return（§1.3.1, §12.2）— 加 `PARSE_ERROR` 常量（2026-05-03 完成）
@@ -82,9 +150,9 @@ _无。等用户选定下一步执行哪一组 P0 后填入。建议每次最多
 ### P2 风格 / 可读性
 
 - [x] **[P2-1]** `*_count` 字段类型 `usize` → `u32`（§9.4 等）（2026-05-03 完成）
-- [ ] **[P2-2]** P1-5 wire DTO 拆分时把 `created_at` 命名为 `received_at_daemon`（依赖 P1-5，跳过，随 P1-5 wire DTO 拆分时一并处理）
+- [x] **[P2-2]** P1-5 wire DTO 拆分时把 `created_at` 命名为 `received_at_daemon`（2026-05-03 完成，随 P1-5 一并处理）
 - [x] **[P2-3]** Timestamp 序列化保证 `Z` 后缀 + 毫秒精度（§4A）（2026-05-03 完成，新增 ts_serde.rs）
-- [ ] **[P2-4]** 多 issue 合并形式（`merged: true` + `issues[]`）实现（§6.1.2, §6.2.2）（依赖 P1-5，跳过，随 P1-5 wire DTO 拆分时一并处理）
+- [x] **[P2-4]** 多 issue 合并形式（`merged: true` + `issues[]`）实现（§6.1.2, §6.2.2）（2026-05-03 完成，随 P1-5 一并处理）
 - [x] **[P2-5]** 建立 `tests/fixtures/v2/` + `tests/schema_v2_fixtures.rs`（骨架：3 method × minimal/full/null = 6 条测试通过；剩余 14 method 待补至 51 条）（2026-05-03 完成骨架）
 - [x] **[P2-6]** `EvaluateRequest.source_agent` 改 `SourceAgent` enum（§5.7）— 测试中废弃 `"claude-code"`（2026-05-03 完成）
 

@@ -1,0 +1,39 @@
+{
+  "jsonrpc": "2.0",
+  "method": "sieve.request_decision",
+  "id": "8f3a2b91-7c4e-4d8f-9b21-1a3c5e7f9d02",
+  "params": {
+    "request_id": "8f3a2b91-7c4e-4d8f-9b21-1a3c5e7f9d02",
+    "rule_id": "IN-CR-05",
+    "title": "签名工具调用：signTransaction",
+    "severity": "critical",
+    "direction": "inbound",
+    "disposition": "gui_popup",
+    "timeout_seconds": 120,
+    "default_on_timeout": "block",
+    "allow_remember": false,
+    "merged": false,
+    "received_at_daemon": "2026-05-02T15:03:11.234Z",
+    "context": {
+      "template": "signing_tool_use",
+      "tool_name": "signTransaction",
+      "chain": "Ethereum",
+      "chain_id": 1,
+      "typed_data": {},
+      "flags": {
+        "infinite_amount": true,
+        "deadline_zero": true,
+        "approve_all": false
+      }
+    },
+    "recommendation": {
+      "decision": "deny",
+      "confidence": "high",
+      "reason": "deadline=0 + 无限 amount 是 Permit2 钓鱼经典模式"
+    },
+    "source_agent": "claude",
+    "origin_chain": [],
+    "source_channel": null,
+    "explicit_chain_depth": 0
+  }
+}

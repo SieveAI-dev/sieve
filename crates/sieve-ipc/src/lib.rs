@@ -13,6 +13,7 @@ pub mod protocol;
 pub mod socket_client;
 pub mod socket_server;
 pub mod ts_serde;
+pub mod wire;
 
 // 常用类型直接 re-export，调用方无需深层 import。
 pub use error::IpcError;
@@ -602,7 +603,7 @@ mod socket_tests {
 
         let req = make_request(id);
         let result = server
-            .request_decision(req, Duration::from_secs(3))
+            .request_decision(req, Duration::from_secs(3), "inbound")
             .await
             .unwrap();
 
@@ -636,7 +637,7 @@ mod socket_tests {
 
         let start = std::time::Instant::now();
         let result = server
-            .request_decision(req, Duration::from_secs(5))
+            .request_decision(req, Duration::from_secs(5), "inbound")
             .await
             .unwrap();
         let elapsed = start.elapsed();
@@ -689,7 +690,7 @@ mod socket_tests {
         let start = std::time::Instant::now();
         // 给很长的 timeout，期望断线后快速 fallback。
         let result = server
-            .request_decision(req, Duration::from_secs(10))
+            .request_decision(req, Duration::from_secs(10), "inbound")
             .await
             .unwrap();
         let elapsed = start.elapsed();
@@ -789,7 +790,8 @@ mod socket_tests {
             let s = Arc::clone(&server);
             let req = make_request(id);
             handles.push(tokio::spawn(async move {
-                s.request_decision(req, Duration::from_secs(5)).await
+                s.request_decision(req, Duration::from_secs(5), "inbound")
+                    .await
             }));
         }
 
@@ -819,7 +821,7 @@ mod socket_tests {
         let id_before = Uuid::now_v7();
         let req_before = make_request(id_before);
         let before = server
-            .request_decision(req_before, Duration::from_secs(5))
+            .request_decision(req_before, Duration::from_secs(5), "inbound")
             .await
             .unwrap();
         // 没有 GUI，立即 fallback（by_user=false）。
@@ -841,7 +843,7 @@ mod socket_tests {
 
         let req_after = make_request(id_after);
         let after = server
-            .request_decision(req_after, Duration::from_secs(3))
+            .request_decision(req_after, Duration::from_secs(3), "inbound")
             .await
             .unwrap();
         // GUI 已连接，回复了 Deny，by_user=true。
@@ -885,7 +887,7 @@ mod socket_tests {
 
         // GUI 连着但不回复，100ms 超时后应返回 Allow（default_on_timeout）。
         let result = server
-            .request_decision(req, Duration::from_millis(100))
+            .request_decision(req, Duration::from_millis(100), "inbound")
             .await
             .unwrap();
         assert_eq!(result.decision, DecisionAction::Allow);
