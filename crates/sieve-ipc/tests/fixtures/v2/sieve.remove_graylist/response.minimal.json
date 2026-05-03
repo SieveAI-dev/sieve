@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "removed": true,
+    "audit_event_id": "evt-001"
+  },
+  "id": "req-rm-gray-1"
+}

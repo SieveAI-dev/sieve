@@ -1,0 +1,13 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "applied": ["IN-GEN-04"],
+    "rejected": [
+      {
+        "rule_id": "IN-CR-05",
+        "reason": "critical_lock"
+      }
+    ]
+  },
+  "id": "req-overrides-2"
+}

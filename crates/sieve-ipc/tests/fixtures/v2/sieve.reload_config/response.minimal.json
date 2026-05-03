@@ -1,0 +1,10 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "reloaded_at": "2026-05-03T12:00:00.000Z",
+    "system_rules_count": 12,
+    "user_rules_count": 0,
+    "user_rules_errors": []
+  },
+  "id": "req-reload-1"
+}

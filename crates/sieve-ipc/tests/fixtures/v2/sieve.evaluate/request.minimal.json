@@ -1,0 +1,10 @@
+{
+  "jsonrpc": "2.0",
+  "method": "sieve.evaluate",
+  "params": {
+    "direction": "outbound",
+    "content_kind": "raw_text",
+    "payload": "send 0.1 ETH to 0xAbCd..."
+  },
+  "id": "req-eval-1"
+}

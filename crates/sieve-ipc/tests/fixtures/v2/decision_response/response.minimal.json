@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "request_id": "8f3a2b91-7c4e-4d8f-9b21-1a3c5e7f9d02",
+    "decision": "deny",
+    "decided_at": "2026-05-03T12:01:00.000Z",
+    "by_user": true,
+    "remember": false
+  },
+  "id": "8f3a2b91-7c4e-4d8f-9b21-1a3c5e7f9d02"
+}

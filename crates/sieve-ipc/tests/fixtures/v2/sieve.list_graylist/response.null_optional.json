@@ -1,0 +1,19 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "entries": [
+      {
+        "fingerprint": "sha256:fedcba0987654321",
+        "rule_id": "IN-GEN-05",
+        "rule_kind": "user",
+        "added_at": 1746273600000,
+        "added_by": "user",
+        "context_hint": null,
+        "match_count_since": 1,
+        "expires_at": null
+      }
+    ],
+    "next_cursor": null
+  },
+  "id": "req-gray-3"
+}

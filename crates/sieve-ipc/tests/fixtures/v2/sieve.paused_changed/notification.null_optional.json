@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "method": "sieve.paused_changed",
+  "params": {
+    "paused": false,
+    "paused_until": null,
+    "reason": "auto_resumed",
+    "applies_to": [],
+    "origin_request_id": null
+  }
+}

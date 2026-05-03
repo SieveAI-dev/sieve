@@ -1,0 +1,20 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "evaluated_at": "2026-05-03T12:00:00.000Z",
+    "matches": [
+      {
+        "rule_id": "IN-GEN-04",
+        "rule_kind": "system",
+        "severity": "medium",
+        "disposition": "status_bar",
+        "matched_pattern_summary": "外链 pattern",
+        "fields_triggered": ["content"],
+        "would_decision": "allow",
+        "would_recommendation": null
+      }
+    ],
+    "no_match": []
+  },
+  "id": "req-eval-3"
+}

@@ -1,0 +1,6 @@
+{
+  "jsonrpc": "2.0",
+  "method": "sieve.list_graylist",
+  "params": {},
+  "id": "req-gray-1"
+}

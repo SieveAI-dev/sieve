@@ -1,0 +1,7 @@
+{
+  "jsonrpc": "2.0",
+  "method": "sieve.reload_user_rules",
+  "params": {
+    "trigger_id": null
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "removed": false,
+    "audit_event_id": "evt-not-found"
+  },
+  "id": "req-rm-gray-3"
+}

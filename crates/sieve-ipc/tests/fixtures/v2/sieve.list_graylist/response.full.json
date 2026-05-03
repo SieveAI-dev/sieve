@@ -1,0 +1,19 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "entries": [
+      {
+        "fingerprint": "sha256:abcdef1234567890",
+        "rule_id": "IN-GEN-04",
+        "rule_kind": "system",
+        "added_at": 1746273600000,
+        "added_by": "user",
+        "context_hint": "这是安全测试，允许",
+        "match_count_since": 3,
+        "expires_at": 1746360000000
+      }
+    ],
+    "next_cursor": "eyJsYXN0X2lkIjoieHl6In0"
+  },
+  "id": "req-gray-2"
+}

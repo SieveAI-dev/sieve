@@ -1,0 +1,10 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "reloaded_at": "2026-05-03T12:00:10.000Z",
+    "system_rules_count": 12,
+    "user_rules_count": 2,
+    "user_rules_errors": ["rule MY-RULE-01: invalid pattern syntax at line 3"]
+  },
+  "id": "req-reload-3"
+}

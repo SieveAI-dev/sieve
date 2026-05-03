@@ -1,0 +1,6 @@
+{
+  "jsonrpc": "2.0",
+  "method": "sieve.reload_config",
+  "params": {},
+  "id": "req-reload-2"
+}

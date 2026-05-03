@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "method": "sieve.notify_status_bar",
+  "params": {
+    "notify_id": "01900000-0000-7001-0000-000000000001",
+    "created_at": "2026-05-03T12:00:00.000Z",
+    "kind": "sequence_hit",
+    "title": "检测到侦察-外泄行为序列",
+    "auto_dismiss_seconds": 5
+  }
+}

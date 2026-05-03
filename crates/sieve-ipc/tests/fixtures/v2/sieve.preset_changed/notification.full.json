@@ -1,0 +1,16 @@
+{
+  "jsonrpc": "2.0",
+  "method": "sieve.preset_changed",
+  "params": {
+    "mode": "custom",
+    "overrides": {
+      "IN-GEN-04": {
+        "timeout_seconds": 60,
+        "default_on_timeout": "allow"
+      }
+    },
+    "changed_at": "2026-05-03T12:00:00.000Z",
+    "source": "gui",
+    "origin_request_id": "01900000-0000-7002-0000-000000000001"
+  }
+}

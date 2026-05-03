@@ -1,0 +1,17 @@
+{
+  "jsonrpc": "2.0",
+  "method": "sieve.set_preset_overrides",
+  "params": {
+    "overrides": {
+      "IN-GEN-04": {
+        "timeout_seconds": 60,
+        "default_on_timeout": "allow"
+      },
+      "IN-GEN-05": {
+        "timeout_seconds": 90,
+        "default_on_timeout": "block"
+      }
+    }
+  },
+  "id": "req-overrides-2"
+}

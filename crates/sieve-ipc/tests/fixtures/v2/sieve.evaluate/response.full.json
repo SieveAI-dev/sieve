@@ -1,0 +1,24 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "evaluated_at": "2026-05-03T12:00:00.000Z",
+    "matches": [
+      {
+        "rule_id": "IN-CR-05",
+        "rule_kind": "system",
+        "severity": "critical",
+        "disposition": "gui_popup",
+        "matched_pattern_summary": "signTransaction 工具调用",
+        "fields_triggered": ["tool_name"],
+        "would_decision": "deny",
+        "would_recommendation": {
+          "decision": "deny",
+          "confidence": "high",
+          "reason": "检测到高风险签名操作"
+        }
+      }
+    ],
+    "no_match": ["IN-GEN-04", "OUT-01-API-KEY"]
+  },
+  "id": "req-eval-2"
+}
