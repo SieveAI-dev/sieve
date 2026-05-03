@@ -12,6 +12,7 @@
 
 ## ✅ 已完成（按时间倒序）
 
+- **2026-05-03** 端到端集成测试 harness（A1：6 场景：握手/heartbeat 时间加速/request_decision 单 issue/merged/重连 boot_id 一致性/set_paused 串行化），mock GUI client + 真实 IpcServer spawn，`tests/end_to_end.rs`
 - **2026-05-03** P1-9 后续 origin_request_id 真实透传到 broadcast notification（ControlPlaneRequest 加 origin_request_id 字段，dispatch 从 JSON-RPC id 解析 UUID，handler 填到 PausedChangedNotify / PresetChangedNotify）
 - **2026-05-03** P1-5 + P2-2 + P2-4 request_decision wire DTO 拆分（单 issue 平铺 / 多 issue merged + issues[]）+ received_at_daemon 字段名 + 时间戳 Z 后缀联动
 
