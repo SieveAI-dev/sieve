@@ -135,16 +135,26 @@ pub enum ControlPlaneRequest {
     /// SPEC-005 §10.0.1：reply 携带 BroadcastPlan，IPC server 先 fan-out 再写 result。
     SetPaused {
         params: SetPausedRequest,
+        /// 触发本次变更的原始 GUI 请求 ID（SPEC-005 §10.0.2）。
+        ///
+        /// 从 JSON-RPC `id` 字段解析（GUI 发送的字符串 UUID）；
+        /// 非 UUID 格式（如整数 id）时为 `None`。handler 应将此值填入
+        /// `PausedChangedNotify.origin_request_id`，使 GUI 能识别"本地回声"。
+        origin_request_id: Option<Uuid>,
         reply: oneshot::Sender<Result<(SetPausedResult, Option<BroadcastPlan>), ControlError>>,
     },
     /// SPEC-005 §10.0.1：reply 携带 BroadcastPlan，IPC server 先 fan-out 再写 result。
     SetPreset {
         params: SetPresetRequest,
+        /// 触发本次变更的原始 GUI 请求 ID（SPEC-005 §10.0.2）。同 SetPaused 语义。
+        origin_request_id: Option<Uuid>,
         reply: oneshot::Sender<Result<(SetPresetResult, Option<BroadcastPlan>), ControlError>>,
     },
     /// SPEC-005 §10.0.1：reply 携带 BroadcastPlan，IPC server 先 fan-out 再写 result。
     SetPresetOverrides {
         params: SetPresetOverridesRequest,
+        /// 触发本次变更的原始 GUI 请求 ID（SPEC-005 §10.0.2）。同 SetPaused 语义。
+        origin_request_id: Option<Uuid>,
         reply: oneshot::Sender<
             Result<(SetPresetOverridesResult, Option<BroadcastPlan>), ControlError>,
         >,
@@ -1134,15 +1144,27 @@ async fn dispatch_control_plane(
         serde_json::from_value(v).map_err(|e| ControlError::invalid_params(e.to_string()))
     }
 
+    /// 从 JSON-RPC `id` 字段尝试解析 UUID（SPEC-005 §10.0.2 origin_request_id 透传）。
+    ///
+    /// GUI 发送的 `id` 通常是 UUID 字符串；整数 `id` 时返回 `None`（无法映射为 UUID）。
+    fn extract_origin_uuid(id: &serde_json::Value) -> Option<Uuid> {
+        id.as_str()?.parse().ok()
+    }
+
     match method {
         "sieve.set_paused" => {
             let p: SetPausedRequest = match require_params(params) {
                 Ok(p) => p,
                 Err(e) => return write_error_response(id, e, write_tx).await,
             };
+            let origin_request_id = extract_origin_uuid(&id);
             let (reply, rx) = oneshot::channel();
             if control_tx
-                .send(ControlPlaneRequest::SetPaused { params: p, reply })
+                .send(ControlPlaneRequest::SetPaused {
+                    params: p,
+                    origin_request_id,
+                    reply,
+                })
                 .await
                 .is_err()
             {
@@ -1161,9 +1183,14 @@ async fn dispatch_control_plane(
                 Ok(p) => p,
                 Err(e) => return write_error_response(id, e, write_tx).await,
             };
+            let origin_request_id = extract_origin_uuid(&id);
             let (reply, rx) = oneshot::channel();
             if control_tx
-                .send(ControlPlaneRequest::SetPreset { params: p, reply })
+                .send(ControlPlaneRequest::SetPreset {
+                    params: p,
+                    origin_request_id,
+                    reply,
+                })
                 .await
                 .is_err()
             {
@@ -1182,9 +1209,14 @@ async fn dispatch_control_plane(
                 Ok(p) => p,
                 Err(e) => return write_error_response(id, e, write_tx).await,
             };
+            let origin_request_id = extract_origin_uuid(&id);
             let (reply, rx) = oneshot::channel();
             if control_tx
-                .send(ControlPlaneRequest::SetPresetOverrides { params: p, reply })
+                .send(ControlPlaneRequest::SetPresetOverrides {
+                    params: p,
+                    origin_request_id,
+                    reply,
+                })
                 .await
                 .is_err()
             {

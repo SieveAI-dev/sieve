@@ -12,6 +12,7 @@
 
 ## ✅ 已完成（按时间倒序）
 
+- **2026-05-03** P1-9 后续 origin_request_id 真实透传到 broadcast notification（ControlPlaneRequest 加 origin_request_id 字段，dispatch 从 JSON-RPC id 解析 UUID，handler 填到 PausedChangedNotify / PresetChangedNotify）
 - **2026-05-03** P1-5 + P2-2 + P2-4 request_decision wire DTO 拆分（单 issue 平铺 / 多 issue merged + issues[]）+ received_at_daemon 字段名 + 时间戳 Z 后缀联动
 
 ### P1-5 wire 格式参考（2026-05-03）
@@ -135,14 +136,14 @@ _无。等用户选定下一步执行哪一组 P0 后填入。建议每次最多
 ### P1 字段/行为偏差
 
 - [x] **[P1-1]** `SetPausedResult.until` → `paused_until`（§9.1, §10.2）— 含 `PausedChangedNotify`（2026-05-03 完成）
-- [x] **[P1-2]** `PresetChangedNotify` + `PausedChangedNotify` 加 `origin_request_id: Option<Uuid>`（§10.0–10.2）（2026-05-03 完成，P1-9 前暂用 None）
+- [x] **[P1-2]** `PresetChangedNotify` + `PausedChangedNotify` 加 `origin_request_id: Option<Uuid>`（§10.0–10.2）（2026-05-03 完成；P1-9 后续已透传真实 request_id）
 - [x] **[P1-3]** `HealthResult.paused` 拆为 `paused: bool` + 独立 `paused_until: Option<DateTime<Utc>>`（§9.5）（2026-05-03 完成）
 - [x] **[P1-4]** `DecisionResponse` 加 `ui_phase_when_clicked: Option<UiPhase>`（§6.2.1, §5.10）（2026-05-03 完成）
 - [x] **[P1-5]** `sieve.request_decision` 拆 wire DTO（§6.0, §6.1）— 字段展开 + `merged: true` + `received_at_daemon`（2026-05-03 完成）
 - [x] **[P1-6]** `protocol_version` 字符串全部 `"v1"` → `"v2"`（含 `tests/control_plane_dispatch.rs:52,142`）（2026-05-03 完成）
 - [x] **[P1-7]** `NotifyKind` 加 `HookTerminal` 变体（§5.9）（2026-05-03 完成）
 - [x] **[P1-8]** JSON 解析失败返回 `-32700 parse_error` 而非静默 return（§1.3.1, §12.2）— 加 `PARSE_ERROR` 常量（2026-05-03 完成）
-- [x] **[P1-9]** `sieve.set_paused` 响应前强制 fan-out（§10.0.1）— 改 `ControlPlaneRequest` 回执结构，让 `forward_reply` 在写 result 前先 broadcast（2026-05-03 完成，方案 A）
+- [x] **[P1-9]** `sieve.set_paused` 响应前强制 fan-out（§10.0.1）— 改 `ControlPlaneRequest` 回执结构，让 `forward_reply` 在写 result 前先 broadcast（2026-05-03 完成）；origin_request_id 真实透传（2026-05-03 后续完成）
 - [x] **[P1-10]** fan-out 写入加 2 秒 bounded write timeout（§10.0.1）— EPIPE/ECONNRESET/EBADF 视为失联（2026-05-03 完成）
 - [x] **[P1-NEW pending-leak]** GUI→daemon error response 按段位处理 pending（§12.4 + 子代理 2026-05-03 发现）（2026-05-03 完成）
   - dispatch_message 收到 -32100~-32199 段时，drop pending channel → fallback，防泄漏

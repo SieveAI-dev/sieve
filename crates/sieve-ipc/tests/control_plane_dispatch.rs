@@ -31,7 +31,11 @@ fn spawn_mock_daemon(server: Arc<IpcServer>) {
         let mut rx = server.control_rx().await.expect("control_rx");
         while let Some(req) = rx.recv().await {
             match req {
-                ControlPlaneRequest::SetPaused { params, reply } => {
+                ControlPlaneRequest::SetPaused {
+                    params,
+                    origin_request_id: _,
+                    reply,
+                } => {
                     let paused = params.minutes > 0;
                     let broadcast = Some(BroadcastPlan::PausedChanged(PausedChangedNotify {
                         paused,
@@ -426,14 +430,19 @@ async fn set_paused_fan_out_before_result() {
     tokio::spawn(async move {
         let mut rx = server_for_daemon.control_rx().await.unwrap();
         while let Some(req) = rx.recv().await {
-            if let ControlPlaneRequest::SetPaused { params, reply } = req {
+            if let ControlPlaneRequest::SetPaused {
+                params,
+                origin_request_id,
+                reply,
+            } = req
+            {
                 let paused = params.minutes > 0;
                 let broadcast = Some(BroadcastPlan::PausedChanged(PausedChangedNotify {
                     paused,
                     paused_until: None,
                     reason: "user_request".to_owned(),
                     applies_to: vec!["AutoRedact".to_owned()],
-                    origin_request_id: None,
+                    origin_request_id,
                 }));
                 let _ = reply.send(Ok((
                     SetPausedResult {
@@ -613,4 +622,128 @@ async fn gui_error_response_clears_pending_decision() {
     );
 
     gui_task.abort();
+}
+
+/// SPEC-005 §10.0.2：set_paused 的 origin_request_id 必须透传到 paused_changed broadcast。
+///
+/// GUI 发 set_paused 时使用 UUID 字符串 id；mock daemon handler 把
+/// ControlPlaneRequest::SetPaused.origin_request_id 透传到 PausedChangedNotify；
+/// 观察者 GUI 收到的 paused_changed 通知必须携带相同 id。
+#[tokio::test]
+async fn set_paused_origin_request_id_propagated_to_broadcast() {
+    use sieve_ipc::ControlPlaneRequest;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use uuid::Uuid;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let socket_path = tmp.path().join("ipc.sock");
+    let server = start_server(&socket_path).await;
+
+    // mock daemon：把 origin_request_id 透传到 broadcast（模拟真实 handler 行为）。
+    let server_for_daemon = Arc::clone(&server);
+    tokio::spawn(async move {
+        let mut rx = server_for_daemon.control_rx().await.unwrap();
+        while let Some(req) = rx.recv().await {
+            if let ControlPlaneRequest::SetPaused {
+                params,
+                origin_request_id,
+                reply,
+            } = req
+            {
+                let paused = params.minutes > 0;
+                // 透传 origin_request_id 到 PausedChangedNotify（P1-9 后续）。
+                let broadcast = Some(BroadcastPlan::PausedChanged(PausedChangedNotify {
+                    paused,
+                    paused_until: None,
+                    reason: "user_request".to_owned(),
+                    applies_to: vec!["gui_popup".to_owned()],
+                    origin_request_id,
+                }));
+                let _ = reply.send(Ok((
+                    SetPausedResult {
+                        paused,
+                        paused_until: None,
+                        applies_to: vec!["gui_popup".to_owned()],
+                    },
+                    broadcast,
+                )));
+            }
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    // 观察者 GUI（第二个连接，接收 fan-out 通知）。
+    let path_for_observer = socket_path.clone();
+    let (obs_tx, mut obs_rx) = tokio::sync::mpsc::channel::<String>(16);
+    let observer_task = tokio::spawn(async move {
+        let stream = tokio::net::UnixStream::connect(&path_for_observer)
+            .await
+            .unwrap();
+        let (read_half, _write_half) = stream.into_split();
+        let mut lines = BufReader::new(read_half).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            let _ = obs_tx.send(line).await;
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(30)).await;
+
+    // 请求方：使用 UUID 字符串作为 JSON-RPC id。
+    let request_uuid = Uuid::now_v7();
+    let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
+    let (read_half, mut write_half) = stream.into_split();
+    let mut req_lines = BufReader::new(read_half).lines();
+
+    let req = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "sieve.set_paused",
+        "params": { "minutes": 15 },
+        "id": request_uuid.to_string(),
+    });
+    let mut payload = serde_json::to_string(&req).unwrap();
+    payload.push('\n');
+    write_half.write_all(payload.as_bytes()).await.unwrap();
+
+    // 等待 result（跳过 hello notification）。
+    loop {
+        let line = tokio::time::timeout(Duration::from_secs(3), req_lines.next_line())
+            .await
+            .expect("timeout waiting for set_paused result")
+            .unwrap()
+            .expect("connection closed");
+        let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+        if v.get("method").is_none() {
+            assert!(v.get("error").is_none(), "set_paused should succeed: {v}");
+            break;
+        }
+    }
+
+    // 验证观察者收到的 paused_changed 通知携带 origin_request_id。
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(500);
+    let mut got_origin_id = false;
+    while tokio::time::Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_millis(100), obs_rx.recv()).await {
+            Ok(Some(line)) => {
+                let v: serde_json::Value = serde_json::from_str(&line).unwrap_or_default();
+                if v["method"].as_str() == Some("sieve.paused_changed") {
+                    let got_id = v["params"]["origin_request_id"]
+                        .as_str()
+                        .unwrap_or_default();
+                    assert_eq!(
+                        got_id,
+                        request_uuid.to_string().as_str(),
+                        "origin_request_id must equal JSON-RPC id (§10.0.2)"
+                    );
+                    got_origin_id = true;
+                    break;
+                }
+            }
+            _ => break,
+        }
+    }
+    assert!(
+        got_origin_id,
+        "paused_changed broadcast must carry origin_request_id (P1-9 后续)"
+    );
+
+    observer_task.abort();
 }
