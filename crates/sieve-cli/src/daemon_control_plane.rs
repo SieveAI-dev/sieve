@@ -18,6 +18,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
@@ -27,9 +28,10 @@ use chrono::{DateTime, Utc};
 use sieve_ipc::{
     AuditDbSnapshot, BroadcastPlan, ControlError, ControlPlaneRequest, EvaluateMatch,
     EvaluateResult, GraylistEntrySummary, GraylistSnapshot, HealthResult, IpcServer, IpcSnapshot,
-    ListGraylistResult, ListenSnapshot, PausedChangedNotify, PresetChangedNotify, PresetOverride,
-    PresetSnapshot, RejectedOverride, ReloadConfigResult, RemoveGraylistResult, RulesSnapshot,
-    SetPausedResult, SetPresetOverridesResult, SetPresetResult,
+    ListGraylistResult, ListRulesResult, ListenSnapshot, PausedChangedNotify, PresetChangedNotify,
+    PresetOverride, PresetSnapshot, PurgeHistoryResult, RejectedOverride, ReloadConfigResult,
+    RemoveGraylistResult, RuleSummary, RulesSnapshot, SetPausedResult, SetPresetOverridesResult,
+    SetPresetResult,
 };
 use uuid::Uuid;
 
@@ -63,6 +65,10 @@ pub struct RuntimeState {
     pub user_rules_count: ArcSwap<usize>,
     /// 上次 reload 时间。
     pub last_reload: ArcSwap<Option<DateTime<Utc>>>,
+    /// `sieve.purge_history` 并发防护标志（SPEC-005 §11B）。
+    ///
+    /// CAS 操作：true 表示 purge 正在进行，此时第二个请求立即返回 `-32007 purge_in_progress`。
+    pub purge_in_progress: AtomicBool,
 }
 
 /// 运行时 preset 快照（mode + 逐规则覆盖）。
@@ -241,6 +247,17 @@ async fn dispatch_request(
         }
         ControlPlaneRequest::RemoveGraylist { params, reply } => {
             let result = handle_remove_graylist(params, audit, state).await;
+            let _ = reply.send(result);
+        }
+        // SPEC-005 §11A：只读，不走串行化队列（§10.0.1 只读请求并发例外）。
+        ControlPlaneRequest::ListRules { reply } => {
+            let result =
+                handle_list_rules(outbound_layered, inbound_layered).await;
+            let _ = reply.send(result);
+        }
+        // SPEC-005 §11B：写操作，通过互斥 flag 防并发。
+        ControlPlaneRequest::PurgeHistory { params, reply } => {
+            let result = handle_purge_history(params, audit, state).await;
             let _ = reply.send(result);
         }
     }
@@ -766,6 +783,185 @@ async fn handle_remove_graylist(
     })
 }
 
+// ─────────────────────────── v2.0+ 兼容扩展 handlers ───────────────────────
+
+/// SPEC-005 §11A `sieve.list_rules`（v2.0+ 兼容扩展）。
+///
+/// 只读操作，不经过串行化队列（§10.0.1 只读请求并发例外）。
+/// 从 inbound + outbound 两个 LayeredEngine 各取系统规则；用户规则当前未在 list 中
+/// 区分方向（用 rule_id `user:` 前缀 + UserEngine source_rules 暂不对外暴露）。
+///
+/// **注意**：`RuleEntry.id` 是规则 ID，无独立 `title` 字段，此处用 `description`
+/// 作为 title 的 fallback（SPEC-005 §11A `title` 说明："UI 显示标题"）。
+async fn handle_list_rules(
+    outbound_layered: &Arc<
+        sieve_rules::engine::LayeredEngine<
+            sieve_rules::engine::VectorscanEngine,
+            sieve_policy::engine::UserEngine,
+        >,
+    >,
+    inbound_layered: &Arc<
+        sieve_rules::engine::LayeredEngine<
+            sieve_rules::engine::VectorscanEngine,
+            sieve_policy::engine::UserEngine,
+        >,
+    >,
+) -> Result<ListRulesResult, ControlError> {
+    use sieve_rules::manifest::{DefaultOnTimeout, Disposition, Severity};
+
+    let mut rules: Vec<RuleSummary> = Vec::new();
+
+    // ── 系统规则：outbound ──────────────────────────────────────────────────
+    let outbound_sys = outbound_layered.system_rules_snapshot();
+    for entry in &outbound_sys {
+        let disp = entry.effective_disposition();
+        let critical_lock = sieve_rules::critical_lock::is_fail_closed(&entry.id);
+        let (default_on_timeout, timeout_seconds) = if disp == Disposition::GuiPopup {
+            let dot = match entry.default_on_timeout {
+                DefaultOnTimeout::Block => Some("block".to_owned()),
+                DefaultOnTimeout::Allow => Some("allow".to_owned()),
+                DefaultOnTimeout::Redact => Some("redact".to_owned()),
+            };
+            (dot, entry.timeout_seconds)
+        } else {
+            (None, None)
+        };
+        rules.push(RuleSummary {
+            rule_id: entry.id.clone(),
+            title: entry.description.clone(),
+            severity: match entry.severity {
+                Severity::Low => "low".to_owned(),
+                Severity::Medium => "medium".to_owned(),
+                Severity::High => "high".to_owned(),
+                Severity::Critical => "critical".to_owned(),
+            },
+            direction: "outbound".to_owned(),
+            disposition: match disp {
+                Disposition::GuiPopup => "gui_popup".to_owned(),
+                Disposition::AutoRedact => "auto_redact".to_owned(),
+                Disposition::StatusBar => "status_bar".to_owned(),
+                Disposition::HookTerminal => "hook_terminal".to_owned(),
+            },
+            default_on_timeout,
+            timeout_seconds,
+            critical_lock,
+            enabled: true, // 系统规则始终启用（未启用的不会被加载）
+            rule_kind: "system".to_owned(),
+            description: Some(entry.description.clone()),
+        });
+    }
+
+    // ── 系统规则：inbound ───────────────────────────────────────────────────
+    let inbound_sys = inbound_layered.system_rules_snapshot();
+    for entry in &inbound_sys {
+        let disp = entry.effective_disposition();
+        let critical_lock = sieve_rules::critical_lock::is_fail_closed(&entry.id);
+        let (default_on_timeout, timeout_seconds) = if disp == Disposition::GuiPopup {
+            let dot = match entry.default_on_timeout {
+                DefaultOnTimeout::Block => Some("block".to_owned()),
+                DefaultOnTimeout::Allow => Some("allow".to_owned()),
+                DefaultOnTimeout::Redact => Some("redact".to_owned()),
+            };
+            (dot, entry.timeout_seconds)
+        } else {
+            (None, None)
+        };
+        rules.push(RuleSummary {
+            rule_id: entry.id.clone(),
+            title: entry.description.clone(),
+            severity: match entry.severity {
+                Severity::Low => "low".to_owned(),
+                Severity::Medium => "medium".to_owned(),
+                Severity::High => "high".to_owned(),
+                Severity::Critical => "critical".to_owned(),
+            },
+            direction: "inbound".to_owned(),
+            disposition: match disp {
+                Disposition::GuiPopup => "gui_popup".to_owned(),
+                Disposition::AutoRedact => "auto_redact".to_owned(),
+                Disposition::StatusBar => "status_bar".to_owned(),
+                Disposition::HookTerminal => "hook_terminal".to_owned(),
+            },
+            default_on_timeout,
+            timeout_seconds,
+            critical_lock,
+            enabled: true,
+            rule_kind: "system".to_owned(),
+            description: Some(entry.description.clone()),
+        });
+    }
+
+    // 规则数为 0 极罕见（daemon 刚启动，引擎未初始化）。
+    // 当前实现在 daemon 启动时同步初始化引擎，此分支在实践中不会触发；
+    // 保留作为防御性检查，符合 SPEC §11A 错误码 -32006 定义。
+    {
+        use sieve_rules::engine::MatchEngine;
+        if rules.is_empty()
+            && outbound_layered.rule_count() + inbound_layered.rule_count() == 0
+        {
+            return Err(ControlError::rules_loading());
+        }
+    }
+
+    Ok(ListRulesResult { rules })
+}
+
+/// SPEC-005 §11B `sieve.purge_history`（v2.0+ 兼容扩展）。
+///
+/// 删除所有 audit events（不 DROP TABLE）。互斥防并发：并发调用时第二个立即返回 -32007。
+async fn handle_purge_history(
+    params: sieve_ipc::PurgeHistoryRequest,
+    audit: &Arc<AuditStore>,
+    state: &Arc<RuntimeState>,
+) -> Result<PurgeHistoryResult, ControlError> {
+    // CAS：false → true（防并发）
+    if state
+        .purge_in_progress
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return Err(ControlError::purge_in_progress());
+    }
+
+    // 确保函数退出时（无论成功或失败）都重置标志。
+    struct PurgeGuard<'a>(&'a AtomicBool);
+    impl<'a> Drop for PurgeGuard<'a> {
+        fn drop(&mut self) {
+            self.0.store(false, Ordering::Release);
+        }
+    }
+    let _guard = PurgeGuard(&state.purge_in_progress);
+
+    // 写 purge_started 审计事件（confirmed_at 来自 GUI）
+    spawn_audit(
+        audit,
+        AuditEvent::PurgeHistoryStarted {
+            confirmed_at_ms: params.confirmed_at,
+        },
+    );
+
+    // 执行删除
+    let rows_deleted = audit.delete_all_events().await.map_err(|e| {
+        ControlError::internal(format!("purge_history delete failed: {e}"))
+    })?;
+
+    let purged_at = chrono::Utc::now().timestamp_millis();
+
+    // 写 purge_completed 审计事件
+    spawn_audit(
+        audit,
+        AuditEvent::PurgeHistoryCompleted {
+            rows_deleted,
+            purged_at_ms: purged_at,
+        },
+    );
+
+    Ok(PurgeHistoryResult {
+        purged_at,
+        rows_deleted,
+    })
+}
+
 // ─────────────────────────── helpers ───────────────────────────────
 
 fn spawn_audit(audit: &Arc<AuditStore>, event: AuditEvent) {
@@ -806,6 +1002,7 @@ mod tests {
             system_rules_count: ArcSwap::from_pointee(0),
             user_rules_count: ArcSwap::from_pointee(0),
             last_reload: ArcSwap::from_pointee(None),
+            purge_in_progress: AtomicBool::new(false),
         })
     }
 

@@ -35,8 +35,9 @@ use crate::{
     protocol::{
         CancelReason, DecisionAction, DecisionRequest, DecisionResponse, DefaultOnTimeout,
         EvaluateRequest, EvaluateResult, HealthRequest, HealthResult, ListGraylistRequest,
-        ListGraylistResult, PausedChangedNotify, PresetChangedNotify, ReloadConfigRequest,
-        ReloadConfigResult, ReloadUserRules, RemoveGraylistRequest, RemoveGraylistResult,
+        ListGraylistResult, ListRulesResult, PausedChangedNotify, PresetChangedNotify,
+        PurgeHistoryRequest, PurgeHistoryResult, ReloadConfigRequest, ReloadConfigResult,
+        ReloadUserRules, RemoveGraylistRequest, RemoveGraylistResult,
         RequestDecisionCanceledNotify, SetPausedRequest, SetPausedResult,
         SetPresetOverridesRequest, SetPresetOverridesResult, SetPresetRequest, SetPresetResult,
         StatusBarNotify,
@@ -108,6 +109,16 @@ impl ControlError {
             format!("unknown fingerprint: {fp}"),
         )
     }
+
+    /// SPEC-005 §11A `-32006 rules_loading`：规则引擎尚未完成初始化。Since v2.0。
+    pub fn rules_loading() -> Self {
+        Self::new(rpc_codes::RULES_LOADING, "rules_loading")
+    }
+
+    /// SPEC-005 §11B `-32007 purge_in_progress`：并发 purge 防护。Since v2.0。
+    pub fn purge_in_progress() -> Self {
+        Self::new(rpc_codes::PURGE_IN_PROGRESS, "purge_in_progress")
+    }
 }
 
 /// 变更类请求（set_paused / set_preset / set_preset_overrides）的 fan-out 计划。
@@ -178,6 +189,15 @@ pub enum ControlPlaneRequest {
     RemoveGraylist {
         params: RemoveGraylistRequest,
         reply: oneshot::Sender<Result<RemoveGraylistResult, ControlError>>,
+    },
+    /// SPEC-005 §11A `sieve.list_rules`（v2.0+ 兼容扩展）。
+    ListRules {
+        reply: oneshot::Sender<Result<ListRulesResult, ControlError>>,
+    },
+    /// SPEC-005 §11B `sieve.purge_history`（v2.0+ 兼容扩展）。
+    PurgeHistory {
+        params: PurgeHistoryRequest,
+        reply: oneshot::Sender<Result<PurgeHistoryResult, ControlError>>,
     },
 }
 
@@ -1006,7 +1026,10 @@ async fn dispatch_message(
             | "sieve.health"
             | "sieve.evaluate"
             | "sieve.list_graylist"
-            | "sieve.remove_graylist" => {
+            | "sieve.remove_graylist"
+            // v2.0+ 兼容扩展（SPEC-005 §11A §11B）
+            | "sieve.list_rules"
+            | "sieve.purge_history" => {
                 let Some(id) = id else {
                     warn!(method = %method, "control-plane method requires id; treating as notification dropped");
                     return;
@@ -1343,6 +1366,44 @@ async fn dispatch_control_plane(
                 .await;
             }
             forward_reply::<RemoveGraylistResult>(id, rx, write_tx).await;
+        }
+        // SPEC-005 §11A：sieve.list_rules（v2.0+ 兼容扩展）。
+        "sieve.list_rules" => {
+            let (reply, rx) = oneshot::channel();
+            if control_tx
+                .send(ControlPlaneRequest::ListRules { reply })
+                .await
+                .is_err()
+            {
+                return write_error_response(
+                    id,
+                    ControlError::internal("daemon control channel closed"),
+                    write_tx,
+                )
+                .await;
+            }
+            forward_reply::<ListRulesResult>(id, rx, write_tx).await;
+        }
+        // SPEC-005 §11B：sieve.purge_history（v2.0+ 兼容扩展）。
+        "sieve.purge_history" => {
+            let p: PurgeHistoryRequest = match require_params(params) {
+                Ok(p) => p,
+                Err(e) => return write_error_response(id, e, write_tx).await,
+            };
+            let (reply, rx) = oneshot::channel();
+            if control_tx
+                .send(ControlPlaneRequest::PurgeHistory { params: p, reply })
+                .await
+                .is_err()
+            {
+                return write_error_response(
+                    id,
+                    ControlError::internal("daemon control channel closed"),
+                    write_tx,
+                )
+                .await;
+            }
+            forward_reply::<PurgeHistoryResult>(id, rx, write_tx).await;
         }
         other => {
             // 不会到达此分支（外层 match 已穷举）。

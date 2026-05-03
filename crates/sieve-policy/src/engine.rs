@@ -18,6 +18,8 @@ pub struct UserEngine {
     inner: VectorscanEngine,
     /// 已编译规则条数（用于 rule_count 元信息）。
     count: usize,
+    /// 编译前的原始规则列表（供 `sieve.list_rules` 查询用，SPEC-005 §11A）。
+    source_rules: Vec<UserRuleEntry>,
 }
 
 impl UserEngine {
@@ -29,12 +31,19 @@ impl UserEngine {
         let enabled: Vec<UserRuleEntry> = rules.into_iter().filter(|r| r.enabled).collect();
         let count = enabled.len();
 
-        let rule_entries: Vec<RuleEntry> = enabled.into_iter().map(to_rule_entry).collect();
+        let rule_entries: Vec<RuleEntry> = enabled.iter().map(|r| to_rule_entry(r.clone())).collect();
 
         let inner = VectorscanEngine::compile(rule_entries)
             .map_err(|e| PolicyError::EngineCompile(e.to_string()))?;
 
-        Ok(Self { inner, count })
+        Ok(Self { inner, count, source_rules: enabled })
+    }
+
+    /// 返回用户规则原始条目快照（SPEC-005 §11A `sieve.list_rules` 用）。
+    ///
+    /// 只返回 enabled=true 的规则（disabled 规则未编译，不在引擎中）。
+    pub fn source_rules_snapshot(&self) -> &[UserRuleEntry] {
+        &self.source_rules
     }
 
     /// 按方向过滤后编译（PRD v2.0 §5.5）。

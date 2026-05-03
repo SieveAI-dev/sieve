@@ -26,12 +26,13 @@ pub use protocol::{
     DefaultOnTimeout, DetectionPayload, Disposition, EvaluateContentKind, EvaluateDirection,
     EvaluateMatch, EvaluateRecommendation, EvaluateRequest, EvaluateResult, GraylistEntrySummary,
     GraylistSnapshot, HealthRequest, HealthResult, HelloParams, IpcSnapshot, ListGraylistRequest,
-    ListGraylistResult, ListenSnapshot, NotifyKind, OriginHop, PausedChangedNotify,
-    PresetChangedNotify, PresetOverride, PresetSnapshot, RejectedOverride, ReloadConfigRequest,
-    ReloadConfigResult, ReloadUserRules, RemoveGraylistRequest, RemoveGraylistResult,
-    RequestDecisionCanceledNotify, RulesSnapshot, SetPausedRequest, SetPausedResult,
-    SetPresetOverridesRequest, SetPresetOverridesResult, SetPresetRequest, SetPresetResult,
-    Severity, SourceAgent, StatusBarNotify, UiPhase,
+    ListGraylistResult, ListRulesResult, ListenSnapshot, NotifyKind, OriginHop, PausedChangedNotify,
+    PresetChangedNotify, PresetOverride, PresetSnapshot, PurgeHistoryRequest, PurgeHistoryResult,
+    RejectedOverride, ReloadConfigRequest, ReloadConfigResult, ReloadUserRules,
+    RemoveGraylistRequest, RemoveGraylistResult, RequestDecisionCanceledNotify, RuleSummary,
+    RulesSnapshot, SetPausedRequest, SetPausedResult, SetPresetOverridesRequest,
+    SetPresetOverridesResult, SetPresetRequest, SetPresetResult, Severity, SourceAgent,
+    StatusBarNotify, UiPhase,
 };
 pub use socket_client::send_reload_user_rules_oneshot;
 pub use socket_server::{

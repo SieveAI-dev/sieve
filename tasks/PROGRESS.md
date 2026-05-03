@@ -12,6 +12,7 @@
 
 ## ✅ 已完成（按时间倒序）
 
+- **2026-05-03** daemon 实现 sieve.list_rules + sieve.purge_history（v2.0+ 兼容扩展）：protocol.rs 加 ListRulesResult/RuleSummary 11 字段 + PurgeHistoryRequest/Result；socket_server.rs ControlPlaneRequest 加 ListRules/PurgeHistory variant + 路由；daemon_control_plane.rs 加 handle_list_rules（从 LayeredEngine 取系统规则 map RuleSummary）+ handle_purge_history（AtomicBool 互斥 + AuditStore.delete_all_events）；rpc_codes 加 -32006/-32007；audit.rs 加 PurgeHistoryStarted/Completed event + delete_all_events 方法；e2e 场景 7+8 + 6 个 fixture（list_rules/purge_history 各 3 档）；696 tests passed
 - **2026-05-03** SPEC-005 §11A sieve.list_rules + §11B sieve.purge_history 字段表（v2.0 兼容扩展，不 bump protocol_version）；§11 速查表追加两行；§12.3 追加 -32006 rules_loading / -32007 purge_in_progress；§13.2 追加 v2.0 兼容扩展方法表 + GUI 降级行为说明
 - **2026-05-03** B2 wire DTO recommendation 字段真实注入（DetectionPayload 加 recommendation 字段，单 issue 拷贝 / 多 issue 按 §6.1.4 各 issue 拷贝；4 个测试覆盖单/多 issue 各分支）
 - **2026-05-03** P2-5 fixtures 补齐到 73 文件（17 method × minimal/full/null_optional，含生成式断言遍历所有 fixture + 往返序列化验证，18 条 schema_v2_fixtures 测试通过）

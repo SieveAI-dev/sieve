@@ -648,6 +648,7 @@ pub async fn run(
             }),
             user_rules_count: arc_swap::ArcSwap::from_pointee(0),
             last_reload: arc_swap::ArcSwap::from_pointee(None),
+            purge_in_progress: std::sync::atomic::AtomicBool::new(false),
         });
         // SPEC-005 §3：注入 sieve.hello 握手通知所需静态信息。
         // daemon_boot_id 在本次启动时生成一次，整生命周期不变。
