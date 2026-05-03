@@ -1319,8 +1319,152 @@ GUI 端维护 `inflight_mutating_request_ids: Set<Uuid>`：
 | `sieve.remove_graylist` | GUI → daemon | request | §9.8 |
 | `sieve.preset_changed` | daemon → GUI fan-out | notification | §10.1 |
 | `sieve.paused_changed` | daemon → GUI fan-out | notification | §10.2 |
+| `sieve.list_rules` | GUI → daemon | request | §11A *(Since v2.0)* |
+| `sieve.purge_history` | GUI → daemon | request | §11B *(Since v2.0)* |
 
 > v1 旧方法名 `request_decision`（无 `sieve.` 前缀）在 v2 中已弃用。所有方法名必须以 `sieve.` 前缀。
+
+---
+
+## 11A. `sieve.list_rules` *(Since v2.0)*
+
+> **兼容扩展**：本方法是 v2.0 协议的向前兼容新增，不递增 `protocol_version`。旧版本 daemon 会返回 `-32601 method_not_found`，GUI **MUST** 在此情况下降级（禁用规则总览 UI，不崩溃）。
+
+GUI Settings 页面 Detection 规则总览 Table 使用本方法获取所有已加载的规则列表（系统规则 + 用户规则合并后的快照）。
+
+### 请求（GUI → daemon）
+
+```jsonc
+{
+  "jsonrpc": "2.0",
+  "method": "sieve.list_rules",
+  "id": "5e7a1c3f-9b2d-4e8a-b6c1-3d5f7e9a1c2b",
+  "params": {}
+}
+```
+
+> `params` 对象可省略或为空对象 `{}`。本方法当前无参数；GUI **SHOULD** 始终发空 `params`（为未来扩展分页等参数预留）。
+
+| 字段 | 类型 | required | default if absent | null accepted | 说明 |
+|---|---|---|---|---|---|
+| （无参数） | — | — | — | — | — |
+
+### 响应
+
+```jsonc
+{
+  "jsonrpc": "2.0",
+  "id": "5e7a1c3f-9b2d-4e8a-b6c1-3d5f7e9a1c2b",
+  "result": {
+    "rules": [
+      {
+        "rule_id": "IN-CR-01",
+        "title": "BIP39 助记词检测",
+        "severity": "critical",
+        "direction": "inbound",
+        "disposition": "gui_popup",
+        "default_on_timeout": "block",
+        "timeout_seconds": 30,
+        "critical_lock": true,
+        "enabled": true,
+        "rule_kind": "system",
+        "description": "检测入站流量中出现的 BIP39 助记词序列（带 SHA-256 checksum 验证）"
+      }
+    ]
+  }
+}
+```
+
+| 字段 | 类型 | required | default if absent | null accepted | 说明 |
+|---|---|---|---|---|---|
+| `rules` | `RuleSummary[]` | yes | — | no | 当前已加载的全部规则快照（系统规则 + 用户规则合并后），空规则集返回 `[]` |
+
+#### `RuleSummary` 对象字段
+
+| 字段 | 类型 | required | default if absent | null accepted | 说明 |
+|---|---|---|---|---|---|
+| `rule_id` | String | yes | — | no | 规则唯一标识，如 `"IN-CR-01"`；用户规则使用用户自定义 ID |
+| `title` | String | yes | — | no | 规则 UI 显示标题（中文或英文由 daemon locale 决定） |
+| `severity` | enum | yes | — | no | `"low"` / `"medium"` / `"high"` / `"critical"` |
+| `direction` | enum | yes | — | no | `"inbound"` / `"outbound"` |
+| `disposition` | enum | yes | — | no | `"gui_popup"` / `"auto_redact"` / `"status_bar"` / `"hook_terminal"` |
+| `default_on_timeout` | enum | no | `null` | yes | 仅 `disposition == "gui_popup"` 时有意义；`"block"` / `"allow"` / `"redact"`；其他 disposition 下**MUST**为 `null` |
+| `timeout_seconds` | u32 | no | `null` | yes | 仅 `disposition == "gui_popup"` 时有意义；弹窗自动确认的超时秒数；其他 disposition 下**MUST**为 `null` |
+| `critical_lock` | bool | yes | — | no | `true` 表示 GUI 端禁止编辑此规则（Critical 级系统规则强制为 `true`） |
+| `enabled` | bool | yes | — | no | 规则是否启用 |
+| `rule_kind` | enum | yes | — | no | `"system"` / `"user"` |
+| `description` | String | no | `null` | yes | 规则描述/备注，可能为 `null` |
+
+### 行为描述
+
+1. daemon 在握手完成后即可响应本请求（规则引擎初始化在 daemon 启动时完成）。
+2. 返回的列表是**调用时刻的快照**（非实时订阅），GUI 如需刷新可重新调用。
+3. 规则顺序：系统规则在前（按内置 severity 排序，critical 优先），用户规则在后（按加载顺序）。
+4. `critical_lock == true` 的规则，GUI 端**MUST**在 UI 上禁用编辑/关闭控件，避免用户误操作。
+
+### 错误码
+
+| Code | 名称 | 触发场景 |
+|---|---|---|
+| `-32006` | `rules_loading` | daemon 启动时规则引擎尚未完成初始化（极罕见，通常在 daemon 刚启动的几百毫秒内）；GUI **SHOULD** 延迟 1 秒后重试 |
+| `-32601` | `method_not_found` | 旧版本 daemon 不支持本方法；GUI **MUST** 降级（禁用规则总览 UI） |
+
+---
+
+## 11B. `sieve.purge_history` *(Since v2.0)*
+
+> **兼容扩展**：本方法是 v2.0 协议的向前兼容新增，不递增 `protocol_version`。旧版本 daemon 会返回 `-32601 method_not_found`，GUI **MUST** 在此情况下降级（禁用"清空历史"按钮，不崩溃）。
+
+GUI Settings → Privacy & Data → "清空历史"按钮触发（Touch ID 二次确认通过后调用）。daemon 删除 audit.db 中所有 audit events 行数据，保留 schema 结构（不 DROP TABLE）。
+
+### 请求（GUI → daemon）
+
+```jsonc
+{
+  "jsonrpc": "2.0",
+  "method": "sieve.purge_history",
+  "id": "7b9c2d4e-1f3a-4b8c-a5e2-6d8f1a3c5e7b",
+  "params": {
+    "confirmed_at": "2026-05-03T08:00:00.000Z"
+  }
+}
+```
+
+| 字段 | 类型 | required | default if absent | null accepted | 说明 |
+|---|---|---|---|---|---|
+| `confirmed_at` | `Timestamp` | yes | — | no | GUI 端 Touch ID（或等效授权手势）通过的时刻（UTC）；用于审计日志，不作为幂等 key |
+
+### 响应
+
+```jsonc
+{
+  "jsonrpc": "2.0",
+  "id": "7b9c2d4e-1f3a-4b8c-a5e2-6d8f1a3c5e7b",
+  "result": {
+    "purged_at": "2026-05-03T08:00:00.123Z",
+    "rows_deleted": 4721
+  }
+}
+```
+
+| 字段 | 类型 | required | default if absent | null accepted | 说明 |
+|---|---|---|---|---|---|
+| `purged_at` | `Timestamp` | yes | — | no | daemon 实际执行删除完成的时刻（UTC） |
+| `rows_deleted` | u64 | yes | — | no | 本次删除的 audit event 行数；`0` 表示历史本就为空，视为成功 |
+
+### 行为描述
+
+1. daemon **MUST** 使用互斥锁保证同一时刻只有一个 purge 在执行；并发调用时第二个请求立即返回 `-32007 purge_in_progress` 错误。
+2. 删除范围：`audit_events` 表（或等效表）中**所有行**，使用 `DELETE FROM audit_events`（不 DROP TABLE / 不 VACUUM）。
+3. daemon 在执行删除前和删除后各写一条审计记录：`purge_started`（含 `confirmed_at`）和 `purge_completed`（含 `rows_deleted`）；这两条记录本身**不**计入 `rows_deleted`。
+4. 本操作**不可逆**，GUI 端**MUST**在调用前完成二次确认（Touch ID 或等效授权）。
+
+### 错误码
+
+| Code | 名称 | 触发场景 |
+|---|---|---|
+| `-32007` | `purge_in_progress` | 另一个 purge 正在进行（去重保护）；GUI **SHOULD** 提示"正在清空，请稍候" |
+| `-32601` | `method_not_found` | 旧版本 daemon 不支持本方法；GUI **MUST** 降级（禁用清空历史按钮） |
 
 ---
 
@@ -1355,6 +1499,8 @@ GUI 端维护 `inflight_mutating_request_ids: Set<Uuid>`：
 | `-32003` | `payload_too_large` | `sieve.evaluate` 的 `payload` 超过 64 KiB |
 | `-32004` | `unknown_fingerprint` | `remove_graylist` 指定的 fingerprint 不存在；`list_graylist` 无此错误（不存在时返回空 `entries[]`） |
 | `-32005` | `unsupported_in_paused` | 暂停态下不允许的操作（保留，当前未使用） |
+| `-32006` | `rules_loading` | `list_rules`：daemon 启动时规则引擎尚未完成初始化；GUI SHOULD 延迟 1 秒后重试 *(Since v2.0)* |
+| `-32007` | `purge_in_progress` | `purge_history`：另一个 purge 操作正在执行；GUI SHOULD 提示"正在清空，请稍候" *(Since v2.0)* |
 
 ### 12.4 GUI → daemon 业务错误（`-32100 ~ -32199`）
 
@@ -1404,6 +1550,17 @@ GUI 端维护 `inflight_mutating_request_ids: Set<Uuid>`：
 - 新增方法（GUI 端必须返回 `-32601 method_not_found` 而不是 crash；daemon 端同样）
 - 新增 `error.code`（双方必须有 fallback "未知错误" 文案）
 - 新增 enum 值时**必须谨慎**：GUI 端若有 exhaustive switch 必须先升级才允许 daemon 发新值；折中做法是在 SPEC 中先标"reserved for vN.x"，daemon 实际启用前两个仓库都升级
+
+#### v2.0 兼容扩展新增方法
+
+以下方法为 v2.0 协议的向前兼容新增（`protocol_version` 保持 `"v2"` 不变）：
+
+| 方法 | SPEC 章节 | 降级行为（旧 daemon 返回 `-32601`） |
+|---|---|---|
+| `sieve.list_rules` | §11A | GUI **MUST** 禁用规则总览 UI，不崩溃 |
+| `sieve.purge_history` | §11B | GUI **MUST** 禁用"清空历史"按钮，不崩溃 |
+
+**GUI 端实现要求**：对上表所有方法，GUI **MUST** 在发送前检测方法可用性（或通过捕获 `-32601` 错误进入降级模式），不能因 `method_not_found` 触发全局错误处理器。
 
 ### 13.3 PR 与发布协调流程
 
