@@ -233,6 +233,18 @@ pub enum AuditEvent {
         /// 关闭连接的时间（unix 毫秒）。
         closed_at_ms: i64,
     },
+    /// GUI 用户触发了清空历史（Touch ID 确认后，开始执行前）。SPEC-005 §11B。
+    PurgeHistoryStarted {
+        /// GUI 端 Touch ID 通过的时刻（unix ms）。
+        confirmed_at_ms: i64,
+    },
+    /// 清空历史执行完成。SPEC-005 §11B。
+    PurgeHistoryCompleted {
+        /// 本次删除的行数。
+        rows_deleted: u64,
+        /// 执行完成的时刻（unix ms）。
+        purged_at_ms: i64,
+    },
 }
 
 impl AuditEvent {
@@ -258,7 +270,9 @@ impl AuditEvent {
             | Self::PausedSet { .. }
             | Self::ConfigReloaded { .. }
             | Self::GraylistRemoved { .. }
-            | Self::IpcOversizeFrame { .. } => "system",
+            | Self::IpcOversizeFrame { .. }
+            | Self::PurgeHistoryStarted { .. }
+            | Self::PurgeHistoryCompleted { .. } => "system",
         }
     }
 
@@ -285,6 +299,8 @@ impl AuditEvent {
             Self::PausedSet { .. } => "system.paused_set",
             Self::ConfigReloaded { .. } => "system.config_reloaded",
             Self::IpcOversizeFrame { .. } => "system.ipc_oversize_frame",
+            Self::PurgeHistoryStarted { .. } => "system.purge_history_started",
+            Self::PurgeHistoryCompleted { .. } => "system.purge_history_completed",
         }
     }
 
@@ -309,7 +325,9 @@ impl AuditEvent {
             | Self::ConfigReloaded { .. }
             | Self::GraylistRemoved { .. }
             | Self::AutoDecidedPaused { .. }
-            | Self::IpcOversizeFrame { .. } => "info",
+            | Self::IpcOversizeFrame { .. }
+            | Self::PurgeHistoryStarted { .. }
+            | Self::PurgeHistoryCompleted { .. } => "info",
             Self::CriticalLockBlocked { .. } => "critical",
         }
     }
@@ -337,6 +355,8 @@ impl AuditEvent {
             Self::GraylistRemoved { .. } => "graylist_removed",
             Self::AutoDecidedPaused { .. } => "auto_decided_paused",
             Self::IpcOversizeFrame { .. } => "ipc_oversize_frame",
+            Self::PurgeHistoryStarted { .. } => "purge_history_started",
+            Self::PurgeHistoryCompleted { .. } => "purge_history_completed",
         }
     }
 
@@ -371,7 +391,9 @@ impl AuditEvent {
             | Self::PausedSet { .. }
             | Self::ConfigReloaded { .. }
             | Self::GraylistRemoved { .. }
-            | Self::IpcOversizeFrame { .. } => "",
+            | Self::IpcOversizeFrame { .. }
+            | Self::PurgeHistoryStarted { .. }
+            | Self::PurgeHistoryCompleted { .. } => "",
         }
     }
 
@@ -409,7 +431,9 @@ impl AuditEvent {
             | Self::PausedSet { .. }
             | Self::ConfigReloaded { .. }
             | Self::GraylistRemoved { .. }
-            | Self::IpcOversizeFrame { .. } => None,
+            | Self::IpcOversizeFrame { .. }
+            | Self::PurgeHistoryStarted { .. }
+            | Self::PurgeHistoryCompleted { .. } => None,
         }
     }
 
@@ -436,7 +460,9 @@ impl AuditEvent {
             | Self::PausedSet { .. }
             | Self::ConfigReloaded { .. }
             | Self::GraylistRemoved { .. }
-            | Self::IpcOversizeFrame { .. } => None,
+            | Self::IpcOversizeFrame { .. }
+            | Self::PurgeHistoryStarted { .. }
+            | Self::PurgeHistoryCompleted { .. } => None,
         }
     }
 }
@@ -541,6 +567,48 @@ impl AuditStore {
     /// 供 sieve.hello 握手通知填充 `audit_db_user_version` 字段（SPEC-005 §3）。
     pub fn schema_version(&self) -> u32 {
         CURRENT_SCHEMA_VERSION
+    }
+
+    /// 删除所有审计事件行，保留表结构（`sieve.purge_history` SPEC-005 §11B 专用）。
+    ///
+    /// 因 append-only 触发器阻止 DELETE，此方法先 DROP 触发器，执行删除，再重建触发器。
+    /// 整个操作包裹在 SQLite 事务中，保证原子性。
+    ///
+    /// # 审计记录
+    ///
+    /// 调用方需在调用前后各写一条 `purge_started` / `purge_completed` 事件
+    /// （由 `handle_purge_history` 负责，本方法不写审计）。
+    ///
+    /// # Returns
+    ///
+    /// 返回实际删除的行数。
+    pub async fn delete_all_events(&self) -> Result<u64> {
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || {
+            let guard = conn
+                .lock()
+                .map_err(|e| anyhow::anyhow!("audit mutex poisoned: {e}"))?;
+
+            // 事务包裹：DROP 触发器 + DELETE + 重建触发器，原子执行。
+            guard.execute_batch("BEGIN IMMEDIATE;")?;
+
+            // 暂时移除 append-only 触发器（purge_history 专用路径）
+            guard.execute_batch(
+                "DROP TRIGGER IF EXISTS no_delete; DROP TRIGGER IF EXISTS no_update;",
+            )?;
+
+            // 执行全量删除（不 DROP TABLE，保留 schema）
+            let rows_deleted = guard.execute("DELETE FROM audit_events", [])?;
+
+            // 重建 append-only 触发器（DDL 幂等，IF NOT EXISTS）
+            guard.execute_batch(APPEND_ONLY_TRIGGERS_DDL)?;
+
+            guard.execute_batch("COMMIT;")?;
+
+            Ok::<u64, anyhow::Error>(rows_deleted as u64)
+        })
+        .await
+        .context("spawn_blocking failed")?
     }
 
     /// 异步写入一条审计事件（spawn_blocking + Mutex 串行化）。

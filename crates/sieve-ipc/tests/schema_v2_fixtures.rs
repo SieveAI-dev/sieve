@@ -163,9 +163,9 @@ fn request_decision_merged_deserializes() {
 
 use sieve_ipc::protocol::{
     DecisionResponse, EvaluateRequest, EvaluateResult, GraylistEntrySummary, ListGraylistResult,
-    NotifyKind, PausedChangedNotify, PresetChangedNotify, ReloadConfigResult, ReloadUserRules,
-    RemoveGraylistResult, RequestDecisionCanceledNotify, SetPresetOverridesResult, SetPresetResult,
-    StatusBarNotify,
+    ListRulesResult, NotifyKind, PausedChangedNotify, PresetChangedNotify, PurgeHistoryRequest,
+    PurgeHistoryResult, ReloadConfigResult, ReloadUserRules, RemoveGraylistResult,
+    RequestDecisionCanceledNotify, SetPresetOverridesResult, SetPresetResult, StatusBarNotify,
 };
 
 /// 遍历 fixtures/v2/ 所有 .json 文件，验证：
@@ -366,6 +366,35 @@ fn all_fixtures_valid_json_and_roundtrip() {
                 "sieve.remove_graylist" => {
                     if let Some(r) = val.get("result") {
                         serde_json::from_value::<RemoveGraylistResult>(r.clone())
+                            .err()
+                            .map(|e| e.to_string())
+                    } else {
+                        None
+                    }
+                }
+                "sieve.list_rules" => {
+                    if let Some(r) = val.get("result") {
+                        serde_json::from_value::<ListRulesResult>(r.clone())
+                            .err()
+                            .map(|e| e.to_string())
+                    } else if let Some(p) = val.get("params") {
+                        // request：params 可以是 {} 或 null
+                        if p.is_object() || p.is_null() {
+                            None
+                        } else {
+                            Some("list_rules params must be object or null".to_owned())
+                        }
+                    } else {
+                        None
+                    }
+                }
+                "sieve.purge_history" => {
+                    if let Some(p) = val.get("params") {
+                        serde_json::from_value::<PurgeHistoryRequest>(p.clone())
+                            .err()
+                            .map(|e| e.to_string())
+                    } else if let Some(r) = val.get("result") {
+                        serde_json::from_value::<PurgeHistoryResult>(r.clone())
                             .err()
                             .map(|e| e.to_string())
                     } else {

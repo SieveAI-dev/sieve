@@ -96,4 +96,8 @@ pub mod rpc_codes {
     pub const UNKNOWN_FINGERPRINT: i64 = -32004;
     /// 当前 paused 状态不允许此操作（保留，目前为空集）。
     pub const UNSUPPORTED_IN_PAUSED: i64 = -32005;
+    /// `list_rules`：规则引擎尚未完成初始化（daemon 刚启动时极罕见）。Since v2.0。
+    pub const RULES_LOADING: i64 = -32006;
+    /// `purge_history`：另一个 purge 操作正在进行中（并发防护）。Since v2.0。
+    pub const PURGE_IN_PROGRESS: i64 = -32007;
 }

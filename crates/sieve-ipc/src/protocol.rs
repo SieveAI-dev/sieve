@@ -641,6 +641,66 @@ pub struct RemoveGraylistResult {
     pub audit_event_id: String,
 }
 
+// ── v2.0+ 兼容扩展方法 ───────────────────────────────────────────────────────
+
+/// `sieve.list_rules` 响应（SPEC-005 §11A，Since v2.0 兼容扩展）。
+///
+/// 旧版本 daemon 不实现此方法，GUI 端应在收到 `-32601 method_not_found` 时降级
+/// （禁用规则总览 UI，不崩溃）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListRulesResult {
+    /// 当前已加载的全部规则快照（系统规则 + 用户规则合并）。
+    pub rules: Vec<RuleSummary>,
+}
+
+/// 单条规则摘要（SPEC-005 §11A `RuleSummary` 字段表）。
+///
+/// 11 个字段对应 SPEC 字段表，GUI 端可直接用于渲染 Detection 规则总览 Table。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuleSummary {
+    /// 规则唯一标识（如 `"IN-CR-01"`；用户规则含 `"user:"` 前缀）。
+    pub rule_id: String,
+    /// UI 显示标题（fallback 为 rule_id，因系统 RuleEntry 只有 description 无独立 title）。
+    pub title: String,
+    /// 严重等级：`"low"` / `"medium"` / `"high"` / `"critical"`。
+    pub severity: String,
+    /// 流量方向：`"inbound"` / `"outbound"`。
+    pub direction: String,
+    /// 处置形式：`"gui_popup"` / `"auto_redact"` / `"status_bar"` / `"hook_terminal"`。
+    pub disposition: String,
+    /// 超时后默认处置（仅 `disposition == "gui_popup"` 时有意义）。
+    #[serde(default)]
+    pub default_on_timeout: Option<String>,
+    /// 弹窗自动确认超时秒数（仅 `disposition == "gui_popup"` 时有意义）。
+    #[serde(default)]
+    pub timeout_seconds: Option<u32>,
+    /// `true` 时 GUI 端禁止编辑此规则（Critical 级系统规则强制为 true）。
+    pub critical_lock: bool,
+    /// 规则是否启用。
+    pub enabled: bool,
+    /// 规则来源：`"system"` / `"user"`。
+    pub rule_kind: String,
+    /// 规则描述/备注，可能为 `null`。
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+/// `sieve.purge_history` 请求参数（SPEC-005 §11B，Since v2.0 兼容扩展）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PurgeHistoryRequest {
+    /// GUI 端 Touch ID 通过的时刻（UTC，Unix ms）；用于审计，不作为幂等 key。
+    pub confirmed_at: i64,
+}
+
+/// `sieve.purge_history` 响应（SPEC-005 §11B）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PurgeHistoryResult {
+    /// daemon 实际执行删除完成的时刻（UTC，Unix ms）。
+    pub purged_at: i64,
+    /// 本次删除的 audit event 行数；`0` 表示历史本就为空，视为成功。
+    pub rows_deleted: u64,
+}
+
 // ── v2.1 daemon → GUI notifications ──────────────────────────────────────────
 
 /// `sieve.hello` 握手通知参数（daemon → GUI，每次连接的第一条出站消息）。

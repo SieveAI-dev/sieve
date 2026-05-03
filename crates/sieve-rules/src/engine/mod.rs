@@ -184,6 +184,16 @@ impl<S: MatchEngine, U: MatchEngine> LayeredEngine<S, U> {
     }
 }
 
+impl<U: MatchEngine> LayeredEngine<VectorscanEngine, U> {
+    /// 返回系统规则快照（SPEC-005 §11A `sieve.list_rules` 用）。
+    ///
+    /// 直接从 `VectorscanEngine` 取规则，不包含用户规则。
+    /// 用户规则通过 `sieve-policy` 的 `UserEngine` 单独获取。
+    pub fn system_rules_snapshot(&self) -> Vec<RuleEntry> {
+        self.system.rules_snapshot()
+    }
+}
+
 impl<S: MatchEngine, U: MatchEngine> MatchEngine for LayeredEngine<S, U> {
     fn scan(&self, input: &[u8]) -> SieveRulesResult<Vec<MatchHit>> {
         // 构造 dummy ScanRequest 复用 scan_with_context 合并逻辑，避免重复代码。
@@ -289,6 +299,15 @@ impl VectorscanEngine {
     /// 获取规则元信息（用于上层组装 Detection）。
     pub fn rule_meta(&self, pattern_id: u32) -> Option<&RuleEntry> {
         self.rules.get(&pattern_id)
+    }
+
+    /// 返回已编译规则的克隆列表（SPEC-005 §11A `sieve.list_rules` 用）。
+    ///
+    /// 顺序与 `compile(rules)` 传入顺序一致（HashMap 无序，按 pattern_id 排序后返回）。
+    pub fn rules_snapshot(&self) -> Vec<RuleEntry> {
+        let mut pairs: Vec<(u32, &RuleEntry)> = self.rules.iter().map(|(k, v)| (*k, v)).collect();
+        pairs.sort_by_key(|(id, _)| *id);
+        pairs.into_iter().map(|(_, r)| r.clone()).collect()
     }
 
     /// 候选文本是否被 placeholder / per-rule allowlist 排除。

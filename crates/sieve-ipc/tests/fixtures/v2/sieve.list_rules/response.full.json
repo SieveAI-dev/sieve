@@ -1,0 +1,47 @@
+{
+  "jsonrpc": "2.0",
+  "id": "5e7a1c3f-9b2d-4e8a-b6c1-3d5f7e9a1c2b",
+  "result": {
+    "rules": [
+      {
+        "rule_id": "IN-CR-01",
+        "title": "BIP39 助记词检测（带 SHA-256 checksum 验证）",
+        "severity": "critical",
+        "direction": "inbound",
+        "disposition": "gui_popup",
+        "default_on_timeout": "block",
+        "timeout_seconds": 30,
+        "critical_lock": true,
+        "enabled": true,
+        "rule_kind": "system",
+        "description": "BIP39 助记词检测（带 SHA-256 checksum 验证）"
+      },
+      {
+        "rule_id": "OUT-01",
+        "title": "私钥泄露检测",
+        "severity": "high",
+        "direction": "outbound",
+        "disposition": "auto_redact",
+        "default_on_timeout": null,
+        "timeout_seconds": null,
+        "critical_lock": false,
+        "enabled": true,
+        "rule_kind": "system",
+        "description": "检测出站流量中的私钥泄露（sk-ant 前缀）"
+      },
+      {
+        "rule_id": "user:MY-CUSTOM-RULE",
+        "title": "自定义关键词检测",
+        "severity": "medium",
+        "direction": "inbound",
+        "disposition": "status_bar",
+        "default_on_timeout": null,
+        "timeout_seconds": null,
+        "critical_lock": false,
+        "enabled": true,
+        "rule_kind": "user",
+        "description": "用户自定义规则：检测特定关键词"
+      }
+    ]
+  }
+}

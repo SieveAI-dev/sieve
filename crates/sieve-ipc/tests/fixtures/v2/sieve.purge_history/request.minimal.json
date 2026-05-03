@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "method": "sieve.purge_history",
+  "id": "7b9c2d4e-1f3a-4b8c-a5e2-6d8f1a3c5e7b",
+  "params": {
+    "confirmed_at": 1746316800000
+  }
+}

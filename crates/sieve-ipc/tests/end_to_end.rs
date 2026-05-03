@@ -19,8 +19,8 @@ use std::time::Duration;
 
 use sieve_ipc::{
     BroadcastPlan, ControlPlaneRequest, DecisionAction, DecisionRequest, DecisionResponse,
-    DefaultOnTimeout, DetectionPayload, Disposition, HelloBuilder, IpcServer, PausedChangedNotify,
-    SetPausedResult, Severity, SourceAgent,
+    DefaultOnTimeout, DetectionPayload, Disposition, HelloBuilder, IpcServer, ListRulesResult,
+    PausedChangedNotify, PurgeHistoryResult, SetPausedResult, Severity, SourceAgent,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
@@ -693,4 +693,118 @@ async fn scenario_6_wire_field_snake_case() {
 
     assert_eq!(result.decision, DecisionAction::Allow);
     gui_task.abort();
+}
+
+// ── 场景 7：sieve.list_rules（v2.0+ 兼容扩展）──────────────────────────────
+
+/// SPEC-005 §11A：GUI 发 `sieve.list_rules` → daemon 回包含 `rules` 数组的 result。
+///
+/// 此测试验证 wire 层路由正确（`sieve.list_rules` 被转发到 control plane 并正确响应），
+/// 以及响应字段满足 SPEC 的最低要求（`rules` 数组存在，可能为空）。
+#[tokio::test]
+async fn scenario_7_list_rules_wire_route() {
+    let tmp = tempfile::tempdir().unwrap();
+    let socket_path = tmp.path().join("ipc_list_rules.sock");
+    let boot_id = Uuid::now_v7();
+    let server = start_server_with_boot_id(&socket_path, boot_id).await;
+
+    // 模拟 control-plane handler：收到 ListRules 请求直接返回空规则列表。
+    let ipc_clone = Arc::clone(&server);
+    tokio::spawn(async move {
+        let mut rx = ipc_clone.control_rx().await.expect("control_rx");
+        while let Some(req) = rx.recv().await {
+            match req {
+                ControlPlaneRequest::ListRules { reply } => {
+                    let _ = reply.send(Ok(ListRulesResult { rules: vec![] }));
+                }
+                _ => {} // 其他请求忽略
+            }
+        }
+    });
+
+    let (mut lines, mut write_half) = connect_gui(&socket_path).await;
+
+    // 消费 sieve.hello（跳过所有通知直到看到请求或直接等）
+    let _hello = next_frame(&mut lines).await;
+
+    // 发 sieve.list_rules 请求
+    let req_id = "test-list-rules-001";
+    send_request(
+        &mut write_half,
+        "sieve.list_rules",
+        serde_json::json!({}),
+        req_id,
+    )
+    .await;
+
+    // 读 response（跳过通知帧）
+    let resp = next_response(&mut lines).await;
+
+    // 验证 JSON-RPC 格式
+    assert_eq!(resp["jsonrpc"].as_str(), Some("2.0"));
+    assert_eq!(resp["id"].as_str(), Some(req_id));
+    assert!(resp.get("error").is_none(), "list_rules should not return error: {resp}");
+
+    // 验证 result.rules 字段存在且为数组
+    let result: ListRulesResult = serde_json::from_value(resp["result"].clone())
+        .expect("result should deserialize to ListRulesResult");
+    assert!(
+        result.rules.is_empty(),
+        "mock handler returns empty rules list"
+    );
+}
+
+// ── 场景 8：sieve.purge_history（v2.0+ 兼容扩展）──────────────────────────
+
+/// SPEC-005 §11B：GUI 发 `sieve.purge_history` → daemon 回 `{purged_at, rows_deleted}` result。
+///
+/// 此测试验证 wire 层路由正确，以及响应字段满足 SPEC 最低要求。
+#[tokio::test]
+async fn scenario_8_purge_history_wire_route() {
+    let tmp = tempfile::tempdir().unwrap();
+    let socket_path = tmp.path().join("ipc_purge_history.sock");
+    let boot_id = Uuid::now_v7();
+    let server = start_server_with_boot_id(&socket_path, boot_id).await;
+
+    let now_ms = chrono::Utc::now().timestamp_millis();
+
+    // 模拟 control-plane handler
+    let ipc_clone = Arc::clone(&server);
+    tokio::spawn(async move {
+        let mut rx = ipc_clone.control_rx().await.expect("control_rx");
+        while let Some(req) = rx.recv().await {
+            match req {
+                ControlPlaneRequest::PurgeHistory { params: _, reply } => {
+                    let _ = reply.send(Ok(PurgeHistoryResult {
+                        purged_at: chrono::Utc::now().timestamp_millis(),
+                        rows_deleted: 42,
+                    }));
+                }
+                _ => {}
+            }
+        }
+    });
+
+    let (mut lines, mut write_half) = connect_gui(&socket_path).await;
+    let _hello = next_frame(&mut lines).await;
+
+    let req_id = "test-purge-history-001";
+    send_request(
+        &mut write_half,
+        "sieve.purge_history",
+        serde_json::json!({ "confirmed_at": now_ms }),
+        req_id,
+    )
+    .await;
+
+    let resp = next_response(&mut lines).await;
+
+    assert_eq!(resp["jsonrpc"].as_str(), Some("2.0"));
+    assert_eq!(resp["id"].as_str(), Some(req_id));
+    assert!(resp.get("error").is_none(), "purge_history should not return error: {resp}");
+
+    let result: PurgeHistoryResult = serde_json::from_value(resp["result"].clone())
+        .expect("result should deserialize to PurgeHistoryResult");
+    assert_eq!(result.rows_deleted, 42);
+    assert!(result.purged_at >= now_ms, "purged_at should be >= confirmed_at");
 }
