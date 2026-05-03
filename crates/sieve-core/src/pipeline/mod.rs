@@ -236,7 +236,7 @@ mod dispatch_impl {
                 allow_remember: false, // v2.0：Week 6 由 daemon 根据规则计算后传入
             };
 
-            let outcome = inbound_hold::hold_and_decide(ipc, ipc_req, ka_tx).await?;
+            let outcome = inbound_hold::hold_and_decide(ipc, ipc_req, ka_tx, "inbound").await?;
             return match outcome {
                 // `remember` / `context_hint` 由 daemon 消费写灰名单（PRD §5.4.2），
                 // dispatch 层只做放行 / 拒绝路由，不处理灰名单逻辑。

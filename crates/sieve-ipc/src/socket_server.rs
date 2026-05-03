@@ -609,6 +609,9 @@ impl IpcServer {
 
     /// 向已连接的 GUI 发送决策请求，等待响应或超时。
     ///
+    /// `direction` 参数：`"inbound"` / `"outbound"`，调用方根据流量方向传入。
+    /// wire DTO 层（SPEC-005 §6.0）用此值填充 `sieve.request_decision` 的 `direction` 字段。
+    ///
     /// # 行为
     ///
     /// - 如果没有 GUI 客户端连接：**立即 fallback**，不等超时。
@@ -623,6 +626,7 @@ impl IpcServer {
         &self,
         req: DecisionRequest,
         timeout: Duration,
+        direction: &str,
     ) -> Result<DecisionResponse, IpcError> {
         let request_id = req.request_id;
         let default_on_timeout = req.default_on_timeout;
@@ -646,11 +650,13 @@ impl IpcServer {
             map.insert(request_id, tx);
         }
 
-        // 3. 通过 mpsc 通道把请求推到 handle_connection 的写循环，
-        //    再由写循环写入真正的 GUI socket 连接。
+        // 3. 通过 wire DTO 适配层序列化请求（SPEC-005 §6.0 / §6.1 / §6.1.1 / §6.1.2）。
+        //    P1-5 + P2-2 + P2-4：使用 RequestDecisionWireKind 替换内部 struct 直接序列化。
+        let wire = crate::wire::RequestDecisionWireKind::from_request(&req, direction);
+        let wire_params = wire.to_value()?;
         let rpc_req = crate::protocol::jsonrpc::Request::call(
             "sieve.request_decision",
-            serde_json::to_value(&req)?,
+            wire_params,
             serde_json::Value::String(request_id.to_string()),
         );
         let mut payload = serde_json::to_string(&rpc_req)?;
@@ -1047,7 +1053,7 @@ async fn dispatch_message(
             // 尝试从 rpc.id 解析 Uuid，匹配 pending map。
             let maybe_uuid: Option<uuid::Uuid> =
                 rpc.id.as_str().and_then(|s| s.parse().ok()).or_else(|| {
-                    rpc.id.as_u64().and_then(|_| None) // u64 id 不是 Uuid，跳过
+                    rpc.id.as_u64().and(None) // u64 id 不是 Uuid，跳过
                 });
             if let Some(request_id) = maybe_uuid {
                 let mut map = pending.lock().await;
@@ -1582,7 +1588,7 @@ mod tests {
         let req = dummy_request();
         let start = Instant::now();
         let resp = server
-            .request_decision(req, Duration::from_secs(60))
+            .request_decision(req, Duration::from_secs(60), "inbound")
             .await
             .expect("request_decision");
         let elapsed = start.elapsed();

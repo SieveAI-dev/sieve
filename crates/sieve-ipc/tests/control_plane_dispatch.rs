@@ -291,7 +291,7 @@ async fn timeout_broadcasts_request_decision_canceled() {
 
     // 短超时让请求快速 timeout
     let _resp = server
-        .request_decision(req, Duration::from_millis(150))
+        .request_decision(req, Duration::from_millis(150), "inbound")
         .await
         .unwrap();
 
@@ -601,7 +601,7 @@ async fn gui_error_response_clears_pending_decision() {
     // pending channel 被 drop → request_decision 收到 Err → fallback（Block）。
     let resp = tokio::time::timeout(
         Duration::from_millis(500),
-        server.request_decision(req, Duration::from_secs(30)),
+        server.request_decision(req, Duration::from_secs(30), "inbound"),
     )
     .await
     .expect("request_decision should not hang after GUI sends -32100 error");

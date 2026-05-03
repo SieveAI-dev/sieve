@@ -88,6 +88,7 @@ pub async fn hold_and_decide(
     ipc: Arc<IpcServer>,
     req: DecisionRequest,
     keep_alive_tx: mpsc::Sender<Bytes>,
+    direction: &str,
 ) -> Result<HoldOutcome, HoldError> {
     let timeout_secs = u64::from(req.timeout_seconds).max(1);
     let default_on_timeout = req.default_on_timeout;
@@ -118,7 +119,7 @@ pub async fn hold_and_decide(
 
     // 等待 IPC 决策
     let timeout = Duration::from_secs(timeout_secs);
-    let result = ipc.request_decision(req, timeout).await;
+    let result = ipc.request_decision(req, timeout, direction).await;
 
     // 停掉 keep-alive（无论成功失败）
     ka_handle.abort();
@@ -257,7 +258,7 @@ mod tests {
         });
 
         let (ka_tx, _ka_rx) = mpsc::channel::<Bytes>(8);
-        let outcome = hold_and_decide(Arc::clone(&server), req, ka_tx)
+        let outcome = hold_and_decide(Arc::clone(&server), req, ka_tx, "inbound")
             .await
             .unwrap();
         assert!(
@@ -301,7 +302,7 @@ mod tests {
         });
 
         let (ka_tx, _ka_rx) = mpsc::channel::<Bytes>(8);
-        let outcome = hold_and_decide(Arc::clone(&server), req, ka_tx)
+        let outcome = hold_and_decide(Arc::clone(&server), req, ka_tx, "inbound")
             .await
             .unwrap();
         assert!(matches!(outcome, HoldOutcome::Deny { .. }));
@@ -324,7 +325,8 @@ mod tests {
         let (ka_tx, _ka_rx) = mpsc::channel::<Bytes>(8);
 
         let ipc_clone = Arc::clone(&server);
-        let task = tokio::spawn(async move { hold_and_decide(ipc_clone, req, ka_tx).await });
+        let task =
+            tokio::spawn(async move { hold_and_decide(ipc_clone, req, ka_tx, "inbound").await });
 
         // 推进 2 秒让超时触发
         tokio::time::advance(Duration::from_secs(2)).await;
@@ -353,7 +355,8 @@ mod tests {
         let (ka_tx, _ka_rx) = mpsc::channel::<Bytes>(8);
 
         let ipc_clone = Arc::clone(&server);
-        let task = tokio::spawn(async move { hold_and_decide(ipc_clone, req, ka_tx).await });
+        let task =
+            tokio::spawn(async move { hold_and_decide(ipc_clone, req, ka_tx, "inbound").await });
 
         tokio::time::advance(Duration::from_secs(2)).await;
         tokio::time::resume();
@@ -410,7 +413,7 @@ mod tests {
                 .await;
         });
 
-        let outcome = hold_and_decide(Arc::clone(&server), req, ka_tx)
+        let outcome = hold_and_decide(Arc::clone(&server), req, ka_tx, "inbound")
             .await
             .unwrap();
         assert!(
@@ -518,7 +521,7 @@ mod tests {
         });
 
         let (ka_tx, _ka_rx) = mpsc::channel::<Bytes>(8);
-        let outcome = hold_and_decide(Arc::clone(&server), req, ka_tx)
+        let outcome = hold_and_decide(Arc::clone(&server), req, ka_tx, "inbound")
             .await
             .unwrap();
 

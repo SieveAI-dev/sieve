@@ -1,0 +1,51 @@
+{
+  "jsonrpc": "2.0",
+  "method": "sieve.request_decision",
+  "id": "9c1d8b73-2a4f-4e6c-b5d8-3e7f1a9c2b04",
+  "params": {
+    "request_id": "9c1d8b73-2a4f-4e6c-b5d8-3e7f1a9c2b04",
+    "title": "Sieve 检测到 2 个安全问题",
+    "severity": "critical",
+    "direction": "inbound",
+    "disposition": "gui_popup",
+    "timeout_seconds": 30,
+    "default_on_timeout": "block",
+    "allow_remember": false,
+    "merged": true,
+    "received_at_daemon": "2026-05-02T15:03:11.234Z",
+    "source_agent": "claude",
+    "origin_chain": [],
+    "source_channel": null,
+    "explicit_chain_depth": 0,
+    "issues": [
+      {
+        "issue_id": "i-1",
+        "rule_id": "IN-CR-05",
+        "title": "签名工具调用：signTransaction",
+        "severity": "critical",
+        "allow_remember": false,
+        "context": {
+          "template": "signing_tool_use",
+          "tool_name": "signTransaction",
+          "chain": "Ethereum"
+        },
+        "recommendation": {
+          "decision": "deny",
+          "confidence": "high",
+          "reason": "deadline=0 + 无限 amount 是 Permit2 钓鱼经典模式"
+        }
+      },
+      {
+        "issue_id": "i-2",
+        "rule_id": "IN-GEN-04",
+        "title": "Markdown 图片外链",
+        "severity": "high",
+        "allow_remember": true,
+        "context": {
+          "template": "markdown_exfil",
+          "markdown_snippet": "![img](https://evil.example.com/leak)"
+        }
+      }
+    ]
+  }
+}
