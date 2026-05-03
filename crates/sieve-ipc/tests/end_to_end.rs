@@ -255,6 +255,7 @@ async fn scenario_2_request_decision_single_issue() {
                 "template": "signing_tool_use",
                 "tool_name": "signTransaction"
             }),
+            recommendation: None,
         }],
         source_agent: SourceAgent::Claude,
         origin_chain: vec![],
@@ -368,6 +369,7 @@ async fn scenario_3_request_decision_merged_issues() {
                 title: "签名操作".to_owned(),
                 one_line_summary: "高风险签名".to_owned(),
                 details: serde_json::json!({ "template": "signing_tool_use" }),
+                recommendation: None,
             },
             DetectionPayload {
                 rule_id: "IN-GEN-04".to_owned(),
@@ -376,6 +378,7 @@ async fn scenario_3_request_decision_merged_issues() {
                 title: "Markdown 外链".to_owned(),
                 one_line_summary: "检测到外链".to_owned(),
                 details: serde_json::json!({ "template": "markdown_exfil" }),
+                recommendation: None,
             },
         ],
         source_agent: SourceAgent::Claude,
@@ -636,6 +639,7 @@ async fn scenario_6_wire_field_snake_case() {
             title: "BIP39 助记词".to_owned(),
             one_line_summary: "检测到助记词".to_owned(),
             details: serde_json::Value::Null,
+            recommendation: None,
         }],
         source_agent: SourceAgent::Claude,
         origin_chain: vec![],

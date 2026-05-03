@@ -12,6 +12,7 @@
 
 ## ✅ 已完成（按时间倒序）
 
+- **2026-05-03** B2 wire DTO recommendation 字段真实注入（DetectionPayload 加 recommendation 字段，单 issue 拷贝 / 多 issue 按 §6.1.4 各 issue 拷贝；4 个测试覆盖单/多 issue 各分支）
 - **2026-05-03** P2-5 fixtures 补齐到 73 文件（17 method × minimal/full/null_optional，含生成式断言遍历所有 fixture + 往返序列化验证，18 条 schema_v2_fixtures 测试通过）
 - **2026-05-03** 端到端集成测试 harness（A1：6 场景：握手/heartbeat 时间加速/request_decision 单 issue/merged/重连 boot_id 一致性/set_paused 串行化），mock GUI client + 真实 IpcServer spawn，`tests/end_to_end.rs`
 - **2026-05-03** P1-9 后续 origin_request_id 真实透传到 broadcast notification（ControlPlaneRequest 加 origin_request_id 字段，dispatch 从 JSON-RPC id 解析 UUID，handler 填到 PausedChangedNotify / PresetChangedNotify）

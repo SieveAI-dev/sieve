@@ -149,6 +149,7 @@ mod tests {
                 title: "私钥检测".to_owned(),
                 one_line_summary: "检测到 BIP39 助记词（12 词，checksum 通过）".to_owned(),
                 details: serde_json::json!({ "word_count": 12 }),
+                recommendation: None,
             }],
             source_agent: SourceAgent::Unknown,
             origin_chain: vec![],
