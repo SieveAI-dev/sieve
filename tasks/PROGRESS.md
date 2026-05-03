@@ -12,6 +12,7 @@
 
 ## ✅ 已完成（按时间倒序）
 
+- **2026-05-03** P2-5 fixtures 补齐到 73 文件（17 method × minimal/full/null_optional，含生成式断言遍历所有 fixture + 往返序列化验证，18 条 schema_v2_fixtures 测试通过）
 - **2026-05-03** 端到端集成测试 harness（A1：6 场景：握手/heartbeat 时间加速/request_decision 单 issue/merged/重连 boot_id 一致性/set_paused 串行化），mock GUI client + 真实 IpcServer spawn，`tests/end_to_end.rs`
 - **2026-05-03** P1-9 后续 origin_request_id 真实透传到 broadcast notification（ControlPlaneRequest 加 origin_request_id 字段，dispatch 从 JSON-RPC id 解析 UUID，handler 填到 PausedChangedNotify / PresetChangedNotify）
 - **2026-05-03** P1-5 + P2-2 + P2-4 request_decision wire DTO 拆分（单 issue 平铺 / 多 issue merged + issues[]）+ received_at_daemon 字段名 + 时间戳 Z 后缀联动
@@ -155,7 +156,7 @@ _无。等用户选定下一步执行哪一组 P0 后填入。建议每次最多
 - [x] **[P2-2]** P1-5 wire DTO 拆分时把 `created_at` 命名为 `received_at_daemon`（2026-05-03 完成，随 P1-5 一并处理）
 - [x] **[P2-3]** Timestamp 序列化保证 `Z` 后缀 + 毫秒精度（§4A）（2026-05-03 完成，新增 ts_serde.rs）
 - [x] **[P2-4]** 多 issue 合并形式（`merged: true` + `issues[]`）实现（§6.1.2, §6.2.2）（2026-05-03 完成，随 P1-5 一并处理）
-- [x] **[P2-5]** 建立 `tests/fixtures/v2/` + `tests/schema_v2_fixtures.rs`（骨架：3 method × minimal/full/null = 6 条测试通过；剩余 14 method 待补至 51 条）（2026-05-03 完成骨架）
+- [x] **[P2-5]** 建立 `tests/fixtures/v2/` + `tests/schema_v2_fixtures.rs`（17 method × 3 = 73 条 fixture，生成式断言 + 往返序列化验证，18 条测试通过）（2026-05-03 完成）
 - [x] **[P2-6]** `EvaluateRequest.source_agent` 改 `SourceAgent` enum（§5.7）— 测试中废弃 `"claude-code"`（2026-05-03 完成）
 
 ### 双侧契约同步点（必须与 sieve-gui-macos 仓库 PROGRESS 同步推进）

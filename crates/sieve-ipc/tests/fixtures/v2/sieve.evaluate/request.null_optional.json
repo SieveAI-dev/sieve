@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "method": "sieve.evaluate",
+  "params": {
+    "direction": "outbound",
+    "content_kind": "model_response",
+    "source_agent": "unknown",
+    "payload": "Here is your answer."
+  },
+  "id": "req-eval-3"
+}

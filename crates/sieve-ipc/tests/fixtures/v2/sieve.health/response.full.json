@@ -1,0 +1,44 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "daemon_version": "0.1.0",
+    "protocol_version": "v2",
+    "started_at": "2026-05-03T10:00:00.000Z",
+    "uptime_seconds": 7200,
+    "preset": {
+      "mode": "custom",
+      "overrides": {
+        "IN-GEN-04": {
+          "timeout_seconds": 60,
+          "default_on_timeout": "allow"
+        }
+      }
+    },
+    "paused": true,
+    "paused_until": "2026-05-03T13:00:00.000Z",
+    "listen": {
+      "addr": "127.0.0.1",
+      "port": 11453
+    },
+    "audit_db": {
+      "path": "~/.sieve/audit.db",
+      "size_bytes": 102400,
+      "schema_version": 2,
+      "events_total": 1234,
+      "events_today": 42
+    },
+    "rules": {
+      "system_count": 15,
+      "user_count": 3,
+      "last_reload": "2026-05-03T11:30:00.000Z"
+    },
+    "graylist": {
+      "active_count": 5
+    },
+    "ipc": {
+      "connected_clients": 2,
+      "total_decisions_inflight": 1
+    }
+  },
+  "id": "req-health-2"
+}

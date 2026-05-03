@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "paused": false,
+    "applies_to": []
+  },
+  "id": "req-001"
+}

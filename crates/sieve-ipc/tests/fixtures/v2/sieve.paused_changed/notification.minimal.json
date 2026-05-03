@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "method": "sieve.paused_changed",
+  "params": {
+    "paused": true,
+    "reason": "user_request",
+    "applies_to": ["AutoRedact", "StatusBar"]
+  }
+}

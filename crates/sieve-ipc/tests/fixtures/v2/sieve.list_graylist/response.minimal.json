@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "entries": [],
+    "next_cursor": null
+  },
+  "id": "req-gray-1"
+}

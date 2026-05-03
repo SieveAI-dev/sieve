@@ -1,0 +1,13 @@
+{
+  "jsonrpc": "2.0",
+  "method": "sieve.notify_status_bar",
+  "params": {
+    "notify_id": "01900000-0000-7001-0000-000000000001",
+    "created_at": "2026-05-03T12:00:00.000Z",
+    "kind": "outbound_redacted",
+    "title": "OUT-01 API 密钥已自动脱敏",
+    "detail": "匹配模式：sk-...xxxx（前 4 后 4 可见）",
+    "rule_id": "OUT-01-API-KEY",
+    "auto_dismiss_seconds": 5
+  }
+}

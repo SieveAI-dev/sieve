@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "method": "sieve.evaluate",
+  "params": {
+    "direction": "inbound",
+    "content_kind": "tool_use_input",
+    "source_agent": "claude",
+    "payload": "{\"name\":\"signTransaction\",\"input\":{\"to\":\"0xAbc\",\"value\":\"1000000000000000000\"}}"
+  },
+  "id": "req-eval-2"
+}

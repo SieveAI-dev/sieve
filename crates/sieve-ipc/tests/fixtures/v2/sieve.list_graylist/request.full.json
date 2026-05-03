@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "method": "sieve.list_graylist",
+  "params": {
+    "limit": 20,
+    "cursor": "eyJsYXN0X2lkIjoiYWJjZGVmIn0"
+  },
+  "id": "req-gray-2"
+}

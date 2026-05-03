@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "method": "sieve.remove_graylist",
+  "params": {
+    "fingerprint": "sha256:fedcba0987654321"
+  },
+  "id": "req-rm-gray-2"
+}
