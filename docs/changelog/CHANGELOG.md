@@ -11,6 +11,45 @@
 
 ---
 
+## [Unreleased] — 2026-05-03
+
+### 协议（SPEC-005 v2）
+- BREAKING: protocol_version "v1" → "v2"，不向下兼容
+- 新增 sieve.hello 握手通知（7 字段）+ sieve.heartbeat 25s 心跳
+- request_decision 拆 wire DTO（内部 vs wire 分离），单 issue 平铺 / 多 issue merged + issues[]
+- decision_response.result 补 required 字段：request_id / decided_at / by_user / ui_phase_when_clicked
+- 错误码段位重划：daemon→GUI -32000~99 / GUI→daemon -32100~99
+- 所有 method 名带 sieve. 前缀
+- 字段重命名 created_at → received_at_daemon
+- 字段名修正：until → paused_until / event_notify → notify_status_bar
+- HealthResult.paused 拆 bool + paused_until
+- NotifyKind 6 枚举值
+- 全部枚举 snake_case lowercase
+
+### 协议（SPEC-005 v2.0+ 兼容扩展，不 bump version）
+- 新增 sieve.list_rules method（GUI 规则总览 Table 数据源）
+- 新增 sieve.purge_history method（GUI 清空历史，需 GUI Touch ID 二次确认）
+- 错误码 -32006 rules_loading / -32007 purge_in_progress
+
+### 实现（daemon）
+- 帧读取改用 FrameReader + memchr（移除无界 BufReader::lines），单帧/remainder 1 MiB 限制 + audit 写 oversize 事件
+- socket 文件 0600 / 父目录 0700
+- fan-out 串行化（先 broadcast 后 result）+ origin_request_id 真实透传
+- fan-out write 加 2s bounded timeout（EPIPE/ECONNRESET/EBADF 视为失联）
+- JSON 解析失败返回 -32700 不关连接
+- recommendation 字段 daemon 业务层真实注入
+
+### 测试
+- e2e 集成测试 harness（spawn 真实 daemon + Rust mock GUI client，6 场景）
+- v2 fixtures 81 条（17+2 method × 3 档）
+- canary_token_hits_out01 路径硬编码 flake 修复
+
+### 善后
+- ipc audit oversize callback 注入（之前 callback 未接 SQLite）
+- pending decision 收到 GUI 错误响应按段位清理（防泄漏）
+
+---
+
 ## [v2.1-gui-control-plane-spec] - 2026-05-02
 
 ### 背景
