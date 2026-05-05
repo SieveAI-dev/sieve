@@ -743,7 +743,10 @@ async fn scenario_7_list_rules_wire_route() {
     // 验证 JSON-RPC 格式
     assert_eq!(resp["jsonrpc"].as_str(), Some("2.0"));
     assert_eq!(resp["id"].as_str(), Some(req_id));
-    assert!(resp.get("error").is_none(), "list_rules should not return error: {resp}");
+    assert!(
+        resp.get("error").is_none(),
+        "list_rules should not return error: {resp}"
+    );
 
     // 验证 result.rules 字段存在且为数组
     let result: ListRulesResult = serde_json::from_value(resp["result"].clone())
@@ -801,10 +804,16 @@ async fn scenario_8_purge_history_wire_route() {
 
     assert_eq!(resp["jsonrpc"].as_str(), Some("2.0"));
     assert_eq!(resp["id"].as_str(), Some(req_id));
-    assert!(resp.get("error").is_none(), "purge_history should not return error: {resp}");
+    assert!(
+        resp.get("error").is_none(),
+        "purge_history should not return error: {resp}"
+    );
 
     let result: PurgeHistoryResult = serde_json::from_value(resp["result"].clone())
         .expect("result should deserialize to PurgeHistoryResult");
     assert_eq!(result.rows_deleted, 42);
-    assert!(result.purged_at >= now_ms, "purged_at should be >= confirmed_at");
+    assert!(
+        result.purged_at >= now_ms,
+        "purged_at should be >= confirmed_at"
+    );
 }

@@ -31,12 +31,17 @@ impl UserEngine {
         let enabled: Vec<UserRuleEntry> = rules.into_iter().filter(|r| r.enabled).collect();
         let count = enabled.len();
 
-        let rule_entries: Vec<RuleEntry> = enabled.iter().map(|r| to_rule_entry(r.clone())).collect();
+        let rule_entries: Vec<RuleEntry> =
+            enabled.iter().map(|r| to_rule_entry(r.clone())).collect();
 
         let inner = VectorscanEngine::compile(rule_entries)
             .map_err(|e| PolicyError::EngineCompile(e.to_string()))?;
 
-        Ok(Self { inner, count, source_rules: enabled })
+        Ok(Self {
+            inner,
+            count,
+            source_rules: enabled,
+        })
     }
 
     /// 返回用户规则原始条目快照（SPEC-005 §11A `sieve.list_rules` 用）。
