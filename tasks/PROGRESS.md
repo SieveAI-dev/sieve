@@ -1,7 +1,7 @@
 # Sieve daemon · 进度
 
 > 上次更新：2026-05-05
-> 当前阶段：**unix-style 改造 TODO-1/2/3a/3b/4/5 全部代码落地，等用户验证（TODO-6 v3.x post-GA opt-in 暂不做）**
+> 当前阶段：**unix-style 改造 TODO-1/2/3a/3b/4/5 全部代码落地，等用户验证（TODO-6 v3.x post-GA opt-in 暂不做）；新增更新通道 + 遥测（ADR-029/030）待启动**
 
 ## 当前阶段一句话
 
@@ -216,6 +216,88 @@ TODO-6 Network jail enforcement 推后到 v3.x post-GA opt-in。
 - §10 forwarder path prefix（DeepSeek 中转站）
 - §11/§12 SPEC-005 中性化 + sieve-ipc 模块化（文档/结构级）
 - §13 GUI 仓 follow-up
+
+### 更新通道 + 遥测（ADR-029 / ADR-030，GA 前必须落地）
+
+> 关联 ADR：[ADR-029](../docs/design/ADR-029-free-first-defer-monetization.md)（装机量优先，延后商业化）/ [ADR-030](../docs/design/ADR-030-update-telemetry-channel.md)（更新通道复用为遥测信标）/ [ADR-006](../docs/design/ADR-006-sigstore-reproducible-build.md)（签名分发）
+> 设计源：2026-05-05 主线讨论 ——「免费优先 + 用更新检查作为 DAU 信号 + Install UUID + 三个 Unix-style env var 开关」
+
+#### P0 · ADR-030 待决项（动手前必须确认，每项都有默认推荐，确认即可推进）
+
+- [ ] **1. 根域名注册**
+  - 当前占位：`updates.sieve.app` / `cdn.sieve.app`
+  - 默认推荐：**`sieve.app`**（CF 个人账号注册 ~$20/年，GA 前迁到 ADR-005 海外主体；子域 `updates.` / `cdn.` / `api.` 共用）
+  - 备选：`.dev` / `.io`
+  - 依赖：可独立先行，不阻塞 ADR-005
+
+- [ ] **2. ed25519 签名密钥管理**
+  - 风险：密钥泄露 = 全网 Sieve 用户被推恶意规则（信任根）
+  - 默认推荐：**GCP KMS**（密钥永不出 HSM / IAM 审计 / 零运维 / 每月签名几次成本可忽略 / 启用版本化 + 跨区域复制做备份）
+  - 备选：1Password Secrets（最简单，但密钥需联网取）/ YubiKey（物理不可导出但单点故障）/ air-gapped（一人公司不现实）
+  - 落地后写入 [ADR-006](../docs/design/ADR-006-sigstore-reproducible-build.md) follow-up
+
+- [ ] **3. 服务端实现栈**
+  - 默认推荐：**Cloudflare Workers + D1**（零运维 / 天然 anti-DDoS / 免费层够前 6 个月装机量 / 与 CDN 一站式）
+  - 备选：自托管 Go / Rust（完全可控但要管服务器 + TLS + 监控 + 备份，一人公司心智成本高）
+  - 后期日志量大了再迁 ClickHouse / BigQuery，迁移代价可接受
+
+- [ ] **4. 客户端 crate 归属**
+  - 默认推荐：**新增 `sieve-updater` 独立 crate**（与 6 crate 边界规范一致 / GUI 仓未来可复用同一份 manifest schema 与签名校验，避免协议漂移）
+  - 备选：塞进 `sieve-cli`（少一个 crate，但与 daemon 启动逻辑耦合，GUI 仓没法复用）
+
+- [ ] **5. 发布通道首发策略**
+  - 默认推荐：**首发 stable 单通道**（实现最简，符合 ADR-011 GA 节奏）；`?ch=` 参数保留预留扩展（默认 `stable`，服务端忽略其他值）
+  - 备选：首发就引入 beta（双套规则文件 + 双套签名 + 用户切换 UI，工程量翻倍）
+
+> **全部推荐汇总**：`sieve.app` / GCP KMS / Cloudflare Workers + D1 / 新增 `sieve-updater` crate / 首发 stable 单通道
+> 全确认后从本表移除并写入 ADR-030「2026-XX-XX 决策」段，然后起草 SPEC-006。
+
+#### P0 · 客户端实现（首发 macOS）
+
+- [ ] 新建 SPEC-006-update-and-telemetry.md（manifest 协议详细规格 + 客户端流程图 + 失败重试策略）
+- [ ] `cache_dir() -> PathBuf` 跨平台抽象（首发 macOS 路径，预留 Linux/Windows 分支）
+- [ ] Install UUID 模块：首启生成 UUIDv4 → 写 `~/Library/Caches/sieve/install-id` 0600 → 后续读取
+- [ ] 6h 定时器（tokio interval）+ 启动时立即查一次的 manifest 拉取流程
+- [ ] manifest GET 请求构造（v / os / arch / uid / ch 参数）+ TLS 1.2+ 强制
+- [ ] manifest 响应解析 + ed25519 签名校验 + sha256 校验 + 规则文件原子替换
+- [ ] 三个环境变量解析与优先级（env > toml > default）
+- [ ] `SIEVE_NO_UPDATE` 启动 banner 明示打印
+- [ ] `[update]` 段加入 sieve.toml schema（enabled / telemetry / url / check_interval_hours）
+- [ ] 失败重试策略（指数退避 + 最大重试次数 + 全失败时不影响 daemon 启动）
+
+#### P0 · 服务端实现
+
+- [ ] manifest 接口骨架（不挂 CDN 的自有服务器 / Cloudflare Worker）
+- [ ] 日志字段写入：`ts | uid | v | os | arch | ch | country(geoip)`
+- [ ] 原始 IP 不落盘（geoip 解析后丢弃，或哈希后保留 ≤7 天硬删）
+- [ ] DAU / WAU / MAU / 留存曲线 / 版本分布 / 平台分布 SQL 模板
+- [ ] 简单反滥用与限流（同一 IP 每分钟请求上限）
+- [ ] 规则正文 CDN 上架 + ed25519 签名 + sha256 manifest 字段填充
+
+#### P0 · 文档同步
+
+- [ ] api-reference.md 新增 §X manifest 接口章节
+- [ ] development.md 加 SIEVE_NO_UPDATE / SIEVE_NO_TELEMETRY / SIEVE_UPDATE_URL 三个环境变量说明
+- [ ] deployment.md 加企业自托管镜像章节（SIEVE_UPDATE_URL 用法）
+- [ ] data-model.md 加服务端日志表 schema（若服务端代码进本仓）
+- [ ] README.md 加隐私声明文案 + Phase 1 免费定位
+- [ ] CHANGELOG `[Unreleased]` 加 manifest 协议 + 三个 env var 条目
+- [ ] PRD §11 商业化策略章节加 ADR-029 引用，定价说明改为「Phase 1 free for personal use」
+
+#### 工作量预估
+- 客户端：约 3-5 天（含 SPEC-006 起草 + 实现 + 单元测试 + 集成测试）
+- 服务端：约 2-3 天（如选 Cloudflare Workers）
+- 文档：约 1 天
+
+#### 完成定义
+- 本地启动 daemon → 6h 内能看到自身 install-id 出现在服务端日志
+- `SIEVE_NO_UPDATE=1 cargo run -p sieve-cli -- start` 启动 banner 明示禁用 + 不发任何更新请求
+- `SIEVE_NO_TELEMETRY=1` 启动后请求中无 uid 字段
+- `SIEVE_UPDATE_URL=http://localhost:8080/v1/manifest` 能切到本地 mock 服务器
+- 删除 install-id 文件后重启，下次请求带新 UUID
+- 服务端能跑出 DAU / 留存曲线
+
+---
 
 ### 已知小尾巴（不阻塞联调）
 - direction 字段在 sieve-core/pipeline 某孤立路径未被完整测试覆盖
