@@ -846,6 +846,96 @@ sieve rules enable <rule_id>
 
 ---
 
+### 6.4a sieve decisions CLI（ADR-028 TODO-4，2026-05-05 新增）
+
+Headless 决策面 CLI——让 daemon 在 GUI 不在线时仍可用（远程 SSH / GUI crash / tmux 工作流）。CLI 跟 GUI 共用同一组 IPC method，**不引入特权 endpoint**。详见 [ADR-028](../design/ADR-028-ipc-protocol-neutralization.md)。
+
+#### `sieve decisions watch`
+
+```
+sieve decisions watch [--format jsonl] [--severity SEV]
+```
+
+流式订阅 daemon 推送的 pending decision events。`--format jsonl` 每行一个 JSON object（默认），方便接 `jq` / `fluentd` / `vector`。`--severity` 过滤（critical / high / medium / low）。Ctrl+C 优雅退出。
+
+#### `sieve decisions show <id>`
+
+```
+sieve decisions show <pending-id>
+```
+
+查询单个 pending decision 的完整上下文（detection / origin / caller）。默认 pretty-printed JSON。
+
+#### `sieve decisions resolve`
+
+```
+sieve decisions resolve <id> --approve [--reason "..."]
+sieve decisions resolve <id> --block   [--reason "..."]
+sieve decisions resolve <id> --warn    [--reason "..."]
+```
+
+解决单个 pending decision；三选一互斥；`--reason` 可选写入 audit。
+
+#### `sieve start --no-client-policy` flag
+
+```
+sieve start --no-client-policy {auto-block|auto-warn|hold-and-fail-closed} ...
+```
+
+daemon 在无 client 接 IPC 时的兜底策略：
+- `auto-block`（默认）：保守 fail-closed，无 client 时直接 deny
+- `auto-warn`：标记 warn 自动放行
+- `hold-and-fail-closed`：等待超时后按 `default_on_timeout` 处置（v1.x 行为）
+
+实现：`gated_request_decision` 在 `connected_clients == 0` 且非 Critical 时按策略快速返回。
+
+---
+
+### 6.4b sieve audit CLI（ADR-028 TODO-5，2026-05-05 新增）
+
+Unix-pipeable 审计日志查询 CLI——直接读 `~/.sieve/audit.db`（不通过 IPC），输出 jsonl 方便接管道工具。详见 [ADR-028](../design/ADR-028-ipc-protocol-neutralization.md)。
+
+#### `sieve audit tail`
+
+```
+sieve audit tail [-f|--follow] [--format jsonl|pretty] [--limit N]
+```
+
+显示最后 N 条审计事件（默认 N=20）。`--follow` 流式跟踪新事件（500ms 轮询）。`--format jsonl` 每行一个 JSON object。
+
+#### `sieve audit query`
+
+```
+sieve audit query [--since DUR] [--severity SEV] [--rule-id RULE] [--provider-id PROVIDER] [--format jsonl|pretty]
+```
+
+按条件过滤查询：
+- `--since`：时间范围（`1h` / `30m` / `7d` / `24h`）
+- `--severity`：critical / high / medium / low
+- `--rule-id`：按 rule_id 过滤
+- `--provider-id`：按 listener 上游标识过滤（v3 schema 新列，ADR-026 Stage E）
+
+#### `sieve audit show <id>`
+
+```
+sieve audit show <event-id>
+```
+
+显示单条事件完整内容（含 raw_json 字段如有）。
+
+**输出 jsonl schema**（对齐 audit_events 表 v3 schema）：
+
+```json
+{"id": 1, "timestamp": "2026-05-05T12:34:56Z", "direction": "outbound", "rule_id": "OUT-01", "severity": "Critical", "disposition": "redact", "decision": null, "request_id": "req-001", "provider_id": "anthropic", "caller_pid": 1234, "caller_exe": "/usr/bin/claude", "raw_json": null}
+```
+
+`provider_id` 特殊值：
+- `_system`：daemon 系统级事件（control plane / oversize / config reload）
+- `unknown`：兜底值（v2 老记录 migration 默认值 / 测试 fixture）
+- 普通字符串：来自 `sieve.toml [[upstream]] provider_id` 字段
+
+---
+
 ### 6.5 sieve setup / doctor / uninstall 退出码
 
 标准 UNIX 惯例：`0` = 成功，非零 = 失败（具体错误信息打印到 stderr）。
