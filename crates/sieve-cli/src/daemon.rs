@@ -146,15 +146,19 @@ fn detection_rule_ids<'a>(detections: &'a [&sieve_core::Detection]) -> Vec<&'a s
     detections.iter().map(|d| d.rule_id.as_str()).collect()
 }
 
-/// 暂停状态感知的 `request_decision`（SPEC-002 §9.1）。
+/// 暂停状态感知的 `request_decision`（SPEC-002 §9.1 + ADR-028 TODO-4 no-client policy）。
 ///
 /// 行为：
-/// 1. 若有任意 detection 命中 `critical_lock::FAIL_CLOSED_RULES` → 照常弹窗（暂停不影响 Critical）。
-/// 2. 否则若 daemon 处于暂停状态 → **跳过 GUI 弹窗**，按 `default_on_timeout` 自动决策，
+/// 1. 若有任意 detection 命中 `critical_lock::FAIL_CLOSED_RULES` → 照常弹窗（暂停 / no-client policy 不影响 Critical）。
+/// 2. 若 IPC server 无 client 连接（GUI 未在线 / CLI 未订阅）→ 按 `no_client_policy` 快速处置（ADR-028 §3）：
+///    - `AutoBlock`：直接 Deny（fail-closed，默认）
+///    - `AutoWarn`：直接 Allow（低风险 headless）
+///    - `HoldAndFailClosed`：继续走原逻辑（等超时，v1.x 行为）
+/// 3. 否则若 daemon 处于暂停状态 → **跳过弹窗**，按 `default_on_timeout` 自动决策，
 ///    写 `AuditEvent::AutoDecidedPaused`，返回合成 response（`by_user=false`）。
-/// 3. 否则 → 直接调 `IpcServer::request_decision`。
+/// 4. 否则 → 直接调 `IpcServer::request_decision`。
 ///
-/// 关联：PRD v2.0 §9 #3 #8（Critical 不可暂停）、SPEC-002 §9.1（paused 弹窗矩阵）。
+/// 关联：PRD v2.0 §9 #3 #8（Critical 不可暂停）、SPEC-002 §9.1（paused 弹窗矩阵）、ADR-028 §3。
 #[allow(clippy::too_many_arguments)]
 async fn gated_request_decision(
     ipc: &Arc<sieve_ipc::IpcServer>,
@@ -164,11 +168,56 @@ async fn gated_request_decision(
     timeout: std::time::Duration,
     direction: &str,
     provider_id: &str,
+    no_client_policy: crate::cli::NoClientPolicy,
 ) -> Result<sieve_ipc::DecisionResponse, sieve_ipc::IpcError> {
     let any_critical = req
         .detections
         .iter()
         .any(|d| sieve_rules::critical_lock::is_fail_closed(&d.rule_id));
+
+    // ADR-028 TODO-4：无 client 连接时按 no_client_policy 快速处置。
+    // Critical 规则不受此策略影响（fail-closed 硬约束，PRD §9 #3 #8）。
+    if !any_critical && ipc.connected_clients() == 0 {
+        match no_client_policy {
+            crate::cli::NoClientPolicy::AutoBlock => {
+                tracing::info!(
+                    provider_id,
+                    "no client connected → auto-block (ADR-028 no_client_policy=auto-block)"
+                );
+                return Ok(sieve_ipc::DecisionResponse {
+                    request_id: req.request_id,
+                    decision: sieve_ipc::DecisionAction::Deny,
+                    decided_at: chrono::Utc::now(),
+                    by_user: false,
+                    remember: false,
+                    context_hint: Some("auto-block: no client connected (ADR-028)".to_owned()),
+                    ui_phase_when_clicked: None,
+                });
+            }
+            crate::cli::NoClientPolicy::AutoWarn => {
+                tracing::info!(
+                    provider_id,
+                    "no client connected → auto-warn allow (ADR-028 no_client_policy=auto-warn)"
+                );
+                return Ok(sieve_ipc::DecisionResponse {
+                    request_id: req.request_id,
+                    decision: sieve_ipc::DecisionAction::Allow,
+                    decided_at: chrono::Utc::now(),
+                    by_user: false,
+                    remember: false,
+                    context_hint: Some("auto-warn: no client connected (ADR-028)".to_owned()),
+                    ui_phase_when_clicked: None,
+                });
+            }
+            crate::cli::NoClientPolicy::HoldAndFailClosed => {
+                // v1.x 行为：继续走 request_decision（等超时，fail-closed 通过 default_on_timeout）
+                tracing::debug!(
+                    provider_id,
+                    "no client connected → hold-and-fail-closed (ADR-028 no_client_policy=hold-and-fail-closed)"
+                );
+            }
+        }
+    }
 
     if any_critical || !ipc.is_paused() {
         return ipc.request_decision(req, timeout, direction).await;
@@ -551,6 +600,23 @@ type ResponseBody = BoxBody<Bytes, Box<dyn std::error::Error + Send + Sync>>;
 /// # Errors
 /// bind 端口失败或 Forwarder 初始化失败时返回错误。
 #[allow(clippy::too_many_arguments)]
+/// daemon::run 扩展参数（ADR-028 TODO-4 no-client policy）。
+///
+/// 单独用结构体封装，避免函数参数过多（clippy too_many_arguments）。
+pub struct DaemonRunOpts {
+    /// 无 client 接 IPC 时的兜底策略（ADR-028 §3）。
+    pub no_client_policy: crate::cli::NoClientPolicy,
+}
+
+impl Default for DaemonRunOpts {
+    fn default() -> Self {
+        Self {
+            no_client_policy: crate::cli::NoClientPolicy::AutoBlock,
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     cfg: Config,
     filter: Arc<OutboundFilter>,
@@ -570,8 +636,10 @@ pub async fn run(
             sieve_policy::engine::UserEngine,
         >,
     >,
+    opts: DaemonRunOpts,
 ) -> Result<()> {
     let dry_run = cfg.dry_run;
+    let no_client_policy = opts.no_client_policy;
 
     // ADR-026 §决策 1+2：把 cfg.upstreams 升级成运行时 ListenerSpec 数组。
     // 单 listener 配置（旧 sieve.toml）走 Config::resolved_upstreams 兼容映射，
@@ -851,6 +919,7 @@ pub async fn run(
             audit_store.clone(),
             ipc_server.clone(),
             dry_run,
+            no_client_policy,
         ));
         handles.push(h);
     }
@@ -880,6 +949,7 @@ async fn accept_loop(
     audit_store: Arc<crate::audit::AuditStore>,
     ipc_server: Option<Arc<sieve_ipc::IpcServer>>,
     dry_run: bool,
+    no_client_policy: crate::cli::NoClientPolicy,
 ) {
     let listen_addr = match listener.local_addr() {
         Ok(a) => a,
@@ -940,7 +1010,20 @@ async fn accept_loop(
                 let pf = pf.clone();
                 // RequestCtx（caller + audit + listener meta）捕获到闭包
                 let ctx = req_ctx.clone();
-                async move { proxy(f, pf, flt, ib_filter, dry_run, ipc, ctx, req).await }
+                async move {
+                    proxy(
+                        f,
+                        pf,
+                        flt,
+                        ib_filter,
+                        dry_run,
+                        ipc,
+                        ctx,
+                        req,
+                        no_client_policy,
+                    )
+                    .await
+                }
             });
 
             if let Err(e) = auto::Builder::new(TokioExecutor::new())
@@ -1131,6 +1214,7 @@ async fn proxy(
     ipc: Option<Arc<sieve_ipc::IpcServer>>,
     ctx: RequestCtx,
     req: Request<Incoming>,
+    no_client_policy: crate::cli::NoClientPolicy,
 ) -> Result<Response<ResponseBody>, hyper::Error> {
     match proxy_inner(
         forwarder,
@@ -1141,6 +1225,7 @@ async fn proxy(
         ipc,
         ctx,
         req,
+        no_client_policy,
     )
     .await
     {
@@ -1188,6 +1273,7 @@ async fn proxy_inner(
     ipc: Option<Arc<sieve_ipc::IpcServer>>,
     ctx: RequestCtx,
     req: Request<Incoming>,
+    no_client_policy: crate::cli::NoClientPolicy,
 ) -> Result<Response<ResponseBody>> {
     let (mut parts, body) = req.into_parts();
 
@@ -1393,6 +1479,7 @@ async fn proxy_inner(
                     timeout_dur,
                     "inbound",
                     &ctx.listener_provider_id,
+                    no_client_policy,
                 )
                 .await;
 
@@ -1669,6 +1756,7 @@ async fn proxy_inner(
                     timeout_dur,
                     "outbound",
                     &ctx.listener_provider_id,
+                    no_client_policy,
                 )
                 .await;
 
@@ -1939,6 +2027,7 @@ async fn proxy_inner(
                 ctx.listener_protocol,
                 ctx.listener_provider_id.clone(),
             ),
+            no_client_policy,
         )
         .await;
     }
@@ -1982,6 +2071,7 @@ async fn proxy_openai(
     source_channel: Option<String>,
     chain_depth: usize,
     ctx: RequestCtx,
+    no_client_policy: crate::cli::NoClientPolicy,
 ) -> Result<Response<ResponseBody>> {
     let RequestCtx {
         caller,
@@ -2196,6 +2286,7 @@ async fn proxy_openai(
                 timeout_dur,
                 "outbound",
                 &listener_provider_id,
+                no_client_policy,
             )
             .await;
 

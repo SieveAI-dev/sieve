@@ -8,6 +8,11 @@
 //! 仅 macOS Phase 1 支持；非 macOS 编译进友好错误 stub。
 //!
 //! Week 6 新增（SPEC-004 §2）：`--agent` / `--all-detected` / `--all` 多 agent 参数。
+//!
+//! ADR-028 新增：
+//! - `decisions`：headless decision CLI（TODO-4）
+//! - `audit`：unix-pipeable 审计查询（TODO-5）
+//! - `sieve start --no-client-policy`：无 client 在线时的兜底策略
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -36,6 +41,14 @@ pub enum Command {
         /// 禁止添加 --no-dry-run 等关闭安全机制的 flag（ADR-007）。
         #[arg(long)]
         dry_run: bool,
+
+        /// 无 client 接 IPC 时的兜底策略（ADR-028 TODO-4）。
+        ///
+        /// 默认 `auto-block`（保守 fail-closed）；其他选项：
+        /// - `auto-warn`：标记 warn 自动放行
+        /// - `hold-and-fail-closed`：等待超时后按 default_on_timeout 处置（v1.x 行为）
+        #[arg(long, value_enum, default_value_t = NoClientPolicy::AutoBlock)]
+        no_client_policy: NoClientPolicy,
     },
     /// 打印版本号并退出。
     Version,
@@ -59,6 +72,17 @@ pub enum Command {
     /// 维护 `~/.sieve/rules/user.toml`：编辑、列出、禁用、启用。
     /// daemon hot-reload 推 Week 6（v2.0 Phase A 仅 ship 文件级操作）。
     Rules(RulesArgs),
+
+    /// 决策面 CLI（headless 工作流，ADR-028 TODO-4）。
+    ///
+    /// 在 GUI 不在线时通过 CLI 订阅 / 查看 / 解决待决策事件。
+    /// CLI 跟 GUI 共用同一组 IPC 方法，不引入特权 endpoint。
+    Decisions(DecisionsArgs),
+
+    /// 审计日志查询（unix-pipeable，ADR-028 TODO-5）。
+    ///
+    /// 直接读 `~/.sieve/audit.db` SQLite，输出 jsonl 格式方便接 jq / fluentd。
+    Audit(AuditArgs),
 }
 
 /// `sieve rules` 参数（PRD v2.0 §5.5.2）。
@@ -171,4 +195,146 @@ pub struct UninstallArgs {
     /// 不询问确认，直接执行。
     #[arg(long)]
     pub yes: bool,
+}
+
+// ── ADR-028 新增类型 ─────────────────────────────────────────────────────────
+
+/// 无 client 接 IPC 时的兜底策略（ADR-028 TODO-4）。
+///
+/// daemon 在 IPC server 没有 client 连接时（或 decision request 超时无人响应）按此策略走。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum NoClientPolicy {
+    /// 无 client 在线时直接 block（最保守，fail-closed；默认值）。
+    AutoBlock,
+    /// 无 client 在线时标记 warn 放行（低风险 headless 场景）。
+    AutoWarn,
+    /// 等待超时后按 default_on_timeout 处置（等价于 v1.x 行为）。
+    HoldAndFailClosed,
+}
+
+/// `sieve decisions` 参数（ADR-028 TODO-4）。
+#[derive(clap::Args, Debug)]
+pub struct DecisionsArgs {
+    /// 子命令。
+    #[command(subcommand)]
+    pub command: DecisionsCommand,
+}
+
+/// `sieve decisions` 子命令枚举。
+#[derive(Debug, Subcommand)]
+pub enum DecisionsCommand {
+    /// 流式订阅 pending decision 事件（每行一个 JSON object，jsonl 格式）。
+    Watch {
+        /// 输出 jsonl 格式（默认开启）。
+        #[arg(long)]
+        format_jsonl: bool,
+
+        /// 按 severity 过滤（critical / high / medium / low）。
+        #[arg(long, value_enum)]
+        severity: Option<Severity>,
+
+        /// 按 listener 上游 provider-id 过滤。
+        #[arg(long)]
+        provider_id: Option<String>,
+    },
+
+    /// 查询单个 pending decision 的完整上下文。
+    Show {
+        /// Decision request UUID。
+        id: String,
+    },
+
+    /// 解决一个 pending decision（批准 / 拒绝 / warn）。
+    Resolve {
+        /// Decision request UUID。
+        id: String,
+
+        /// 批准（Allow）。与 --block / --warn 互斥。
+        #[arg(long, conflicts_with_all = &["block", "warn"])]
+        approve: bool,
+
+        /// 拒绝（Block / Deny）。与 --approve / --warn 互斥。
+        #[arg(long, conflicts_with_all = &["approve", "warn"])]
+        block: bool,
+
+        /// 标记 warn 放行。与 --approve / --block 互斥。
+        #[arg(long, conflicts_with_all = &["approve", "block"])]
+        warn: bool,
+
+        /// 决策理由（可选，写入 audit）。
+        #[arg(long)]
+        reason: Option<String>,
+    },
+}
+
+/// severity 枚举（共用于 decisions watch + audit query）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum Severity {
+    Critical,
+    High,
+    Medium,
+    Low,
+}
+
+/// 输出格式枚举（共用于 audit tail / query）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum OutputFormat {
+    Jsonl,
+    Pretty,
+}
+
+/// `sieve audit` 参数（ADR-028 TODO-5）。
+#[derive(clap::Args, Debug)]
+pub struct AuditArgs {
+    /// 子命令。
+    #[command(subcommand)]
+    pub command: AuditCommand,
+}
+
+/// `sieve audit` 子命令枚举。
+#[derive(Debug, Subcommand)]
+pub enum AuditCommand {
+    /// 显示最后 N 条审计事件，支持 --follow 流式跟踪。
+    Tail {
+        /// 流式跟踪新事件（500ms 轮询 SQLite）。
+        #[arg(short = 'f', long)]
+        follow: bool,
+
+        /// 输出格式（jsonl 默认）。
+        #[arg(long, value_enum)]
+        format: Option<OutputFormat>,
+
+        /// 显示最后 N 条（默认 20）。
+        #[arg(long, default_value_t = 20)]
+        limit: u32,
+    },
+
+    /// 按条件查询审计事件。
+    Query {
+        /// 时间范围（如 "1h" / "24h" / "7d"）。
+        #[arg(long)]
+        since: Option<String>,
+
+        /// 按 severity 过滤。
+        #[arg(long, value_enum)]
+        severity: Option<Severity>,
+
+        /// 按 rule_id 过滤。
+        #[arg(long)]
+        rule_id: Option<String>,
+
+        /// 按 listener 上游 provider_id 过滤（v3 schema 新列）。
+        #[arg(long)]
+        provider_id: Option<String>,
+
+        /// 输出格式（jsonl 默认）。
+        #[arg(long, value_enum)]
+        format: Option<OutputFormat>,
+    },
+
+    /// 显示单条审计事件完整内容。
+    Show {
+        /// 审计事件 id（INTEGER PRIMARY KEY）。
+        id: i64,
+    },
 }
