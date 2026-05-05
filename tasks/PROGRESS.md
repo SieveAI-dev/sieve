@@ -17,6 +17,21 @@ GUI 仓库（sieve-gui-macos）同步完成 swift test 127 passed + xcodebuild S
 
 ## ✅ 主里程碑
 
+### 2026-05-05 unix-style 改造 TODO-2 Stage B/C/D · multi-listener + 协议错位拒绝（ADR-026）
+- ListenerSpec struct + 拆 accept_loop 独立 async fn
+- daemon::run 重构：cfg.resolved_upstreams() → Vec<ListenerSpec> → 多 bind（fail-fast）→ spawn N accept_loop
+- proxy_inner 协议错位 fail-closed 校验（Anthropic listener 收 /v1/chat/completions → 400；反向亦然）
+- build_protocol_mismatch_400 helper（400 + sieve_blocked event payload）
+- RequestCtx 加 listener_protocol + listener_provider_id（8 处 ::new + 5 处 destructure 同步）
+- 向后兼容：旧 sieve.toml 走 resolved_upstreams 单元素映射，行为不变
+- 验证：sieve-cli 226 passed / workspace 713 passed / clippy 0 / fmt clean
+
+### 2026-05-05 unix-style 改造 TODO-2 Stage A · Config schema（ADR-026）
+- Protocol enum + UpstreamListener struct + [[upstream]] 数组
+- Config::resolved_upstreams 兼容旧字段映射
+- check_safety_invariants 拆出可单测函数（端口冲突 / 非 loopback bind 检测）
+- 13 个新测试（共 226 sieve-cli passed）
+
 ### 2026-05-05 unix-style 改造 TODO-1 · forwarder path prefix 修复（ADR-026）
 - `Forwarder` 加 `upstream_path_prefix` 字段，`Forwarder::new` 解析 + trim 末尾 `/`
 - `rewrite_uri` 拼接 prefix（DeepSeek `/anthropic` 等中转站现已可用）
@@ -63,8 +78,8 @@ GUI 仓库（sieve-gui-macos）同步完成 swift test 127 passed + xcodebuild S
 - [x] **TODO-1 修 forwarder path prefix bug** ✅（已完成，commit 见 git log）
 - [ ] **TODO-2 Port-based multi-listener**（执行中）
   - 决策：Q1=b（IPC HealthResult listeners 数组升级）/ Q2=a（审计 provider_id 同步）/ Q3=严格（协议错位 fail-closed 400）/ Q4=方案 B 三段 commit
-  - [x] Stage A: Config schema ✅ 完成 2026-05-05（Protocol enum / UpstreamListener struct / [[upstream]] 数组 / resolved_upstreams 兼容旧字段 / check_safety_invariants 可单测 / 13 个新测试）
-  - [ ] Stage B+C+D: multi-listener accept loop + per-listener forwarder + 协议错位拒绝（待启动）
+  - [x] Stage A: Config schema ✅ 完成 2026-05-05
+  - [x] Stage B+C+D: multi-listener accept loop + per-listener forwarder + 协议错位拒绝 ✅ 完成 2026-05-05
   - [ ] Stage E+F+G: 审计 provider_id + IPC HealthResult listeners + doctor + 文档（待启动）
   - 需 GUI 仓 follow-up：sieve-gui-macos SPEC-002 + Swift 代码读 listeners 数组（向后兼容期内 listen 单值仍发）
 

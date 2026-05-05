@@ -406,10 +406,14 @@ impl Config {
         PathBuf::from(".sieve").join("sieveignore")
     }
 
-    /// 拼接监听 SocketAddr。
+    /// 拼接监听 SocketAddr（**已废弃**，仅保留兼容性 + 测试使用）。
+    ///
+    /// ADR-026 后 daemon 走 [`Config::resolved_upstreams`] 多 listener 路径，
+    /// 不再读 single `port` 字段。本方法保留供旧 sieve.toml 反序列化校验测试使用。
     ///
     /// # Errors
     /// `bind_addr` 或 `port` 无法解析为合法 SocketAddr 时返回错误。
+    #[allow(dead_code)]
     pub fn listen_addr(&self) -> Result<std::net::SocketAddr> {
         format!("{}:{}", self.bind_addr, self.port)
             .parse()
