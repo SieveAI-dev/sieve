@@ -827,6 +827,7 @@ mod tests {
                         Option::<String>::None,
                         Option::<i32>::None,    // caller_pid
                         Option::<String>::None, // caller_exe
+                        UNKNOWN_PROVIDER_ID,    // provider_id (v3 schema, ADR-026 Stage E)
                     ],
                 )
                 .unwrap();
@@ -898,14 +899,17 @@ mod tests {
         )
         .unwrap();
 
-        // 调用迁移
+        // 调用迁移（v1 → v3 一次性迁移，ADR-026 Stage E 升级到 v3）
         migrate(&conn).expect("migrate 应成功");
 
-        // 验证 user_version = 2
+        // 验证 user_version = 3（v1 → v3 完整迁移）
         let ver: u32 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(ver, 2, "迁移后 user_version 应为 2");
+        assert_eq!(
+            ver, 3,
+            "v1 迁移后 user_version 应为最新 v3 (ADR-026 Stage E)"
+        );
 
         // 验证旧数据仍存在
         let rule_id: String = conn
@@ -915,7 +919,7 @@ mod tests {
             .unwrap();
         assert_eq!(rule_id, "OUT-01", "迁移后旧数据不应丢失");
 
-        // 验证新列存在且旧行为 NULL
+        // 验证 v2 列存在且旧行为 NULL
         let pid: Option<i32> = conn
             .query_row(
                 "SELECT caller_pid FROM audit_events WHERE id = 1",
@@ -932,10 +936,23 @@ mod tests {
             .unwrap();
         assert!(pid.is_none(), "迁移后旧行 caller_pid 应为 NULL");
         assert!(exe.is_none(), "迁移后旧行 caller_exe 应为 NULL");
+
+        // 验证 v3 列存在且旧行默认 'unknown'（ADR-026 Stage E）
+        let provider: String = conn
+            .query_row(
+                "SELECT provider_id FROM audit_events WHERE id = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            provider, "unknown",
+            "v1→v3 迁移后旧行 provider_id 应默认 'unknown'"
+        );
     }
 
-    /// 全新数据库（通过 AuditStore::init）应直接从 schema v2 开始，
-    /// 包含 caller_pid / caller_exe 列，PRAGMA user_version = 2。
+    /// 全新数据库（通过 AuditStore::init）应直接从 schema v3 开始，
+    /// 包含 caller_pid / caller_exe / provider_id 列，PRAGMA user_version = 3。
     #[test]
     fn fresh_database_starts_at_v2() {
         let dir = tempdir().unwrap();
@@ -944,13 +961,16 @@ mod tests {
 
         let conn = Connection::open(&db_path).unwrap();
 
-        // 验证 user_version = 2
+        // 验证 user_version = 3（ADR-026 Stage E）
         let ver: u32 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(ver, 2, "全新 DB 的 user_version 应为 2");
+        assert_eq!(
+            ver, 3,
+            "全新 DB 的 user_version 应为最新 v3 (ADR-026 Stage E)"
+        );
 
-        // 验证 caller_pid / caller_exe 列存在（pragma table_info 返回列描述）
+        // 验证 caller_pid / caller_exe / provider_id 列均存在
         let mut stmt = conn.prepare("PRAGMA table_info(audit_events)").unwrap();
         let cols: Vec<String> = stmt
             .query_map([], |r| r.get::<_, String>(1))
@@ -964,6 +984,10 @@ mod tests {
         assert!(
             cols.contains(&"caller_exe".to_string()),
             "全新 DB 应含 caller_exe 列，实际列：{cols:?}"
+        );
+        assert!(
+            cols.contains(&"provider_id".to_string()),
+            "全新 DB 应含 provider_id 列（ADR-026 Stage E v3），实际列：{cols:?}"
         );
     }
 
