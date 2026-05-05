@@ -13,6 +13,16 @@
 
 v1.4 引入三件套：Sieve 主代理（Rust 后台进程）、Native GUI App（独立仓库 `sieve-gui-macos`）、`sieve-hook`（独立 crate，Claude Code PreToolUse hook 入口）。
 
+> **v2.x ADR-026 multi-listener 扩展**（2026-05-05）：Sieve 主代理升级为多 listener 架构，
+> 同时绑定多个端口，每个 port 独立连接不同的真实上游 LLM endpoint。哑 client（Claude
+> Code 等只认 single base_url 的 agent）通过指向不同 port 切换上游，无须注入路由 header。
+> listener 显式声明协议（`anthropic` / `openai`），请求 path 错位时 daemon fail-closed
+> 400 拒绝。详见 [ADR-026](./ADR-026-port-based-listener-routing.md)。
+>
+> 兼容性：v1.4 三件套架构不变；旧 sieve.toml（`upstream_url` + `port` 单字段）继续工作，
+> 自动映射成单元素 listener。X-Sieve-Provider header routing（OpenClaw / Hermes）保留
+> 兼容，与 port routing 并存。
+
 > **v1.5 multi-agent 扩展**：Sieve 主代理同时支持三家入口。v1.4 三件套架构不变，入口层扩展为：
 > - **Claude Code**（ANTHROPIC_BASE_URL，沿用 v1.4 全部双层防御能力）
 > - **OpenClaw**（多通道消息网关，改 daemon config 把所有 LLM provider base_url 指向 Sieve 11453 端口）

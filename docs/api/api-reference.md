@@ -432,6 +432,64 @@ HTTP/1.1 451 Unavailable For Legal Reasons
 "OUT-09" = "high"     # ❌ 启动失败：BIP39 默认 critical，禁止降级
 ```
 
+### 3.3.1 ADR-026 Multi-listener 配置（**实际代码 schema**）
+
+> 本节记录的是 `crates/sieve-cli/src/config.rs` 的实际配置结构（截至 2026-05-05）。
+> §3.1 表格保留作 PRD 设计参考；运行时以本节的 schema 为准。
+
+`Config` 顶层字段实际是扁平的（不分 `[server]` / `[upstream]` / `[storage]` 段）。
+ADR-026 引入 `[[upstream]]` 数组支持多 listener：
+
+```toml
+# 推荐写法（multi-listener，ADR-026）
+bind_addr = "127.0.0.1"
+tls_verify_upstream = true
+
+[[upstream]]
+port = 11453
+url = "https://api.anthropic.com"
+provider_id = "anthropic"
+protocol = "anthropic"
+
+[[upstream]]
+port = 11454
+url = "https://api.deepseek.com/anthropic"   # path 前缀已正确转发（ADR-026 TODO-1）
+provider_id = "deepseek"
+protocol = "anthropic"
+
+[[upstream]]
+port = 11455
+url = "https://api.openai.com"
+provider_id = "openai"
+protocol = "openai"
+```
+
+`[[upstream]]` 字段：
+
+| 字段 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `port` | u16 | (必填) | 监听端口（127.0.0.1:port），同 daemon 内必须唯一 |
+| `url` | string | (必填) | 上游真实 endpoint，**含 path 前缀**（如 `/anthropic`） |
+| `provider_id` | string | URL host 派生 | 审计 / 日志 / IPC 事件标注 |
+| `protocol` | enum | `"anthropic"` | `"anthropic"` \| `"openai"`，错位请求 fail-closed 400 |
+
+**向后兼容**：旧 schema（`upstream_url` + `port` 单字段）继续工作，自动映射成单元素
+`upstreams` vec（provider_id = `"anthropic"`，protocol = `Anthropic`）。新旧字段同时给
+时新字段优先，旧字段被忽略并 WARN。
+
+```toml
+# 旧写法（仍可用，自动映射成单 listener）
+upstream_url = "https://api.anthropic.com"
+port = 11453
+bind_addr = "127.0.0.1"
+```
+
+**协议错位 fail-closed 拒绝**（ADR-026 §决策 4）：
+- `protocol = "anthropic"` listener 收到 `/v1/chat/completions` → 400 + `sieve_blocked` event
+- `protocol = "openai"` listener 收到 `/v1/messages` → 400
+- 其他 path（健康检查 / 透传）保持原行为
+- X-Sieve-Provider header routing 不能 override listener 协议
+
 ### 3.3 完整示例 `config.toml`
 
 ```toml

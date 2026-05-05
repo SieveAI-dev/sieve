@@ -452,10 +452,33 @@ pub struct PresetSnapshot {
 }
 
 /// 监听地址快照（health 子结构）。
+///
+/// **ADR-026 后语义变化**：daemon 可同时绑定多个端口（[`HealthResult::listeners`]
+/// 数组每项一个）。本结构仍代表单个 listener，但 [`HealthResult::listen`] 字段
+/// 退化为 `listeners[0]` 的别名，仅保留向后兼容（旧 GUI 客户端读取）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListenSnapshot {
     pub addr: String,
     pub port: u16,
+}
+
+/// 单 listener 完整快照（ADR-026 §决策 6 + Stage F）。
+///
+/// 比 [`ListenSnapshot`] 多带 `provider_id` + `protocol` 元信息，新版 GUI 客户端
+/// 通过 [`HealthResult::listeners`] 数组消费，列出 daemon 所有 listener 及其上游身份。
+///
+/// 协议版本不 bump（v2 内向后兼容扩展）：旧客户端忽略本数组，新客户端读取它。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListenerSnapshot {
+    /// 监听地址（强制 `127.0.0.1`，PRD §9 #2）。
+    pub addr: String,
+    /// 监听端口（multi-listener 各自唯一）。
+    pub port: u16,
+    /// 上游身份标识（来自 `sieve.toml [[upstream]] provider_id`，留空时从 URL host 派生）。
+    pub provider_id: String,
+    /// 协议声明（`"anthropic"` | `"openai"`）。
+    /// 错位请求会被 daemon fail-closed 400（ADR-026 §决策 4）。
+    pub protocol: String,
 }
 
 /// audit.db 快照（health 子结构）。
@@ -504,7 +527,16 @@ pub struct HealthResult {
     /// 暂停截止时间（UTC，SPEC-005 §4A）；`paused=false` 时为 None。
     #[serde(default, serialize_with = "crate::ts_serde::serialize_opt_utc_millis")]
     pub paused_until: Option<DateTime<Utc>>,
+    /// **已废弃，向后兼容保留**：等价于 `listeners[0]`。
+    /// ADR-026 多 listener 后单一 listen 字段语义不再唯一；新客户端应读 `listeners` 数组。
     pub listen: ListenSnapshot,
+    /// 多 listener 完整快照（ADR-026 §决策 6 + Stage F）。
+    ///
+    /// daemon 同时绑定的所有端口及其元信息（含 provider_id / protocol）。
+    /// `#[serde(default)]` 保证旧 daemon 不发本字段时新客户端拿到空 vec 不崩。
+    /// 旧客户端忽略本字段、读 `listen` 单值即可继续工作。
+    #[serde(default)]
+    pub listeners: Vec<ListenerSnapshot>,
     pub audit_db: AuditDbSnapshot,
     pub rules: RulesSnapshot,
     pub graylist: GraylistSnapshot,

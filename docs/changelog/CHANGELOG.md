@@ -11,7 +11,42 @@
 
 ---
 
-## [Unreleased] — 2026-05-03
+## [Unreleased] — 2026-05-05
+
+### unix-style 改造（ADR-026）
+
+- **BREAKING**：`Config` schema 升级支持多 listener。新增 `[[upstream]]` 数组，每项含
+  `port` / `url` / `provider_id` / `protocol`。旧字段 `upstream_url` + `port` 保留
+  向后兼容（`Config::resolved_upstreams` 自动映射成单元素 vec），现有 sieve.toml 无需
+  改动即可继续工作；`upstreams` 非空时旧字段被忽略并 WARN。
+  详见 [ADR-026](../design/ADR-026-port-based-listener-routing.md)。
+- 新增 `Protocol` enum（`anthropic` | `openai`）+ `UpstreamListener` 配置 struct。
+- daemon 重构成 multi-listener 架构：`daemon::run` 遍历 `cfg.resolved_upstreams()`
+  各自 bind + spawn 独立 `accept_loop`，任一 bind 失败 fail-fast。哑 client（Claude
+  Code 等只认 single base_url 的 agent）通过指向不同 port 切换上游，无须注入路由 header。
+- 新增 listener 协议错位 fail-closed 拒绝（ADR-026 §决策 4 / PRD §9 #3）：
+  Anthropic listener 收到 `/v1/chat/completions` → 400 + `sieve_blocked` event；
+  Openai listener 收到 `/v1/messages` → 400。其他 path（健康检查 / 透传）保持原行为。
+  X-Sieve-Provider header routing 不能 override listener 协议（fail-closed 一致性）。
+- 新增 IPC `HealthResult.listeners: Vec<ListenerSnapshot>`（含 `provider_id` /
+  `protocol`），向后兼容 `listen: ListenSnapshot` 单字段保留为 `listeners[0]` 别名。
+  GUI 客户端（sieve-gui-macos）需 follow-up 同步读取新字段。
+- **Fix**：`Forwarder::new` + `rewrite_uri` 修复 v1.x bug——`upstream_url` 中的
+  path 前缀被丢弃，导致 DeepSeek 等 Anthropic 兼容入口
+  （`https://api.deepseek.com/anthropic`）转发后变成 `/v1/messages` 而非
+  `/anthropic/v1/messages`（404）。新增 `Forwarder.upstream_path_prefix` 字段，
+  `Host` header 行为不变（仍是纯 authority）。
+
+### unix-style 改造立项
+
+- 新增 [ADR-026](../design/ADR-026-port-based-listener-routing.md) Port-based listener routing
+- 新增 [ADR-027](../design/ADR-027-network-jail-enforcement.md) Network jail enforcement（v3.x post-GA opt-in）
+- 新增 [ADR-028](../design/ADR-028-ipc-protocol-neutralization.md) IPC 协议中性化 + sieve-ipc 内部模块化
+- `tasks/PROGRESS.md` 加「unix-style 改造」段，6 个 TODO 按 P0/P1/P2 排进 v2.x 与 v3.x
+
+---
+
+## [v2.0+ 兼容扩展] — 2026-05-03
 
 ### 协议（SPEC-005 v2）
 - BREAKING: protocol_version "v1" → "v2"，不向下兼容

@@ -713,12 +713,10 @@ async fn scenario_7_list_rules_wire_route() {
     tokio::spawn(async move {
         let mut rx = ipc_clone.control_rx().await.expect("control_rx");
         while let Some(req) = rx.recv().await {
-            match req {
-                ControlPlaneRequest::ListRules { reply } => {
-                    let _ = reply.send(Ok(ListRulesResult { rules: vec![] }));
-                }
-                _ => {} // 其他请求忽略
+            if let ControlPlaneRequest::ListRules { reply } = req {
+                let _ = reply.send(Ok(ListRulesResult { rules: vec![] }));
             }
+            // 其他请求忽略
         }
     });
 
@@ -776,14 +774,11 @@ async fn scenario_8_purge_history_wire_route() {
     tokio::spawn(async move {
         let mut rx = ipc_clone.control_rx().await.expect("control_rx");
         while let Some(req) = rx.recv().await {
-            match req {
-                ControlPlaneRequest::PurgeHistory { params: _, reply } => {
-                    let _ = reply.send(Ok(PurgeHistoryResult {
-                        purged_at: chrono::Utc::now().timestamp_millis(),
-                        rows_deleted: 42,
-                    }));
-                }
-                _ => {}
+            if let ControlPlaneRequest::PurgeHistory { params: _, reply } = req {
+                let _ = reply.send(Ok(PurgeHistoryResult {
+                    purged_at: chrono::Utc::now().timestamp_millis(),
+                    rows_deleted: 42,
+                }));
             }
         }
     });
