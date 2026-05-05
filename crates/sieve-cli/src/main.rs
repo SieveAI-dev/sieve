@@ -1,11 +1,13 @@
 //! Sieve CLI 入口（关联 PRD §6.1 / ADR-001）。
 //!
 //! 子命令：
-//! - `sieve start [--config <path>] [--dry-run]`：启动 daemon
+//! - `sieve start [--config <path>] [--dry-run] [--no-client-policy <policy>]`：启动 daemon
 //! - `sieve version`：打印版本号
 //! - `sieve setup [--agent <name>] [--all-detected] [--dry-run] [--yes]`：配置 AI agent（仅 macOS，ADR-015 / SPEC-004）
 //! - `sieve doctor [--agent <name>] [--all]`：诊断 Sieve 安装状态（仅 macOS）
 //! - `sieve uninstall [--agent <name>] [--all] [--dry-run] [--yes]`：回滚 setup 改动（仅 macOS）
+//! - `sieve decisions watch|show|resolve`：headless decision CLI（ADR-028 TODO-4）
+//! - `sieve audit tail|query|show`：unix-pipeable 审计日志查询（ADR-028 TODO-5）
 
 // unsafe_code 在生产代码中禁止（等效 forbid），测试代码通过 #[allow(unsafe_code)] 豁免
 // 以支持 Rust 1.80+ 的 std::env::set_var 必须用 unsafe {} 的要求。
@@ -60,6 +62,7 @@ async fn main() -> Result<()> {
         Command::Start {
             config: cfg_path,
             dry_run: cli_dry_run,
+            no_client_policy,
         } => {
             let mut cfg = config::Config::load(&cfg_path)
                 .with_context(|| format!("failed to load config from {}", cfg_path.display()))?;
@@ -208,6 +211,7 @@ async fn main() -> Result<()> {
                 audit_store,
                 outbound_layered,
                 inbound_layered,
+                daemon::DaemonRunOpts { no_client_policy },
             )
             .await?;
         }
@@ -229,6 +233,12 @@ async fn main() -> Result<()> {
         }
         Command::Rules(args) => {
             commands::rules::run(&args)?;
+        }
+        Command::Decisions(args) => {
+            commands::decisions::run(args)?;
+        }
+        Command::Audit(args) => {
+            commands::audit::run(args)?;
         }
     }
 
