@@ -251,8 +251,7 @@ async fn dispatch_request(
         }
         // SPEC-005 §11A：只读，不走串行化队列（§10.0.1 只读请求并发例外）。
         ControlPlaneRequest::ListRules { reply } => {
-            let result =
-                handle_list_rules(outbound_layered, inbound_layered).await;
+            let result = handle_list_rules(outbound_layered, inbound_layered).await;
             let _ = reply.send(result);
         }
         // SPEC-005 §11B：写操作，通过互斥 flag 防并发。
@@ -896,9 +895,7 @@ async fn handle_list_rules(
     // 保留作为防御性检查，符合 SPEC §11A 错误码 -32006 定义。
     {
         use sieve_rules::engine::MatchEngine;
-        if rules.is_empty()
-            && outbound_layered.rule_count() + inbound_layered.rule_count() == 0
-        {
+        if rules.is_empty() && outbound_layered.rule_count() + inbound_layered.rule_count() == 0 {
             return Err(ControlError::rules_loading());
         }
     }
@@ -941,9 +938,10 @@ async fn handle_purge_history(
     );
 
     // 执行删除
-    let rows_deleted = audit.delete_all_events().await.map_err(|e| {
-        ControlError::internal(format!("purge_history delete failed: {e}"))
-    })?;
+    let rows_deleted = audit
+        .delete_all_events()
+        .await
+        .map_err(|e| ControlError::internal(format!("purge_history delete failed: {e}")))?;
 
     let purged_at = chrono::Utc::now().timestamp_millis();
 
