@@ -39,6 +39,9 @@
 | [ADR-023](./ADR-023-process-context-audit.md)             | 进程上下文记录（caller_pid + caller_exe / proc_pidinfo / LRU cache）  | Accepted | 2026-05-01 | v2.0 §5.6              |
 | [ADR-024](./ADR-024-rules-engine-abstraction.md)          | 规则引擎抽象（MatchEngine::scan(ScanRequest) + LayeredEngine 合并顺序）  | Accepted | 2026-05-01 | v2.0 §6.3、§5.5.2.1     |
 | [ADR-025](./ADR-025-content-type-routing-matrix.md)       | content-type 路由矩阵（v1.5.4 P0 教训永久化，4 类组合集成测试硬约束）           | Accepted | 2026-05-01 | v2.0 §9 #16、§5.7.4     |
+| [ADR-026](./ADR-026-port-based-listener-routing.md)       | Port-based listener routing —— 多上游 listener + path prefix 修复            | Proposed | 2026-05-05 | v2.0 §6.1、§6.5、§9 #2、§9 #16 |
+| [ADR-027](./ADR-027-network-jail-enforcement.md)          | Network jail enforcement —— 防火墙层硬隔离 LLM 流量（v3.x post-GA opt-in） | Proposed | 2026-05-05 | v2.0 §1.2、§9 #12、§11.2、§11.5 |
+| [ADR-028](./ADR-028-ipc-protocol-neutralization.md)       | IPC 协议中性化 —— 去 GUI 假设 + sieve-ipc 内部模块化 + headless decision path | Proposed | 2026-05-05 | v2.0 §6.5、§6.6        |
 
 
 ---
