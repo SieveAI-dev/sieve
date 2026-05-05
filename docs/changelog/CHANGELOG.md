@@ -17,6 +17,52 @@
 > ADR-026 multi-listener + ADR-028 IPC 中性化 + 2 个新 CLI 子命令。
 > TODO-6 Network jail（ADR-027）推后到 v3.x post-GA opt-in。
 > 验证：workspace 725 passed / clippy 0 / fmt clean。
+>
+> **本日另立 2 项商业化 / 遥测决策**（无代码变更,纯文档）：
+> [ADR-029](../design/ADR-029-free-first-defer-monetization.md) 装机量优先 +
+> [ADR-030](../design/ADR-030-update-telemetry-channel.md) 更新通道复用为遥测信标。
+> ADR-030 部分修订 [ADR-003](../design/ADR-003-local-only-no-cloud-verifier.md) 的「绝对禁止 telemetry」反模式条款。
+
+### Changed — 商业化策略（ADR-029）
+
+- **Phase 1（GA 后 6–12 个月）改为纯免费,装机量为唯一指标**——原 PRD §7「试用期 + [redacted]/月正式版 + 降级模式」定价模式被 ADR-029 替换。
+- **永久排除「中转站认证 + 排名广告」收费模式**（评级机构利益冲突会摧毁「客观本地审计」产品定位）。
+- Phase 2+ 商业化方向预备清单（用户端 Pro 订阅 / [redacted] / 客观技术认证,**认证与广告严格分离**），具体路径待 6 个月装机数据出来后定。
+- ~~[redacted] ≥ [redacted]~~ → [redacted]优先,[redacted]推后到 Phase 2。
+- README.md 定价段更新（旧定价 PRD §7 折叠为历史段）+ 核心叙事 / 关键差异化精确化。
+- CLAUDE.md [redacted]约束段同步。
+
+### Changed — 网络边界（ADR-003 amended by ADR-030）
+
+- **ADR-003 §决策段 admonition 修订**：
+  - 「绝对禁止 telemetry 自动上报」→ **「仅禁止独立心跳通道」**（允许复用更新通道附带匿名 install id）
+  - 「`telemetry_enabled` 强制 false」→ **「`[update].telemetry = true` 默认开启,可关闭」**
+  - 「规则更新检查不带 query 参数」→ **「manifest URL 允许 `?v=&os=&arch=&uid=&ch=` 5 字段 + UA `sieve-updater/<v>`」**
+  - **保留不变**：「token verifier 不联网」核心决策永久性 + 不上传 prompt / response / API key / 使用记录。
+- **唯一允许的出站请求**新增 2 host：`updates.sieve.app`（manifest,**不挂 CDN**）+ `cdn.sieve.app`（规则正文 zst,带 sha256 + ed25519）。原 `releases.sieve.dev` 占位符废弃。
+- 频率：每周 1 次 → **每天 4 次（每 6h 一次）**;manifest 接口同时是装机量信标（`COUNT(DISTINCT uid) WHERE date = today` 算 DAU）。
+- ADR-INDEX：ADR-003 状态加注 "(amended 2026-05-05)"; ADR-030 升 Accepted。
+
+### Added — 遥测协议（ADR-030 §设计冻结,代码待落地）
+
+- **Manifest 协议 v0.1**：
+  - 客户端 `GET https://updates.sieve.app/v1/manifest?v=<v>&os=<os>&arch=<arch>&uid=<UUIDv4>&ch=<stable|beta>`（仅 TLS 1.2+,无 cookie / Auth）
+  - 服务端响应 `{schema, rules: {version, url, sha256, size, signature}, client: {latest, min_supported, deprecation_notice}, next_check_after_seconds}`
+  - 服务端日志只存 `ts | uid | v | os | arch | ch | country(geoip)`,**丢原始 IP**,DAU / MAU / 留存 / 版本分布 / 平台分布全从这一张日志表算。
+- **Install UUID**：UUIDv4 纯随机,首次启动生成,`~/Library/Caches/sieve/install-id`（macOS first; Linux / Windows 路径在 Phase 2 跨平台时落地）。文件权限 0600,用户主动删除 = 新装机（接受统计噪声）。
+- **三个环境变量开关**（unix-style,任何非空值 = 启用,优先级高于配置文件）：
+  - `SIEVE_NO_UPDATE`：跳过更新检查（不发请求,规则冻结,无遥测）—— 启动 banner 必须打印 `update check disabled by SIEVE_NO_UPDATE`
+  - `SIEVE_NO_TELEMETRY`：仍发更新请求但省略 `uid` 字段
+  - `SIEVE_UPDATE_URL`：覆盖默认更新源 URL（企业自托管镜像）
+- **隐私声明文案**（首次启动 onboarding + README + 隐私政策页统一文案,见 ADR-030 §6）。
+
+### Follow-up（GA 前必须落地）
+
+- **代码侧**：新建 `sieve-updater` crate（独立二进制,GUI 仓后续可复用）/ 实现 manifest 协议客户端 / install id 生成与持久化 / 三个 env var 解析 / 6h 定时器 / 签名校验 / 失败重试策略。CLAUDE.md "六个 Crate" 段需同步成「七个 Crate」（见 ADR-022 类似前例）。
+- **运维侧**：域名 `updates.sieve.app` / `cdn.sieve.app` 注册（待 ADR-005 [redacted]）/ ed25519 签名密钥管理（HSM / 单独 build 机 / GCP KMS 之一,写入 ADR-006 follow-up）/ 服务端实现（**倾向 Cloudflare Workers + KV / D1**,manifest 接口天然反 DDoS）/ ch 通道策略（首发 stable 单通道,Phase 2 加 beta）。
+- **文档侧**：新建 SPEC-006 落地 manifest 协议 + 客户端 updater 模块详细设计 / api-reference 加 manifest 接口章节 / development.md 加三个 env var / deployment.md 加企业自托管镜像章节 / data-model.md 加服务端日志表 schema（如服务端代码进本仓）。
+
+
 
 ### unix-style 改造立项（commit cf129a2）
 
