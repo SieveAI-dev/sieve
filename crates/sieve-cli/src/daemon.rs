@@ -48,25 +48,40 @@ use crate::upstream_routes::UpstreamRoutes;
 
 // ── v2.0：请求上下文（PRD v2.0 §5.6 / §5.6.1）──────────────────────────────
 
-/// 每请求上下文：caller 进程信息 + audit 存储句柄（PRD v2.0 §5.6 / §5.6.1）。
+/// 每请求上下文：caller 进程信息 + audit 存储句柄 + listener 元信息（PRD v2.0 §5.6 / §5.6.1；ADR-026）。
 ///
 /// 合并为一个结构体以减少函数参数数量（clippy too_many_arguments）。
-/// `clone()` 开销：Arc clone + Option clone，均为 O(1)。
+/// `clone()` 开销：Arc clone + Option clone + 标量 copy，均为 O(1)。
 #[derive(Clone)]
 struct RequestCtx {
     /// 调用方进程信息（v2.0 Phase A：macOS 真实反查；其他平台 None）。
     caller: Option<crate::process_context::CallerInfo>,
     /// 审计存储句柄（SQLite append-only，PRD §5.6.1）。
     audit: Arc<crate::audit::AuditStore>,
+    /// 本次连接所在 listener 的协议声明（ADR-026 §决策 4）。
+    /// proxy_inner 用此字段做协议错位 fail-closed 校验。
+    listener_protocol: crate::config::Protocol,
+    /// 本次连接所在 listener 的 provider_id（ADR-026 §决策 5）。
+    /// 透传到审计 / IPC 事件 / 日志，标注本次请求命中哪个上游。
+    /// Stage E 落地审计 schema 后会被消费；当前仅在错位拒绝日志中使用。
+    #[allow(dead_code)]
+    listener_provider_id: String,
 }
 
 impl RequestCtx {
-    /// 从 caller_info + audit_store 构造。
+    /// 从 caller_info + audit_store + listener metadata 构造。
     fn new(
         caller: Option<crate::process_context::CallerInfo>,
         audit: Arc<crate::audit::AuditStore>,
+        listener_protocol: crate::config::Protocol,
+        listener_provider_id: String,
     ) -> Self {
-        Self { caller, audit }
+        Self {
+            caller,
+            audit,
+            listener_protocol,
+            listener_provider_id,
+        }
     }
 
     /// 构造 `crate::audit::CallerContext`（供 audit 事件填充）。
@@ -82,6 +97,27 @@ impl RequestCtx {
                 .map(|p| p.display().to_string()),
         }
     }
+}
+
+// ── ADR-026：multi-listener 元信息 ──────────────────────────────────────────
+
+/// 单 listener 运行时元信息（ADR-026 §决策 1）。
+///
+/// 把 [`crate::config::UpstreamListener`] 配置升级成运行时形态：
+/// - `forwarder` 已 build（含连接池），accept_loop 直接复用
+/// - `provider_id` 已规范化（`UpstreamListener::resolved_provider_id` 求值）
+///
+/// `Clone` 开销：3 × Arc clone + 1 × String clone + 标量 copy，全部 O(1)/O(n_short)。
+#[derive(Clone)]
+struct ListenerSpec {
+    /// 监听端口（127.0.0.1:port，ADR-003 完全本地）。
+    port: u16,
+    /// 上游转发器（含连接池，rustls TLS）。
+    forwarder: Arc<Forwarder>,
+    /// 上游身份标识（透传到 RequestCtx → 审计 / 日志 / IPC）。
+    provider_id: String,
+    /// 协议声明（proxy_inner 用此字段做错位 fail-closed 校验）。
+    protocol: crate::config::Protocol,
 }
 
 // ── v2.0：灰名单辅助（PRD v2.0 §5.4.2）─────────────────────────────────────
@@ -527,10 +563,34 @@ pub async fn run(
         >,
     >,
 ) -> Result<()> {
-    let listen = cfg.listen_addr()?;
     let dry_run = cfg.dry_run;
-    let forwarder =
-        Arc::new(Forwarder::new(&cfg.upstream_url).map_err(|e| anyhow!("init forwarder: {e}"))?);
+
+    // ADR-026 §决策 1+2：把 cfg.upstreams 升级成运行时 ListenerSpec 数组。
+    // 单 listener 配置（旧 sieve.toml）走 Config::resolved_upstreams 兼容映射，
+    // 在此处统一表现为 Vec<ListenerSpec>。
+    // 任一 forwarder 初始化失败 → fail-fast（避免半启动状态）。
+    let listener_specs: Vec<ListenerSpec> = {
+        let upstreams = cfg.resolved_upstreams();
+        let mut specs = Vec::with_capacity(upstreams.len());
+        for u in upstreams {
+            let provider_id = u.resolved_provider_id();
+            let f = Arc::new(Forwarder::new(&u.url).map_err(|e| {
+                anyhow!(
+                    "init forwarder for listener port {} (provider {}, url {}): {e}",
+                    u.port,
+                    provider_id,
+                    u.url
+                )
+            })?);
+            specs.push(ListenerSpec {
+                port: u.port,
+                forwarder: f,
+                provider_id,
+                protocol: u.protocol,
+            });
+        }
+        specs
+    };
 
     // R11-#1：加载 OpenClaw 上游路由表（~/.sieve/upstream-routes.json）。
     // 加载失败（文件不存在 / JSON 非法）时 warn 后继续，所有请求走默认上游兜底。
@@ -731,48 +791,115 @@ pub async fn run(
         }
     }
 
-    let listener = TcpListener::bind(listen)
-        .await
-        .with_context(|| format!("bind {}", listen))?;
+    // ADR-026 §决策 3：多 listener bind + spawn。任一 bind 失败 → fail-fast
+    // （半启动状态会让 doctor 输出混淆，违反"完全本地"的明确性承诺）。
+    let mut bound: Vec<(TcpListener, ListenerSpec)> = Vec::with_capacity(listener_specs.len());
+    for spec in listener_specs {
+        let addr_str = format!("{}:{}", cfg.bind_addr, spec.port);
+        let addr: std::net::SocketAddr = addr_str
+            .parse()
+            .map_err(|e| anyhow!("invalid listener bind addr {}: {e}", addr_str))?;
+        let listener = TcpListener::bind(addr)
+            .await
+            .with_context(|| format!("bind listener port {}", spec.port))?;
+        tracing::info!(
+            listen = %addr,
+            upstream_host = %spec.forwarder.upstream_host(),
+            provider_id = %spec.provider_id,
+            protocol = ?spec.protocol,
+            dry_run = dry_run,
+            "sieve daemon listener bound"
+        );
+        bound.push((listener, spec));
+    }
 
-    tracing::info!(
-        listen = %listen,
-        upstream = %cfg.upstream_url,
-        dry_run = dry_run,
-        "sieve daemon started"
-    );
+    // 全部 bind 成功 → 各 spawn accept_loop。任一 task 退出（panic 才会退）→
+    // 整个 daemon 退出（fail-closed：单 listener 故障即等于 bypass 缺口）。
+    let mut handles = Vec::with_capacity(bound.len());
+    for (listener, spec) in bound {
+        let h = tokio::spawn(accept_loop(
+            listener,
+            spec,
+            filter.clone(),
+            inbound_engine.clone(),
+            inbound_sieveignore.clone(),
+            address_guard_config.clone(),
+            provider_forwarders.clone(),
+            audit_store.clone(),
+            ipc_server.clone(),
+            dry_run,
+        ));
+        handles.push(h);
+    }
+    for h in handles {
+        if let Err(e) = h.await {
+            tracing::error!(error = %e, "listener task ended unexpectedly");
+        }
+    }
+    Ok(())
+}
+
+/// 单 listener 永久 accept loop（ADR-026 §决策 3）。
+///
+/// 每个 listener 独立 spawn 一份本函数，共享 filter / IPC / audit / inbound engine 等
+/// daemon 单例。listener 自身 + 对应的 [`ListenerSpec`]（含 forwarder / protocol /
+/// provider_id）则不共享——`RequestCtx` 携带 listener metadata 透传到 proxy_inner，
+/// 后者用此做协议错位 fail-closed 校验。
+#[allow(clippy::too_many_arguments)]
+async fn accept_loop(
+    listener: TcpListener,
+    spec: ListenerSpec,
+    filter: Arc<OutboundFilter>,
+    inbound_engine: Arc<dyn InboundEngine>,
+    inbound_sieveignore: Arc<HashSet<String>>,
+    address_guard_config: sieve_core::pipeline::inbound::AddressGuardConfig,
+    provider_forwarders: Arc<HashMap<String, Arc<Forwarder>>>,
+    audit_store: Arc<crate::audit::AuditStore>,
+    ipc_server: Option<Arc<sieve_ipc::IpcServer>>,
+    dry_run: bool,
+) {
+    let listen_addr = match listener.local_addr() {
+        Ok(a) => a,
+        Err(e) => {
+            tracing::error!(error = %e, port = spec.port, "listener.local_addr() failed; aborting accept loop");
+            return;
+        }
+    };
 
     loop {
         let (stream, peer) = match listener.accept().await {
             Ok(v) => v,
             Err(e) => {
-                tracing::warn!(error = %e, "accept failed");
+                tracing::warn!(error = %e, port = spec.port, "accept failed");
                 continue;
             }
         };
 
         // v2.0 Phase A：caller PID 反查（PRD §5.6 / §6.6 / OQ-V20-02）。
-        // 调用 process_context::lookup_caller_by_socket_addr 走真实 socket 4-tuple 反查；
-        // 非 macOS 或失败时静默返回 None，不影响主流程。
-        let local_addr = listener.local_addr().ok().unwrap_or(listen);
         let caller_info: Option<crate::process_context::CallerInfo> =
-            peer_addr_to_pid(local_addr, peer).and_then(crate::process_context::lookup_caller);
+            peer_addr_to_pid(listen_addr, peer).and_then(crate::process_context::lookup_caller);
         tracing::trace!(
             peer = %peer,
+            port = spec.port,
+            provider_id = %spec.provider_id,
             caller_pid = ?caller_info.as_ref().map(|c| c.pid),
             caller_exe = ?caller_info.as_ref().and_then(|c| c.exe.as_ref()).map(|p| p.display().to_string()),
             "new connection: caller context"
         );
 
-        let forwarder = forwarder.clone();
+        let forwarder = spec.forwarder.clone();
         let filter = filter.clone();
         let inbound_engine = inbound_engine.clone();
         let inbound_sieveignore = inbound_sieveignore.clone();
         let ipc_server = ipc_server.clone();
         let ag_cfg = address_guard_config.clone();
         let pf = provider_forwarders.clone();
-        // 构造 RequestCtx（caller + audit），per-connection clone
-        let req_ctx = RequestCtx::new(caller_info.clone(), Arc::clone(&audit_store));
+        let req_ctx = RequestCtx::new(
+            caller_info.clone(),
+            Arc::clone(&audit_store),
+            spec.protocol,
+            spec.provider_id.clone(),
+        );
 
         tokio::spawn(async move {
             let io = TokioIo::new(stream);
@@ -788,7 +915,7 @@ pub async fn run(
                 );
                 let ipc = ipc_server.clone();
                 let pf = pf.clone();
-                // RequestCtx（caller + audit）捕获到闭包（v2.0 Phase A，PRD §5.6.1）
+                // RequestCtx（caller + audit + listener meta）捕获到闭包
                 let ctx = req_ctx.clone();
                 async move { proxy(f, pf, flt, ib_filter, dry_run, ipc, ctx, req).await }
             });
@@ -1064,6 +1191,34 @@ async fn proxy_inner(
 
     let path = parts.uri.path().to_string();
     let method = parts.method.clone();
+
+    // ── ADR-026 §决策 4：listener 协议错位 fail-closed 检查 ───────────────────
+    //
+    // listener 声明的协议与请求 path 隐含的协议不一致时立即 400 拒绝，不进入路径分发。
+    // 仅检查 LLM endpoint（/v1/messages 与 /v1/chat/completions）；其他 path（健康
+    // 检查 / 透传 / 未知）保持现有透传行为，不强制。
+    //
+    // 即便请求带 X-Sieve-Provider header（已在前面 routing 选择 forwarder），listener
+    // 协议依然是硬约束——header routing 不能 override（PRD §9 #3 fail-closed 一致性）。
+    if path == "/v1/messages" && ctx.listener_protocol == crate::config::Protocol::Openai {
+        tracing::warn!(
+            path = %path,
+            listener_protocol = ?ctx.listener_protocol,
+            provider_id = %ctx.listener_provider_id,
+            "ADR-026 protocol mismatch: openai listener received anthropic /v1/messages, rejecting"
+        );
+        return Ok(build_protocol_mismatch_400(&path, ctx.listener_protocol));
+    }
+    if path == "/v1/chat/completions" && ctx.listener_protocol == crate::config::Protocol::Anthropic
+    {
+        tracing::warn!(
+            path = %path,
+            listener_protocol = ?ctx.listener_protocol,
+            provider_id = %ctx.listener_provider_id,
+            "ADR-026 protocol mismatch: anthropic listener received openai /v1/chat/completions, rejecting"
+        );
+        return Ok(build_protocol_mismatch_400(&path, ctx.listener_protocol));
+    }
 
     // ── v1.5：公共 header 解析（所有 LLM 路径）────────────────────────────────
 
@@ -1680,7 +1835,12 @@ async fn proxy_inner(
                     source_channel,
                     chain_depth,
                 },
-                RequestCtx::new(ctx.caller.clone(), Arc::clone(&ctx.audit)),
+                RequestCtx::new(
+                    ctx.caller.clone(),
+                    Arc::clone(&ctx.audit),
+                    ctx.listener_protocol,
+                    ctx.listener_provider_id.clone(),
+                ),
             )
             .await;
         }
@@ -1716,7 +1876,12 @@ async fn proxy_inner(
                 source_channel,
                 chain_depth,
             },
-            RequestCtx::new(ctx.caller.clone(), Arc::clone(&ctx.audit)),
+            RequestCtx::new(
+                ctx.caller.clone(),
+                Arc::clone(&ctx.audit),
+                ctx.listener_protocol,
+                ctx.listener_provider_id.clone(),
+            ),
         )
         .await;
     }
@@ -1737,7 +1902,12 @@ async fn proxy_inner(
             origin_chain,
             source_channel,
             chain_depth,
-            RequestCtx::new(ctx.caller.clone(), Arc::clone(&ctx.audit)),
+            RequestCtx::new(
+                ctx.caller.clone(),
+                Arc::clone(&ctx.audit),
+                ctx.listener_protocol,
+                ctx.listener_provider_id.clone(),
+            ),
         )
         .await;
     }
@@ -1785,6 +1955,8 @@ async fn proxy_openai(
     let RequestCtx {
         caller,
         audit: audit_store,
+        listener_protocol,
+        listener_provider_id,
     } = ctx;
     use sieve_core::pipeline::PipelineNode;
     use sieve_core::protocol::unified_message::{
@@ -2192,7 +2364,12 @@ async fn proxy_openai(
                 source_channel,
                 chain_depth,
             },
-            RequestCtx::new(caller.clone(), Arc::clone(&audit_store)),
+            RequestCtx::new(
+                caller.clone(),
+                Arc::clone(&audit_store),
+                listener_protocol,
+                listener_provider_id.clone(),
+            ),
         )
         .await;
     }
@@ -2227,7 +2404,7 @@ async fn proxy_openai(
             source_channel,
             chain_depth,
         },
-        RequestCtx::new(caller, audit_store),
+        RequestCtx::new(caller, audit_store, listener_protocol, listener_provider_id),
     )
     .await
 }
@@ -2276,6 +2453,8 @@ async fn forward_with_inbound_inspection(
     let RequestCtx {
         caller,
         audit: audit_store,
+        listener_protocol,
+        listener_provider_id,
     } = ctx;
     use http_body_util::Full;
 
@@ -2330,7 +2509,12 @@ async fn forward_with_inbound_inspection(
             dry_run,
             meta,
             ipc.clone(),
-            RequestCtx::new(caller.clone(), Arc::clone(&audit_store)),
+            RequestCtx::new(
+                caller.clone(),
+                Arc::clone(&audit_store),
+                listener_protocol,
+                listener_provider_id.clone(),
+            ),
         )
         .await;
     }
@@ -2684,6 +2868,8 @@ async fn forward_with_openai_inbound_inspection(
     let RequestCtx {
         caller,
         audit: audit_store,
+        listener_protocol,
+        listener_provider_id,
     } = ctx;
     use http_body_util::Full;
     use sieve_core::sse::openai_parser::OpenAiSseParser;
@@ -2732,7 +2918,12 @@ async fn forward_with_openai_inbound_inspection(
             dry_run,
             meta,
             ipc.clone(),
-            RequestCtx::new(caller.clone(), Arc::clone(&audit_store)),
+            RequestCtx::new(
+                caller.clone(),
+                Arc::clone(&audit_store),
+                listener_protocol,
+                listener_provider_id.clone(),
+            ),
         )
         .await;
     }
@@ -3376,9 +3567,13 @@ async fn handle_anthropic_json_inbound(
     ipc: Option<Arc<sieve_ipc::IpcServer>>,
     ctx: RequestCtx,
 ) -> Result<Response<ResponseBody>> {
+    // 本叶子函数不再调用 sub-flow，listener_protocol/provider_id 在此层无消费者。
+    // 仍 destructure 出来便于未来加审计调用时不再改 destructure 形式（Stage E）。
     let RequestCtx {
         caller,
         audit: audit_store,
+        listener_protocol: _,
+        listener_provider_id: _,
     } = ctx;
     use http_body_util::BodyExt as _;
 
@@ -3518,9 +3713,13 @@ async fn handle_openai_json_inbound(
     ipc: Option<Arc<sieve_ipc::IpcServer>>,
     ctx: RequestCtx,
 ) -> Result<Response<ResponseBody>> {
+    // 本叶子函数不再调用 sub-flow，listener_protocol/provider_id 在此层无消费者。
+    // 仍 destructure 出来便于未来加审计调用时不再改 destructure 形式（Stage E）。
     let RequestCtx {
         caller,
         audit: audit_store,
+        listener_protocol: _,
+        listener_provider_id: _,
     } = ctx;
     use http_body_util::BodyExt as _;
 
@@ -3792,6 +3991,50 @@ async fn forward_streaming(
 
 /// 构造因嵌套调用过深（chain_depth ≥ 5）的 426 Upgrade Required 响应。
 ///
+/// 构造协议错位拒绝响应（ADR-026 §决策 4）。
+///
+/// listener 声明的协议与请求 path 隐含的协议不一致时，daemon fail-closed 拒绝，
+/// 返回 400 Bad Request + sieve_blocked event payload。
+/// 例：Anthropic listener 收到 `/v1/chat/completions` → 400。
+/// 关联：ADR-026 §决策 4、PRD §9 #3 fail-closed、ADR-007。
+fn build_protocol_mismatch_400(
+    path: &str,
+    listener_protocol: crate::config::Protocol,
+) -> Response<ResponseBody> {
+    let listener_proto_str = match listener_protocol {
+        crate::config::Protocol::Anthropic => "anthropic",
+        crate::config::Protocol::Openai => "openai",
+    };
+    let body_json = serde_json::json!({
+        "type": "sieve_blocked",
+        "blocked_at": epoch_secs_string(),
+        "reason": "listener_protocol_mismatch",
+        "request_path": path,
+        "listener_protocol": listener_proto_str,
+        "guidance": {
+            "zh": format!(
+                "Sieve 检测到本 listener 声明协议为 {}，但请求路径 {} 属于不同协议，拒绝处理。\
+                 建议：将 client 指向声明匹配协议的 listener，或检查 sieve.toml [[upstream]] 配置。",
+                listener_proto_str, path
+            ),
+            "en": format!(
+                "Sieve rejected request: listener configured for {} protocol but request path {} \
+                 implies a different protocol. ADR-026 enforces strict listener-protocol matching.",
+                listener_proto_str, path
+            ),
+        }
+    });
+    let body_bytes = Bytes::from(body_json.to_string());
+    Response::builder()
+        .status(http::StatusCode::BAD_REQUEST) // 400
+        .header(
+            http::header::CONTENT_TYPE,
+            "application/json; charset=utf-8",
+        )
+        .body(bytes_body(body_bytes))
+        .unwrap_or_else(|_| Response::new(empty_body()))
+}
+
 /// 攻击模式检测：超过 5 层 agent 嵌套调用视为异常，直接拒绝。
 /// 关联：ADR-019 §嵌套深度限制、PRD v1.5 §6.5。
 fn build_426_nested_rejection(chain_depth: usize) -> Response<ResponseBody> {
