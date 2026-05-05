@@ -264,6 +264,55 @@ test key: sk-ant-test-XXXXXXXXXXXXXXXXXXXXXXXXXXXX（固定字符串，不是真
 期望响应：包含 [REDACTED] 替换后的内容
 ```
 
+### 4.2b Multi-listener 体检（ADR-026）
+
+**触发条件**：仅当 `~/.sieve/sieve.toml` 中 `[[upstream]]` 数组元素数量 > 1 时执行；单 listener 配置跳过此检查（避免冗余）。
+
+**检查行为**：
+
+读取 `~/.sieve/sieve.toml`，调用 `cfg.resolved_upstreams()`，对每个 listener 执行 `TcpStream::connect_timeout(127.0.0.1:<port>, 500ms)`。
+
+| 状态 | 条件 | 输出 |
+|------|------|------|
+| 通过 | 所有 listener 端口均可达 | `✅ ADR-026 multi-listener 全部端口可达（N 个 listener）` |
+| 失败 | 任一端口不可达 | `❌ ADR-026 multi-listener 全部端口可达（N 个 listener）` + 失败端口列表 |
+
+**实现位置**：`crates/sieve-cli/src/commands/doctor.rs::check_all_listeners_from_config`（已落地，本节仅文档化）。
+
+**与 check 3（daemon 监听）的关系**：
+
+- check 3 (`check_daemon_listening`) 仅探测 `127.0.0.1:11453` 单端口，作向后兼容保留
+- check 3b (`check_all_listeners_from_config`) 是 multi-listener 全量端口体检，仅在多 listener 配置下额外执行
+
+**doctor 输出示例（全部通过）**：
+
+```
+=== Claude Code doctor 检查 ===
+  ✅ settings.json: ANTHROPIC_BASE_URL = http://127.0.0.1:11453
+  ✅ settings.json: hooks.PreToolUse 含 sieve-hook check
+  ✅ daemon 在 127.0.0.1:11453 监听
+  ✅ ADR-026 multi-listener 全部端口可达（3 个 listener）
+  ✅ launchd com.sieve.daemon 已加载
+  ✅ canary 本地规则引擎命中 OUT-01
+✅ 所有检查通过，Sieve 运行正常。
+```
+
+**doctor 输出示例（部分 listener 失败）**：
+
+```
+=== Claude Code doctor 检查 ===
+  ✅ settings.json: ANTHROPIC_BASE_URL = http://127.0.0.1:11453
+  ✅ settings.json: hooks.PreToolUse 含 sieve-hook check
+  ✅ daemon 在 127.0.0.1:11453 监听
+  ❌ ADR-026 multi-listener 全部端口可达（3 个 listener）
+    失败的 listener: port 11454 (deepseek), port 11455 (openai)
+  ✅ launchd com.sieve.daemon 已加载
+  ✅ canary 本地规则引擎命中 OUT-01
+❌ 检查未全部通过，请按上述提示修复。
+```
+
+**check 顺序**：1 settings / 2 hook / 3 daemon listening / 3b multi-listener（条件执行）/ 4 launchd / 5 canary。
+
 ### 4.3 doctor 退出码
 
 - 所有项通过：exit 0

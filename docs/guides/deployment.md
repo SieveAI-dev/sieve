@@ -271,6 +271,75 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:21453
 
 ---
 
+## 6a. Multi-listener 部署（ADR-026）
+
+v2.x 起，sieve daemon 支持在单次启动中同时监听多个端口，每个端口绑定独立的上游（`[[upstream]]` 数组）。这使哑 client（Claude Code / Codex CLI / Cursor 等只认 `ANTHROPIC_BASE_URL` 一个 env var）可以通过切换端口来切换上游 provider，无需注入任何 header。
+
+### 6a.1 配置示例
+
+`~/.sieve/sieve.toml`：
+
+```toml
+bind_addr = "127.0.0.1"
+tls_verify_upstream = true
+
+[[upstream]]
+port = 11453
+url = "https://api.anthropic.com"
+provider_id = "anthropic"
+protocol = "anthropic"
+
+[[upstream]]
+port = 11454
+url = "https://api.deepseek.com/anthropic"
+provider_id = "deepseek"
+protocol = "anthropic"
+
+[[upstream]]
+port = 11455
+url = "https://api.openai.com"
+provider_id = "openai"
+protocol = "openai"
+```
+
+**字段说明**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `port` | `u16` | 监听端口，必须 `127.0.0.1` 绑定，不可指向公网（[ADR-003](../design/ADR-003-local-only-binding.md)） |
+| `url` | `String` | 真实上游地址，含 path prefix（如 `https://api.deepseek.com/anthropic`）|
+| `provider_id` | `String` | 用于审计日志、IPC 事件标注 |
+| `protocol` | `anthropic` \| `openai` | 显式声明协议，不再靠 path 猜；错位请求 fail-closed（400）|
+
+**向后兼容**：旧 `upstream_url` + `port` 单字段格式仍可读，deserialize 时自动映射为单元素 `[[upstream]]`，行为不变。
+
+### 6a.2 端口规划建议
+
+- 默认起 `11453`，递增分配（`11454` / `11455` / ...）
+- 避开常见冲突端口（`80` / `443` / `8080` / `5000` / `3000`）
+- 同一 daemon 实例内端口必须唯一（启动时端口冲突 → 立即 `exit 1`，不进入 partial-start）
+- 仅本地回环（`127.0.0.1`）—— `bind_addr` 任何非 `127.0.0.1` 值会触发 FATAL exit（[ADR-003](../design/ADR-003-local-only-binding.md) / [PRD §9 #2](../prd/sieve-prd-v2.0.md)）
+
+### 6a.3 launchd plist 不需改动
+
+daemon 内部完成多 `bind`，launchd plist 只需启动 `sieve start --config ~/.sieve/sieve.toml` 一次（无需多 socket activation）。`sieve setup` 写入的 plist 模板不变，无需手动调整。
+
+### 6a.4 故障排查
+
+| 症状 | 原因 | 处置 |
+|------|------|------|
+| daemon 启动 FATAL `duplicate listener port X` | `[[upstream]]` 数组里两项 `port` 相同 | 修 `sieve.toml`，每项 `port` 唯一 |
+| daemon 启动 `bind listener port 11454: Address already in use` | 该端口被其他进程占用 | `lsof -i :11454` 排查；改用其他端口 |
+| 任一 listener bind 失败 → daemon 整体退出 | fail-fast 行为（[ADR-026 §决策 3](../design/ADR-026-port-based-listener-routing.md)）| by design——半启动状态会让 `sieve doctor` 输出混淆 |
+| `sieve doctor` 报 `ADR-026 multi-listener 全部端口可达 ❌` | 某个 listener 当前不可连 | 检查 daemon 日志（`~/.sieve/logs/sieve.log`）看哪个 listener 失败；可能是端口冲突恢复中 |
+| Claude Code 报 `ETIMEDOUT` 但 daemon 日志无新条目 | 客户端 `ANTHROPIC_BASE_URL` 端口写错（指向了 daemon 没绑的端口）| 核对 env var 端口；用 `lsof -i -P \| grep sieve` 确认 daemon 实际绑定的端口列表 |
+
+### 6a.5 Pro Mode（v3.x，ADR-027 网络层硬隔离）
+
+[ADR-027](../design/ADR-027-network-jail-enforcement.md) network jail enforcement 计划在 v3.x post-GA opt-in 上线，届时多 listener 会与 macOS pf / Linux nftables uid-based egress filter 配合，实现"非 sieve 进程无法直连 LLM endpoint"。本节只覆盖 v2.x multi-listener，jail 部署见未来版本。
+
+---
+
 ## 7. 日志 & 审计
 
 ### 7.1 文本日志
