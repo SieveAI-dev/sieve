@@ -13,36 +13,123 @@
 
 ## [Unreleased] — 2026-05-05
 
-### unix-style 改造（ADR-026）
+> **本日完成 unix-style 改造 v2.x 全部 5 项 TODO**（13 commits）：
+> ADR-026 multi-listener + ADR-028 IPC 中性化 + 2 个新 CLI 子命令。
+> TODO-6 Network jail（ADR-027）推后到 v3.x post-GA opt-in。
+> 验证：workspace 725 passed / clippy 0 / fmt clean。
 
-- **BREAKING**：`Config` schema 升级支持多 listener。新增 `[[upstream]]` 数组，每项含
-  `port` / `url` / `provider_id` / `protocol`。旧字段 `upstream_url` + `port` 保留
-  向后兼容（`Config::resolved_upstreams` 自动映射成单元素 vec），现有 sieve.toml 无需
-  改动即可继续工作；`upstreams` 非空时旧字段被忽略并 WARN。
-  详见 [ADR-026](../design/ADR-026-port-based-listener-routing.md)。
-- 新增 `Protocol` enum（`anthropic` | `openai`）+ `UpstreamListener` 配置 struct。
-- daemon 重构成 multi-listener 架构：`daemon::run` 遍历 `cfg.resolved_upstreams()`
-  各自 bind + spawn 独立 `accept_loop`，任一 bind 失败 fail-fast。哑 client（Claude
-  Code 等只认 single base_url 的 agent）通过指向不同 port 切换上游，无须注入路由 header。
-- 新增 listener 协议错位 fail-closed 拒绝（ADR-026 §决策 4 / PRD §9 #3）：
-  Anthropic listener 收到 `/v1/chat/completions` → 400 + `sieve_blocked` event；
-  Openai listener 收到 `/v1/messages` → 400。其他 path（健康检查 / 透传）保持原行为。
-  X-Sieve-Provider header routing 不能 override listener 协议（fail-closed 一致性）。
-- 新增 IPC `HealthResult.listeners: Vec<ListenerSnapshot>`（含 `provider_id` /
-  `protocol`），向后兼容 `listen: ListenSnapshot` 单字段保留为 `listeners[0]` 别名。
-  GUI 客户端（sieve-gui-macos）需 follow-up 同步读取新字段。
-- **Fix**：`Forwarder::new` + `rewrite_uri` 修复 v1.x bug——`upstream_url` 中的
-  path 前缀被丢弃，导致 DeepSeek 等 Anthropic 兼容入口
-  （`https://api.deepseek.com/anthropic`）转发后变成 `/v1/messages` 而非
-  `/anthropic/v1/messages`（404）。新增 `Forwarder.upstream_path_prefix` 字段，
-  `Host` header 行为不变（仍是纯 authority）。
-
-### unix-style 改造立项
+### unix-style 改造立项（commit cf129a2）
 
 - 新增 [ADR-026](../design/ADR-026-port-based-listener-routing.md) Port-based listener routing
 - 新增 [ADR-027](../design/ADR-027-network-jail-enforcement.md) Network jail enforcement（v3.x post-GA opt-in）
 - 新增 [ADR-028](../design/ADR-028-ipc-protocol-neutralization.md) IPC 协议中性化 + sieve-ipc 内部模块化
 - `tasks/PROGRESS.md` 加「unix-style 改造」段，6 个 TODO 按 P0/P1/P2 排进 v2.x 与 v3.x
+
+### Added — Multi-listener（ADR-026 全部落地）
+
+- **`[[upstream]]` 配置数组**（commit bdcb8de，Stage A）：每项含 `port` / `url` /
+  `provider_id` / `protocol`。新增 `Protocol` enum（`anthropic` | `openai`）+
+  `UpstreamListener` 配置 struct + `Config::resolved_upstreams()` 兼容方法 +
+  `check_safety_invariants()` 可单测函数（端口冲突 + 非 loopback bind 检测）。
+- **BREAKING**：`Config.upstream_url` + `port` 标为 deprecated。旧字段保留向后
+  兼容（自动映射成单元素 vec），现有 `sieve.toml` 无需改动即可继续工作；
+  `upstreams` 非空时旧字段被忽略并 WARN。
+- **Multi-listener accept loop + 协议错位 fail-closed**（commit 042c4c9，Stage B+C+D）：
+  daemon 重构遍历 `cfg.resolved_upstreams()` 各自 bind + spawn 独立 `accept_loop`，
+  任一 bind 失败 fail-fast。哑 client（Claude Code / Codex CLI 等只认 single base_url
+  的 agent）通过指向不同 port 切换上游，无须注入路由 header。Anthropic listener 收到
+  `/v1/chat/completions` → 400 + `sieve_blocked`；Openai listener 收到 `/v1/messages` → 400。
+  其他 path 透传不强制；X-Sieve-Provider header routing 不能 override listener 协议
+  （fail-closed 一致性，PRD §9 #3）。`ListenerSpec` struct + `RequestCtx` 加
+  `listener_protocol` / `listener_provider_id` 字段。
+- **审计 provider_id 透传**（commit b6e716d，Stage E）：`AuditStore::append` 签名
+  升级 `(event, provider_id)`；SQLite schema **v2 → v3** migration（`ALTER TABLE
+  ADD COLUMN provider_id TEXT NOT NULL DEFAULT 'unknown'`）；新增
+  `audit::SYSTEM_PROVIDER_ID = "_system"` / `UNKNOWN_PROVIDER_ID = "unknown"`
+  常量；13 处 audit.append 调用点全部同步；daemon 系统级事件（control plane /
+  oversize / UserRulesReloaded）用 `_system`。
+- **IPC HealthResult.listeners 数组**（commit d90c51b，Stage F）：新增
+  `sieve-ipc::ListenerSnapshot`（含 `provider_id` / `protocol`）；
+  `HealthResult.listeners: Vec<ListenerSnapshot>` 向后兼容 `listen: ListenSnapshot`
+  单字段保留为 `listeners[0]` 别名。GUI 客户端（sieve-gui-macos）需 follow-up
+  同步读取新字段。
+- **doctor multi-listener 体检**（commit b6e716d）：新增 `check_all_listeners_from_config`
+  helper，读 `~/.sieve/sieve.toml` 解析 upstreams 逐 port TCP 探测；仅
+  `[[upstream]] > 1` 时打印（避免单 listener 配置冗余）。
+- **Fix Forwarder path prefix**（commit 28fbb30，TODO-1）：修复 v1.x bug——
+  `upstream_url` 中的 path 前缀被丢弃，导致 DeepSeek 等 Anthropic 兼容入口
+  （`https://api.deepseek.com/anthropic`）转发后变成 `/v1/messages` 而非
+  `/anthropic/v1/messages`（404）。新增 `Forwarder.upstream_path_prefix` 字段，
+  `Host` header 行为不变（仍是纯 authority），5 个调用点零改动。
+
+### Added — IPC 中性化（ADR-028 全部落地）
+
+- **SPEC-005 协议术语中性化**（commit 69664c3，TODO-3a）：清洗 ~371 处 GUI-中心化
+  术语：「GUI 端」→「client 端」/「daemon → GUI」→「daemon → client」/「popup」→
+  「decision request/event」。`gui_popup` wire 字段值**保持不变**（向后兼容硬要求）+
+  加 ADR-028 标注语义中性化。`ui_phase` / §3.4 UI 文案 / §6.1.4 recommendation
+  加 admonition 标注 GUI 实现细节。§9 标题「GUI 控制面方法」→「控制面方法」。
+  daemon IPC 协议**不感知 client 形态**（GUI / CLI / TUI / webhook 都是平等 client）。
+- **sieve-ipc crate 内部模块化**（commit 0ba0350，TODO-3b）：拆分
+  `crates/sieve-ipc/src/protocol.rs` 为 `protocol/` 子目录（envelope / decision /
+  handshake / rules / audit / health / notify 7 子文件）；`socket_server.rs` →
+  `server/socket_server.rs`；`socket_client.rs` → `client/connection.rs`。新增
+  `protocol/README.md`：SPEC-005 权威源声明 + 零 IO 依赖硬约束（仅 import serde /
+  chrono / uuid / std；禁止 tokio / hyper / fd-lock / 任何 IO crate）。lib.rs
+  re-export 100% 兼容 + 向后兼容别名（`socket_client` / `socket_server` 路径仍可用）。
+
+### Added — 新 CLI 子命令（ADR-028 TODO-4 + TODO-5）
+
+- **`sieve decisions` headless CLI**（commit 8717442，TODO-4）：让 daemon 在
+  GUI 不在线时仍可用，CLI 接管决策（远程 SSH / GUI crash / tmux 工作流不再卡死）。
+  - `sieve decisions watch [--format jsonl] [--severity SEV]`：流式订阅 pending
+    decision events
+  - `sieve decisions show <id>`：查询单个 pending 上下文
+  - `sieve decisions resolve <id> --approve|--block|--warn [--reason "..."]`
+  - 新增 `sieve start --no-client-policy={auto-block|auto-warn|hold-and-fail-closed}`
+    flag（默认 auto-block）：daemon 在无 client 接 IPC 时的兜底策略。
+  - 实现：raw JSON-RPC over `UnixStream`，连 `~/.sieve/ipc.sock`；CLI 跟 GUI
+    共用同一组 IPC method，不引入特权 endpoint。`gated_request_decision` 加
+    `no_client_policy` 参数，`connected_clients == 0` 且非 Critical 时按策略快速返回。
+  - +5 单元测试。
+- **`sieve audit` unix-pipeable CLI**（commit 7a1415d，TODO-5）：审计日志
+  unix-pipeable 输出，方便接 jq / fluentd / vector。
+  - `sieve audit tail [-f] [--format jsonl] [--limit N]`：最后 N 条 + `--follow`
+    流式跟踪
+  - `sieve audit query [--since DUR] [--severity SEV] [--rule-id RULE] [--provider-id PROVIDER]`
+  - `sieve audit show <id>`
+  - 实现：直接读 `~/.sieve/audit.db` SQLite（不通过 IPC）；jsonl 每行一个 JSON
+    object；`parse_duration` 解析 `1h/30m/7d`；`tail --follow` 用
+    `LIMIT + ORDER BY id DESC` 轮询（500ms 间隔）。
+  - +7 单元测试。
+
+### Changed — 文档同步
+
+- **CHANGELOG / api-reference §3.3.1 / architecture §1.1**（commit d90c51b，Stage G 核心）：
+  multi-listener 配置 schema + 部署拓扑说明。
+- **data-model §5.1a + §6.2 events 表 v3 + §6.2b migration**（commit b6e716d）：
+  `[[upstream]]` 数组字段表 + provider_id 列说明 + v2→v3 migration SQL +
+  特殊值 `_system` / `unknown`。
+- **development.md §3.4a**（commit b6e716d）：multi-listener dev 模式实战
+  配置 + 协议错位测试示例。
+- **SPEC-003 §4.2b doctor multi-listener 体检 + SPEC-004 §4.2.6 header vs port
+  routing 分工 + deployment.md §6a Multi-listener 部署**（commit 16bc0e7）：
+  3 份文档同步 +135 行；[redacted]（ADR-027）前向引用。
+
+### Fixed
+
+- **fmt baseline 清理**（commit 39e82a1）：4 个 crate 中 8 处 pre-existing
+  fmt 偏差（daemon_control_plane / sieve-ipc / sieve-policy）。无功能变更。
+- **audit v3 schema 测试断言**（commit bb5f6a1）：修补 Stage E 漏改的 3 个
+  pre-existing 测试：`update_trigger_blocks`（INSERT_SQL 11 参数）/
+  `migration_from_v1_preserves_data`（user_version 终为 3）/
+  `fresh_database_starts_at_v2`（全新 DB 应是 v3）。
+
+### Follow-up（不阻塞）
+
+- TODO-6 Network jail enforcement（ADR-027，v3.x post-GA opt-in 高级特性）
+- GUI 仓 sieve-gui-macos：Swift 代码读 `health.listeners` 数组（向后兼容期内
+  `listen` 单字段仍发，daemon 可独立 ship 不阻塞）
 
 ---
 
