@@ -1,11 +1,11 @@
 # ADR-030: 更新通道复用为遥测信标 + Install UUID + 三个环境变量开关
 
 ## 状态
-**Proposed**
+**Accepted**
 > 决策日期:2026-05-05
 > 范围:规则更新通道设计 + 装机量/DAU/留存遥测方案
-> 关联:[ADR-029](./ADR-029-free-first-defer-monetization.md)(免费优先,装机量为唯一指标) / [ADR-006](./ADR-006-sigstore-reproducible-build.md)(签名分发)
-> 待落地项:域名 / ed25519 签名密钥管理 / 服务端实现(Cloudflare Workers vs 自托管)/ 发布通道是否引入 beta
+> 关联:[ADR-003](./ADR-003-local-only-no-cloud-verifier.md)(**本 ADR 部分修订 ADR-003 的「绝对禁止 telemetry」反模式条款**,详见 ADR-003 §决策段 admonition) / [ADR-029](./ADR-029-free-first-defer-monetization.md)(免费优先,装机量为唯一指标) / [ADR-006](./ADR-006-sigstore-reproducible-build.md)(签名分发)
+> 待落地项:域名 / ed25519 签名密钥管理 / 服务端实现(Cloudflare Workers vs 自托管)/ 发布通道是否引入 beta / sieve-updater crate 实现
 
 ## 背景
 

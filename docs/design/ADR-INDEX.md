@@ -20,7 +20,7 @@
 | --------------------------------------------------------- | ------------------------------------------------------ | -------- | ---------- | --------------------- |
 | [ADR-001](./ADR-001-rust-tech-stack.md)                   | 选用 Rust 作为技术栈                                          | Accepted | 2026-04-26 | §6.3、§9.1             |
 | [ADR-002](./ADR-002-rule-engine-only-phase1.md)           | Phase 1 纯规则引擎，不引入本地 ML 模型                              | Accepted | 2026-04-26 | §6.2                  |
-| [ADR-003](./ADR-003-local-only-no-cloud-verifier.md)      | 完全本地运行，绝不联网做 token verifier                            | Accepted | 2026-04-26 | §1.2、§9.2、§11.2       |
+| [ADR-003](./ADR-003-local-only-no-cloud-verifier.md)      | 完全本地运行，绝不联网做 token verifier（2026-05-05 ADR-030 部分修订：放开更新通道遥测）  | Accepted (amended 2026-05-05) | 2026-04-26 | §1.2、§9.2、§11.2       |
 | [ADR-004](./ADR-004-anthropic-first-unified-interface.md) | Phase 1 只适配 Anthropic Messages API，UnifiedMessage 接口预留 | Accepted | 2026-04-26 | §6.1、§9.9             |
 | [ADR-005](./ADR-005-overseas-legal-entity.md)             | 海外公司主体作为收款与营销载体                                        | Accepted | 2026-04-26 | §1.4、§11.5            |
 | [ADR-006](./ADR-006-sigstore-reproducible-build.md)       | Sigstore 签名 + Reproducible Build + 透明日志                | Accepted | 2026-04-26 | §1.2、§9.6、§10.1、§11.3 |
@@ -43,7 +43,7 @@
 | [ADR-027](./ADR-027-network-jail-enforcement.md)          | Network jail enforcement —— 防火墙层硬隔离 LLM 流量（v3.x post-GA opt-in） | Proposed | 2026-05-05 | v2.0 §1.2、§9 #12、§11.2、§11.5 |
 | [ADR-028](./ADR-028-ipc-protocol-neutralization.md)       | IPC 协议中性化 —— 去 GUI 假设 + sieve-ipc 内部模块化 + headless decision path | Accepted | 2026-05-05 | v2.0 §6.5、§6.6        |
 | [ADR-029](./ADR-029-free-first-defer-monetization.md)     | 装机量优先,延后商业化 + 拒绝中转站认证收费模式                                | Accepted | 2026-05-05 | v2.0 §11、§1.4        |
-| [ADR-030](./ADR-030-update-telemetry-channel.md)          | 更新通道复用为遥测信标 + Install UUID + 三个环境变量开关                     | Proposed | 2026-05-05 | 新增,关联 ADR-006/029 |
+| [ADR-030](./ADR-030-update-telemetry-channel.md)          | 更新通道复用为遥测信标 + Install UUID + 三个环境变量开关（部分修订 ADR-003）         | Accepted | 2026-05-05 | 新增,关联 ADR-003/006/029 |
 
 
 ---

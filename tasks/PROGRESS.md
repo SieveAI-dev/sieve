@@ -191,6 +191,99 @@ TODO-6 Network jail enforcement 推后到 v3.x post-GA opt-in。
 - v2.x（GA 前）：TODO-1~5 全部完成 2026-05-05（单日 12 commits，主上下文 + 4 子代理并行）
 - v3.x（GA 后，dogfood 验证后）：TODO-6 约 3-5 个工作日
 
+---
+
+### 商业化 + 遥测决策落地（ADR-029 / ADR-030 / ADR-003 amended，2026-05-05 立项）
+
+> 关联 ADR：[ADR-029](../docs/design/ADR-029-free-first-defer-monetization.md) 装机量优先 / [ADR-030](../docs/design/ADR-030-update-telemetry-channel.md) 更新通道遥测 / [ADR-003 amended](../docs/design/ADR-003-local-only-no-cloud-verifier.md) 网络边界修订
+> 立项原因：ADR-029 把装机量定为 GA 前唯一指标，需要 ADR-030 manifest 协议提供数据来源；ADR-030 修订 ADR-003 「禁 telemetry」反模式条款。决策已 Accepted，落地工作待 GA 前完成。
+
+#### P0 · 代码侧（GA 前必须）
+
+- [ ] **TODO-7 sieve-updater crate 骨架**（1 天）
+  - 新建 `crates/sieve-updater/`（独立 crate，GUI 仓后续可复用）
+  - CLAUDE.md 「六个 Crate」段同步成「七个 Crate」（参考 ADR-022 类似前例）
+  - .cursorrules §3.3 + architecture.md §1.1 同步
+  - 关联：ADR-030 §待决项 #5
+
+- [ ] **TODO-8 manifest 协议客户端**（2-3 天）
+  - `GET https://updates.sieve.app/v1/manifest?v=&os=&arch=&uid=&ch=`（仅 TLS 1.2+，无 cookie/Auth）
+  - 解析 server response（rules + client + next_check_after_seconds）
+  - sha256 + ed25519 签名校验（编译期硬编码公钥，参考 ADR-006）
+  - 失败重试策略（exponential backoff，限制次数）
+  - 关联：ADR-030 §3
+
+- [ ] **TODO-9 install id 生成与持久化**（半天）
+  - 首次启动生成 UUIDv4（纯随机，不掺设备/账号信息）
+  - 持久化路径：macOS `~/Library/Caches/sieve/install-id`（首发；Linux/Windows 路径在 Phase 2 跨平台时落地）
+  - 文件权限 0600
+  - 用户主动删除 → 下次启动重新生成（接受统计噪声）
+  - 封装统一的 `cache_dir() -> PathBuf` 函数（按 `cfg!(target_os = ...)` 返回）
+  - 关联：ADR-030 §2
+
+- [ ] **TODO-10 三个环境变量解析**（半天）
+  - `SIEVE_NO_UPDATE`：跳过更新检查（启动 banner 必须打印 `update check disabled by SIEVE_NO_UPDATE`）
+  - `SIEVE_NO_TELEMETRY`：仍发更新请求但省略 uid 字段
+  - `SIEVE_UPDATE_URL`：覆盖默认更新源 URL
+  - 优先级：env var > toml > 默认值
+  - 关联：ADR-030 §5
+
+- [ ] **TODO-11 6h 定时器 + 启动立即查一次**（半天）
+  - 启动立即一次 + 6h 周期触发（即使内容无变化也照常发请求，兼装机量信标）
+  - 服务端 `next_check_after_seconds` 可动态调节频率
+  - 关联：ADR-030 §1
+
+- [ ] **TODO-12 sieve.toml `[update]` 段**（半天，Phase 2 也可推后）
+  - `enabled` / `telemetry` / `url` / `check_interval_hours`（不暴露给用户改）
+  - env var 优先级始终高于 toml
+  - GA 前可只接 env var，toml 字段在 Phase 2 落地（ADR-030 §7）
+  - 关联：ADR-030 §7
+
+#### P1 · 运维侧（GA 前必须）
+
+- [ ] **TODO-13 域名注册**（依赖 ADR-005 海外主体落地）
+  - `updates.sieve.app`（manifest，**不挂 CDN**）
+  - `cdn.sieve.app`（规则正文 zst）
+  - 关联：ADR-005 / ADR-030 §待决项 #1
+
+- [ ] **TODO-14 ed25519 签名密钥管理**（1 天）
+  - HSM / 单独 build 机 / 1Password Secrets / GCP KMS 之一
+  - 写入 ADR-006 follow-up（amendment 或新 ADR）
+  - 密钥泄露 = 规则分发被劫持的最大风险点
+  - 关联：ADR-030 §待决项 #2 / ADR-006
+
+- [ ] **TODO-15 服务端实现**（2-3 天）
+  - 倾向 Cloudflare Workers + KV / D1（零运维 + manifest 接口天然反 DDoS）
+  - 备选：自托管 Go / Rust
+  - 服务端日志只存 `ts | uid | v | os | arch | ch | country(geoip)`，丢原始 IP（geoip 解析后丢弃，或哈希后保留 ≤7 天反滥用）
+  - DAU / MAU / 留存 / 版本分布 / 平台分布全从这一张表算
+  - 关联：ADR-030 §4 / §待决项 #4
+
+- [ ] **TODO-16 ch 通道策略**（决策）
+  - 推荐先 stable 单通道，Phase 2 再加 beta
+  - 关联：ADR-030 §待决项 #3
+
+#### P2 · 文档侧（GA 前必须）
+
+- [ ] **TODO-17 SPEC-006 manifest 协议详细设计**（1 天）
+  - 落地 manifest 协议 + 客户端 updater 模块详细设计
+  - 6h 定时器 / install-id 生成 / env var 解析 / 签名校验 / 失败重试策略
+  - 关联：ADR-030 §需要更新的文档
+
+- [ ] **TODO-18 docs 同步**（半天）
+  - api-reference.md 加 §X manifest 接口章节
+  - development.md 加 SIEVE_NO_UPDATE / SIEVE_NO_TELEMETRY / SIEVE_UPDATE_URL 三个环境变量说明
+  - deployment.md 加企业自托管镜像章节（SIEVE_UPDATE_URL 用法）
+  - data-model.md 加服务端日志表 schema（如服务端代码进本仓）
+  - README.md / onboarding 加隐私声明文案（ADR-030 §6）
+
+- [ ] **TODO-19 PRD §11 商业化策略修订**（半天，可与 PRD v2.1 一起做）
+  - 引用 ADR-029 替换原 §7 定价表
+  - PRD §1.2 第 3 句「完全本地运行,从不上传你的数据」精确化（参考 README §核心叙事第 3 句已修订版本）
+  - PRD §9 #2「绝不联网做 verifier」明确边界（参考 CLAUDE.md 已修订版本）
+  - PRD §11.2 ToS 同步 ADR-030 隐私文案
+  - 关联：ADR-029 §需要更新的文档
+
 #### 产出物（已落地）
 - 3 份 ADR：ADR-026 / ADR-027 / ADR-028
 - SPEC-005 v2 协议中性化（commit 69664c3）
