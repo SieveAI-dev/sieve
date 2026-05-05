@@ -69,6 +69,13 @@ fn spawn_mock_daemon(server: Arc<IpcServer>) {
                             addr: "127.0.0.1".to_owned(),
                             port: 11453,
                         },
+                        // ADR-026 Stage F：multi-listener 快照数组（测试用单元素）
+                        listeners: vec![sieve_ipc::ListenerSnapshot {
+                            addr: "127.0.0.1".to_owned(),
+                            port: 11453,
+                            provider_id: "anthropic".to_owned(),
+                            protocol: "anthropic".to_owned(),
+                        }],
                         audit_db: sieve_ipc::AuditDbSnapshot {
                             path: "/tmp/audit".to_owned(),
                             size_bytes: 0,

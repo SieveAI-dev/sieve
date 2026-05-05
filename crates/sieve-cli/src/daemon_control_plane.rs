@@ -48,7 +48,13 @@ pub struct RuntimeState {
     /// daemon 启动时间（不可变）。
     pub started_at: DateTime<Utc>,
     /// 监听端口与地址（不可变）。
+    ///
+    /// **ADR-026 后**：daemon 可同时绑定多个 listener。本字段保留为 `listeners[0]`
+    /// 别名向后兼容旧 GUI 客户端（仅读 health.listen 单值）；新代码应读 `listeners` 数组。
     pub listen: ListenSnapshot,
+    /// 多 listener 快照数组（ADR-026 §决策 6 + Stage F）。
+    /// daemon::run 启动时按 `cfg.resolved_upstreams()` 顺序填充，不可变。
+    pub listeners: Vec<sieve_ipc::ListenerSnapshot>,
     /// daemon 版本号（不可变）。
     pub daemon_version: String,
     /// IPC 协议版本号（不可变）。
@@ -569,6 +575,7 @@ async fn handle_health(
         paused: paused_bool,
         paused_until: paused_until_val,
         listen: state.listen.clone(),
+        listeners: state.listeners.clone(),
         audit_db: AuditDbSnapshot {
             path: audit_db_path.display().to_string(),
             size_bytes: audit_db_size,
@@ -992,6 +999,13 @@ mod tests {
                 addr: "127.0.0.1".to_owned(),
                 port: 11453,
             },
+            // ADR-026 Stage F：multi-listener 快照数组（测试用单元素）
+            listeners: vec![sieve_ipc::ListenerSnapshot {
+                addr: "127.0.0.1".to_owned(),
+                port: 11453,
+                provider_id: "anthropic".to_owned(),
+                protocol: "anthropic".to_owned(),
+            }],
             daemon_version: "test".to_owned(),
             protocol_version: "v2".to_owned(),
             audit_db_path: PathBuf::from("/tmp/test_audit.db"),

@@ -26,7 +26,7 @@ pub use protocol::{
     DefaultOnTimeout, DetectionPayload, Disposition, EvaluateContentKind, EvaluateDirection,
     EvaluateMatch, EvaluateRecommendation, EvaluateRequest, EvaluateResult, GraylistEntrySummary,
     GraylistSnapshot, HealthRequest, HealthResult, HelloParams, IpcSnapshot, ListGraylistRequest,
-    ListGraylistResult, ListRulesResult, ListenSnapshot, NotifyKind, OriginHop,
+    ListGraylistResult, ListRulesResult, ListenSnapshot, ListenerSnapshot, NotifyKind, OriginHop,
     PausedChangedNotify, PresetChangedNotify, PresetOverride, PresetSnapshot, PurgeHistoryRequest,
     PurgeHistoryResult, RejectedOverride, ReloadConfigRequest, ReloadConfigResult, ReloadUserRules,
     RemoveGraylistRequest, RemoveGraylistResult, RequestDecisionCanceledNotify, RuleSummary,

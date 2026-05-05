@@ -689,8 +689,21 @@ pub async fn run(
             started_at: chrono::Utc::now(),
             listen: sieve_ipc::ListenSnapshot {
                 addr: cfg.bind_addr.clone(),
-                port: cfg.port,
+                // ADR-026 兼容：旧 listen 单字段 = listeners[0]，即 cfg.resolved_upstreams()[0].port
+                port: listener_specs.first().map(|s| s.port).unwrap_or(cfg.port),
             },
+            listeners: listener_specs
+                .iter()
+                .map(|s| sieve_ipc::ListenerSnapshot {
+                    addr: cfg.bind_addr.clone(),
+                    port: s.port,
+                    provider_id: s.provider_id.clone(),
+                    protocol: match s.protocol {
+                        crate::config::Protocol::Anthropic => "anthropic".to_owned(),
+                        crate::config::Protocol::Openai => "openai".to_owned(),
+                    },
+                })
+                .collect(),
             daemon_version: env!("CARGO_PKG_VERSION").to_owned(),
             protocol_version: "v2".to_owned(),
             audit_db_path: cfg

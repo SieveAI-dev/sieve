@@ -17,6 +17,18 @@ GUI 仓库（sieve-gui-macos）同步完成 swift test 127 passed + xcodebuild S
 
 ## ✅ 主里程碑
 
+### 2026-05-05 unix-style 改造 TODO-2 Stage F + 部分 G · IPC HealthResult listeners + 核心文档同步（ADR-026）
+- sieve-ipc::ListenerSnapshot 新 struct（port / addr / provider_id / protocol）
+- HealthResult.listeners 数组字段；listen 单字段保留为 listeners[0] 别名（向后兼容）
+- daemon RuntimeState 加 listeners 字段；handle_health 填充
+- daemon::run 启动时按 cfg.resolved_upstreams() 顺序构造 ListenerSnapshot 数组
+- 修复 2 处 pre-existing clippy single_match 触发问题（end_to_end.rs）
+- CHANGELOG.md 加 [Unreleased] 2026-05-05 unix-style 改造段（4 个 ADR / 2 个 BREAKING / 1 个 Fix）
+- docs/api/api-reference.md §3.3.1 加 Multi-listener 配置实战 schema + 兼容性说明
+- docs/design/architecture.md §1.1 加 ADR-026 多 listener 部署拓扑说明
+- 验证：workspace 713 passed / clippy 0 / fmt clean
+- **GUI 仓 follow-up**：sieve-gui-macos 仓 Swift 代码读 health.listeners 数组（向后兼容期内 listen 单值仍发）
+
 ### 2026-05-05 unix-style 改造 TODO-2 Stage B/C/D · multi-listener + 协议错位拒绝（ADR-026）
 - ListenerSpec struct + 拆 accept_loop 独立 async fn
 - daemon::run 重构：cfg.resolved_upstreams() → Vec<ListenerSpec> → 多 bind（fail-fast）→ spawn N accept_loop
@@ -76,12 +88,14 @@ GUI 仓库（sieve-gui-macos）同步完成 swift test 127 passed + xcodebuild S
 ### unix-style 改造 · 2026-05-05 启动
 
 - [x] **TODO-1 修 forwarder path prefix bug** ✅（已完成，commit 见 git log）
-- [ ] **TODO-2 Port-based multi-listener**（执行中）
-  - 决策：Q1=b（IPC HealthResult listeners 数组升级）/ Q2=a（审计 provider_id 同步）/ Q3=严格（协议错位 fail-closed 400）/ Q4=方案 B 三段 commit
+- [ ] **TODO-2 Port-based multi-listener**（核心完成，含 follow-up）
+  - 决策：Q1=b / Q2=a / Q3=严格 / Q4=方案 B 三段 commit
   - [x] Stage A: Config schema ✅ 完成 2026-05-05
   - [x] Stage B+C+D: multi-listener accept loop + per-listener forwarder + 协议错位拒绝 ✅ 完成 2026-05-05
-  - [ ] Stage E+F+G: 审计 provider_id + IPC HealthResult listeners + doctor + 文档（待启动）
-  - 需 GUI 仓 follow-up：sieve-gui-macos SPEC-002 + Swift 代码读 listeners 数组（向后兼容期内 listen 单值仍发）
+  - [x] Stage F + 核心 G: IPC HealthResult listeners + CHANGELOG + api-reference + architecture ✅ 完成 2026-05-05
+  - [ ] **Stage E follow-up**: 审计 provider_id 透传（SQLite schema v3 + AuditEvent 各 variant 加 provider_id 字段 + 13 处 audit.append 调用点同步）—— 涉及面较大，单独工程项
+  - [ ] **Stage G 余项 follow-up**: doctor multi-listener 体检 / data-model.md / SPEC-003 / SPEC-004 / development.md / deployment.md 同步
+  - **GUI 仓 follow-up**：sieve-gui-macos 仓 Swift 代码读 `health.listeners` 数组 + SPEC-002 同步（向后兼容期内 `listen` 单字段仍发，不阻塞）
 
 ---
 
