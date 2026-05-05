@@ -35,21 +35,29 @@ pub struct Forwarder {
     >,
     upstream_host: String,
     upstream_scheme: String,
+    /// 上游 URL 中的 path 前缀（已 trim 末尾 `/`）。
+    ///
+    /// 例：`https://api.anthropic.com` → `""`；
+    /// `https://api.deepseek.com/anthropic` → `"/anthropic"`；
+    /// `https://api.deepseek.com/anthropic/` → `"/anthropic"`。
+    /// `rewrite_uri` 时拼接到 client 请求 path 之前（ADR-026）。
+    upstream_path_prefix: String,
 }
 
 impl Forwarder {
     /// 新建 Forwarder。
     ///
     /// # Arguments
-    /// * `upstream_host_with_scheme` - 形如 `https://api.anthropic.com`。
+    /// * `upstream_url` - 形如 `https://api.anthropic.com` 或
+    ///   `https://api.deepseek.com/anthropic`（含 path 前缀的中转站）。
     ///
     /// # Errors
     /// URI 格式非法或 TLS 配置失败时返回 [`SieveCoreError::Forwarder`] /
     /// [`SieveCoreError::TlsConfig`]。
-    pub fn new(upstream_host_with_scheme: &str) -> SieveCoreResult<Self> {
+    pub fn new(upstream_url: &str) -> SieveCoreResult<Self> {
         install_crypto_provider();
 
-        let url = http::Uri::try_from(upstream_host_with_scheme)
+        let url = http::Uri::try_from(upstream_url)
             .map_err(|e| SieveCoreError::Forwarder(format!("invalid upstream uri: {e}")))?;
         let scheme = url
             .scheme_str()
@@ -59,6 +67,11 @@ impl Forwarder {
             .authority()
             .ok_or_else(|| SieveCoreError::Forwarder("upstream uri missing authority".into()))?
             .to_string();
+        // 抽取 path 前缀。trim_end_matches('/') 同时处理：
+        //   - `https://api.anthropic.com`（path = "/" → "")
+        //   - `https://api.deepseek.com/anthropic/`（trailing slash → "/anthropic"）
+        // 拼接时与 client 请求 path（必带前导 `/`）天然不会双斜杠。
+        let path_prefix = url.path().trim_end_matches('/').to_owned();
 
         // webpki-roots：编译期内嵌根证书，不依赖系统证书 store。
         // reproducible build 友好，见 ADR-006。
@@ -82,6 +95,7 @@ impl Forwarder {
             client,
             upstream_host: host,
             upstream_scheme: scheme,
+            upstream_path_prefix: path_prefix,
         })
     }
 
@@ -102,15 +116,18 @@ impl Forwarder {
             .map_err(|e| SieveCoreError::Forwarder(format!("upstream request failed: {e}")))
     }
 
-    /// 重写客户端请求 URI 到上游（scheme + authority，保留 path + query）。
+    /// 重写客户端请求 URI 到上游：scheme + authority + 上游 path 前缀 + 请求 path/query。
+    ///
+    /// 上游 URL 含 path 前缀时（如 `https://api.deepseek.com/anthropic`），
+    /// 前缀会被拼接到 client 请求 path 之前——ADR-026 修复 v1.x 丢弃前缀的 bug。
     ///
     /// # Errors
     /// URI 重组失败时返回 [`SieveCoreError::Forwarder`]。
     pub fn rewrite_uri(&self, original: &http::Uri) -> SieveCoreResult<http::Uri> {
         let path_and_query = original.path_and_query().map(|p| p.as_str()).unwrap_or("/");
         let new_uri = format!(
-            "{}://{}{}",
-            self.upstream_scheme, self.upstream_host, path_and_query
+            "{}://{}{}{}",
+            self.upstream_scheme, self.upstream_host, self.upstream_path_prefix, path_and_query
         );
         http::Uri::try_from(new_uri)
             .map_err(|e| SieveCoreError::Forwarder(format!("uri rewrite failed: {e}")))
@@ -165,5 +182,62 @@ mod tests {
         let original: http::Uri = "/".parse().unwrap();
         let new = f.rewrite_uri(&original).unwrap();
         assert_eq!(new.to_string(), "https://api.anthropic.com/");
+    }
+
+    // ── ADR-026: upstream path prefix 修复 ──────────────────────────────
+
+    #[test]
+    fn rewrite_uri_with_path_prefix() {
+        // DeepSeek Anthropic 兼容入口：含 /anthropic 前缀
+        let f = Forwarder::new("https://api.deepseek.com/anthropic").unwrap();
+        let original: http::Uri = "/v1/messages".parse().unwrap();
+        let new = f.rewrite_uri(&original).unwrap();
+        assert_eq!(
+            new.to_string(),
+            "https://api.deepseek.com/anthropic/v1/messages"
+        );
+    }
+
+    #[test]
+    fn rewrite_uri_path_prefix_with_query() {
+        let f = Forwarder::new("https://api.deepseek.com/anthropic").unwrap();
+        let original: http::Uri = "/v1/messages?beta=1".parse().unwrap();
+        let new = f.rewrite_uri(&original).unwrap();
+        assert_eq!(
+            new.to_string(),
+            "https://api.deepseek.com/anthropic/v1/messages?beta=1"
+        );
+    }
+
+    #[test]
+    fn rewrite_uri_path_prefix_trailing_slash_normalized() {
+        // 用户配置末尾带 `/`，结果应与不带 `/` 一致（无双斜杠）
+        let f = Forwarder::new("https://api.deepseek.com/anthropic/").unwrap();
+        let original: http::Uri = "/v1/messages".parse().unwrap();
+        let new = f.rewrite_uri(&original).unwrap();
+        assert_eq!(
+            new.to_string(),
+            "https://api.deepseek.com/anthropic/v1/messages"
+        );
+    }
+
+    #[test]
+    fn rewrite_uri_multi_segment_path_prefix() {
+        // 多层前缀也支持（某些中转站会用 /api/v2 这种结构）
+        let f = Forwarder::new("https://relay.example.com/api/v2").unwrap();
+        let original: http::Uri = "/v1/messages".parse().unwrap();
+        let new = f.rewrite_uri(&original).unwrap();
+        assert_eq!(
+            new.to_string(),
+            "https://relay.example.com/api/v2/v1/messages"
+        );
+    }
+
+    #[test]
+    fn upstream_host_excludes_path_prefix() {
+        // 关键不变量：upstream_host() 必须只返回 authority（用于 HTTP Host header），
+        // 绝不能含 path 前缀，否则上游会拒绝请求。
+        let f = Forwarder::new("https://api.deepseek.com/anthropic").unwrap();
+        assert_eq!(f.upstream_host(), "api.deepseek.com");
     }
 }
