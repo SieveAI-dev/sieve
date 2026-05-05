@@ -17,6 +17,13 @@ GUI 仓库（sieve-gui-macos）同步完成 swift test 127 passed + xcodebuild S
 
 ## ✅ 主里程碑
 
+### 2026-05-05 unix-style 改造 TODO-1 · forwarder path prefix 修复（ADR-026）
+- `Forwarder` 加 `upstream_path_prefix` 字段，`Forwarder::new` 解析 + trim 末尾 `/`
+- `rewrite_uri` 拼接 prefix（DeepSeek `/anthropic` 等中转站现已可用）
+- 新增 5 个测试 case：path / path+query / trailing slash / multi-segment / Host header 不变量
+- 对外 `upstream_host()` API 零 breaking，5 个调用点未改动
+- sieve-core: 173 passed / clippy 0 warnings / fmt clean
+
 ### 2026-05-03 v2.0+ 兼容扩展 + 业务层完整化
 - SPEC-005 §11A sieve.list_rules + §11B sieve.purge_history（不 bump version）
 - daemon 实现两个新 method
@@ -50,7 +57,11 @@ GUI 仓库（sieve-gui-macos）同步完成 swift test 127 passed + xcodebuild S
 ---
 
 ## 🚧 进行中
-（无 — 代码侧任务清零）
+
+### unix-style 改造 · 2026-05-05 启动
+
+- [x] **TODO-1 修 forwarder path prefix bug** ✅（已完成，commit 见 git log）
+- [ ] **TODO-2 Port-based multi-listener**（待启动；TODO-1 已就绪）
 
 ---
 
@@ -67,11 +78,7 @@ GUI 仓库（sieve-gui-macos）同步完成 swift test 127 passed + xcodebuild S
 
 #### P0 · 基础设施（先做，其他依赖）
 
-- [ ] **TODO-1 修 forwarder path prefix bug**（半天）
-  - 痛点：`upstream_url` 里的 path 被丢弃，DeepSeek 这种 `https://api.deepseek.com/anthropic` 转不通
-  - 改动：`crates/sieve-core/src/forwarder/mod.rs`，`Forwarder::new` 多记 `upstream_path_prefix`，`rewrite_uri` 拼接 prefix + original path
-  - 测试：补 `upstream_url` 含 path / 含 path + query / 含 trailing slash 三个 case
-  - 关联：ADR-026
+- [x] ~~**TODO-1 修 forwarder path prefix bug**~~ ✅ 完成 2026-05-05（见「主里程碑」）
 
 - [ ] **TODO-2 Port-based multi-listener**（1-2 天）
   - 痛点：哑 client（Claude Code）不会注入 header，`X-Sieve-Provider` 路由对它无效；同一 client 同进程没法切上游
