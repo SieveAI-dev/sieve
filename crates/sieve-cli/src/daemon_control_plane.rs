@@ -972,7 +972,8 @@ async fn handle_purge_history(
 fn spawn_audit(audit: &Arc<AuditStore>, event: AuditEvent) {
     let store = Arc::clone(audit);
     tokio::spawn(async move {
-        if let Err(e) = store.append(event).await {
+        // ADR-026 Stage E：control plane 是 daemon 系统级路径，无 listener 上下文
+        if let Err(e) = store.append(event, crate::audit::SYSTEM_PROVIDER_ID).await {
             tracing::warn!(error = %e, "audit append failed (control plane)");
         }
     });

@@ -185,7 +185,7 @@ sieve rules enable <rule-id>
 ### 3.4 启动 daemon（开发模式）
 
 ```bash
-# 1. 写最小 config
+# 1. 写最小 config（旧 schema，仍兼容）
 cat > /tmp/sieve.toml <<EOF
 upstream_url = "https://api.anthropic.com"
 port = 11453
@@ -203,6 +203,49 @@ ANTHROPIC_BASE_URL=http://127.0.0.1:11453 claude --bare -p "hello"
 # 4. 验证流量过代理：daemon 日志应显示 detection 或 INBOUND/OUTBOUND BLOCKED；
 #    若 daemon 日志为空但 claude 仍正常返回，说明请求绕过代理（典型：忘了 --bare）。
 ```
+
+#### 3.4a Multi-listener 配置（ADR-026 推荐）
+
+配置 daemon 同时监听多个端口，每个 port 独立连接不同的真实上游：
+
+```bash
+# 多 listener config
+cat > /tmp/sieve.toml <<EOF
+bind_addr = "127.0.0.1"
+tls_verify_upstream = true
+
+[[upstream]]
+port = 11453
+url = "https://api.anthropic.com"
+provider_id = "anthropic"
+protocol = "anthropic"
+
+[[upstream]]
+port = 11454
+url = "https://api.deepseek.com/anthropic"
+provider_id = "deepseek"
+protocol = "anthropic"
+
+[[upstream]]
+port = 11455
+url = "https://api.openai.com"
+provider_id = "openai"
+protocol = "openai"
+EOF
+
+# 启动（任一 listener bind 失败 → fail-fast 整体退出）
+SIEVE_LOG=info cargo run -p sieve-cli -- start --config /tmp/sieve.toml
+
+# 切换不同上游：改 ANTHROPIC_BASE_URL 端口即可
+ANTHROPIC_BASE_URL=http://127.0.0.1:11453 ANTHROPIC_AUTH_TOKEN=<anthropic-key> claude --bare
+ANTHROPIC_BASE_URL=http://127.0.0.1:11454 ANTHROPIC_AUTH_TOKEN=<deepseek-key>  claude --bare
+
+# 协议错位测试（fail-closed）
+curl -X POST http://127.0.0.1:11453/v1/chat/completions   # Anthropic listener 收 OpenAI path
+# → 400 + {"type":"sieve_blocked","reason":"listener_protocol_mismatch", ...}
+```
+
+详见 [ADR-026 §决策 1-4](../design/ADR-026-port-based-listener-routing.md)。
 
 > daemon 日志环境变量是 `SIEVE_LOG`（不是 `RUST_LOG`），格式 `<crate>=<level>,fallback`，
 > 例如 `SIEVE_LOG=sieve_cli=debug,info`。

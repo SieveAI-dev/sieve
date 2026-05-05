@@ -17,6 +17,21 @@ GUI 仓库（sieve-gui-macos）同步完成 swift test 127 passed + xcodebuild S
 
 ## ✅ 主里程碑
 
+### 2026-05-05 unix-style 改造 TODO-2 Stage E + 余 G · 审计 provider_id + doctor multi-listener + data-model + dev guide（ADR-026）
+- AuditStore::append 签名升级：加 `provider_id: &str` 参数
+- SQLite schema v2 → v3 migration：ALTER TABLE ADD COLUMN provider_id TEXT NOT NULL DEFAULT 'unknown'
+- CREATE TABLE DDL + INSERT_SQL 同步加 provider_id 列
+- 新增 `crate::audit::SYSTEM_PROVIDER_ID = "_system"` / `UNKNOWN_PROVIDER_ID = "unknown"` 常量
+- 透传链路：`RequestCtx.listener_provider_id` → 8 处 audit.append 调用全部加参数
+  （含 try_write_graylist / classify_inbound_detections / record_into_sequence_and_detect /
+   handle_anthropic_json_inbound / handle_openai_json_inbound 等 sub-flow 函数签名升级）
+- gated_request_decision 加 provider_id 参数（3 处调用同步）
+- daemon 系统级事件（control plane / oversize / UserRulesReloaded）用 SYSTEM_PROVIDER_ID
+- doctor 升级：新增 ADR-026 multi-listener 体检（读 sieve.toml 解析 upstreams 逐 port TCP 探测）
+- docs/design/data-model.md §5.1a 加 `[[upstream]]` 数组 schema + §6.2 events 表 v3 + §6.2b migration
+- docs/guides/development.md §3.4a 加 multi-listener 配置实战 + 协议错位测试示例
+- 13 处 audit.append 调用点全部同步（含 5 处 audit.rs 内部测试）
+
 ### 2026-05-05 unix-style 改造 TODO-2 Stage F + 部分 G · IPC HealthResult listeners + 核心文档同步（ADR-026）
 - sieve-ipc::ListenerSnapshot 新 struct（port / addr / provider_id / protocol）
 - HealthResult.listeners 数组字段；listen 单字段保留为 listeners[0] 别名（向后兼容）
@@ -84,18 +99,10 @@ GUI 仓库（sieve-gui-macos）同步完成 swift test 127 passed + xcodebuild S
 ---
 
 ## 🚧 进行中
-
-### unix-style 改造 · 2026-05-05 启动
-
-- [x] **TODO-1 修 forwarder path prefix bug** ✅（已完成，commit 见 git log）
-- [ ] **TODO-2 Port-based multi-listener**（核心完成，含 follow-up）
-  - 决策：Q1=b / Q2=a / Q3=严格 / Q4=方案 B 三段 commit
-  - [x] Stage A: Config schema ✅ 完成 2026-05-05
-  - [x] Stage B+C+D: multi-listener accept loop + per-listener forwarder + 协议错位拒绝 ✅ 完成 2026-05-05
-  - [x] Stage F + 核心 G: IPC HealthResult listeners + CHANGELOG + api-reference + architecture ✅ 完成 2026-05-05
-  - [ ] **Stage E follow-up**: 审计 provider_id 透传（SQLite schema v3 + AuditEvent 各 variant 加 provider_id 字段 + 13 处 audit.append 调用点同步）—— 涉及面较大，单独工程项
-  - [ ] **Stage G 余项 follow-up**: doctor multi-listener 体检 / data-model.md / SPEC-003 / SPEC-004 / development.md / deployment.md 同步
-  - **GUI 仓 follow-up**：sieve-gui-macos 仓 Swift 代码读 `health.listeners` 数组 + SPEC-002 同步（向后兼容期内 `listen` 单字段仍发，不阻塞）
+（无 — TODO-1 / TODO-2 已完成；TODO-3~6 待用户验证 TODO-2 联调反馈后启动）
+  - [x] Stage A / B+C+D / E / F / G 核心全部完成
+  - [ ] Stage G 余项（仅文档 follow-up，不阻塞）：SPEC-003-sieve-setup-tool.md doctor 5 项更新 / SPEC-004-multi-agent-setup.md §4.2 header vs port routing 分工 / deployment.md 多 listener 部署章节
+  - **GUI 仓 follow-up**（不在本仓）：sieve-gui-macos 仓 Swift 代码读 `health.listeners` 数组 + SPEC-002 同步（向后兼容期内 `listen` 单字段仍发，不阻塞）
 
 ---
 
@@ -114,13 +121,7 @@ GUI 仓库（sieve-gui-macos）同步完成 swift test 127 passed + xcodebuild S
 
 - [x] ~~**TODO-1 修 forwarder path prefix bug**~~ ✅ 完成 2026-05-05（见「主里程碑」）
 
-- [ ] **TODO-2 Port-based multi-listener**（1-2 天）
-  - 痛点：哑 client（Claude Code）不会注入 header，`X-Sieve-Provider` 路由对它无效；同一 client 同进程没法切上游
-  - 改动：`Config.upstream_url` → `Config.upstreams: Vec<UpstreamListener>`（含 port / url / provider_id / protocol）；旧字段映射成单元素 vec 兼容；`daemon.rs:734` 单 listener 拆 multi accept loop
-  - 显式 protocol 字段替代靠 path 猜
-  - 审计 schema 加 `provider_id` 列
-  - doctor 加 listener 维度体检
-  - 关联：ADR-026
+- [x] ~~**TODO-2 Port-based multi-listener**~~ ✅ 完成 2026-05-05（Stage A/B+C+D/E/F/G 核心全部落地，见「主里程碑」）
 
 #### P1 · 协议中性化（GUI 不再特权）
 

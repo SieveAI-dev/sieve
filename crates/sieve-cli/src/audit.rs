@@ -469,14 +469,15 @@ impl AuditEvent {
 
 // ─────────────────────────── Schema migration ──────────────────────────────
 
-/// 当前 schema 版本（v2.0，PRD §5.6.1）。
-const CURRENT_SCHEMA_VERSION: u32 = 2;
+/// 当前 schema 版本（v3：ADR-026 Stage E 加 provider_id 列）。
+const CURRENT_SCHEMA_VERSION: u32 = 3;
 
 /// 打开数据库后执行一次 schema 迁移。
 ///
-/// - 全新 DB（user_version = 0）：CREATE TABLE 已含新列，直接设版本号。
-/// - v1 老 DB（user_version = 1）：`ALTER TABLE ADD COLUMN`，不重写表，不丢数据。
-/// - v2 及以上：跳过。
+/// - 全新 DB（user_version = 0）：CREATE TABLE 已含全部最新列，直接设版本号。
+/// - v1 老 DB（user_version = 1）：`ALTER TABLE ADD COLUMN`（caller_pid/exe + provider_id），不重写表。
+/// - v2 老 DB（user_version = 2）：仅加 provider_id 列（ADR-026 Stage E）。
+/// - v3 及以上：跳过。
 ///
 /// 迁移在事务内执行，失败自动回滚（PRD §5.6.1）。
 ///
@@ -493,26 +494,44 @@ fn migrate(conn: &Connection) -> Result<()> {
     }
 
     if current == 0 {
-        // 全新数据库：CREATE TABLE 已包含 caller_pid / caller_exe；
+        // 全新数据库：CREATE TABLE 已包含 caller_pid / caller_exe / provider_id；
         // 直接将版本号设为最新。
         conn.execute_batch(&format!("PRAGMA user_version = {CURRENT_SCHEMA_VERSION};"))
             .context("设置 user_version 失败")?;
         return Ok(());
     }
 
-    if current < CURRENT_SCHEMA_VERSION {
-        // v1 → v2：为旧表加两列。
+    if current == 1 {
+        // v1 → v2：加 caller_pid + caller_exe（PRD §5.6.1）。
         // ALTER TABLE ADD COLUMN 在 SQLite 中是 O(1) 操作（不重写表），
         // 新列对现有行为 NULL，不触发 NOT NULL 约束失败（列定义无 NOT NULL）。
         // BEFORE UPDATE/DELETE 触发器基于行操作，ADD COLUMN 不失效触发器。
-        conn.execute_batch(&format!(
+        conn.execute_batch(
             "BEGIN;
              ALTER TABLE audit_events ADD COLUMN caller_pid INTEGER;
              ALTER TABLE audit_events ADD COLUMN caller_exe TEXT;
-             PRAGMA user_version = {CURRENT_SCHEMA_VERSION};
-             COMMIT;"
-        ))
+             PRAGMA user_version = 2;
+             COMMIT;",
+        )
         .context("v1→v2 schema 迁移失败")?;
+    }
+
+    // 此处 current 已经被前一段升到 2，统一走 v2 → v3 分支。
+    let after_v1: u32 = conn
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .context("读取 PRAGMA user_version 失败")?;
+
+    if after_v1 == 2 {
+        // v2 → v3：加 provider_id 列（ADR-026 Stage E）。
+        // 新列默认 'unknown' 兼容 ADR-026 之前写入的旧记录；
+        // ADR-026 之后所有 audit.append 都会显式传 provider_id（来自 listener 元信息）。
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE audit_events ADD COLUMN provider_id TEXT NOT NULL DEFAULT 'unknown';
+             PRAGMA user_version = 3;
+             COMMIT;",
+        )
+        .context("v2→v3 schema 迁移失败（ADR-026 provider_id）")?;
     }
 
     Ok(())
@@ -615,8 +634,9 @@ impl AuditStore {
     ///
     /// # Errors
     /// SQLite 写入失败时返回错误。
-    pub async fn append(&self, event: AuditEvent) -> Result<()> {
+    pub async fn append(&self, event: AuditEvent, provider_id: &str) -> Result<()> {
         let conn = Arc::clone(&self.conn);
+        let provider_id = provider_id.to_owned();
         tokio::task::spawn_blocking(move || {
             let guard = conn
                 .lock()
@@ -637,6 +657,7 @@ impl AuditStore {
                     event.raw_json().or(raw_json.as_deref()),
                     event.caller_pid(),
                     event.caller_exe(),
+                    provider_id,
                 ],
             )?;
             Ok::<(), anyhow::Error>(())
@@ -647,9 +668,24 @@ impl AuditStore {
     }
 }
 
+/// daemon 系统级审计事件的默认 provider_id（无 listener 上下文）。
+///
+/// 用于 control plane 调用、规则 reload、preset 变更等不属于任何具体上游的事件。
+/// `audit_events.provider_id` 列 NOT NULL，所以系统事件需用此常量而非空字符串。
+///
+/// 关联：ADR-026 Stage E。
+pub const SYSTEM_PROVIDER_ID: &str = "_system";
+
+/// 测试 / 兜底场景的 provider_id 常量（同样 NOT NULL 占位）。
+#[cfg_attr(not(test), allow(dead_code))]
+pub const UNKNOWN_PROVIDER_ID: &str = "unknown";
+
 // ─────────────────────────── SQL 常量 ──────────────────────────────────────
 
-/// 建表 DDL（含 v2 新列 caller_pid / caller_exe，PRD §5.6.1）。
+/// 建表 DDL（含 v3 全部新列：caller_pid / caller_exe / provider_id）。
+///
+/// - v2 列（PRD §5.6.1）：caller_pid / caller_exe
+/// - v3 列（ADR-026 Stage E）：provider_id —— 标注本次审计事件命中哪个 listener 上游
 const CREATE_TABLE_DDL: &str = r#"
 CREATE TABLE IF NOT EXISTS audit_events (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -661,8 +697,9 @@ CREATE TABLE IF NOT EXISTS audit_events (
     decision            TEXT,               -- 'Allow' | 'Block' | NULL
     request_id          TEXT    NOT NULL,
     raw_json            TEXT,
-    caller_pid          INTEGER,            -- 调用方 PID（PRD §5.6.1，NULL 表示未知）
-    caller_exe          TEXT                -- 调用方可执行路径（PRD §5.6.1，NULL 表示未知）
+    caller_pid          INTEGER,                                        -- 调用方 PID（PRD §5.6.1，NULL 表示未知）
+    caller_exe          TEXT,                                           -- 调用方可执行路径（PRD §5.6.1，NULL 表示未知）
+    provider_id         TEXT    NOT NULL DEFAULT 'unknown'              -- 上游身份标识（ADR-026 Stage E，'unknown' 表示无 listener 上下文）
 );
 "#;
 
@@ -686,9 +723,9 @@ END;
 const INSERT_SQL: &str = r#"
 INSERT INTO audit_events
     (timestamp_rfc3339, direction, rule_id, severity, disposition, decision,
-     request_id, raw_json, caller_pid, caller_exe)
+     request_id, raw_json, caller_pid, caller_exe, provider_id)
 VALUES
-    (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+    (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
 "#;
 
 // ─────────────────────────── 单元测试 ───────────────────────────────────────
@@ -726,7 +763,10 @@ mod tests {
         let store = AuditStore::init(&db_path).expect("init failed");
 
         for i in 1..=5 {
-            store.append(make_event(i)).await.expect("append failed");
+            store
+                .append(make_event(i), UNKNOWN_PROVIDER_ID)
+                .await
+                .expect("append failed");
         }
 
         // 直接用 rusqlite 验证
@@ -750,7 +790,10 @@ mod tests {
         let db_path = dir.path().join("audit_decision.db");
         let store = AuditStore::init(&db_path).expect("init failed");
 
-        store.append(make_decision_event()).await.unwrap();
+        store
+            .append(make_decision_event(), UNKNOWN_PROVIDER_ID)
+            .await
+            .unwrap();
 
         let conn = Connection::open(&db_path).unwrap();
         let decision: Option<String> = conn
@@ -941,7 +984,10 @@ mod tests {
                 exe: Some("/usr/bin/claude".to_string()),
             },
         };
-        store.append(event).await.expect("append failed");
+        store
+            .append(event, "test-provider")
+            .await
+            .expect("append failed");
 
         let conn = Connection::open(&db_path).unwrap();
         let (pid, exe): (Option<i32>, Option<String>) = conn
@@ -973,7 +1019,10 @@ mod tests {
             raw_json: None,
             caller: CallerContext::default(),
         };
-        store.append(event).await.expect("append failed");
+        store
+            .append(event, UNKNOWN_PROVIDER_ID)
+            .await
+            .expect("append failed");
 
         let conn = Connection::open(&db_path).unwrap();
         let (pid, exe): (Option<i32>, Option<String>) = conn
@@ -1068,7 +1117,7 @@ mod tests {
         };
 
         store
-            .append(event)
+            .append(event, "test-provider")
             .await
             .expect("GraylistAddFailed append 不应失败");
 

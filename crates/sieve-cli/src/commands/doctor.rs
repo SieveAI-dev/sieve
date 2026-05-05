@@ -272,6 +272,24 @@ mod macos {
         print_check("daemon 在 127.0.0.1:11453 监听", check3);
         results.push(("daemon 监听 :11453", check3));
 
+        // ── 检查 3b（ADR-026 Stage F）: multi-listener 体检
+        // 读 ~/.sieve/sieve.toml 解析 upstreams，逐个 TCP 探测。
+        // 配置无 multi-listener（旧 schema 或无 sieve.toml）时跳过此项。
+        let (total, ml_failures) = check_all_listeners_from_config();
+        if total > 1 {
+            // 仅 multi-listener 时打印（避免单 listener 重复 check 3 信息）
+            let ml_passed = ml_failures.is_empty();
+            let label = format!(
+                "ADR-026 multi-listener 全部端口可达（{} 个 listener）",
+                total
+            );
+            print_check(&label, ml_passed);
+            if !ml_passed {
+                println!("    失败的 listener: {}", ml_failures.join(", "));
+            }
+            results.push(("multi-listener 全部端口可达", ml_passed));
+        }
+
         // ── 检查 4: launchd 状态
         let check4 = check_launchd();
         print_check("launchd com.sieve.daemon 已加载", check4);
@@ -350,6 +368,10 @@ mod macos {
     }
 
     /// 尝试 TCP 连接 127.0.0.1:11453，成功则 daemon 在监听。
+    ///
+    /// 兼容性检查：仅探测默认端口 11453。ADR-026 multi-listener 配置下，
+    /// 用户可能配多个端口（如 11453 / 11454 / 11455），本函数只覆盖默认端口。
+    /// 完整的 multi-listener 体检见 [`check_all_listeners_from_config`]。
     fn check_daemon_listening() -> bool {
         use std::net::TcpStream;
         use std::time::Duration;
@@ -358,6 +380,50 @@ mod macos {
             Duration::from_millis(500),
         )
         .is_ok()
+    }
+
+    /// ADR-026 multi-listener 体检：读 sieve.toml 解析 upstreams，逐个 TCP 探测。
+    ///
+    /// 返回 (总数, 失败的 listener 列表)。配置文件不存在或解析失败时返回 (0, vec\[\])
+    /// 表示 "没有 multi-listener 配置"，由调用方决定是否打印诊断。
+    ///
+    /// 关联：ADR-026 §决策 7 / Stage F doctor 升级。
+    fn check_all_listeners_from_config() -> (usize, Vec<String>) {
+        use std::net::TcpStream;
+        use std::time::Duration;
+
+        let home = match std::env::var("HOME") {
+            Ok(h) => h,
+            Err(_) => return (0, vec![]),
+        };
+        let cfg_path = std::path::PathBuf::from(&home)
+            .join(".sieve")
+            .join("sieve.toml");
+
+        let cfg = match crate::config::Config::load(&cfg_path) {
+            Ok(c) => c,
+            Err(_) => return (0, vec![]),
+        };
+
+        let upstreams = cfg.resolved_upstreams();
+        let total = upstreams.len();
+        let mut failures = Vec::new();
+        for u in &upstreams {
+            let addr_str = format!("127.0.0.1:{}", u.port);
+            let addr = match addr_str.parse::<std::net::SocketAddr>() {
+                Ok(a) => a,
+                Err(_) => {
+                    failures.push(format!("port {} (invalid addr)", u.port));
+                    continue;
+                }
+            };
+            let ok = TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_ok();
+            let provider_id = u.resolved_provider_id();
+            if !ok {
+                failures.push(format!("port {} ({})", u.port, provider_id));
+            }
+        }
+        (total, failures)
     }
 
     /// 检查 launchctl list 是否含 com.sieve.daemon。

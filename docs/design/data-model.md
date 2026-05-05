@@ -232,8 +232,9 @@ deadbeef00112233  # known dev fixture address 0x000...dead
 
 | 字段 | 类型 | 默认 | 说明 |
 |------|------|------|------|
-| `upstream_url` | string | `"https://api.anthropic.com"` | 上游 API base URL；可指向中转站 |
-| `port` | u16 | `11453` | 本地监听端口 |
+| `upstream_url` | string | `"https://api.anthropic.com"` | **已废弃**（向后兼容）：上游 API base URL；ADR-026 后推荐用 `[[upstream]]` 数组（见下方 §5.1a） |
+| `port` | u16 | `11453` | **已废弃**（向后兼容）：本地监听端口 |
+| `[[upstream]]` | array | `[]` | **ADR-026 推荐**：multi-listener 配置数组，每项含 `port` / `url` / `provider_id` / `protocol`（见 §5.1a） |
 | `bind_addr` | string | `"127.0.0.1"` | 监听地址，**禁止**改成 `0.0.0.0`（启动时报错） |
 | `rules_path` | string | `"~/.sieve/rules-v{N}.tar.zst"` | 规则文件路径 |
 | `sieveignore_path` | string | `"~/.sieve/sieveignore"` | 白名单路径 |
@@ -250,6 +251,21 @@ deadbeef00112233  # known dev fixture address 0x000...dead
 | `preset` | enum | `"default"` | 规则集预设：`"strict"` / `"default"` / `"relaxed"` / `"custom"`；影响 StatusBar 类规则阈值，**不影响 Critical**（详见 [ADR-016](./ADR-016-disposition-matrix-2d.md)） |
 | `launchd_plist_path` | path | `"~/Library/LaunchAgents/com.sieve.daemon.plist"` | launchd plist 路径（macOS only）；`sieve setup` 生成并 `launchctl bootstrap` |
 | `gui_socket_enabled` | bool | `true` | 是否启用 GUI App Unix socket（IPC 通道 A）；设为 `false` 时降级为 macOS `osascript` 系统通知，不弹 HIPS 弹窗（仍 fail-closed） |
+
+### 5.1a `[[upstream]]` 数组（ADR-026 multi-listener）
+
+每项 listener 配置：
+
+| 字段 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `port` | u16 | (必填) | 监听端口；同一 daemon 内必须唯一（启动时端口冲突 → exit 1） |
+| `url` | string | (必填) | 真实上游 endpoint（**含 path 前缀**，如 `https://api.deepseek.com/anthropic`） |
+| `provider_id` | string | URL host 派生 | 上游身份标识；写入 audit `provider_id` 列 + IPC `ListenerSnapshot.provider_id` |
+| `protocol` | enum | `"anthropic"` | `"anthropic"` \| `"openai"`；请求 path 错位时 fail-closed 400 拒绝（[ADR-026 §决策 4](./ADR-026-port-based-listener-routing.md)） |
+
+向后兼容：`[[upstream]]` 为空时，从旧 `upstream_url` + `port` 字段映射成单元素 vec
+（`provider_id = "anthropic"`，`protocol = anthropic`）。两套配置同时给时，`[[upstream]]`
+优先，旧字段 ignored 并打 WARN。
 
 ### 5.2 `~/.sieve/` 目录结构
 
@@ -317,10 +333,10 @@ tls_verify_upstream = true
 - **不存原始 prompt 内容**——只存 fingerprint 与最小元信息（PRD §11.2）
 - 当前 schema 版本：**v2**（`PRAGMA user_version = 2`）
 
-### 6.2 `events` 表（schema v2）
+### 6.2 `events` 表（schema v3，ADR-026 Stage E）
 
 ```sql
-PRAGMA user_version = 2;
+PRAGMA user_version = 3;
 
 CREATE TABLE events (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -334,7 +350,8 @@ CREATE TABLE events (
   user_choice     TEXT,                    -- allow_once/cancel/redact_send/null
   evidence_meta   TEXT,                    -- JSON: { "len": N, "prefix": "sk-ant-...", ... }
   caller_pid      INTEGER,                 -- v2 新增：调用方进程 PID（NULL 若反查失败）
-  caller_exe      TEXT                     -- v2 新增：调用方可执行文件路径（NULL 若反查失败）
+  caller_exe      TEXT,                    -- v2 新增：调用方可执行文件路径（NULL 若反查失败）
+  provider_id     TEXT    NOT NULL DEFAULT 'unknown'   -- v3 新增（ADR-026）：listener 上游身份标识
 );
 
 CREATE INDEX idx_events_timestamp ON events(timestamp);
@@ -362,12 +379,40 @@ COMMIT;
 
 迁移完成后重建 append-only 触发器（SQLite ALTER TABLE 不触发触发器重建，需显式 DROP + RECREATE）。迁移失败则回滚并打印 `ERROR`，daemon 拒绝启动。
 
+### 6.2b schema v2 → v3 迁移（ADR-026 Stage E）
+
+启动时检查 `PRAGMA user_version`，若为 2 则在单个事务内执行：
+
+```sql
+BEGIN;
+ALTER TABLE events ADD COLUMN provider_id TEXT NOT NULL DEFAULT 'unknown';
+PRAGMA user_version = 3;
+COMMIT;
+```
+
+`provider_id` 列记录每条事件命中哪个 listener 上游（multi-listener 场景，
+[ADR-026](./ADR-026-port-based-listener-routing.md)）。NOT NULL DEFAULT `'unknown'`
+保证旧记录（migration 时存在的 audit）填上兜底值；ADR-026 后所有
+`audit.append` 调用都从 `RequestCtx.listener_provider_id` 显式传入。
+
+特殊值：
+- `_system`：daemon 系统级事件（control plane / config reload / preset change /
+  IPC oversize 等无 listener 上下文的事件）
+- `unknown`：兜底值（v2 老记录 migration 默认 / 测试 fixture）
+- 普通字符串：来自 `sieve.toml [[upstream]] provider_id` 字段，或 URL host 派生
+
+迁移失败则回滚并打印 `ERROR`，daemon 拒绝启动。
+
 ### 6.3 字段语义
 
 - `evidence_meta`：JSON 字符串，**仅存元信息**（长度、前缀几个字符、entropy 值），用于事后分析 FP 而不是回放 prompt；
 - `user_choice`：仅 Critical / High 在用户交互后写入；Medium / Low 为 NULL；
 - `session_id`：与 Claude Code 单次进程绑定（启动时随机），**不**做跨进程关联；
 - `caller_pid` / `caller_exe`（v2 新增）：由 accept loop 进程上下文反查注入（[ADR-023](./ADR-023-process-context-audit.md)）；macOS `proc_listpids` + `proc_pidfdinfo` 4-tuple 匹配；反查失败时存 NULL，不阻断请求处理。
+- `provider_id`（v3 新增，[ADR-026](./ADR-026-port-based-listener-routing.md)）：标注本条事件命中的 listener 上游身份。
+  multi-listener 场景下用于审计追溯（"用户哪个 endpoint 触发的告警"）；
+  系统级事件（control plane / config reload）填 `_system`；
+  来源：`sieve.toml [[upstream]] provider_id` → `RequestCtx.listener_provider_id` → `AuditStore::append(event, provider_id)`。
 
 > 即使审计文件被攻击者读到，也只能拿到"此用户在此时间点触发过 OUT-09 BIP39 检测"，无法还原任何敏感内容。这是 [ADR-003](./ADR-003-local-only-no-cloud-verifier.md) 在数据层的兑现。
 

@@ -155,6 +155,7 @@ fn detection_rule_ids<'a>(detections: &'a [&sieve_core::Detection]) -> Vec<&'a s
 /// 3. 否则 → 直接调 `IpcServer::request_decision`。
 ///
 /// 关联：PRD v2.0 §9 #3 #8（Critical 不可暂停）、SPEC-002 §9.1（paused 弹窗矩阵）。
+#[allow(clippy::too_many_arguments)]
 async fn gated_request_decision(
     ipc: &Arc<sieve_ipc::IpcServer>,
     audit: &Arc<crate::audit::AuditStore>,
@@ -162,6 +163,7 @@ async fn gated_request_decision(
     req: sieve_ipc::DecisionRequest,
     timeout: std::time::Duration,
     direction: &str,
+    provider_id: &str,
 ) -> Result<sieve_ipc::DecisionResponse, sieve_ipc::IpcError> {
     let any_critical = req
         .detections
@@ -212,8 +214,9 @@ async fn gated_request_decision(
         caller: caller_ctx,
     };
     let store = Arc::clone(audit);
+    let provider_id_owned = provider_id.to_owned();
     tokio::spawn(async move {
-        if let Err(e) = store.append(event).await {
+        if let Err(e) = store.append(event, &provider_id_owned).await {
             tracing::warn!(error = %e, "audit append AutoDecidedPaused failed");
         }
     });
@@ -251,6 +254,7 @@ async fn gated_request_decision(
 /// - `audit_store`：审计存储句柄（v2.1 接入，PRD §5.4.2）
 /// - `caller`：调用方进程信息（v2.0 Phase A）
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 fn try_write_graylist(
     rule_id: &str,
     matched_text: &str,
@@ -262,6 +266,7 @@ fn try_write_graylist(
     audit_event_id: &str,
     audit_store: &Arc<crate::audit::AuditStore>,
     caller: &Option<crate::process_context::CallerInfo>,
+    provider_id: &str,
 ) {
     let caller_ctx = crate::audit::CallerContext {
         pid: caller.as_ref().map(|c| c.pid),
@@ -284,8 +289,9 @@ fn try_write_graylist(
             caller: caller_ctx,
         };
         let audit = Arc::clone(audit_store);
+        let provider_id_owned = provider_id.to_owned();
         tokio::spawn(async move {
-            if let Err(e) = audit.append(event).await {
+            if let Err(e) = audit.append(event, &provider_id_owned).await {
                 tracing::warn!(error = %e, "audit append GraylistCriticalRejected failed");
             }
         });
@@ -304,8 +310,9 @@ fn try_write_graylist(
                 caller: caller_ctx,
             };
             let audit = Arc::clone(audit_store);
+            let provider_id_owned = provider_id.to_owned();
             tokio::spawn(async move {
-                if let Err(ae) = audit.append(event).await {
+                if let Err(ae) = audit.append(event, &provider_id_owned).await {
                     tracing::warn!(error = %ae, "audit append GraylistAddFailed failed");
                 }
             });
@@ -353,8 +360,9 @@ fn try_write_graylist(
             caller: caller_ctx,
         };
         let audit = Arc::clone(audit_store);
+        let provider_id_owned = provider_id.to_owned();
         tokio::spawn(async move {
-            if let Err(ae) = audit.append(event).await {
+            if let Err(ae) = audit.append(event, &provider_id_owned).await {
                 tracing::warn!(error = %ae, "audit append GraylistAddFailed failed");
             }
         });
@@ -755,7 +763,9 @@ pub async fn run(
                     );
                     let store = Arc::clone(&audit_for_oversize);
                     tokio::spawn(async move {
-                        if let Err(e) = store.append(event).await {
+                        // ADR-026 Stage E：oversize 是 IPC 帧事件，无 listener 上下文 → SYSTEM_PROVIDER_ID
+                        if let Err(e) = store.append(event, crate::audit::SYSTEM_PROVIDER_ID).await
+                        {
                             tracing::warn!(error = %e, "audit write for oversize frame failed");
                         }
                     });
@@ -1044,7 +1054,11 @@ pub(crate) fn perform_user_rules_reload(
     };
     let audit_clone = Arc::clone(audit);
     tokio::spawn(async move {
-        if let Err(e) = audit_clone.append(event).await {
+        // ADR-026 Stage E：UserRulesReloaded 是 daemon 系统级事件，无 listener 上下文
+        if let Err(e) = audit_clone
+            .append(event, crate::audit::SYSTEM_PROVIDER_ID)
+            .await
+        {
             tracing::warn!(error = %e, "audit append UserRulesReloaded failed");
         }
     });
@@ -1378,6 +1392,7 @@ async fn proxy_inner(
                     ipc_req,
                     timeout_dur,
                     "inbound",
+                    &ctx.listener_provider_id,
                 )
                 .await;
 
@@ -1401,6 +1416,7 @@ async fn proxy_inner(
                                         &request_id.to_string(),
                                         &ctx.audit,
                                         &ctx.caller,
+                                        &ctx.listener_provider_id,
                                     );
                                 }
                             }
@@ -1652,6 +1668,7 @@ async fn proxy_inner(
                     ipc_req,
                     timeout_dur,
                     "outbound",
+                    &ctx.listener_provider_id,
                 )
                 .await;
 
@@ -1674,6 +1691,7 @@ async fn proxy_inner(
                                         &request_id.to_string(),
                                         &ctx.audit,
                                         &ctx.caller,
+                                        &ctx.listener_provider_id,
                                     );
                                 }
                             }
@@ -2177,6 +2195,7 @@ async fn proxy_openai(
                 ipc_req,
                 timeout_dur,
                 "outbound",
+                &listener_provider_id,
             )
             .await;
 
@@ -2199,6 +2218,7 @@ async fn proxy_openai(
                                     &request_id.to_string(),
                                     &audit_store,
                                     &caller,
+                                    &listener_provider_id,
                                 );
                             }
                         }
@@ -2583,6 +2603,7 @@ async fn forward_with_inbound_inspection(
                         &ipc,
                         &audit_store,
                         caller.as_ref(),
+                        &listener_provider_id,
                     );
 
                     // 修 #4（fail-closed 被绕过修复）：Block 检查必须在 Hold 之前。
@@ -2729,6 +2750,7 @@ async fn forward_with_inbound_inspection(
                                                 &request_id.to_string(),
                                                 &audit_store,
                                                 &caller,
+                                                &listener_provider_id,
                                             );
                                         }
                                     }
@@ -2803,6 +2825,7 @@ async fn forward_with_inbound_inspection(
             &ipc,
             &audit_store,
             caller.as_ref(),
+            &listener_provider_id,
         );
 
         // flush 阶段 Hook 类同样 fail-closed：写失败即截流
@@ -2989,6 +3012,7 @@ async fn forward_with_openai_inbound_inspection(
                         &ipc,
                         &audit_store,
                         caller.as_ref(),
+                        &listener_provider_id,
                     );
 
                     // 1. Block 类：注入 sieve_blocked 并截流（fail-closed 优先）
@@ -3117,6 +3141,7 @@ async fn forward_with_openai_inbound_inspection(
                                                 &request_id.to_string(),
                                                 &audit_store,
                                                 &caller,
+                                                &listener_provider_id,
                                             );
                                         }
                                     }
@@ -3189,6 +3214,7 @@ async fn forward_with_openai_inbound_inspection(
             &ipc,
             &audit_store,
             caller.as_ref(),
+            &listener_provider_id,
         );
 
         for d in &hook_detections {
@@ -3266,6 +3292,7 @@ async fn forward_with_openai_inbound_inspection(
 /// v2.0：新增 `ipc_server` / `audit_store` / `caller` 参数，接入 StatusBar + audit。
 /// feature `sequence_detection` 关闭时 detect_sequence_hits 是 no-op，
 /// 但闭包仍构造 Arc clone 保持代码始终编译通过。
+#[allow(clippy::too_many_arguments)]
 fn record_into_sequence_and_detect(
     inbound_filter: &sieve_core::pipeline::inbound::InboundFilter,
     tool: &sieve_core::CompletedToolCall,
@@ -3274,6 +3301,7 @@ fn record_into_sequence_and_detect(
     ipc_server: &Option<Arc<sieve_ipc::IpcServer>>,
     audit_store: &Arc<crate::audit::AuditStore>,
     caller: Option<&crate::process_context::CallerInfo>,
+    provider_id: &str,
 ) {
     let rule_ids: Vec<String> = rule_hits.iter().map(|d| d.rule_id.clone()).collect();
     if let Err(e) = inbound_filter.record_tool_use_into_sequence(&tool.name, &tool.input, rule_ids)
@@ -3319,8 +3347,9 @@ fn record_into_sequence_and_detect(
                     },
                 };
                 let audit_clone = Arc::clone(audit_store);
+                let provider_id_owned = provider_id.to_owned();
                 tokio::spawn(async move {
-                    if let Err(e) = audit_clone.append(event).await {
+                    if let Err(e) = audit_clone.append(event, &provider_id_owned).await {
                         tracing::warn!(error = %e, "audit append SequenceHit failed");
                     }
                 });
@@ -3341,6 +3370,7 @@ fn classify_inbound_detections(
     ipc_server: &Option<Arc<sieve_ipc::IpcServer>>,
     audit_store: &Arc<crate::audit::AuditStore>,
     caller: Option<&crate::process_context::CallerInfo>,
+    provider_id: &str,
 ) -> (
     Vec<sieve_core::Detection>,
     Vec<sieve_core::Detection>,
@@ -3365,6 +3395,7 @@ fn classify_inbound_detections(
                         ipc_server,
                         audit_store,
                         caller,
+                        provider_id,
                     );
                     all_hits.extend(hits);
                 }
@@ -3580,13 +3611,13 @@ async fn handle_anthropic_json_inbound(
     ipc: Option<Arc<sieve_ipc::IpcServer>>,
     ctx: RequestCtx,
 ) -> Result<Response<ResponseBody>> {
-    // 本叶子函数不再调用 sub-flow，listener_protocol/provider_id 在此层无消费者。
-    // 仍 destructure 出来便于未来加审计调用时不再改 destructure 形式（Stage E）。
+    // ADR-026 Stage E：listener_provider_id 透传到 record_into_sequence_and_detect，
+    // listener_protocol 在 JSON 路径已确定（外层 proxy_inner 已校验），此处无消费者。
     let RequestCtx {
         caller,
         audit: audit_store,
         listener_protocol: _,
-        listener_provider_id: _,
+        listener_provider_id,
     } = ctx;
     use http_body_util::BodyExt as _;
 
@@ -3654,6 +3685,7 @@ async fn handle_anthropic_json_inbound(
                         &ipc,
                         &audit_store,
                         caller.as_ref(),
+                        &listener_provider_id,
                     );
                     for mut d in hits {
                         match &d.action {
@@ -3726,13 +3758,13 @@ async fn handle_openai_json_inbound(
     ipc: Option<Arc<sieve_ipc::IpcServer>>,
     ctx: RequestCtx,
 ) -> Result<Response<ResponseBody>> {
-    // 本叶子函数不再调用 sub-flow，listener_protocol/provider_id 在此层无消费者。
-    // 仍 destructure 出来便于未来加审计调用时不再改 destructure 形式（Stage E）。
+    // ADR-026 Stage E：listener_provider_id 透传到 record_into_sequence_and_detect，
+    // listener_protocol 在 JSON 路径已确定（外层 proxy_inner 已校验），此处无消费者。
     let RequestCtx {
         caller,
         audit: audit_store,
         listener_protocol: _,
-        listener_provider_id: _,
+        listener_provider_id,
     } = ctx;
     use http_body_util::BodyExt as _;
 
@@ -3809,6 +3841,7 @@ async fn handle_openai_json_inbound(
                             &ipc,
                             &audit_store,
                             caller.as_ref(),
+                            &listener_provider_id,
                         );
                         for mut d in hits {
                             match &d.action {
