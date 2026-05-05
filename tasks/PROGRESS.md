@@ -200,11 +200,22 @@ TODO-6 Network jail enforcement 推后到 v3.x post-GA opt-in。
 - CHANGELOG `[BREAKING]` Config schema + IPC schema + audit schema 全部记入
 
 #### 用户验证清单（当前等用户跑）
-- workspace 测试：`cargo test --workspace --locked` 应 725 passed / 7 ignored / 0 failed
-- multi-listener 联调：3 listener sieve.toml + 协议错位 fail-closed 测试（见 development.md §3.4a）
-- doctor 升级：multi-listener 配置下应见检查 3b
-- sieve audit 子命令：`sieve audit tail -f --format jsonl` / `sieve audit query --since 1h`
-- sieve decisions 子命令：`sieve decisions watch` / `sieve decisions resolve <id> --approve`
+
+**完整 step-by-step checklist**：[docs/guides/manual-integration-test.md](../docs/guides/manual-integration-test.md)（14 节，按 §1-§13 逐项勾选；全过即 dogfood 就绪）
+
+快速摘要：
+- §1 基线：`cargo fmt/clippy/test/deny/build` 全绿 → workspace 725 passed
+- §2 旧 schema 向后兼容（旧 `upstream_url` + `port` 仍可用）
+- §3 multi-listener 配置（3 listener bind + 端口冲突 fail-fast）
+- §4 协议错位 fail-closed（4 个子 case：path mismatch + X-Sieve-Provider 不能 override）
+- §5 doctor multi-listener 体检（条件性输出）
+- §6 sieve audit tail / query / show（jsonl 接 jq / fluentd）
+- §7 SQLite v3 schema 直查（provider_id 分布）
+- §8 v2 → v3 migration（如有老 audit.db）
+- §9 sieve decisions watch / show / resolve + `--no-client-policy` 三种策略
+- §10 forwarder path prefix（DeepSeek 中转站）
+- §11/§12 SPEC-005 中性化 + sieve-ipc 模块化（文档/结构级）
+- §13 GUI 仓 follow-up
 
 ### 已知小尾巴（不阻塞联调）
 - direction 字段在 sieve-core/pipeline 某孤立路径未被完整测试覆盖
