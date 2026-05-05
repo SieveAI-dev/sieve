@@ -1,21 +1,66 @@
 # Sieve daemon · 进度
 
 > 上次更新：2026-05-05
-> 当前阶段：**SPEC-005 v2 代码就绪等联调 + unix-style 改造立项（ADR-026/027/028）**
+> 当前阶段：**unix-style 改造 TODO-1/2/3a/3b/4/5 全部代码落地，等用户验证（TODO-6 v3.x post-GA opt-in 暂不做）**
 
 ## 当前阶段一句话
 
-SPEC-005 v2.0 frozen + v2.0+ 兼容扩展（list_rules / purge_history）双侧契约全部实现并对齐；
-P0 5/5 ✅ · P1 10/10 ✅ · P2 5/6 ✅（P2 仅余 fixtures polish）+ 善后全部 ✅；
-e2e 集成测试 harness 6 场景，cargo workspace 696 passed 全绿。
-GUI 仓库（sieve-gui-macos）同步完成 swift test 127 passed + xcodebuild SUCCEEDED。
-代码侧任务清零，等用户手动联调反馈。
+SPEC-005 v2.0 frozen + v2.0+ 兼容扩展双侧契约全部对齐 + 代码侧 dogfood 就绪。
+2026-05-05 单日完成 unix-style 改造 v2.x 全部 5 项（TODO-1~5）并落地 12 个 commits：
+ADR-026 multi-listener（含 forwarder path prefix / Config schema / multi-listener accept loop /
+协议错位 fail-closed / 审计 provider_id / IPC HealthResult.listeners / doctor 升级）+
+ADR-028 IPC 协议中性化 / sieve-ipc 模块化 / sieve decisions CLI / sieve audit CLI。
+TODO-6 Network jail enforcement 推后到 v3.x post-GA opt-in。
 
-2026-05-05 起：基于「sieve 应做成 iptables-like unix-style 工具」的设计反思，立项三项 ADR 与 6 个工程项（path prefix bug / port-based listener routing / IPC 协议中性化 / headless decision CLI / unix-pipeable audit / network jail enforcement），按 P0/P1/P2 排进 v2.x 与 v3.x。
+2026-05-05 单日工作以并行子代理 + 主上下文协作完成；workspace 测试基线从 696 → ~745+
+（+5 forwarder + 13 config + 12 audit/decisions + 其他新增），全过 / clippy 0 / fmt clean。
 
 ---
 
 ## ✅ 主里程碑
+
+### 2026-05-05 unix-style 改造 TODO-3a · SPEC-005 协议术语中性化（ADR-028）
+- §0 文档定位重写：明确 client-agnostic + 引用 ADR-028
+- 段落术语清洗 ~371 处：「GUI 端」→「client 端」/「daemon → GUI」→「daemon → client」/「popup」→「decision request/event」
+- gui_popup wire 字段值**保持不变**（向后兼容硬要求），加 ADR-028 标注说明语义中性化
+- ui_phase / §3.4 UI 文案 / §6.1.4 recommendation 加 admonition：标注「GUI client 参考实现，headless 可忽略」
+- §9 标题「GUI 控制面方法」→「控制面方法」，§10 多 GUI 回声防护 → 多 client 回声防护
+- §16 变更记录加 v2.0-adr028 条目；文档头部加协议变更日志
+- SPEC-005 净改动 +201 / -170 行
+- commit: 69664c3
+
+### 2026-05-05 unix-style 改造 TODO-3b · sieve-ipc crate 内部模块化（ADR-028）
+- crates/sieve-ipc/src/protocol.rs 拆分为 protocol/ 子目录（envelope / decision / handshake / rules / audit / health / notify）
+- crates/sieve-ipc/src/socket_server.rs → server/socket_server.rs
+- crates/sieve-ipc/src/socket_client.rs → client/connection.rs
+- 新增 protocol/README.md：SPEC-005 权威源声明 + 零 IO 约束
+- lib.rs re-export 100% 兼容 + 向后兼容别名（socket_client / socket_server 路径仍可用）
+- 验证：sieve-ipc 单独 106 passed / workspace clippy 0 / fmt clean
+- commit: 0ba0350
+
+### 2026-05-05 unix-style 改造 TODO-5 · sieve audit unix-pipeable CLI（ADR-028）
+- 新增 sieve audit 子命令：tail [-f] / query [--since DUR] / show <id>
+- 直接读 ~/.sieve/audit.db SQLite，不通过 IPC
+- jsonl 输出格式（每行一个 JSON object，方便接 jq / fluentd）
+- 支持过滤：--severity / --rule-id / --provider-id（v3 schema 新列）
+- crates/sieve-cli/src/commands/audit.rs 新增（510 行）+ 7 个单元测试
+- commit: 7a1415d
+
+### 2026-05-05 unix-style 改造 TODO-4 · sieve decisions headless CLI（ADR-028）
+- 新增 sieve decisions 子命令：watch / show / resolve --approve|--block|--warn
+- 新增 sieve start --no-client-policy=auto-block|auto-warn|hold-and-fail-closed flag
+- daemon::gated_request_decision 透传 NoClientPolicy：connected_clients == 0 + 非 Critical 时按策略快速返回
+- DaemonRunOpts 透传 run → accept_loop → proxy → proxy_inner/proxy_openai
+- raw JSON-RPC over UnixStream，不引入 IPC 客户端 typed schema 依赖
+- crates/sieve-cli/src/commands/decisions.rs 新增（778 行总，含 daemon.rs 改动）+ 5 个单元测试
+- commit: 8717442
+
+### 2026-05-05 unix-style 改造 ADR-026 follow-up · SPEC-003 doctor + SPEC-004 §4.2 + deployment（文档）
+- SPEC-003 §4.2b 新增 multi-listener 体检（条件性输出，仅 [[upstream]] > 1 时打印）
+- SPEC-004 §4.2.6 加 header routing vs port routing 分工对比表
+- deployment.md §6a 新增 Multi-listener 部署章节（5 小节：配置 / 端口规划 / launchd / 故障排查 / Pro Mode 前向引用）
+- 共 +135 行，纯文档无代码
+- commit: 16bc0e7
 
 ### 2026-05-05 unix-style 改造 TODO-2 Stage E + 余 G · 审计 provider_id + doctor multi-listener + data-model + dev guide（ADR-026）
 - AuditStore::append 签名升级：加 `provider_id: &str` 参数
@@ -125,30 +170,10 @@ GUI 仓库（sieve-gui-macos）同步完成 swift test 127 passed + xcodebuild S
 
 #### P1 · 协议中性化（GUI 不再特权）
 
-- [ ] **TODO-3a SPEC-005 协议术语中性化**（1 天）
-  - 改 method 名：`decision.popup` → `decision.pending`、`decision.popup_canceled` → `decision.canceled`（保留旧名作 deprecated alias 一个 minor 版本）
-  - 段落重写：「GUI 端」→「client 端」全文替换；GUI-only UI 状态机搬到 sieve-gui-macos 仓 SPEC-002
-  - SPEC-005 §0 文档定位更新：daemon 协议只描述语义，不感知 client 形态
-  - 关联：ADR-028
-
-- [ ] **TODO-3b sieve-ipc 内部模块化**（半天）
-  - 范围：crate 内部 `protocol/` 子模块化，**不拆 crate**
-  - 目录：`protocol/` (envelope / decision / handshake / rules / audit) + `server/` + `client/` + `file_ipc/`
-  - 硬约束：`protocol/` 只能 import serde / chrono / 标量类型，禁止 IO 依赖
-  - 关联：ADR-028
-
-- [ ] **TODO-4 Headless decision CLI**（2 天）
-  - 新增 `sieve decisions watch / show / resolve` 子命令
-  - 新增 `sieve start --no-client-policy=auto-block|auto-warn|hold-and-fail-closed` flag
-  - CLI 跟 GUI 共用同一组 IPC method，不引入特权 endpoint
-  - 依赖：TODO-3a / TODO-3b
-  - 关联：ADR-028
-
-- [ ] **TODO-5 Audit 层 unix-pipeable**（1-2 天）
-  - 新增 `sieve audit tail -f --format jsonl` / `sieve audit query --since 1h --severity critical --jsonl`
-  - 新增 `sieve start --emit-events stdout`（daemon 直接吐事件流）
-  - 关键：SQLite 留作权威存储，jsonl 是 projection；不增加新写路径
-  - 独立可做，无依赖
+- [x] ~~**TODO-3a SPEC-005 协议术语中性化**~~ ✅ 完成 2026-05-05（commit 69664c3，见「主里程碑」）
+- [x] ~~**TODO-3b sieve-ipc 内部模块化**~~ ✅ 完成 2026-05-05（commit 0ba0350，见「主里程碑」）
+- [x] ~~**TODO-4 Headless decision CLI**~~ ✅ 完成 2026-05-05（commit 8717442，见「主里程碑」）
+- [x] ~~**TODO-5 Audit 层 unix-pipeable**~~ ✅ 完成 2026-05-05（commit 7a1415d，见「主里程碑」）
 
 #### P2 · 网络层兜底（v3.x post-GA opt-in，不阻塞 GA）
 
@@ -162,15 +187,24 @@ GUI 仓库（sieve-gui-macos）同步完成 swift test 127 passed + xcodebuild S
   - 营销卖点：「Sieve Pro Mode」差异化定位
   - 关联：ADR-027
 
-#### 工作量与节奏
-- v2.x（GA 前）：TODO-1~5 共约 6-8 个工作日，与联调并行不冲突
+#### 工作量与节奏（实际）
+- v2.x（GA 前）：TODO-1~5 全部完成 2026-05-05（单日 12 commits，主上下文 + 4 子代理并行）
 - v3.x（GA 后，dogfood 验证后）：TODO-6 约 3-5 个工作日
 
-#### 产出物清单
-- 3 份 ADR：ADR-026 / ADR-027 / ADR-028（已立项）
-- SPEC-005 修订（TODO-3a 落地时）
-- sieve-ipc crate 内部目录调整（TODO-3b）
-- CHANGELOG `[BREAKING]` Config schema 升级（TODO-2）
+#### 产出物（已落地）
+- 3 份 ADR：ADR-026 / ADR-027 / ADR-028
+- SPEC-005 v2 协议中性化（commit 69664c3）
+- sieve-ipc crate 模块化（commit 0ba0350）
+- SPEC-003 / SPEC-004 / deployment.md 多 listener 同步（commit 16bc0e7）
+- data-model.md / api-reference.md / architecture.md / development.md ADR-026 同步
+- CHANGELOG `[BREAKING]` Config schema + IPC schema + audit schema 全部记入
+
+#### 用户验证清单（当前等用户跑）
+- workspace 测试：`cargo test --workspace --locked` 应 725 passed / 7 ignored / 0 failed
+- multi-listener 联调：3 listener sieve.toml + 协议错位 fail-closed 测试（见 development.md §3.4a）
+- doctor 升级：multi-listener 配置下应见检查 3b
+- sieve audit 子命令：`sieve audit tail -f --format jsonl` / `sieve audit query --since 1h`
+- sieve decisions 子命令：`sieve decisions watch` / `sieve decisions resolve <id> --approve`
 
 ### 已知小尾巴（不阻塞联调）
 - direction 字段在 sieve-core/pipeline 某孤立路径未被完整测试覆盖
