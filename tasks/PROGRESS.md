@@ -61,7 +61,12 @@ GUI 仓库（sieve-gui-macos）同步完成 swift test 127 passed + xcodebuild S
 ### unix-style 改造 · 2026-05-05 启动
 
 - [x] **TODO-1 修 forwarder path prefix bug** ✅（已完成，commit 见 git log）
-- [ ] **TODO-2 Port-based multi-listener**（待启动；TODO-1 已就绪）
+- [ ] **TODO-2 Port-based multi-listener**（执行中）
+  - 决策：Q1=b（IPC HealthResult listeners 数组升级）/ Q2=a（审计 provider_id 同步）/ Q3=严格（协议错位 fail-closed 400）/ Q4=方案 B 三段 commit
+  - [x] Stage A: Config schema ✅ 完成 2026-05-05（Protocol enum / UpstreamListener struct / [[upstream]] 数组 / resolved_upstreams 兼容旧字段 / check_safety_invariants 可单测 / 13 个新测试）
+  - [ ] Stage B+C+D: multi-listener accept loop + per-listener forwarder + 协议错位拒绝（待启动）
+  - [ ] Stage E+F+G: 审计 provider_id + IPC HealthResult listeners + doctor + 文档（待启动）
+  - 需 GUI 仓 follow-up：sieve-gui-macos SPEC-002 + Swift 代码读 listeners 数组（向后兼容期内 listen 单值仍发）
 
 ---
 
