@@ -42,6 +42,8 @@
 | [ADR-026](./ADR-026-port-based-listener-routing.md)       | Port-based listener routing —— 多上游 listener + path prefix 修复            | Accepted | 2026-05-05 | v2.0 §6.1、§6.5、§9 #2、§9 #16 |
 | [ADR-027](./ADR-027-network-jail-enforcement.md)          | Network jail enforcement —— 防火墙层硬隔离 LLM 流量（v3.x post-GA opt-in） | Proposed | 2026-05-05 | v2.0 §1.2、§9 #12、§11.2、§11.5 |
 | [ADR-028](./ADR-028-ipc-protocol-neutralization.md)       | IPC 协议中性化 —— 去 GUI 假设 + sieve-ipc 内部模块化 + headless decision path | Accepted | 2026-05-05 | v2.0 §6.5、§6.6        |
+| [ADR-029](./ADR-029-free-first-defer-monetization.md)     | 装机量优先,延后商业化 + 拒绝中转站认证收费模式                                | Accepted | 2026-05-05 | v2.0 §11、§1.4        |
+| [ADR-030](./ADR-030-update-telemetry-channel.md)          | 更新通道复用为遥测信标 + Install UUID + 三个环境变量开关                     | Proposed | 2026-05-05 | 新增,关联 ADR-006/029 |
 
 
 ---
