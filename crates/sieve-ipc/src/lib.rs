@@ -3,6 +3,7 @@
 // 供 sieve-cli（主代理）调用，向 GUI（sieve-gui-macos）或 hook（sieve-hook）
 // 传递决策请求并等待响应。关联：ADR-013（IPC 协议）、ADR-014（双层防御）。
 
+pub mod client;
 pub mod decision_file;
 pub mod error;
 pub mod frame_reader;
@@ -10,12 +11,17 @@ pub mod origin_header;
 pub mod paths;
 pub mod pending_file;
 pub mod protocol;
-pub mod socket_client;
-pub mod socket_server;
+pub mod server;
 pub mod ts_serde;
 pub mod wire;
 
+// 向后兼容别名：旧代码 `use sieve_ipc::socket_client::*` 仍可用。
+pub use client as socket_client;
+// 向后兼容别名：旧代码 `use sieve_ipc::socket_server::*` 仍可用。
+pub use server::socket_server;
+
 // 常用类型直接 re-export，调用方无需深层 import。
+pub use client::send_reload_user_rules_oneshot;
 pub use error::IpcError;
 pub use origin_header::{
     build_signed_origin_header, parse_and_verify_origin_header, parse_origin_header, OriginHeader,
@@ -34,8 +40,7 @@ pub use protocol::{
     SetPresetOverridesResult, SetPresetRequest, SetPresetResult, Severity, SourceAgent,
     StatusBarNotify, UiPhase,
 };
-pub use socket_client::send_reload_user_rules_oneshot;
-pub use socket_server::{
+pub use server::{
     BroadcastPlan, ControlError, ControlPlaneRequest, HelloBuilder, IpcServer, OversizeCallback,
     OversizeKind,
 };
