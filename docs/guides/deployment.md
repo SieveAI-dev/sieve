@@ -575,16 +575,18 @@ mv ~/.sieve ~/.sieve.bak.$(date +%Y%m%d)
 适合空气墙环境 / 出差不联网 / 极度多疑场景。
 
 ```bash
-export SIEVE_DISABLE_RULES_UPDATE=1
+export SIEVE_NO_UPDATE=1
 sieve --config ~/.sieve/config.toml
 ```
 
-或在 config 中：
+或在 config 中（ADR-030 §7）：
 
 ```toml
-[rules_update]
+[update]
 enabled = false
 ```
+
+> **说明**：旧字段名 `SIEVE_DISABLE_RULES_UPDATE` / `[rules_update]` 已被 ADR-030 替换为统一的 `SIEVE_NO_UPDATE` / `[update]` 段。详见 §13 自托管镜像 + manifest 接口 + [SPEC-006](../specs/SPEC-006-update-and-telemetry.md)。
 
 特性：
 
@@ -722,6 +724,108 @@ launchctl load ~/Library/LaunchAgents/tools.sieve.agent.plist
 
 ---
 
+## 13. 企业自托管镜像 / 私有更新源（ADR-030）
+
+> 适合企业内网部署、离线环境（air-gapped）、隐私敏感机构使用。完整协议见 [SPEC-006 §3](../specs/SPEC-006-update-and-telemetry.md)。
+
+### 13.1 `SIEVE_UPDATE_URL` 用法
+
+将 manifest 请求指向企业内网服务器：
+
+```bash
+# 运行时设置
+export SIEVE_UPDATE_URL=https://updates.internal.corp/sieve/v1/manifest
+sieve start --config ~/.sieve/sieve.toml
+
+# 或写入 sieve.toml（env var 优先级更高）
+```
+
+```toml
+[update]
+url = "https://updates.internal.corp/sieve/v1/manifest"
+```
+
+### 13.2 自建服务端要求
+
+自托管 manifest 服务端必须满足：
+
+- 响应 JSON 格式符合 [SPEC-006 §3.2 schema](../specs/SPEC-006-update-and-telemetry.md)（`schema` / `rules` / `client` / `next_check_after_seconds` 字段）
+- 支持 TLS 1.2+（客户端强制 TLS，HTTP 连接会被拒绝）
+- 不需要 `Authorization` header（Sieve 客户端不发认证信息）
+- 规则包（`rules.url`）可与 manifest 服务在同一服务器，也可放企业 CDN
+
+**最简 mock 响应示例**（用于本地开发测试）：
+
+```json
+{
+  "schema": 1,
+  "rules": {
+    "version": "2026.01.01.0",
+    "url": "https://cdn.internal.corp/sieve/rules/2026.01.01.0.json.zst",
+    "sha256": "aaabbbccc...",
+    "size": 184320,
+    "signature": "ed25519:..."
+  },
+  "client": {
+    "latest": "0.3.1",
+    "min_supported": "0.2.0",
+    "deprecation_notice": null
+  },
+  "next_check_after_seconds": 21600
+}
+```
+
+### 13.3 离线环境（air-gapped）
+
+完全禁用更新检查，规则永久冻结在安装时的版本：
+
+```bash
+# 方式一：环境变量（推荐，即时生效）
+export SIEVE_NO_UPDATE=1
+sieve start --config ~/.sieve/sieve.toml
+# 启动日志会打印：update check disabled by SIEVE_NO_UPDATE
+
+# 方式二：写入 sieve.toml
+```
+
+```toml
+[update]
+enabled = false     # 等价 SIEVE_NO_UPDATE
+```
+
+> 注意：离线模式下规则不更新，规则包会逐渐过期。建议定期通过安全渠道分发最新规则包到 `~/.sieve/rules/`，并验证 ed25519 签名后原子替换。
+
+### 13.4 隐私敏感场景（只想要规则更新，不参与装机统计）
+
+```bash
+export SIEVE_NO_TELEMETRY=1
+sieve start --config ~/.sieve/sieve.toml
+```
+
+或写入 `sieve.toml`：
+
+```toml
+[update]
+telemetry = false   # 省略 uid 字段，仍发更新请求
+```
+
+**效果**：
+
+- 仍能拉取最新规则（规则更新不受影响）
+- manifest 请求 URL 中省略 `uid=` 参数
+- 服务端无法统计该安装 ID 的 DAU
+
+### 13.5 优先级汇总
+
+```
+SIEVE_NO_UPDATE=1       → 完全不发请求（最高权限）
+SIEVE_NO_TELEMETRY=1    → 发请求但省略 uid
+SIEVE_UPDATE_URL=<url>  → 覆盖默认 manifest URL
+↑ 以上 env var 均优先于 sieve.toml [update] 段
+```
+
+---
+
 ## 相关文档
 
 - 项目入口：[../../README.md](../../README.md)
@@ -731,6 +835,8 @@ launchctl load ~/Library/LaunchAgents/tools.sieve.agent.plist
 - 变更日志：[../changelog/CHANGELOG.md](../changelog/CHANGELOG.md)
 - 架构文档：[../design/architecture.md](../design/architecture.md)
 - ADR-006 sigstore + reproducible build：[../design/ADR-006-sigstore-reproducible-build.md](../design/ADR-006-sigstore-reproducible-build.md)
+- ADR-030 更新通道遥测：[../design/ADR-030-update-telemetry-channel.md](../design/ADR-030-update-telemetry-channel.md)
+- SPEC-006 manifest 协议规格：[../specs/SPEC-006-update-and-telemetry.md](../specs/SPEC-006-update-and-telemetry.md)
 - 数据模型：[../design/data-model.md](../design/data-model.md)
 - 术语表：[../glossary.md](../glossary.md)
 

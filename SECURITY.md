@@ -12,7 +12,7 @@
 | 渠道 | 说明 | 适用阶段 |
 |------|------|---------|
 | **Email** | doskey.lee@gmail.com | Phase 1 GA 之前唯一渠道 |
-| Email | security@sieve.tools | GA 后启用（域名待 Week 6-8 商标确定后注册） |
+| Email | security@sieveai.dev | GA 后启用（域名 sieveai.dev 已确定 2026-05-05；DNS / MX 注册待 ADR-005 海外主体落地） |
 | PGP | TBD（Week 6-8 GA 前公布公钥指纹） | GA 后启用 |
 
 请在邮件标题加前缀 `[SIEVE-SECURITY]`，内容包含：

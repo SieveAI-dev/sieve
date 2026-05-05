@@ -811,7 +811,82 @@ pub enum HoldOutcome {
 
 ---
 
-## 13. 相关文档
+## 13. 服务端遥测日志 schema（ADR-030 §4）
+
+> 本节描述 manifest 服务端（`updates.sieveai.dev`）的日志表 schema。服务端实现待 TODO-15 Cloudflare Workers + D1 落地后细化；本节记录字段约定以便客户端和服务端对齐。
+
+### 13.1 日志字段
+
+```sql
+CREATE TABLE manifest_requests (
+  ts      TIMESTAMP NOT NULL,          -- 请求时间（精确到秒，UTC）
+  uid     TEXT,                        -- UUIDv4 install-id（SIEVE_NO_TELEMETRY 时为 NULL）
+  v       TEXT      NOT NULL,          -- 客户端版本（如 "0.3.1"）
+  os      TEXT      NOT NULL,          -- 操作系统："mac" / "linux" / "windows"
+  arch    TEXT      NOT NULL,          -- CPU 架构："x64" / "arm64"
+  ch      TEXT      NOT NULL DEFAULT 'stable',  -- 发布通道
+  country TEXT,                        -- 国家代码（geoip 解析后填入，不落原始 IP）
+  PRIMARY KEY (ts, uid)
+);
+
+-- DAU 统计
+CREATE INDEX idx_date_uid ON manifest_requests(date(ts), uid);
+```
+
+### 13.2 隐私原则
+
+- **原始 IP 不落盘**：geoip 解析后丢弃（或哈希后保留 ≤7 天用于反滥用，过期硬删）
+- **uid 可为 NULL**：`SIEVE_NO_TELEMETRY` 省略 uid 时，country 可落盘但无法追踪留存
+- 不存 User-Agent 详情、不存 Referer、不存任何用户输入相关字段
+
+### 13.3 核心指标 SQL 模板
+
+```sql
+-- DAU（按日独立安装数）
+SELECT date(ts) AS day, COUNT(DISTINCT uid) AS dau
+FROM manifest_requests
+WHERE uid IS NOT NULL
+GROUP BY day
+ORDER BY day DESC;
+
+-- MAU（按月独立安装数）
+SELECT strftime('%Y-%m', ts) AS month, COUNT(DISTINCT uid) AS mau
+FROM manifest_requests
+WHERE uid IS NOT NULL
+GROUP BY month;
+
+-- 7 天留存率（D0 安装，D7 仍活跃）
+-- 实现见服务端 analytics 代码（TODO-15）
+
+-- 版本分布
+SELECT v, COUNT(DISTINCT uid) AS installs
+FROM manifest_requests
+WHERE date(ts) = date('now')
+GROUP BY v
+ORDER BY installs DESC;
+
+-- OS / 平台分布
+SELECT os, arch, COUNT(DISTINCT uid) AS installs
+FROM manifest_requests
+WHERE date(ts) = date('now', '-7 day')
+GROUP BY os, arch;
+```
+
+### 13.4 服务端实现推荐
+
+服务端实现栈推荐：**Cloudflare Workers + D1**（ADR-030 §待决项 #4 默认推荐）。
+
+理由：
+- 零运维（serverless）
+- manifest 接口天然反 DDoS（Cloudflare WAF 级别）
+- D1 SQLite 与本文 schema 直接兼容
+- 免费层（D1 每天 5M row read / 100K row write）够前 6 个月装机量
+
+若服务端代码进本仓，则在 `crates/sieve-manifest-server/` 下实现，本节 schema 同步迁移。
+
+---
+
+## 14. 相关文档
 
 - [PRD-sieve v2.0](../prd/sieve-prd-v2.0.md) §5、§6.6、§7、§11
 - [architecture.md](./architecture.md) —— 模块职责、性能预算、Phase 2 演进路径
@@ -825,4 +900,6 @@ pub enum HoldOutcome {
 - [ADR-023](./ADR-023-process-context-audit.md) —— 进程上下文反查（caller_pid / caller_exe）
 - [ADR-024](./ADR-024-rules-engine-abstraction.md) —— 规则引擎抽象 + LayeredEngine
 - [ADR-025](./ADR-025-content-type-routing-matrix.md) —— content-type 路由矩阵
+- [ADR-030](./ADR-030-update-telemetry-channel.md) —— 更新通道复用为遥测信标
+- [SPEC-006](../specs/SPEC-006-update-and-telemetry.md) —— manifest 协议详细规格
 - `docs/api/api-reference.md` —— 待编写

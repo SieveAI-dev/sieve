@@ -1,4 +1,4 @@
-# ADR-003: 完全本地,出站只到 api.anthropic.com 和 releases.sieve.dev
+# ADR-003: 完全本地,出站只到 api.anthropic.com 和 cdn.sieveai.dev
 # 此文件由 cargo-deny 在 CI 中检查
 
 [graph]

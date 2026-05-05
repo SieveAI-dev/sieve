@@ -95,6 +95,41 @@ impl UpstreamListener {
     }
 }
 
+/// Update / telemetry-beacon configuration (ADR-030 §5).
+///
+/// Corresponds to the `[update]` section in `sieve.toml`.
+/// All fields have defaults so the section is entirely optional
+/// (existing configs without `[update]` continue to work).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct UpdateConfig {
+    /// Enable the update check + telemetry beacon (default `true`).
+    /// Can also be disabled via `SIEVE_NO_UPDATE` env var.
+    pub enabled: bool,
+    /// Enable install-ID telemetry in manifest requests (default `true`).
+    /// Can also be disabled via `SIEVE_NO_TELEMETRY` env var.
+    pub telemetry: bool,
+    /// Override manifest URL (default `None` → uses sieve-updater built-in default).
+    /// Can also be overridden via `SIEVE_UPDATE_URL` env var.
+    pub url: Option<String>,
+    /// How often to check for updates, in hours (default 6).
+    pub check_interval_hours: u64,
+    /// Release channel to report in manifest requests (default `"stable"`).
+    pub channel: String,
+}
+
+impl Default for UpdateConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            telemetry: true,
+            url: None,
+            check_interval_hours: 6,
+            channel: "stable".to_string(),
+        }
+    }
+}
+
 /// Sieve 顶层配置。
 ///
 /// 对应 `sieve.toml`（ADR-003 / data-model.md §配置）。
@@ -199,6 +234,14 @@ pub struct Config {
     /// SQLite 审计数据库路径（Week 5；`None` 时沿用 `log_path` 或 `~/.sieve/audit.db`）。
     #[serde(default)]
     pub audit_db_path: Option<PathBuf>,
+
+    /// Update check + telemetry beacon settings (ADR-030 §5).
+    ///
+    /// The `[update]` section is optional; omitting it preserves all defaults
+    /// (`enabled = true`, `telemetry = true`, `check_interval_hours = 6`,
+    /// `channel = "stable"`).
+    #[serde(default)]
+    pub update: UpdateConfig,
 }
 
 fn home_path() -> PathBuf {
@@ -270,6 +313,7 @@ impl Default for Config {
             launchd_plist_path: default_launchd_plist(),
             gui_socket_enabled: default_gui_socket_enabled(),
             audit_db_path: None,
+            update: UpdateConfig::default(),
         }
     }
 }

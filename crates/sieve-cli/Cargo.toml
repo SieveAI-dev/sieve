@@ -25,6 +25,7 @@ sieve-core = { path = "../sieve-core" }
 sieve-rules = { path = "../sieve-rules" }
 sieve-ipc = { path = "../sieve-ipc" }
 sieve-policy = { path = "../sieve-policy" }
+sieve-updater = { path = "../sieve-updater" }
 rusqlite = { version = "0.31", features = ["bundled"] }
 chrono = { workspace = true }
 

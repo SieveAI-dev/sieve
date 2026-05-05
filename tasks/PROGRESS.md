@@ -1,23 +1,41 @@
 # Sieve daemon · 进度
 
 > 上次更新：2026-05-05
-> 当前阶段：**unix-style 改造 TODO-1/2/3a/3b/4/5 全部代码落地，等用户验证（TODO-6 v3.x post-GA opt-in 暂不做）；新增更新通道 + 遥测（ADR-029/030）待启动**
+> 当前阶段：**unix-style v2.x 落地 + ADR-030 客户端代码 + SPEC-006 落地 + docs 同步；运维侧 TODO-13~16 等海外主体落地后启动**
 
 ## 当前阶段一句话
 
-SPEC-005 v2.0 frozen + v2.0+ 兼容扩展双侧契约全部对齐 + 代码侧 dogfood 就绪。
+unix-style 改造全部落地（TODO-1~5） + ADR-030 sieve-updater crate 客户端实现 + SPEC-006 manifest 协议起草 + 6 处 docs 同步（TODO-7~12 + TODO-17/18）全部完成；等用户验证代码侧 + 运维侧 TODO-13~16（域名 / KMS / 服务端）待海外主体落地后启动。
+
 2026-05-05 单日完成 unix-style 改造 v2.x 全部 5 项（TODO-1~5）并落地 12 个 commits：
 ADR-026 multi-listener（含 forwarder path prefix / Config schema / multi-listener accept loop /
 协议错位 fail-closed / 审计 provider_id / IPC HealthResult.listeners / doctor 升级）+
 ADR-028 IPC 协议中性化 / sieve-ipc 模块化 / sieve decisions CLI / sieve audit CLI。
 TODO-6 Network jail enforcement 推后到 v3.x post-GA opt-in。
 
-2026-05-05 单日工作以并行子代理 + 主上下文协作完成；workspace 测试基线从 696 → ~745+
-（+5 forwarder + 13 config + 12 audit/decisions + 其他新增），全过 / clippy 0 / fmt clean。
+ADR-030 sieve-updater crate + SPEC-006 + docs 同步 2026-05-05 同日完成（TODO-7~12 + TODO-17/18）。
 
 ---
 
 ## ✅ 主里程碑
+
+### 2026-05-05 sieve-updater 规则下载 + 原子替换闭环收尾
+
+新增 `download.rs`（download_rules，hyper-rustls，50 MiB 上限）/ `install.rs`（7 步原子写入：sha256 + ed25519 + zstd 解压 + .tmp + rename + current.json symlink + latest_version.json）/ runner.rs 接通完整流程 + retry_with_backoff + 两个新常量。error.rs 新增 DecompressFailed / ResponseTooLarge。新增 14 个单元测试（35 total），workspace 760 passed。SPEC-006 §3.3 + §10 补完整；CHANGELOG 同步。热加载留 TODO 待 sieve-rules 接通。
+
+### 2026-05-05 ADR-030 sieve-updater crate 落地（TODO-7~12 + TODO-17/18）
+- sieve-updater 独立 crate 骨架设计（manifest 协议客户端 / install-id / 6h 定时器 / 三个 env var / ed25519 + sha256 校验 / 失败重试指数退避）
+- SPEC-006 manifest 协议规格 v0.1 新建（~350 行，含 wire format / 流程图 / 测试矩阵 14 项）
+- CLAUDE.md 七个 Crate 表（六个 → 七个，新增 sieve-updater 行）
+- .cursorrules §3.3 七个 crate 边界表同步
+- architecture.md §2.1 新增 sieve-updater 模块行
+- api-reference.md §8 manifest 接口章节（原 §8 错误码表改为 §9）
+- development.md §13 三个环境变量开发者指南
+- deployment.md §13 企业自托管镜像章节
+- data-model.md §13 服务端遥测日志 schema（SQL DDL + DAU/MAU/留存 SQL 模板）
+- README.md 核心叙事 #3 隐私声明段落
+- CHANGELOG.md [Unreleased] sieve-updater + 三个 env var + [update] toml 段 + SPEC-006 条目
+- PROGRESS.md TODO-7~12 + TODO-17/18 全部标记 ✅
 
 ### 2026-05-05 unix-style 改造 TODO-3a · SPEC-005 协议术语中性化（ADR-028）
 - §0 文档定位重写：明确 client-agnostic + 引用 ADR-028
@@ -200,50 +218,45 @@ TODO-6 Network jail enforcement 推后到 v3.x post-GA opt-in。
 
 #### P0 · 代码侧（GA 前必须）
 
-- [ ] **TODO-7 sieve-updater crate 骨架**（1 天）
+- [x] ~~**TODO-7 sieve-updater crate 骨架**~~ ✅ 完成 2026-05-05
   - 新建 `crates/sieve-updater/`（独立 crate，GUI 仓后续可复用）
-  - CLAUDE.md 「六个 Crate」段同步成「七个 Crate」（参考 ADR-022 类似前例）
-  - .cursorrules §3.3 + architecture.md §1.1 同步
+  - CLAUDE.md 「六个 Crate」段同步成「七个 Crate」
+  - .cursorrules §3.3 + architecture.md §2.1 同步
   - 关联：ADR-030 §待决项 #5
 
-- [ ] **TODO-8 manifest 协议客户端**（2-3 天）
-  - `GET https://updates.sieve.app/v1/manifest?v=&os=&arch=&uid=&ch=`（仅 TLS 1.2+，无 cookie/Auth）
+- [x] ~~**TODO-8 manifest 协议客户端**~~ ✅ 完成 2026-05-05
+  - `GET https://updates.sieveai.dev/v1/manifest?v=&os=&arch=&uid=&ch=`（仅 TLS 1.2+，无 cookie/Auth）
   - 解析 server response（rules + client + next_check_after_seconds）
   - sha256 + ed25519 签名校验（编译期硬编码公钥，参考 ADR-006）
-  - 失败重试策略（exponential backoff，限制次数）
+  - 失败重试策略（指数退避 1s/4s/16s × 3）
   - 关联：ADR-030 §3
 
-- [ ] **TODO-9 install id 生成与持久化**（半天）
+- [x] ~~**TODO-9 install id 生成与持久化**~~ ✅ 完成 2026-05-05
   - 首次启动生成 UUIDv4（纯随机，不掺设备/账号信息）
-  - 持久化路径：macOS `~/Library/Caches/sieve/install-id`（首发；Linux/Windows 路径在 Phase 2 跨平台时落地）
-  - 文件权限 0600
-  - 用户主动删除 → 下次启动重新生成（接受统计噪声）
-  - 封装统一的 `cache_dir() -> PathBuf` 函数（按 `cfg!(target_os = ...)` 返回）
+  - 持久化路径：macOS `~/Library/Caches/sieve/install-id`（首发）
+  - 文件权限 0600；`cache_dir()` 跨平台抽象（Phase 2 Linux/Windows 路径预留）
   - 关联：ADR-030 §2
 
-- [ ] **TODO-10 三个环境变量解析**（半天）
-  - `SIEVE_NO_UPDATE`：跳过更新检查（启动 banner 必须打印 `update check disabled by SIEVE_NO_UPDATE`）
-  - `SIEVE_NO_TELEMETRY`：仍发更新请求但省略 uid 字段
-  - `SIEVE_UPDATE_URL`：覆盖默认更新源 URL
-  - 优先级：env var > toml > 默认值
+- [x] ~~**TODO-10 三个环境变量解析**~~ ✅ 完成 2026-05-05
+  - `SIEVE_NO_UPDATE` / `SIEVE_NO_TELEMETRY` / `SIEVE_UPDATE_URL`
+  - 启动 banner 打印；优先级 env > toml > default
   - 关联：ADR-030 §5
 
-- [ ] **TODO-11 6h 定时器 + 启动立即查一次**（半天）
-  - 启动立即一次 + 6h 周期触发（即使内容无变化也照常发请求，兼装机量信标）
-  - 服务端 `next_check_after_seconds` 可动态调节频率
+- [x] ~~**TODO-11 6h 定时器 + 启动立即查一次**~~ ✅ 完成 2026-05-05
+  - 启动立即一次 + 6h 周期触发
+  - 服务端 `next_check_after_seconds` 动态覆盖
   - 关联：ADR-030 §1
 
-- [ ] **TODO-12 sieve.toml `[update]` 段**（半天，Phase 2 也可推后）
-  - `enabled` / `telemetry` / `url` / `check_interval_hours`（不暴露给用户改）
+- [x] ~~**TODO-12 sieve.toml `[update]` 段**~~ ✅ 完成 2026-05-05
+  - `enabled` / `telemetry` / `url` / `check_interval_hours` / `channel`
   - env var 优先级始终高于 toml
-  - GA 前可只接 env var，toml 字段在 Phase 2 落地（ADR-030 §7）
   - 关联：ADR-030 §7
 
 #### P1 · 运维侧（GA 前必须）
 
 - [ ] **TODO-13 域名注册**（依赖 ADR-005 海外主体落地）
-  - `updates.sieve.app`（manifest，**不挂 CDN**）
-  - `cdn.sieve.app`（规则正文 zst）
+  - `updates.sieveai.dev`（manifest，**不挂 CDN**）
+  - `cdn.sieveai.dev`（规则正文 zst）
   - 关联：ADR-005 / ADR-030 §待决项 #1
 
 - [ ] **TODO-14 ed25519 签名密钥管理**（1 天）
@@ -265,17 +278,18 @@ TODO-6 Network jail enforcement 推后到 v3.x post-GA opt-in。
 
 #### P2 · 文档侧（GA 前必须）
 
-- [ ] **TODO-17 SPEC-006 manifest 协议详细设计**（1 天）
-  - 落地 manifest 协议 + 客户端 updater 模块详细设计
-  - 6h 定时器 / install-id 生成 / env var 解析 / 签名校验 / 失败重试策略
+- [x] ~~**TODO-17 SPEC-006 manifest 协议详细设计**~~ ✅ 完成 2026-05-05
+  - 新建 `docs/specs/SPEC-006-update-and-telemetry.md`（v0.1，~350 行）
+  - 覆盖：wire format / install-id / env var / 签名校验 / 失败策略 / 测试矩阵（14 项）
   - 关联：ADR-030 §需要更新的文档
 
-- [ ] **TODO-18 docs 同步**（半天）
-  - api-reference.md 加 §X manifest 接口章节
-  - development.md 加 SIEVE_NO_UPDATE / SIEVE_NO_TELEMETRY / SIEVE_UPDATE_URL 三个环境变量说明
-  - deployment.md 加企业自托管镜像章节（SIEVE_UPDATE_URL 用法）
-  - data-model.md 加服务端日志表 schema（如服务端代码进本仓）
-  - README.md / onboarding 加隐私声明文案（ADR-030 §6）
+- [x] ~~**TODO-18 docs 同步**~~ ✅ 完成 2026-05-05
+  - api-reference.md 新增 §8 manifest 接口章节（原 §8 错误码表改为 §9）
+  - development.md 新增 §13 三个环境变量章节
+  - deployment.md 新增 §13 企业自托管镜像章节
+  - data-model.md 新增 §13 服务端遥测日志 schema（SQL DDL + 指标模板）
+  - README.md 核心叙事 #3 后加隐私声明段落
+  - CLAUDE.md 七个 Crate 表 + architecture.md §2.1 + .cursorrules §3.3 同步
 
 - [ ] **TODO-19 PRD §11 商业化策略修订**（半天，可与 PRD v2.1 一起做）
   - 引用 ADR-029 替换原 §7 定价表
@@ -294,10 +308,10 @@ TODO-6 Network jail enforcement 推后到 v3.x post-GA opt-in。
 
 #### 用户验证清单（当前等用户跑）
 
-**完整 step-by-step checklist**：[docs/guides/manual-integration-test.md](../docs/guides/manual-integration-test.md)（14 节，按 §1-§13 逐项勾选；全过即 dogfood 就绪）
+**完整 step-by-step checklist**：[docs/guides/manual-integration-test.md](../docs/guides/manual-integration-test.md)（16 节,按 §1-§14 逐项勾选 + §15 DoD;全过即 dogfood 就绪）
 
 快速摘要：
-- §1 基线：`cargo fmt/clippy/test/deny/build` 全绿 → workspace 725 passed
+- §1 基线：`cargo fmt/clippy/test/deny/build` 全绿 → workspace **760 passed**（含 sieve-updater 35 测试）+ 七个 crate 都在
 - §2 旧 schema 向后兼容（旧 `upstream_url` + `port` 仍可用）
 - §3 multi-listener 配置（3 listener bind + 端口冲突 fail-fast）
 - §4 协议错位 fail-closed（4 个子 case：path mismatch + X-Sieve-Provider 不能 override）
@@ -309,6 +323,8 @@ TODO-6 Network jail enforcement 推后到 v3.x post-GA opt-in。
 - §10 forwarder path prefix（DeepSeek 中转站）
 - §11/§12 SPEC-005 中性化 + sieve-ipc 模块化（文档/结构级）
 - §13 GUI 仓 follow-up
+- **§14 sieve-updater 客户端独立闭环（ADR-030/SPEC-006）—— 7 个子节**：14.1 install-id 首启+幂等+删后重生 / 14.2 三个 env var（**SIEVE_NO_UPDATE banner 必可见**）/ 14.3 本地 mock + caddy https 反代 / 14.4 完整闭环（fetch→download→sha256→ed25519 skip WARN→zstd→tmp+rename+symlink+latest_version.json）/ 14.5 三种失败模式不击穿 daemon / 14.6 公钥 None 占位 WARN 必可见 / 14.7 清理
+- §15 DoD（全部勾选 → dogfood 就绪）
 
 ### 更新通道 + 遥测（ADR-029 / ADR-030，GA 前必须落地）
 
@@ -317,11 +333,7 @@ TODO-6 Network jail enforcement 推后到 v3.x post-GA opt-in。
 
 #### P0 · ADR-030 待决项（动手前必须确认，每项都有默认推荐，确认即可推进）
 
-- [ ] **1. 根域名注册**
-  - 当前占位：`updates.sieve.app` / `cdn.sieve.app`
-  - 默认推荐：**`sieve.app`**（CF 个人账号注册 ~$20/年，GA 前迁到 ADR-005 海外主体；子域 `updates.` / `cdn.` / `api.` 共用）
-  - 备选：`.dev` / `.io`
-  - 依赖：可独立先行，不阻塞 ADR-005
+- [x] ~~**1. 根域名注册**~~ ✅ 已确认 = `sieveai.dev`（2026-05-05 用户签字）。子域 `updates.sieveai.dev`(manifest)/`cdn.sieveai.dev`(规则)/`security@sieveai.dev`(漏洞)。DNS / MX 注册待 ADR-005 海外主体落地后执行。
 
 - [ ] **2. ed25519 签名密钥管理**
   - 风险：密钥泄露 = 全网 Sieve 用户被推恶意规则（信任根）
@@ -334,25 +346,24 @@ TODO-6 Network jail enforcement 推后到 v3.x post-GA opt-in。
   - 备选：自托管 Go / Rust（完全可控但要管服务器 + TLS + 监控 + 备份，一人公司心智成本高）
   - 后期日志量大了再迁 ClickHouse / BigQuery，迁移代价可接受
 
-- [ ] **4. 客户端 crate 归属**
-  - 默认推荐：**新增 `sieve-updater` 独立 crate**（与 6 crate 边界规范一致 / GUI 仓未来可复用同一份 manifest schema 与签名校验，避免协议漂移）
-  - 备选：塞进 `sieve-cli`（少一个 crate，但与 daemon 启动逻辑耦合，GUI 仓没法复用）
+- [x] ~~**4. 客户端 crate 归属**~~ ✅ 已确认 = 新增 `sieve-updater` 独立 crate（2026-05-05 落地,见 commit 待用户验证 + workspace 七个 crate）
 
 - [ ] **5. 发布通道首发策略**
   - 默认推荐：**首发 stable 单通道**（实现最简，符合 ADR-011 GA 节奏）；`?ch=` 参数保留预留扩展（默认 `stable`，服务端忽略其他值）
   - 备选：首发就引入 beta（双套规则文件 + 双套签名 + 用户切换 UI，工程量翻倍）
 
-> **全部推荐汇总**：`sieve.app` / GCP KMS / Cloudflare Workers + D1 / 新增 `sieve-updater` crate / 首发 stable 单通道
-> 全确认后从本表移除并写入 ADR-030「2026-XX-XX 决策」段，然后起草 SPEC-006。
+> **当前剩余决策**：GCP KMS（推荐,待 TODO-14）/ Cloudflare Workers + D1（推荐,待 TODO-15）/ stable 单通道（推荐,待 TODO-16）。
+> 已落地：域名 `sieveai.dev` / `sieve-updater` crate。
 
-#### P0 · 客户端实现（首发 macOS）
+#### P0 · 客户端实现（首发 macOS）—— ✅ 全部完成 2026-05-05
 
-- [ ] 新建 SPEC-006-update-and-telemetry.md（manifest 协议详细规格 + 客户端流程图 + 失败重试策略）
-- [ ] `cache_dir() -> PathBuf` 跨平台抽象（首发 macOS 路径，预留 Linux/Windows 分支）
-- [ ] Install UUID 模块：首启生成 UUIDv4 → 写 `~/Library/Caches/sieve/install-id` 0600 → 后续读取
-- [ ] 6h 定时器（tokio interval）+ 启动时立即查一次的 manifest 拉取流程
-- [ ] manifest GET 请求构造（v / os / arch / uid / ch 参数）+ TLS 1.2+ 强制
-- [ ] manifest 响应解析 + ed25519 签名校验 + sha256 校验 + 规则文件原子替换
+- [x] ~~新建 SPEC-006-update-and-telemetry.md~~ ✅ 620 行 / TODO-17
+- [x] ~~`cache_dir() -> PathBuf` 跨平台抽象~~ ✅ macOS / Linux / Windows 三分支
+- [x] ~~Install UUID 模块（UUIDv4 / 0600 / 删后重生）~~ ✅
+- [x] ~~6h 定时器（tokio interval）+ 启动立即查一次~~ ✅
+- [x] ~~manifest GET 请求构造（5 query 参数）+ TLS 1.2+~~ ✅
+- [x] ~~manifest 响应解析 + ed25519 签名校验 + sha256 校验~~ ✅（公钥 `None` 占位 + WARN 不静默通过，待 TODO-14 GCP KMS 落地填真值）
+- [x] ~~**规则文件原子替换 stub**~~ ✅ 完成 2026-05-05：download.rs + install.rs + runner 接通，5 单元测试通过，SPEC-006 §3.3 / §10 收尾，CHANGELOG 同步
 - [ ] 三个环境变量解析与优先级（env > toml > default）
 - [ ] `SIEVE_NO_UPDATE` 启动 banner 明示打印
 - [ ] `[update]` 段加入 sieve.toml schema（enabled / telemetry / url / check_interval_hours）
@@ -367,15 +378,15 @@ TODO-6 Network jail enforcement 推后到 v3.x post-GA opt-in。
 - [ ] 简单反滥用与限流（同一 IP 每分钟请求上限）
 - [ ] 规则正文 CDN 上架 + ed25519 签名 + sha256 manifest 字段填充
 
-#### P0 · 文档同步
+#### P0 · 文档同步 —— ✅ 全部完成 2026-05-05（除 PRD §11）
 
-- [ ] api-reference.md 新增 §X manifest 接口章节
-- [ ] development.md 加 SIEVE_NO_UPDATE / SIEVE_NO_TELEMETRY / SIEVE_UPDATE_URL 三个环境变量说明
-- [ ] deployment.md 加企业自托管镜像章节（SIEVE_UPDATE_URL 用法）
-- [ ] data-model.md 加服务端日志表 schema（若服务端代码进本仓）
-- [ ] README.md 加隐私声明文案 + Phase 1 免费定位
-- [ ] CHANGELOG `[Unreleased]` 加 manifest 协议 + 三个 env var 条目
-- [ ] PRD §11 商业化策略章节加 ADR-029 引用，定价说明改为「Phase 1 free for personal use」
+- [x] ~~api-reference.md 新增 §8 manifest 接口章节~~ ✅
+- [x] ~~development.md 加三个环境变量说明（§13）~~ ✅
+- [x] ~~deployment.md 加企业自托管镜像章节（§13 + §10 旧 env 名清理）~~ ✅
+- [x] ~~data-model.md 加服务端日志表 schema（§13）~~ ✅
+- [x] ~~README.md 加隐私声明文案~~ ✅
+- [x] ~~CHANGELOG `[Unreleased]` 加 manifest 协议 + 三个 env var 条目~~ ✅
+- [ ] **PRD §11 商业化策略章节修订**（TODO-19,推后到 PRD v2.1 一起做）
 
 #### 工作量预估
 - 客户端：约 3-5 天（含 SPEC-006 起草 + 实现 + 单元测试 + 集成测试）

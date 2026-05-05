@@ -730,6 +730,67 @@ GitHub Actions（`.github/workflows/ci.yml`）强制：
 
 ---
 
+## 13. 更新通道环境变量（ADR-030）
+
+> 三个环境变量控制更新检查 / 遥测行为，适用于开发者本地测试与 CI 场景。优先级：**env var > sieve.toml [update] > 默认值**。完整协议规格见 [SPEC-006](../specs/SPEC-006-update-and-telemetry.md)。
+
+### 13.1 变量速查表
+
+| 变量 | 作用 | 默认 | 典型使用场景 |
+|------|------|------|------------|
+| `SIEVE_NO_UPDATE` | 完全跳过更新检查（不发任何请求，规则冻结，无遥测） | 未设（默认开启） | CI 测试 / 离线开发 / 审计期 / 避免遥测污染 |
+| `SIEVE_NO_TELEMETRY` | 仍发更新请求但省略 `uid` 字段 | 未设（默认附带 uid） | 隐私敏感场景 / 想要规则更新但不参与统计 |
+| `SIEVE_UPDATE_URL` | 覆盖默认 manifest URL | 未设（使用 `https://updates.sieveai.dev/v1/manifest`） | 企业自托管镜像 / 本地 mock 服务器测试 |
+
+任何非空值视为启用该开关（unix-style，参考 `NO_COLOR` 惯例）。
+
+### 13.2 使用示例
+
+**CI 测试中禁用更新检查（推荐）**：
+
+```bash
+# 避免 CI 遥测污染 + 防止更新检查影响测试隔离性
+SIEVE_NO_UPDATE=1 cargo run -p sieve-cli -- start --config /tmp/sieve.toml
+```
+
+**本地 mock 服务器测试**：
+
+```bash
+# 起一个本地 mock manifest 服务器（mockito / wiremock 等）
+SIEVE_UPDATE_URL=http://localhost:8080/v1/manifest cargo run -p sieve-cli -- start --config /tmp/sieve.toml
+```
+
+**仅关闭遥测，保留规则更新**：
+
+```bash
+SIEVE_NO_TELEMETRY=1 cargo run -p sieve-cli -- start --config /tmp/sieve.toml
+```
+
+### 13.3 Banner 行为（`SIEVE_NO_UPDATE` 强制可见）
+
+检测到 `SIEVE_NO_UPDATE` 时，daemon 启动日志**必须**打印：
+
+```
+update check disabled by SIEVE_NO_UPDATE
+```
+
+这一行是强制的：防止开发者忘了在 shell profile 里设过此变量，后来奇怪为什么规则不更新。
+
+### 13.4 sieve.toml 等价配置
+
+```toml
+[update]
+enabled = true              # 等价 SIEVE_NO_UPDATE（false = 禁用）
+telemetry = true            # 等价 SIEVE_NO_TELEMETRY（false = 省略 uid）
+url = "https://updates.sieveai.dev/v1/manifest"  # 等价 SIEVE_UPDATE_URL
+check_interval_hours = 6    # 定时检查间隔，env var 无等价物
+channel = "stable"          # 发布通道，Phase 2 加 beta
+```
+
+env var 优先级始终高于 toml：同时设置时 env var 胜出。
+
+---
+
 ## 相关文档
 
 - 项目入口：[../../README.md](../../README.md)

@@ -882,6 +882,38 @@ pub async fn run(
         }
     }
 
+    // ADR-030: start the update-check + telemetry beacon task.
+    // The task is detached — its failure never affects the daemon.
+    {
+        let env_overrides = sieve_updater::env::from_env();
+        if !cfg.update.enabled || env_overrides.no_update {
+            tracing::info!("update check disabled by SIEVE_NO_UPDATE");
+        } else {
+            let url = env_overrides
+                .url_override
+                .or_else(|| cfg.update.url.clone())
+                .unwrap_or_else(|| sieve_updater::DEFAULT_MANIFEST_URL.to_string());
+            let no_telemetry = env_overrides.no_telemetry || !cfg.update.telemetry;
+            let interval = cfg.update.check_interval_hours.saturating_mul(3600);
+            let updater_cfg = sieve_updater::runner::UpdaterConfig {
+                base_url: url.clone(),
+                interval_secs: interval,
+                no_telemetry,
+                client_version: env!("CARGO_PKG_VERSION").to_string(),
+                channel: cfg.update.channel.clone(),
+            };
+            tracing::info!(
+                url = %url,
+                telemetry = !no_telemetry,
+                interval_secs = interval,
+                "starting updater task (ADR-030)"
+            );
+            tokio::spawn(async move {
+                sieve_updater::runner::run(updater_cfg).await;
+            });
+        }
+    }
+
     // ADR-026 §决策 3：多 listener bind + spawn。任一 bind 失败 → fail-fast
     // （半启动状态会让 doctor 输出混淆，违反"完全本地"的明确性承诺）。
     let mut bound: Vec<(TcpListener, ListenerSpec)> = Vec::with_capacity(listener_specs.len());
