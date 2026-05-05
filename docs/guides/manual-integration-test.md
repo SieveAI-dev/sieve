@@ -1,16 +1,16 @@
 # Sieve daemon · 手动联调 Checklist
 
-> 上次更新：2026-05-05
-> 范围：unix-style 改造 v2.x 全部 5 项 TODO 的用户验证步骤
-> 关联：[ADR-026](../design/ADR-026-port-based-listener-routing.md) / [ADR-028](../design/ADR-028-ipc-protocol-neutralization.md) / [PROGRESS.md](../../tasks/PROGRESS.md)
+> 上次更新：2026-05-05（增补 §14 sieve-updater 联调,域名落定 sieveai.dev）
+> 范围：unix-style 改造 v2.x 5 项 TODO + ADR-030 sieve-updater 客户端闭环 的用户验证步骤
+> 关联：[ADR-026](../design/ADR-026-port-based-listener-routing.md) / [ADR-028](../design/ADR-028-ipc-protocol-neutralization.md) / [ADR-030](../design/ADR-030-update-telemetry-channel.md) / [SPEC-006](../specs/SPEC-006-update-and-telemetry.md) / [PROGRESS.md](../../tasks/PROGRESS.md)
 
 ---
 
 ## 0. 文档目的
 
-把 2026-05-05 完成的 13 commits（unix-style 改造）转化为**可逐项勾选**的人工验证步骤。所有步骤跑完且勾选 → daemon 侧 dogfood 就绪。GUI 仓侧的联调（sieve-gui-macos）见该仓自己的 checklist，本文档不覆盖。
+把 2026-05-05 完成的 13 commits（unix-style 改造）+ ADR-030 sieve-updater 客户端闭环转化为**可逐项勾选**的人工验证步骤。所有步骤跑完且勾选 → daemon 侧 dogfood 就绪。GUI 仓侧的联调（sieve-gui-macos）见该仓自己的 checklist，本文档不覆盖。服务端（CF Workers + D1）尚未实施,§14 用本地 mock 服务器即可验证客户端独立闭环。
 
-**前置假设**：你在 macOS（Phase 1 唯一 Tier 1 平台）；本仓 clone 到 `~/src/sieve-suite/sieve`；已经装了 Rust toolchain（见 `rust-toolchain.toml`）+ `sqlite3` CLI。
+**前置假设**：你在 macOS（Phase 1 唯一 Tier 1 平台）；本仓 clone 到 `~/src/sieve-suite/sieve`；已经装了 Rust toolchain（见 `rust-toolchain.toml`）+ `sqlite3` CLI + `zstd` CLI（`brew install zstd`,§14 用）+ `python3`（§14 mock server 用,系统自带）+ `caddy` + `mkcert`（§14.3 https 反代,`brew install caddy mkcert`）。
 
 ---
 
@@ -21,10 +21,11 @@ cd ~/src/sieve-suite/sieve
 ```
 
 - [ ] **fmt clean**：`cargo fmt --all -- --check` exit 0
-- [ ] **clippy 0 issues**：`cargo clippy --workspace --all-targets --locked -- -D warnings` exit 0
-- [ ] **workspace 测试 725 passed / 7 ignored / 0 failed**：`cargo test --workspace --locked`
+- [ ] **clippy 0 issues**：`cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` exit 0
+- [ ] **workspace 测试 760 passed / 7 ignored / 0 failed**：`cargo test --workspace --locked`（含 sieve-updater 35 个新测试）
 - [ ] **deny 检查通过**：`cargo deny check`（如未装：`cargo install cargo-deny --locked`）
-- [ ] **build 干净**：`cargo build --workspace --release --locked`，release 二进制大小约 9 MB
+- [ ] **build 干净**：`cargo build --workspace --release --locked`,release 二进制大小约 9 MB
+- [ ] **七个 crate 都在**：`ls crates/` 应有 `sieve-cli/ sieve-core/ sieve-hook/ sieve-ipc/ sieve-policy/ sieve-rules/ sieve-updater/`
 
 任一项 fail → **不要继续**，先排查（看 PROGRESS.md / lessons.md）。
 
@@ -496,9 +497,259 @@ DeepSeek Anthropic 兼容入口 `https://api.deepseek.com/anthropic` 是验证 T
 
 ---
 
-## 14. 完成定义（DoD）
+## 14. sieve-updater 客户端独立闭环（ADR-030 / SPEC-006）
 
-- [ ] §1 基线全过
+> 关联：[ADR-030](../design/ADR-030-update-telemetry-channel.md) / [SPEC-006](../specs/SPEC-006-update-and-telemetry.md)
+> **服务端尚未实施（CF Workers + D1,Phase 1B）**。本节用本地 mock HTTP 服务器验证客户端能完整跑通 manifest → 下载 → 校验 → 原子落盘的闭环。
+
+### 14.1 install-id 模块（首启幂等 + 删后重生）
+
+- [ ] **首启生成 install-id**：
+
+  ```bash
+  rm -f ~/Library/Caches/sieve/install-id   # 清空旧的（如有）
+  SIEVE_NO_UPDATE=1 cargo run -p sieve-cli -- start --config /tmp/sieve-legacy.toml &
+  DAEMON_PID=$!
+  sleep 2
+  kill $DAEMON_PID
+  ```
+
+  注：这里用 `SIEVE_NO_UPDATE=1` 启动只为触发 install-id 模块初始化（实际 install-id 加载发生在 updater task spawn 前;若发现 SIEVE_NO_UPDATE 路径下 install-id 不生成,见下方备选）。
+
+- [ ] 备选：去掉 `SIEVE_NO_UPDATE`,让 updater task 真跑（会试连 updates.sieveai.dev,失败 log error 不影响 daemon）：
+
+  ```bash
+  cargo run -p sieve-cli -- start --config /tmp/sieve-legacy.toml &
+  DAEMON_PID=$!
+  sleep 5     # 给 updater task 初始化时间
+  kill $DAEMON_PID
+  ```
+
+- [ ] 检查文件存在 + 权限 0600：
+
+  ```bash
+  ls -la ~/Library/Caches/sieve/install-id
+  # 期望：-rw-------  1 doskey  staff  36 May  5 12:34
+  cat ~/Library/Caches/sieve/install-id
+  # 期望：UUIDv4 字符串,例如 a1b2c3d4-e5f6-7890-1234-567890abcdef
+  ```
+
+- [ ] **首启幂等**（第二次启动复用同一 UUID）：
+
+  ```bash
+  UID_BEFORE=$(cat ~/Library/Caches/sieve/install-id)
+  cargo run -p sieve-cli -- start --config /tmp/sieve-legacy.toml &
+  sleep 3
+  kill %1
+  UID_AFTER=$(cat ~/Library/Caches/sieve/install-id)
+  [ "$UID_BEFORE" = "$UID_AFTER" ] && echo "OK: idempotent" || echo "FAIL"
+  ```
+
+- [ ] **删后重生**（用户主动删除 → 视为新装机,接受统计噪声）：
+
+  ```bash
+  rm ~/Library/Caches/sieve/install-id
+  cargo run -p sieve-cli -- start --config /tmp/sieve-legacy.toml &
+  sleep 3
+  kill %1
+  ls ~/Library/Caches/sieve/install-id   # 应重新生成
+  cat ~/Library/Caches/sieve/install-id  # 新 UUID,与 UID_BEFORE 不同
+  ```
+
+### 14.2 三个环境变量（SIEVE_NO_UPDATE / SIEVE_NO_TELEMETRY / SIEVE_UPDATE_URL）
+
+- [ ] **SIEVE_NO_UPDATE banner 强制可见**（ADR-030 §5）：
+
+  ```bash
+  SIEVE_NO_UPDATE=1 cargo run -p sieve-cli -- start --config /tmp/sieve-legacy.toml 2>&1 | head -30 | grep -i "update check disabled"
+  ```
+
+  期望日志含一行：`update check disabled by SIEVE_NO_UPDATE`。**找不到这行视为 P0 bug**——用户忘了设过此变量却奇怪规则不更新的最大防护。
+
+- [ ] **SIEVE_NO_UPDATE 不发任何更新请求**（不应连 updates.sieveai.dev）：
+
+  ```bash
+  # 用 sudo 不便时,只看日志中是否有 "starting updater task" 出现
+  SIEVE_NO_UPDATE=1 cargo run -p sieve-cli -- start --config /tmp/sieve-legacy.toml 2>&1 | grep "starting updater task"
+  # 期望：无输出（updater task 没 spawn）
+  ```
+
+- [ ] **SIEVE_NO_TELEMETRY 仍发请求但无 uid**：见 §14.4 mock server 验证
+
+- [ ] **SIEVE_UPDATE_URL 切到本地 mock**：见 §14.3
+
+### 14.3 本地 mock 服务器（验证客户端独立闭环）
+
+启个最简 mock manifest + CDN 服务器（同一 Python http.server 即可）。
+
+- [ ] **准备 mock 工作目录**：
+
+  ```bash
+  MOCK_DIR=$(mktemp -d)
+  cd "$MOCK_DIR"
+
+  # 1. 生成假规则文件（任意内容均可,真实规则 schema 见 sieve-rules）
+  echo '{"rules":[],"version":"2026.05.05.1","note":"test fixture"}' > rules-payload.json
+
+  # 2. zstd 压缩
+  zstd -19 -o rules.json.zst rules-payload.json
+
+  # 3. 算 sha256（manifest 字段需要）
+  RULES_SHA=$(shasum -a 256 rules.json.zst | awk '{print $1}')
+  echo "RULES_SHA=$RULES_SHA"
+
+  # 4. 写 manifest 响应（schema 见 ADR-030 §3 / SPEC-006 §3）
+  mkdir -p v1
+  cat > v1/manifest <<EOF
+  {
+    "schema": 1,
+    "rules": {
+      "version": "2026.05.05.1",
+      "url": "http://127.0.0.1:8080/rules.json.zst",
+      "sha256": "$RULES_SHA",
+      "size": $(stat -f%z rules.json.zst),
+      "signature": "ed25519:placeholder-not-verified-when-pubkey-is-None"
+    },
+    "client": {
+      "latest": "0.1.0-alpha",
+      "min_supported": "0.1.0-alpha",
+      "deprecation_notice": null
+    },
+    "next_check_after_seconds": 21600
+  }
+  EOF
+
+  # 5. 起 HTTP server
+  python3 -m http.server 8080 &
+  MOCK_PID=$!
+  echo "MOCK_PID=$MOCK_PID  MOCK_DIR=$MOCK_DIR"
+  ```
+
+- [ ] **测试 mock 接口活着**：
+
+  ```bash
+  curl -s http://127.0.0.1:8080/v1/manifest | head -3
+  curl -sI http://127.0.0.1:8080/rules.json.zst | head -3
+  ```
+
+> **注意**：客户端 `download.rs` 用 hyper-rustls **https_only**,默认拒绝纯 HTTP。本地 mock 验证需要要么 (a) 用 `mkcert` + nginx 反代 https 包一层,要么 (b) 临时跑 release 编译时移除 https_only 跑联调（不要 commit 这个改动）,要么 (c) 在 sieve-updater 加一个 dev-only feature flag `allow-http-mock`（默认 off）。**推荐 (a)**——一行 `mkcert` + caddy 反代 4 行配置就能起 https://localhost:8443。
+
+参考 caddy 反代（5 秒起）：
+
+```bash
+brew install caddy mkcert
+mkcert -install
+cd "$MOCK_DIR"
+mkcert localhost 127.0.0.1
+cat > Caddyfile <<EOF
+localhost:8443 {
+  tls localhost+1.pem localhost+1-key.pem
+  reverse_proxy http://127.0.0.1:8080
+}
+EOF
+caddy run --config Caddyfile &
+CADDY_PID=$!
+```
+
+之后客户端用 `SIEVE_UPDATE_URL=https://localhost:8443/v1/manifest`。
+
+### 14.4 完整闭环（fetch → download → 校验 → 原子落盘）
+
+- [ ] **清空 staging area**（保证测试干净）：
+
+  ```bash
+  rm -rf ~/Library/Caches/sieve/rules
+  ls ~/Library/Caches/sieve/    # 应只有 install-id 和可能的 rules（已删）
+  ```
+
+- [ ] **跑客户端,指向 mock**：
+
+  ```bash
+  SIEVE_UPDATE_URL=https://localhost:8443/v1/manifest \
+  RUST_LOG=sieve_updater=debug,info \
+  cargo run -p sieve-cli -- start --config /tmp/sieve-legacy.toml 2>&1 | tee /tmp/sieve-updater.log &
+  sleep 8     # 启动立即查一次,5-8 秒内应完成 download+install
+  kill %1
+  ```
+
+- [ ] **检查日志**：
+
+  ```bash
+  grep -E "starting updater task|fetch_manifest|download_rules|install_rules|rules installed" /tmp/sieve-updater.log
+  ```
+
+  期望按顺序出现：
+  - `starting updater task target=https://localhost:8443/v1/manifest telemetry=true`
+  - `fetch_manifest ok version=2026.05.05.1`
+  - `download_rules ok size=<bytes>`
+  - `install_rules ok version=2026.05.05.1`（含 sha256 校验通过 + ed25519 跳过 WARN + zstd 解压成功）
+  - `rules installed version=2026.05.05.1 path=...`
+
+- [ ] **检查 staging 落盘**：
+
+  ```bash
+  ls -la ~/Library/Caches/sieve/rules/
+  # 期望：
+  #   2026.05.05.1.json     ← 解压后内容
+  #   current.json          ← symlink 指向上面
+  #   latest_version.json   ← 元信息
+
+  cat ~/Library/Caches/sieve/rules/latest_version.json
+  # 期望：{"version":"2026.05.05.1","installed_at":<ts>,"sha256":"<hex>"}
+
+  readlink ~/Library/Caches/sieve/rules/current.json
+  # 期望：2026.05.05.1.json
+
+  cat ~/Library/Caches/sieve/rules/current.json
+  # 期望与 mock 的 rules-payload.json 一致
+  ```
+
+- [ ] **二次启动同版本应跳过下载**（version 比对生效）：
+
+  ```bash
+  cargo run -p sieve-cli -- start --config /tmp/sieve-legacy.toml 2>&1 | tee /tmp/sieve-updater-2.log &
+  sleep 5
+  kill %1
+  grep -E "fetch_manifest|download_rules|install_rules" /tmp/sieve-updater-2.log
+  # 期望：fetch_manifest 出现,download_rules / install_rules 不应出现
+  ```
+
+### 14.5 失败模式（client 应优雅降级,不影响 daemon）
+
+- [ ] **sha256 不匹配 → 安装失败但 daemon 继续运行**：
+
+  改 `MOCK_DIR/v1/manifest` 把 `sha256` 字段改成假值,重启客户端,日志应有 `Sha256Mismatch`,临时文件应被清理（`ls ~/Library/Caches/sieve/rules/.tmp-*` 应无文件）,daemon 主进程不退出。
+
+- [ ] **manifest 接口 500 → 重试 3 次后跳过**：
+
+  停掉 caddy（`kill $CADDY_PID`）模拟服务端 down。客户端日志应有指数退避 `1s/4s/16s` 重试 3 次后 `RetryExhausted`,daemon 继续跑（后续每 6h 再尝试）。
+
+- [ ] **解压失败 → DecompressFailed**：
+
+  把 `rules.json.zst` 替换为非 zst 字节（`echo "not zstd" > rules.json.zst`）+ 改 manifest 的 sha256。日志应有 `DecompressFailed`。
+
+### 14.6 公钥 None 占位的 WARN 强制可见（ADR-030 §决策 / SPEC-006 §安全）
+
+- [ ] 在 §14.4 完整闭环日志里查找：
+
+  ```bash
+  grep -i "trusted pubkey not configured" /tmp/sieve-updater.log
+  ```
+
+  期望含一行：`ed25519 trusted pubkey not configured, skipping signature verification`。**找不到这行视为 P0 bug**——若公钥占位被人误改成跳过 WARN,会导致供应链攻击防线失效（TODO-14 GCP KMS 落地后填真值,届时这行 WARN 消失）。
+
+### 14.7 清理
+
+```bash
+kill $MOCK_PID $CADDY_PID 2>/dev/null
+rm -rf "$MOCK_DIR"
+```
+
+---
+
+## 15. 完成定义（DoD）
+
+- [ ] §1 基线全过（含 sieve-updater 35 测试,workspace 760 passed）
 - [ ] §2 旧 schema 兼容
 - [ ] §3 multi-listener bind + 实际两个上游各能跑
 - [ ] §4 协议错位 fail-closed（4 个子 case 全过）
@@ -511,10 +762,16 @@ DeepSeek Anthropic 兼容入口 `https://api.deepseek.com/anthropic` 是验证 T
 - [ ] §11 SPEC-005 中性化（文档级别）
 - [ ] §12 sieve-ipc 模块化（结构级别）
 - [ ] §13 GUI 仓接入正常（向后兼容期内）
+- [ ] §14.1 install-id 首启 + 幂等 + 删后重生
+- [ ] §14.2 三个 env var（SIEVE_NO_UPDATE banner 必可见 / SIEVE_NO_TELEMETRY / SIEVE_UPDATE_URL）
+- [ ] §14.3 本地 mock + caddy https 反代起得来
+- [ ] §14.4 完整闭环（fetch→download→sha256→ed25519 skip WARN→zstd→tmp+rename+symlink+latest_version.json）
+- [ ] §14.5 三种失败模式不击穿 daemon（sha256 mismatch / 服务端 down 重试耗尽 / 解压失败）
+- [ ] §14.6 公钥 None 占位 WARN 强制可见
 
 **任一项 fail**：在 [tasks/lessons.md](../../tasks/lessons.md) 记一条 lesson，回报到主上下文准备修复。
 
-**全过**：unix-style 改造 v2.x 联调通过 → 进 dogfood 阶段。
+**全过**：unix-style 改造 v2.x + ADR-030 客户端闭环 联调通过 → 进 dogfood 阶段（服务端 CF Workers + D1 是 Phase 1B 工作,与 dogfood 并行启动）。
 
 ---
 
@@ -537,15 +794,28 @@ sqlite3 ~/.sieve/audit.db "PRAGMA user_version;"
 # 强制清空 dogfood 数据（重新开始联调）
 rm -f ~/.sieve/audit.db ~/.sieve/ipc.sock
 rm -rf ~/.sieve/pending ~/.sieve/decisions
+
+# 强制清空 sieve-updater 状态（§14 重跑）
+rm -rf ~/Library/Caches/sieve/    # install-id + rules/ staging 一起清
+
+# 看 updater 当前 staging 状态
+ls -la ~/Library/Caches/sieve/rules/ 2>/dev/null
+cat ~/Library/Caches/sieve/rules/latest_version.json 2>/dev/null
+
+# 三个 env var 一次性 export（联调 §14 用）
+export SIEVE_UPDATE_URL=https://localhost:8443/v1/manifest
+unset SIEVE_NO_UPDATE SIEVE_NO_TELEMETRY     # 默认放开
 ```
 
 ## 附录 B：关联文档
 
 - [ADR-026 Port-based listener routing](../design/ADR-026-port-based-listener-routing.md)
 - [ADR-028 IPC 协议中性化](../design/ADR-028-ipc-protocol-neutralization.md)
+- [ADR-030 更新通道复用为遥测信标](../design/ADR-030-update-telemetry-channel.md)
 - [SPEC-003 sieve setup tool](../specs/SPEC-003-sieve-setup-tool.md) §4.2b doctor multi-listener
 - [SPEC-004 multi-agent setup](../specs/SPEC-004-multi-agent-setup.md) §4.2.6 header vs port routing
-- [deployment.md §6a Multi-listener 部署](deployment.md#6a-multi-listener-部署)
-- [development.md §3.4a Multi-listener 配置](development.md#34a-multi-listener-配置)
-- [api-reference.md §6.4a sieve decisions / §6.4b sieve audit](../api/api-reference.md#64a-sieve-decisions-cli)
+- [SPEC-006 manifest 协议 + sieve-updater 客户端](../specs/SPEC-006-update-and-telemetry.md)
+- [deployment.md §6a Multi-listener 部署](deployment.md#6a-multi-listener-部署) / §13 企业自托管镜像
+- [development.md §3.4a Multi-listener 配置](development.md#34a-multi-listener-配置) / §13 三个 env var
+- [api-reference.md §6.4a sieve decisions / §6.4b sieve audit](../api/api-reference.md#64a-sieve-decisions-cli) / §8 manifest 接口
 - [tasks/PROGRESS.md](../../tasks/PROGRESS.md) 用户验证清单段

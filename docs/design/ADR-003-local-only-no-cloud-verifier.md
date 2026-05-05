@@ -79,8 +79,8 @@ Sieve 进程在运行期**仅**会向以下 host 发起出站请求（**2026-05-
 | Host | 用途 | 何时发起 |
 |------|------|---------|
 | `api.anthropic.com` 或 `config.upstream_url`（multi-listener 时是 `cfg.resolved_upstreams()` 各项 url，ADR-026）| 转发 Claude Code / OpenClaw / Hermes 的请求 | 用户主动调用 AI agent 时 |
-| `updates.sieve.app`（域名占位,ADR-005 [redacted]后实定，ADR-030 §3）| 拉规则更新 manifest（默认每 6h 一次,带 `?v=&os=&arch=&uid=&ch=` query;manifest 接口**不挂 CDN**,日志能追溯每次请求）| 启动时 + 6h 周期触发,即使内容无变化也照常发请求（兼装机量信标） |
-| `cdn.sieve.app`（域名占位）| 下载规则正文 zst 包（带 sha256 + ed25519 签名）| manifest 返回新版本时 |
+| `updates.sieveai.dev`（域名占位,ADR-005 [redacted]后实定，ADR-030 §3）| 拉规则更新 manifest（默认每 6h 一次,带 `?v=&os=&arch=&uid=&ch=` query;manifest 接口**不挂 CDN**,日志能追溯每次请求）| 启动时 + 6h 周期触发,即使内容无变化也照常发请求（兼装机量信标） |
+| `cdn.sieveai.dev`（域名占位）| 下载规则正文 zst 包（带 sha256 + ed25519 签名）| manifest 返回新版本时 |
 
 **没有第四个**。任何 PR 引入新的出站 host 调用，CI 必须 hard-fail（用 `cargo deny` + 自定义 lint 检查）。
 

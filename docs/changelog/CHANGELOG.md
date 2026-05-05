@@ -39,14 +39,14 @@
   - 「`telemetry_enabled` 强制 false」→ **「`[update].telemetry = true` 默认开启,可关闭」**
   - 「规则更新检查不带 query 参数」→ **「manifest URL 允许 `?v=&os=&arch=&uid=&ch=` 5 字段 + UA `sieve-updater/<v>`」**
   - **保留不变**：「token verifier 不联网」核心决策永久性 + 不上传 prompt / response / API key / 使用记录。
-- **唯一允许的出站请求**新增 2 host：`updates.sieve.app`（manifest,**不挂 CDN**）+ `cdn.sieve.app`（规则正文 zst,带 sha256 + ed25519）。原 `releases.sieve.dev` 占位符废弃。
+- **唯一允许的出站请求**新增 2 host：`updates.sieveai.dev`（manifest,**不挂 CDN**）+ `cdn.sieveai.dev`（规则正文 zst,带 sha256 + ed25519）。原 `releases.sieve.dev` 占位符废弃。
 - 频率：每周 1 次 → **每天 4 次（每 6h 一次）**;manifest 接口同时是装机量信标（`COUNT(DISTINCT uid) WHERE date = today` 算 DAU）。
 - ADR-INDEX：ADR-003 状态加注 "(amended 2026-05-05)"; ADR-030 升 Accepted。
 
 ### Added — 遥测协议（ADR-030 §设计冻结,代码待落地）
 
 - **Manifest 协议 v0.1**：
-  - 客户端 `GET https://updates.sieve.app/v1/manifest?v=<v>&os=<os>&arch=<arch>&uid=<UUIDv4>&ch=<stable|beta>`（仅 TLS 1.2+,无 cookie / Auth）
+  - 客户端 `GET https://updates.sieveai.dev/v1/manifest?v=<v>&os=<os>&arch=<arch>&uid=<UUIDv4>&ch=<stable|beta>`（仅 TLS 1.2+,无 cookie / Auth）
   - 服务端响应 `{schema, rules: {version, url, sha256, size, signature}, client: {latest, min_supported, deprecation_notice}, next_check_after_seconds}`
   - 服务端日志只存 `ts | uid | v | os | arch | ch | country(geoip)`,**丢原始 IP**,DAU / MAU / 留存 / 版本分布 / 平台分布全从这一张日志表算。
 - **Install UUID**：UUIDv4 纯随机,首次启动生成,`~/Library/Caches/sieve/install-id`（macOS first; Linux / Windows 路径在 Phase 2 跨平台时落地）。文件权限 0600,用户主动删除 = 新装机（接受统计噪声）。
@@ -56,13 +56,38 @@
   - `SIEVE_UPDATE_URL`：覆盖默认更新源 URL（企业自托管镜像）
 - **隐私声明文案**（首次启动 onboarding + README + 隐私政策页统一文案,见 ADR-030 §6）。
 
-### Follow-up（GA 前必须落地）
+### Added — sieve-updater 规则下载 + 原子替换闭环（2026-05-05 收尾）
 
-- **代码侧**：新建 `sieve-updater` crate（独立二进制,GUI 仓后续可复用）/ 实现 manifest 协议客户端 / install id 生成与持久化 / 三个 env var 解析 / 6h 定时器 / 签名校验 / 失败重试策略。CLAUDE.md "六个 Crate" 段需同步成「七个 Crate」（见 ADR-022 类似前例）。
-- **运维侧**：域名 `updates.sieve.app` / `cdn.sieve.app` 注册（待 ADR-005 [redacted]）/ ed25519 签名密钥管理（HSM / 单独 build 机 / GCP KMS 之一,写入 ADR-006 follow-up）/ 服务端实现（**倾向 Cloudflare Workers + KV / D1**,manifest 接口天然反 DDoS）/ ch 通道策略（首发 stable 单通道,Phase 2 加 beta）。
-- **文档侧**：新建 SPEC-006 落地 manifest 协议 + 客户端 updater 模块详细设计 / api-reference 加 manifest 接口章节 / development.md 加三个 env var / deployment.md 加企业自托管镜像章节 / data-model.md 加服务端日志表 schema（如服务端代码进本仓）。
+- **`sieve-updater` 规则文件完整下载 + 原子替换**（ADR-030 §5 / SPEC-006 §3.3）：manifest → 版本比对 → download_rules → install_rules（sha256 + ed25519 + zstd 解压 + .tmp + rename + current.json symlink + latest_version.json 原子写）；安装失败 log error 不退出主循环；热加载留 TODO 由 sieve-rules 接通。
+- **`download.rs`**：`download_rules(url, max_size)` via hyper-rustls（TLS 1.2+，https_only），50 MiB 上限，指数退避由调用方（runner）负责。
+- **`install.rs`**：`install_rules(payload, sha256, sig, version, dest_dir)` 七步原子写入；`read_installed_version(dest_dir)` 读取已安装版本。zstd magic 检测 + fallback 直接当解压结果（测试友好）。Windows 平台 symlink 失败退化为 copy。
+- **runner.rs 接通**：`process_manifest` 接通完整下载 + 安装路径；新增 `retry_with_backoff` 通用指数退避 helper；新增常量 `DEFAULT_RULES_DIR = "rules"` / `MAX_RULES_SIZE = 50 MiB`。
 
+### Changed — sieve-updater::error 新增两个 enum 项（ADR-030 §5 收尾）
 
+- `UpdaterError::DecompressFailed(String)` — zstd 解压失败
+- `UpdaterError::ResponseTooLarge { size, max }` — 响应体超出最大大小限制
+
+### Added — sieve-updater crate + manifest 协议（ADR-030 客户端落地）
+
+- **新增 `sieve-updater` crate**（ADR-030 §1 + §待决项 #5）：manifest 协议客户端 + install-id 生成 + 6h 定时器 + ed25519 / sha256 双重校验 + 失败重试指数退避（1s / 4s / 16s × 3 次）；独立 crate 职责清晰，GUI 仓后续可复用同一份 manifest schema 与签名校验，避免协议漂移
+- **新增三个环境变量**（ADR-030 §5，unix-style，任何非空值视为启用）：
+  - `SIEVE_NO_UPDATE`：完全跳过更新检查（不发请求，规则冻结，无遥测）；启动时强制打印 banner `update check disabled by SIEVE_NO_UPDATE`
+  - `SIEVE_NO_TELEMETRY`：仍发更新请求但省略 `uid` 字段（仍能拿到规则更新，不参与装机统计）
+  - `SIEVE_UPDATE_URL`：覆盖默认更新源 URL（企业自托管镜像 / 私有内网 / 本地 mock 测试）
+- **`sieve.toml` 新增 `[update]` 段**（ADR-030 §7）：`enabled` / `telemetry` / `url` / `check_interval_hours` / `channel`；env var 优先级始终高于 toml
+- **新增 SPEC-006**（manifest 协议规格 v0.1）：wire format + install-id + 三个 env var + 签名校验 + 失败处理 + 测试矩阵（14 项），详见 [docs/specs/SPEC-006-update-and-telemetry.md](../specs/SPEC-006-update-and-telemetry.md)
+
+### Changed — CLAUDE.md 七个 Crate 表（ADR-030）
+
+- CLAUDE.md「六个 Crate」→「七个 Crate」，新增 `sieve-updater` 行（职责 + 禁做）
+- `.cursorrules §3.3` 同步更新七个 crate 边界表
+- `docs/design/architecture.md §2.1` 新增 sieve-updater 模块行 + updater task 不在 hot path 说明
+
+### Follow-up（运维侧，GA 前必须落地）
+
+- **运维侧**：域名 `updates.sieveai.dev` / `cdn.sieveai.dev` 注册（待 ADR-005 [redacted]）/ ed25519 签名密钥管理（HSM / 单独 build 机 / GCP KMS 之一,写入 ADR-006 follow-up）/ 服务端实现（**倾向 Cloudflare Workers + KV / D1**,manifest 接口天然反 DDoS）/ ch 通道策略（首发 stable 单通道,Phase 2 加 beta）。
+- **代码侧**：TRUSTED_PUBKEY TODO-14 GCP KMS 落地后填入真实公钥（当前 None 占位，WARN + 跳过 ed25519 校验）
 
 ### unix-style 改造立项（commit cf129a2）
 

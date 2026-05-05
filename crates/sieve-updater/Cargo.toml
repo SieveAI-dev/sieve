@@ -1,0 +1,36 @@
+[package]
+name = "sieve-updater"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Update + telemetry beacon (ADR-030)"
+publish = false
+
+[dependencies]
+tokio = { workspace = true, features = ["rt", "macros", "time", "fs"] }
+hyper = { workspace = true, features = ["http1", "client"] }
+hyper-util = { workspace = true, features = ["tokio", "client-legacy", "http1"] }
+hyper-rustls = { workspace = true, features = ["aws-lc-rs", "http1", "webpki-tokio", "tls12"] }
+http = { workspace = true }
+http-body-util = { workspace = true }
+bytes = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+ed25519-dalek = { version = "2", default-features = false, features = ["alloc"] }
+sha2 = "0.10"
+hex = "0.4"
+zstd = "0.13"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros", "time", "fs", "rt-multi-thread"] }
+tempfile = "3"
+serial_test = { workspace = true }
+
+[lints]
+workspace = true

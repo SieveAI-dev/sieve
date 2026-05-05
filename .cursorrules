@@ -109,7 +109,7 @@ docs/changelog/CHANGELOG.md
 
 ### 3.3 模块边界
 
-按 PRD §6 分六个 crate：
+按 PRD §6 分七个 crate（ADR-030 sieve-updater 于 2026-05-05 新增）：
 
 | crate | 职责 | 不允许做 |
 |-------|------|---------|
@@ -119,6 +119,7 @@ docs/changelog/CHANGELOG.md
 | `sieve-ipc` | IPC 协议（JSON-RPC over Unix socket + 文件锁 + pending/decisions 文件 IO） | 不参与请求处理 / 不依赖 sieve-core 业务逻辑 |
 | `sieve-hook` | 极简 PreToolUse hook 二进制，启动时延 < 50ms | 不依赖 sieve-core / sieve-rules / sieve-ipc / tokio |
 | `sieve-policy` (v2.0 新增) | 用户规则加载（user.toml） / lint（11 类约束） / 与系统规则合并（LayeredEngine） / 灰名单管理 / 规则编辑器（$EDITOR pipeline） | 不直接做匹配（调 sieve-rules）；不直接处理网络 IO（调 sieve-cli）；不破坏 critical_lock（用户规则永远不能 suppress 系统 Critical） |
+| `sieve-updater` (ADR-030 新增) | manifest 协议客户端 / install-id 生成 / 6h 定时器 / ed25519 + sha256 校验 / 三个 env var 解析（ADR-030） | 不参与请求处理 / 不依赖 sieve-core 业务逻辑 / 不做规则文件原子替换（属于 sieve-rules） |
 
 跨 crate 调用走显式 trait，避免互相 import 实现细节。
 

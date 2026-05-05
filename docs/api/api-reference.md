@@ -394,6 +394,7 @@ HTTP/1.1 451 Unavailable For Legal Reasons
 
 ### 3.1 字段定义
 
+> **ADR-030 修订（2026-05-05）**：下表中 `[rules_update]` / `[telemetry]` 段为 v1.x 设计参考，已被 ADR-030 统一为 `[update]` 段（详见 §8 manifest 接口 + [SPEC-006](../specs/SPEC-006-update-and-telemetry.md)）。新代码请使用 `[update]` 段；`[rules_update]` 段保留仅作历史参考,运行时不再读取。
 
 | 段                | 字段                    | 类型      | 默认值                                              | 说明                                                              |
 | ---------------- | --------------------- | ------- | ------------------------------------------------ | --------------------------------------------------------------- |
@@ -416,7 +417,7 @@ HTTP/1.1 451 Unavailable For Legal Reasons
 | `[license]`      | `offline_grace_days`  | u16     | `30`                                             | 无网络时 license 缓存有效期                                              |
 | `[rules_update]` | `enabled`             | bool    | `true`                                           | 关闭后等价 `SIEVE_DISABLE_RULES_UPDATE=1`                            |
 | `[rules_update]` | `signing_pubkey_path` | path    | `"~/.sieve/keys/sieve-rules.pub"`                | Ed25519 公钥，**fail-closed**                                      |
-| `[rules_update]` | `update_url`          | string  | `"https://updates.sieve.tools/v1/rules.tar.zst"` | 规则包下载地址                                                         |
+| `[rules_update]` | `update_url`          | string  | `"https://updates.sieveai.dev/v1/rules.tar.zst"` | 规则包下载地址                                                         |
 | `[rules_update]` | `interval_hours`      | u16     | `168`                                            | 自动检查间隔（默认每周）                                                    |
 | `[telemetry]`    | `enabled`             | bool    | `**false`（强制，不可改）**                              | **不存在任何 telemetry。**此字段保留仅为让用户在 config 中可视化确认；写 `true` 启动会拒绝并提示 |
 
@@ -530,7 +531,7 @@ offline_grace_days = 30
 [rules_update]
 enabled = true
 signing_pubkey_path = "~/.sieve/keys/sieve-rules.pub"
-update_url = "https://updates.sieve.tools/v1/rules.tar.zst"
+update_url = "https://updates.sieveai.dev/v1/rules.tar.zst"
 interval_hours = 168
 
 [telemetry]
@@ -568,7 +569,10 @@ sieve setup
 | `SIEVE_LICENSE_KEY` | sieve 进程 | 否 | 无 | 覆盖 `[license].key` |
 | `SIEVE_LOG_LEVEL` | sieve 进程 | 否 | `info` | 覆盖 log 级别，取值 `trace`/`debug`/`info`/`warn`/`error` |
 | `SIEVE_RULES_PATH` | sieve 进程 | 否 | `$SIEVE_HOME/rules` | 覆盖规则路径 |
-| `SIEVE_DISABLE_RULES_UPDATE` | sieve 进程 | 否 | 未设置 | 设为 `1` 时禁用规则自动更新（仅离线场景） |
+| `SIEVE_NO_UPDATE` | sieve 进程 | 否 | 未设置 | 完全跳过 manifest 更新检查（不发请求,规则冻结,无遥测）—— 离线 / 隔离网络 / CI 测试。命中时启动 banner 必打印 `update check disabled by SIEVE_NO_UPDATE`。详见 [ADR-030 §5](../design/ADR-030-update-telemetry-channel.md) |
+| `SIEVE_NO_TELEMETRY` | sieve 进程 | 否 | 未设置 | 仍发 manifest 请求但省略 `uid` 字段（隐私敏感用户仍能拿规则更新） |
+| `SIEVE_UPDATE_URL` | sieve 进程 | 否 | `https://updates.sieveai.dev/v1/manifest` | 覆盖默认更新源 URL（企业自托管镜像 / 私有内网 / 本地 mock）|
+| ~~`SIEVE_DISABLE_RULES_UPDATE`~~ | ~~sieve 进程~~ | — | — | **已被 `SIEVE_NO_UPDATE` 替换（ADR-030,2026-05-05）**,旧字段不再读取 |
 
 > 环境变量优先级 **高于** 配置文件，但 **低于** CLI flag（如有）。`SIEVE_HOME` 是总控变量，设置后无需分别覆盖各子路径。
 
@@ -1014,9 +1018,104 @@ X-Sieve-Origin: hermes-delegate-claude:def45678-...:1
 
 ---
 
-## 8. 错误码表
+## 8. Manifest 接口（ADR-030，sieve-updater 使用）
 
-### 8.1 标准 4xx / 5xx（Sieve 透传上游或自身产生）
+> manifest 接口是 Sieve 唯一允许的主动出站接口（详见 [ADR-003 amended](../design/ADR-003-local-only-no-cloud-verifier.md) + [ADR-030](../design/ADR-030-update-telemetry-channel.md)）。完整协议规格见 [SPEC-006](../specs/SPEC-006-update-and-telemetry.md)。
+
+### 8.1 请求格式
+
+```
+GET https://updates.sieveai.dev/v1/manifest
+  ?v=<client_version>       # 必选，语义版本如 "0.3.1"
+  &os=<mac|linux|windows>   # 必选，小写
+  &arch=<x64|arm64>         # 必选
+  &uid=<UUIDv4>             # 必选（SIEVE_NO_TELEMETRY 时省略）
+  &ch=<stable|beta>         # 可选，发布通道，默认 stable
+```
+
+**传输层约束**：
+- 仅 TLS 1.2+
+- 不带 cookie / Authorization header
+- `User-Agent: sieve-updater/<v>`（仅客户端版本）
+- manifest 接口走自有服务器**不挂 CDN**（保证每次请求都能记日志，作为装机量信标）
+
+**Query 参数说明**：
+
+| 参数 | 类型 | 必选 | 说明 |
+|------|------|------|------|
+| `v` | string | 是 | Sieve 客户端语义版本（如 `0.3.1`） |
+| `os` | string | 是 | 操作系统：`mac` / `linux` / `windows` |
+| `arch` | string | 是 | CPU 架构：`x64` / `arm64` |
+| `uid` | UUID | 否 | UUIDv4 install-id（`SIEVE_NO_TELEMETRY` 时省略） |
+| `ch` | string | 否 | 发布通道：`stable`（默认）/ `beta`（Phase 2 加） |
+
+### 8.2 响应 JSON Schema
+
+```json
+{
+  "schema": 1,
+  "rules": {
+    "version": "2026.05.05.1",
+    "url": "https://cdn.sieveai.dev/rules/2026.05.05.1.json.zst",
+    "sha256": "ab12cd34ef56789012345678901234567890123456789012345678901234abcd",
+    "size": 184320,
+    "signature": "ed25519:BASE64URL_ENCODED_SIGNATURE"
+  },
+  "client": {
+    "latest": "0.4.0",
+    "min_supported": "0.2.0",
+    "deprecation_notice": null
+  },
+  "next_check_after_seconds": 21600
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `schema` | integer | 协议版本号，当前 `1` |
+| `rules.version` | string | 规则包版本（`YYYY.MM.DD.N`） |
+| `rules.url` | string | 规则包 CDN 地址（HTTPS） |
+| `rules.sha256` | string | 规则包 sha256（64 位小写 hex） |
+| `rules.size` | integer | 规则包字节数 |
+| `rules.signature` | string | `"ed25519:"` 前缀 + base64url 签名 |
+| `client.latest` | string | 最新客户端版本 |
+| `client.min_supported` | string | 最低支持版本；低于此时 log warn |
+| `next_check_after_seconds` | integer | 服务端指定下次检查间隔（覆盖本地 `check_interval_hours`） |
+
+### 8.3 自托管镜像替换（`SIEVE_UPDATE_URL`）
+
+企业内网或离线环境可通过环境变量覆盖默认 manifest URL：
+
+```bash
+export SIEVE_UPDATE_URL=https://updates.internal.corp/sieve/v1/manifest
+```
+
+或在 `sieve.toml` 中配置：
+
+```toml
+[update]
+url = "https://updates.internal.corp/sieve/v1/manifest"
+```
+
+自托管服务端必须：
+- 响应符合 §8.2 JSON schema
+- 支持 TLS 1.2+
+- 不需要 `Authorization` header（Sieve 客户端不发认证信息）
+
+### 8.4 约束与隐私
+
+- **不带 cookie / Auth header**：manifest 请求匿名，服务端无法关联到用户身份
+- **uid 可关闭**：`SIEVE_NO_TELEMETRY=1` 省略 uid 字段，仍能拿到规则更新
+- **完全禁用**：`SIEVE_NO_UPDATE=1` 跳过所有更新请求（离线 / CI 场景）
+- **签名验证**：规则包下载后强制 ed25519 + sha256 双重校验，签名失败 fail-closed 保留旧规则
+
+详见 [SPEC-006 §5 签名校验](../specs/SPEC-006-update-and-telemetry.md) 和 [ADR-030 §3](../design/ADR-030-update-telemetry-channel.md)。
+
+---
+
+## 9. 错误码表
+
+### 9.1 标准 4xx / 5xx（Sieve 透传上游或自身产生）
 
 
 | 状态码                         | 来源          | 含义                                      |
@@ -1032,7 +1131,7 @@ X-Sieve-Origin: hermes-delegate-claude:def45678-...:1
 | `504 Gateway Timeout`       | Sieve       | 上游响应超时（`[upstream].timeout_ms`）         |
 
 
-### 8.2 Sieve 自定义 4xx 子段（Critical 拦截相关）
+### 9.2 Sieve 自定义 4xx 子段（Critical 拦截相关）
 
 
 | 状态码                                 | Sieve 语义          | 触发场景                                                                       | Body                     |
@@ -1063,7 +1162,7 @@ X-Sieve-Origin: hermes-delegate-claude:def45678-...:1
 
 > 选用 `426` 是产品语义层的"行为升级要求"（用户需脱敏后重发），与 RFC 7231 协议升级语义有偏差，但**实际客户端不会因此崩溃**（Anthropic SDK 把非 2xx 当作错误并显示 body 文本）。**ADR-008 状态**：候选，Week 2-3 dogfood 验证 Claude Code SDK 行为后正式落 ADR（见 [ADR-INDEX](../design/ADR-INDEX.md)）。
 
-### 8.3 入站拦截响应（SSE event 注入）
+### 9.3 入站拦截响应（SSE event 注入）
 
 Sieve 检测到入站 Critical 命中（IN-CR-02 危险 shell / IN-CR-05 签名工具 / IN-CR-01 地址替换 / IN-GEN-01/03 等）时，**不等响应完成**，在 SSE 流中**注入一个额外的 sieve_blocked event，然后关闭连接**：
 
@@ -1103,7 +1202,7 @@ data: {"type":"sieve_blocked","blocked_at":<unix_epoch>,"detections":[{"rule_id"
 ## 接口冻结声明
 
 - **冻结时间点**：Week 12 GA（参见 [PRD §10.2 Week 12](../prd/sieve-prd-v2.0.md#102-phase-b闭测阶段week-9-12)）
-- **冻结范围**：本文 §1（反向代理路由）、§2（管理 API + audit schema）、§3（配置文件 schema 顶层字段）、§4（环境变量名）、§5（severity → HTTP 状态码映射）、§6（CLI 退出码 + IPC 单向通知方法名 + sieve rules 子命令签名）、§7（X-Sieve-Origin header 格式 + chain_depth 语义）、§8（自定义错误码 426 / 451 / 499）
+- **冻结范围**：本文 §1（反向代理路由）、§2（管理 API + audit schema）、§3（配置文件 schema 顶层字段）、§4（环境变量名）、§5（severity → HTTP 状态码映射）、§6（CLI 退出码 + IPC 单向通知方法名 + sieve rules 子命令签名）、§7（X-Sieve-Origin header 格式 + chain_depth 语义）、§8（manifest 接口 + SIEVE_* env var 名）、§9（自定义错误码 426 / 451 / 499）
 - **冻结后变更规则**：
   - **MAJOR**（v2.0.0）：删除字段、改语义、改默认绑定地址、关闭 fail-closed 行为（**永远不会做**）
   - **MINOR**（v1.x.0）：新增可选字段、新增端点、新增检测规则 ID
