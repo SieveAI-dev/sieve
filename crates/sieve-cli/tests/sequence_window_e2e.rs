@@ -276,6 +276,9 @@ dry_run = false
             // 使用 info（不是 sequence_alert=info,warn）避免 env-filter 解析歧义。
             // tracing-subscriber 默认写 stdout（W = fn() -> io::Stdout），所以 pipe stdout。
             .env("SIEVE_LOG", "info")
+            // ADR-030: 测试禁止触发真实 updates.sieveai.dev 联网 + telemetry 上报
+            .env("SIEVE_NO_UPDATE", "1")
+            .env("SIEVE_NO_TELEMETRY", "1")
             .env("SIEVE_HOME", sieve_home.path())
             .stdout(Stdio::piped()) // 捕获 tracing 日志（tracing-sub 默认写 stdout）
             .stderr(Stdio::null()) // 不需要 stderr（WARN 级别日志被 filter 过滤了）
@@ -292,20 +295,8 @@ dry_run = false
             buf
         });
 
-        // 等 daemon 监听就绪
-        let deadline = Instant::now() + Duration::from_secs(10);
-        loop {
-            if std::net::TcpStream::connect_timeout(
-                &format!("127.0.0.1:{port}").parse().unwrap(),
-                Duration::from_millis(500),
-            )
-            .is_ok()
-            {
-                break;
-            }
-            assert!(Instant::now() < deadline, "daemon 未在 10s 内监听 :{port}");
-            std::thread::sleep(Duration::from_millis(100));
-        }
+        // 等 daemon HTTP 真正就绪（TCP listen 已 bind 但 accept loop 未接管会让请求被 RST）
+        wait_for_http_ready(port, Duration::from_secs(10));
 
         (
             port,
@@ -316,6 +307,26 @@ dry_run = false
                 _sieve_home: sieve_home,
             },
         )
+    }
+
+    /// 等 daemon TCP listener 就绪。HTTP-level probe 在 #[tokio::test] 上会死锁
+    /// （详见 outbound_block.rs::wait_for_http_ready 注释）。
+    fn wait_for_http_ready(port: u16, timeout: Duration) {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if std::net::TcpStream::connect_timeout(
+                &format!("127.0.0.1:{port}").parse().unwrap(),
+                Duration::from_millis(500),
+            )
+            .is_ok()
+            {
+                return;
+            }
+            if Instant::now() >= deadline {
+                panic!("sieve daemon did not listen on :{port} within {timeout:?}");
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
     }
 
     // ─── HTTP 请求辅助（同 content_type_matrix.rs）────────────────────────────

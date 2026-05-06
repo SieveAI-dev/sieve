@@ -250,7 +250,12 @@ fn home_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
+/// 优先级：`$SIEVE_HOME` env var > `$HOME/.sieve`。与 `sieve_ipc::paths::sieve_home`
+/// 对齐，使 daemon / IPC / 审计 DB / sieveignore 共享同一根目录。
 fn sieve_home() -> PathBuf {
+    if let Some(p) = std::env::var_os("SIEVE_HOME") {
+        return PathBuf::from(p);
+    }
     home_path().join(".sieve")
 }
 
@@ -436,18 +441,18 @@ impl Config {
         PathBuf::from("crates/sieve-rules/rules/inbound.toml")
     }
 
-    /// 解析 `.sieveignore` 路径。显式给定时直接用，否则回退到 `~/.sieve/sieveignore`。
-    ///
-    /// 若 `HOME` 不可读则 fallback 到 `.sieve/sieveignore`（相对 cwd）并打印 WARN。
+    /// 解析 `.sieveignore` 路径。显式给定时直接用，否则 `<sieve_home>/sieveignore`
+    /// （`SIEVE_HOME` env var > `$HOME/.sieve`）。
     pub fn resolved_sieveignore_path(&self) -> PathBuf {
         if let Some(p) = &self.sieveignore_path {
             return p.clone();
         }
-        if let Some(home) = std::env::var_os("HOME") {
-            return PathBuf::from(home).join(".sieve").join("sieveignore");
+        if std::env::var_os("SIEVE_HOME").is_none() && std::env::var_os("HOME").is_none() {
+            tracing::warn!(
+                "HOME / SIEVE_HOME 均未设置；fallback 到 .sieve/sieveignore（相对 cwd）"
+            );
         }
-        tracing::warn!("HOME env var not set; using .sieve/sieveignore relative to cwd");
-        PathBuf::from(".sieve").join("sieveignore")
+        sieve_home().join("sieveignore")
     }
 
     /// 拼接监听 SocketAddr（**已废弃**，仅保留兼容性 + 测试使用）。
@@ -464,10 +469,11 @@ impl Config {
             .map_err(|e| anyhow!("invalid bind addr/port: {e}"))
     }
 
-    /// 解析审计日志路径。优先级：`audit_db_path` > `log_path` > `~/.sieve/audit.db`。
+    /// 解析审计日志路径。优先级：`audit_db_path` > `log_path` >
+    /// `<sieve_home>/audit.db`（`SIEVE_HOME` env var > `$HOME/.sieve`）。
     ///
     /// # Errors
-    /// `$HOME` 不存在或不可识别时返回错误。
+    /// `$SIEVE_HOME` 与 `$HOME` 均未设置时返回错误。
     pub fn audit_db_path(&self) -> Result<PathBuf> {
         if let Some(p) = &self.audit_db_path {
             return Ok(p.clone());
@@ -475,10 +481,12 @@ impl Config {
         if let Some(p) = &self.log_path {
             return Ok(p.clone());
         }
-        let home = std::env::var_os("HOME").ok_or_else(|| {
-            anyhow!("HOME env var not set; specify audit_db_path or log_path explicitly")
-        })?;
-        Ok(PathBuf::from(home).join(".sieve").join("audit.db"))
+        if std::env::var_os("SIEVE_HOME").is_none() && std::env::var_os("HOME").is_none() {
+            return Err(anyhow!(
+                "neither SIEVE_HOME nor HOME set; specify audit_db_path or log_path explicitly"
+            ));
+        }
+        Ok(sieve_home().join("audit.db"))
     }
 }
 
