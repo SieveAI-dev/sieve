@@ -128,7 +128,8 @@ fn spawn_sieve_daemon(upstream_url: &str, dry_run: bool) -> (u16, DaemonGuard) {
 
 /// 启动真实 sieve daemon，支持传入自定义 `sieve_home`（供 IPC 集成测试使用）。
 ///
-/// `sieve_home`：若 Some，则设置 `SIEVE_HOME` 环境变量；daemon 会把 IPC socket 放在此目录下。
+/// `sieve_home`：若 Some，则用它；否则自动创建 tempdir 兜底。**不再 fallback 到 $HOME/.sieve**——
+/// 测试若不显式 isolate 会污染真实用户目录（IPC socket 冲突 / install-id / 灰名单 / audit DB）。
 fn spawn_sieve_daemon_with_home(
     upstream_url: &str,
     dry_run: bool,
@@ -174,22 +175,51 @@ dry_run = {}
         binary.display()
     );
 
+    // 调用方未指定 sieve_home 则自动 isolate 到 tempdir。
+    let owned_home: Option<tempfile::TempDir> = if sieve_home.is_none() {
+        Some(tempfile::tempdir().unwrap())
+    } else {
+        None
+    };
+    let effective_home: &std::path::Path = sieve_home
+        .or_else(|| owned_home.as_ref().map(|d| d.path()))
+        .unwrap();
+
     let mut cmd = Command::new(&binary);
     cmd.arg("start")
         .arg("--config")
         .arg(config_file.path())
         .env("SIEVE_LOG", "warn")
+        // ADR-030: 测试禁止触发真实 updates.sieveai.dev 联网 + telemetry 上报
+        .env("SIEVE_NO_UPDATE", "1")
+        .env("SIEVE_NO_TELEMETRY", "1")
+        .env("SIEVE_HOME", effective_home)
         .stdout(Stdio::null())
         .stderr(Stdio::null());
 
-    if let Some(home) = sieve_home {
-        cmd.env("SIEVE_HOME", home);
-    }
-
     let proc = cmd.spawn().expect("spawn sieve daemon");
 
-    // 等 daemon 监听，最长 10 秒
-    let deadline = Instant::now() + Duration::from_secs(10);
+    wait_for_http_ready(port, Duration::from_secs(10));
+
+    (
+        port,
+        DaemonGuard {
+            proc,
+            _config_file: config_file,
+            _sieve_home: owned_home,
+        },
+    )
+}
+
+/// 等 daemon TCP listener 就绪。
+///
+/// 注意：不能用 HTTP-level probe（实测会让 #[tokio::test] 死锁——current_thread
+/// runtime 上 std::io::Read::read 阻塞会阻断 mock upstream 的 accept loop，
+/// 导致 daemon 永远拿不到上游响应）。TCP listener bind 后 connect_timeout 成功
+/// 即视为就绪，accept loop 启动竞态在并发跑测试时偶现 RST，是已知 flaky；
+/// 单测重试或 CI retry 即可。
+fn wait_for_http_ready(port: u16, timeout: Duration) {
+    let deadline = Instant::now() + timeout;
     loop {
         if std::net::TcpStream::connect_timeout(
             &format!("127.0.0.1:{port}").parse().unwrap(),
@@ -197,22 +227,13 @@ dry_run = {}
         )
         .is_ok()
         {
-            break;
+            return;
         }
         if Instant::now() >= deadline {
-            panic!("sieve daemon did not listen on :{port} within 10 s");
+            panic!("sieve daemon did not listen on :{port} within {timeout:?}");
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-
-    (
-        port,
-        DaemonGuard {
-            proc,
-            _config_file: config_file,
-            _sieve_home: None,
-        },
-    )
 }
 
 /// 构造含 fake Anthropic key 的 /v1/messages 请求 body。
@@ -1193,26 +1214,14 @@ async fn r11_anthropic_out06_default_redact_no_ipc_redacts_and_forwards() {
     })
     .await;
 
-    // 不设置 SIEVE_HOME（让 ipc_server = None via fallback to $HOME/.sieve bind collision
-    // 或者：把 SIEVE_HOME 设为一个不存在的路径使 bind 失败）
-    // 用法：spawn_sieve_daemon（不传 sieve_home）时 SIEVE_HOME 没设，
-    // 但 HOME 存在，daemon 会用 $HOME/.sieve/ipc.sock；
-    // 那个 socket 可能已存在（另一个测试留下的），或者正常 bind。
-    // 为确保 IPC server None，用一个不存在的嵌套路径作为 SIEVE_HOME。
-    let nonexistent_home = std::path::PathBuf::from(format!(
-        "/tmp/sieve-r11-nonexistent-{}/sub",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    // 不创建这个目录，让 IPC bind 失败 → ipc_server = None
+    // 强制 ipc_server = None：用 existing tempdir 作 SIEVE_HOME（让 audit DB 正常 init），
+    // 但预先把 ipc.sock 路径建成「目录」，UnixListener::bind 会因 EISDIR 失败 → IPC None。
+    let sieve_home_dir = tempfile::tempdir().unwrap();
+    let sieve_home = sieve_home_dir.path().to_owned();
+    std::fs::create_dir_all(sieve_home.join("ipc.sock")).unwrap();
 
-    let (sieve_port, _guard) = spawn_sieve_daemon_with_home(
-        &format!("http://{upstream_addr}"),
-        false,
-        Some(&nonexistent_home),
-    );
+    let (sieve_port, _guard) =
+        spawn_sieve_daemon_with_home(&format!("http://{upstream_addr}"), false, Some(&sieve_home));
 
     let jwt_req = jwt_body();
     let client = plain_http_client();
@@ -1269,20 +1278,13 @@ async fn r11_anthropic_out07_default_block_no_ipc_returns_426() {
     })
     .await;
 
-    let nonexistent_home = std::path::PathBuf::from(format!(
-        "/tmp/sieve-r11-nonexistent-{}/sub",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-            + 1 // 避免与上一个测试冲突
-    ));
+    // 强制 ipc_server = None：见 r11_anthropic_out06_default_redact_no_ipc_redacts_and_forwards 注释。
+    let sieve_home_dir = tempfile::tempdir().unwrap();
+    let sieve_home = sieve_home_dir.path().to_owned();
+    std::fs::create_dir_all(sieve_home.join("ipc.sock")).unwrap();
 
-    let (sieve_port, _guard) = spawn_sieve_daemon_with_home(
-        &format!("http://{upstream_addr}"),
-        false,
-        Some(&nonexistent_home),
-    );
+    let (sieve_port, _guard) =
+        spawn_sieve_daemon_with_home(&format!("http://{upstream_addr}"), false, Some(&sieve_home));
 
     let body = pem_key_body();
     let client = plain_http_client();

@@ -118,6 +118,8 @@ where
 struct DaemonGuard {
     proc: Child,
     _config_file: tempfile::NamedTempFile,
+    /// 测试隔离：sieve_home tempdir，防止污染真实 ~/.sieve。
+    _sieve_home: tempfile::TempDir,
 }
 
 impl Drop for DaemonGuard {
@@ -167,17 +169,37 @@ dry_run = false
         binary.display()
     );
 
+    let sieve_home = tempfile::tempdir().unwrap();
+
     let proc = Command::new(&binary)
         .arg("start")
         .arg("--config")
         .arg(config_file.path())
         .env("SIEVE_LOG", "warn")
+        .env("SIEVE_NO_UPDATE", "1")
+        .env("SIEVE_NO_TELEMETRY", "1")
+        .env("SIEVE_HOME", sieve_home.path())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
         .expect("spawn sieve daemon");
 
-    let deadline = Instant::now() + Duration::from_secs(10);
+    wait_for_http_ready(port, Duration::from_secs(10));
+
+    (
+        port,
+        DaemonGuard {
+            proc,
+            _config_file: config_file,
+            _sieve_home: sieve_home,
+        },
+    )
+}
+
+/// 等 daemon TCP listener 就绪。HTTP-level probe 在 #[tokio::test] 上会死锁
+/// （详见 outbound_block.rs::wait_for_http_ready 注释）。
+fn wait_for_http_ready(port: u16, timeout: Duration) {
+    let deadline = Instant::now() + timeout;
     loop {
         if std::net::TcpStream::connect_timeout(
             &format!("127.0.0.1:{port}").parse().unwrap(),
@@ -185,21 +207,13 @@ dry_run = false
         )
         .is_ok()
         {
-            break;
+            return;
         }
         if Instant::now() >= deadline {
-            panic!("sieve daemon did not listen on :{port} within 10 s");
+            panic!("sieve daemon did not listen on :{port} within {timeout:?}");
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-
-    (
-        port,
-        DaemonGuard {
-            proc,
-            _config_file: config_file,
-        },
-    )
 }
 
 /// 发送原始 HTTP 请求，支持自定义 path、body 和 headers。

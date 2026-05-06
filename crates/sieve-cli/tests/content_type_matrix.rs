@@ -246,27 +246,16 @@ dry_run = false
         .arg("--config")
         .arg(config_file.path())
         .env("SIEVE_LOG", "warn")
+        // ADR-030: 测试禁止触发真实 updates.sieveai.dev 联网 + telemetry 上报
+        .env("SIEVE_NO_UPDATE", "1")
+        .env("SIEVE_NO_TELEMETRY", "1")
         .env("SIEVE_HOME", sieve_home.path())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
         .expect("spawn sieve daemon");
 
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        if std::net::TcpStream::connect_timeout(
-            &format!("127.0.0.1:{port}").parse().unwrap(),
-            Duration::from_millis(500),
-        )
-        .is_ok()
-        {
-            break;
-        }
-        if Instant::now() >= deadline {
-            panic!("sieve daemon did not listen on :{port} within 10 s");
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
+    wait_for_http_ready(port, Duration::from_secs(10));
 
     let sieve_home_dir = TempDir::new().unwrap(); // 占位（实际 sieve_home 已传入）
     (
@@ -277,6 +266,26 @@ dry_run = false
             _sieve_home: sieve_home_dir,
         },
     )
+}
+
+/// 等 daemon TCP listener 就绪。HTTP-level probe 在 #[tokio::test] 上会死锁
+/// （详见 outbound_block.rs::wait_for_http_ready 注释）。
+fn wait_for_http_ready(port: u16, timeout: Duration) {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if std::net::TcpStream::connect_timeout(
+            &format!("127.0.0.1:{port}").parse().unwrap(),
+            Duration::from_millis(500),
+        )
+        .is_ok()
+        {
+            return;
+        }
+        if Instant::now() >= deadline {
+            panic!("sieve daemon did not listen on :{port} within {timeout:?}");
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
 }
 
 /// 发出 HTTP 请求，返回原始响应 body（chunked 解码）。
