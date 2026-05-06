@@ -1,8 +1,8 @@
 Sieve License Status
 ====================
 
-> Project state: Week 1 engineering phase (2026-04-27).
-> See PRD v1.3 §11.3 (Open Source Strategy) and ADR-011 (repo private until Week 12 GA).
+> Project state: Pre-GA (private repo per ADR-011, public at GA).
+> See PRD v2.0 §11 (Commercialization & Marketing) and ADR-029 (free-first / defer monetization).
 
 This repository contains TWO categories of content with DIFFERENT license terms.
 
@@ -29,10 +29,13 @@ Under the following terms:
     written permission: doskey.lee@gmail.com)
   - ShareAlike — derivatives must use the same license
 
-Rationale: Sieve is a commercial product (single-developer SaaS, $49/month per
-PRD §7.1). Documentation is published at Week 12 GA (ADR-011) for transparency
-and trust narrative ("you can verify us, not just trust us" — PRD §1.2 #4), but
-should not be repackaged as competitor material without permission.
+Rationale: Sieve documentation is published at Week 12 GA (ADR-011) for
+transparency and trust narrative ("you can verify us, not just trust us" —
+PRD §1.2 #4). Phase 1 (post-GA, 6–12 months) is fully free with installation
+count as the sole metric (ADR-029). Phase 2+ commercial paths (user Pro
+subscription / vendor B2B monitoring) are TBD pending Phase 1 install data.
+Documentation should not be repackaged as competitor material without
+permission regardless of Sieve's monetization phase.
 
 ---
 
@@ -44,8 +47,8 @@ Scope: All Rust source code (`*.rs`, `Cargo.toml`, `Cargo.lock`, `build.rs`,
 License (planned):
 
   - **Core engine: MIT License** — published at Week 12 GA (PRD §11.3, §9 #10)
-  - **Phase 2 advanced rule sets: Closed source** (PRD §11.3) — sold as part
-    of paid subscription
+  - **Phase 2 advanced rule sets: Closed source** (PRD §11.3) — bundled with
+    Phase 2+ paid offerings (specific monetization path TBD per ADR-029)
 
 Until Week 12 GA, the repository is fully private (ADR-011). The license file
 in this directory will be replaced with the full MIT License text when source
