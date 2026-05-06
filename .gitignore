@@ -41,6 +41,10 @@ docs/_temp/
 _temp-*.md
 _draft-*.md
 
+# tasks 历史归档（含个人 todo / 历史 status / 临时报告，仅本地保留，不公开）
+# 公开三件套（PROGRESS.md / roadmap.md / lessons.md）保留入库
+tasks/_archive/
+
 # 用户本地白名单与审计库（仅当被错放到 repo 时；正常运行时位于 ~/.sieve/）
 .sieveignore
 audit.db
