@@ -20,8 +20,8 @@
 cd ~/src/sieve-suite/sieve
 ```
 
-- [ ] **fmt clean**：`cargo fmt --all -- --check` exit 0
-- [ ] **clippy 0 issues**：`cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` exit 0
+- [x] **fmt clean**：`cargo fmt --all -- --check` exit 0
+- [x] **clippy 0 issues**：`cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` exit 0
 - [ ] **workspace 测试 760 passed / 7 ignored / 0 failed**：`cargo test --workspace --locked`（含 sieve-updater 35 个新测试）
 - [ ] **deny 检查通过**：`cargo deny check`（如未装：`cargo install cargo-deny --locked`）
 - [ ] **build 干净**：`cargo build --workspace --release --locked`,release 二进制大小约 9 MB
