@@ -1,6 +1,6 @@
 # Sieve 开发指南
 
-> Version: v2.0 — 2026-05-01
+> Version: v2.1 — 2026-05-07
 >
 > **状态：v2.0 + v2.1 代码全量落地。**
 > 五 crate 骨架完整，IPC + hook 路径跑通，行为序列检测（IN-SEQ-*）以 feature flag 形式 opt-in，用户规则 CLI 可用，benchmark CI gate 已接入 `.github/workflows/bench.yml`。
@@ -788,6 +788,33 @@ channel = "stable"          # 发布通道，Phase 2 加 beta
 ```
 
 env var 优先级始终高于 toml：同时设置时 env var 胜出。
+
+---
+
+## 14. 测试隔离：SIEVE_HOME
+
+> 适用于编写集成测试时避免污染真实用户数据（`~/.sieve/audit.db` / `~/.sieve/ipc.sock` 等）。
+
+`config.rs::sieve_home()` 优先读 `SIEVE_HOME` env var（优先级高于 `$HOME/.sieve`），`audit_db_path` / `sieveignore` 路径全部走该函数。集成测试 spawn daemon 时**必须**同时注入以下三个环境变量：
+
+```bash
+# 测试隔离标准模式（在 spawn helper 中注入）
+SIEVE_HOME=/tmp/sieve-test-<uuid>   # 隔离所有文件 I/O 到 tempdir
+SIEVE_NO_UPDATE=1                   # 禁止向 updates.sieveai.dev 发送 manifest 请求
+SIEVE_NO_TELEMETRY=1                # 禁止发送 uid（防止遥测污染统计数据）
+```
+
+**IPC socket 无法 bind 的测试场景**：不要依赖「不存在的路径让 UnixListener::bind 失败」——`AuditStore::init` 会自动创建父目录，绕过这一假设。正确做法是在 tempdir 中预先创建 `ipc.sock` 为**目录**（而非文件），使 `UnixListener::bind` 触发 `EISDIR` 返回 `IpcServer = None`。
+
+```rust
+// 正确：预占 ipc.sock 为目录 → EISDIR
+let ipc_sock = sieve_home.join("ipc.sock");
+std::fs::create_dir_all(&ipc_sock)?;
+
+// 错误：不存在路径会被 AuditStore::init 自动创建父目录
+```
+
+注意：`#[tokio::test]` current_thread runtime 上不要使用 `std::io::Read::read` 阻塞 mock upstream 的 accept loop——会阻断 daemon 等待上游响应，测试永远不完成。改用 HTTP-level probe 时已实测此陷阱，相关 trade-off 注释见 `crates/sieve-cli/tests/outbound_block.rs`。
 
 ---
 

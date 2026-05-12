@@ -1,11 +1,11 @@
 # Sieve daemon · 进度
 
-> 上次更新：2026-05-05
-> 当前阶段：**unix-style v2.x 落地 + ADR-030 客户端代码 + SPEC-006 落地 + docs 同步；运维侧 TODO-13~16 等海外主体落地后启动**
+> 上次更新：2026-05-12
+> 当前阶段：**dogfood 等验证；运维侧 TODO-13~16 待海外主体落地；ADR-031/032 草案待决策通过**
 
 ## 当前阶段一句话
 
-unix-style 改造全部落地（TODO-1~5） + ADR-030 sieve-updater crate 客户端实现 + SPEC-006 manifest 协议起草 + 6 处 docs 同步（TODO-7~12 + TODO-17/18）全部完成；等用户验证代码侧 + 运维侧 TODO-13~16（域名 / KMS / 服务端）待海外主体落地后启动。
+unix-style 改造 + ADR-030 sieve-updater 客户端 + docs 全部落地（2026-05-05）；2026-05-06~07 修复 SIEVE_HOME 测试隔离 bug、清理归档、重构 README/LICENSE、起草 ADR-031/032（cc-switch 互操作 + Orchesis 借鉴，Proposed 未过）、扩展 SPEC-005 listeners[] 数组。等用户 dogfood 验证 + 运维侧 TODO-13~16 落地。
 
 2026-05-05 单日完成 unix-style 改造 v2.x 全部 5 项（TODO-1~5）并落地 12 个 commits：
 ADR-026 multi-listener（含 forwarder path prefix / Config schema / multi-listener accept loop /
@@ -18,6 +18,15 @@ ADR-030 sieve-updater crate + SPEC-006 + docs 同步 2026-05-05 同日完成（T
 ---
 
 ## ✅ 主里程碑
+
+### 2026-05-07 文档 + 配置层后续收尾（commits 2e38e44 / 7cd60e7 / b299463 / 14269f8 / ac12a70 / 7108a45）
+
+- **SIEVE_HOME 透传 bug fix**（2e38e44）：`config.rs::sieve_home()` 对齐 `sieve_ipc` 实现，`audit_db_path` / `sieveignore` 改走该函数；5 个集成测试注入 `SIEVE_HOME` tempdir + `SIEVE_NO_UPDATE=1` + `SIEVE_NO_TELEMETRY=1` 达到完整隔离；workspace 747 passed。
+- **tasks/_archive 清理**（7cd60e7）：删除 12 份过期归档；landing-page 占位移除；`.gitignore` 排除 `tasks/_archive/`。
+- **README / LICENSE 重构同步 ADR-029**（b299463）：加架构图 + 隐私声明独立成段；client/上游范围精确化（Claude Code / Codex / Cursor + Anthropic / OpenAI / 中转站）；LICENSE 移除 $49/月 硬定价。
+- **ADR-005 措辞中性化**（14269f8）：个人身份表述改为「创始人/境内自然人身份」，对外发布友好。
+- **ADR-031 cc-switch 互操作 + ADR-032 Orchesis 借鉴策略（Proposed 草案）**（ac12a70）：路径 A/B/C 决策框架已立；调研报告 `docs/research/2026-05-06-orchesis-analysis.md` 新增；待通过前不动代码。
+- **SPEC-005 §9.5 listeners[] 扩展**（7108a45）：health 响应 `listeners[]` 数组向后兼容扩展，旧 `listen` 标 deprecated；`manual-integration-test.md` 勾选 fmt/clippy 已过。
 
 ### 2026-05-05 sieve-updater 规则下载 + 原子替换闭环收尾
 

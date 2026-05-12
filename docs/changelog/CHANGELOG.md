@@ -11,6 +11,45 @@
 
 ---
 
+## [Unreleased] — 2026-05-07
+
+> **2026-05-06~07 变更（3 commits，纯文档 + 配置层）**：
+> 1. SIEVE_HOME 透传 bug fix + 5 个集成测试隔离（commit 2e38e44，2026-05-06）
+> 2. tasks/_archive 清理 + landing-page 占位移除（commit 7cd60e7，2026-05-07）
+> 3. README / LICENSE 重构同步 ADR-029 免费优先（commit b299463，2026-05-07）
+> 4. ADR-005 措辞中性化（commit 14269f8，2026-05-07）
+> 5. ADR-031 cc-switch 互操作 + ADR-032 Orchesis 借鉴策略（草案）（commit ac12a70，2026-05-07）
+> 6. SPEC-005 listeners[] 数组扩展（commit 7108a45，2026-05-07）
+
+### Fixed — SIEVE_HOME 透传 + 测试隔离（commit 2e38e44）
+
+- **`config.rs::sieve_home()` 现优先读 `SIEVE_HOME` env var**（与 `sieve_ipc::paths::sieve_home` 对齐），`audit_db_path` / `sieveignore` 路径全部改走该函数；修复 daemon 设了 `SIEVE_HOME` 仍把 audit DB 写到真实 `~/.sieve/audit.db` 的污染 bug。
+- **5 个集成测试 spawn helper 注入测试隔离**：`outbound_block` / `inbound_block` / `multi_agent_routing` / `content_type_matrix` / `sequence_window_e2e` 强制 `SIEVE_HOME` 落到 tempdir + 注入 `SIEVE_NO_UPDATE=1` + `SIEVE_NO_TELEMETRY=1`，杜绝真实 `~/.sieve/` 写入与遥测污染。
+- **`r11_anthropic_out0{6,7}_no_ipc` 测试修复**：改用预占 `ipc.sock` 路径为目录触发 EISDIR，代替「不存在路径」旧手段（被 `AuditStore::init` 自动创父目录绕过）。
+- 验证：workspace 747 passed / 13 failed / 7 ignored；真实 `~/.sieve/audit.db` mtime 测试前后不变。
+
+### Changed — README / LICENSE 同步 ADR-029 免费优先（commit b299463）
+
+- README 重构：加架构图 + 简化项目状态段 + 隐私声明独立成段；支持 client（Claude Code / Codex / Cursor）+ 上游（Anthropic / OpenAI / 中转站）范围精确化。
+- LICENSE：移除 `$49/月` 硬定价表述，改为 Phase 1 全免费 / Phase 2+ 商业路径 TBD，与 [ADR-029](../design/ADR-029-free-first-defer-monetization.md) 和 PRD v2.0 §11 保持一致。
+
+### Added — ADR-031 cc-switch 互操作 + ADR-032 Orchesis 借鉴策略（草案，commit ac12a70）
+
+- **[ADR-031](../design/ADR-031-cc-switch-compatibility.md)**（Proposed）：Sieve 作为 cc-switch 一档供应商。路径 A（GA 前 P0：文档 + 供应商模板）/ 路径 B（Phase 2 候选：自动读 cc-switch.db）/ 路径 C（永久排除：依赖对方维护）。
+- **[ADR-032](../design/ADR-032-orchesis-strategy.md)**（Proposed）：选择性借鉴 Orchesis 工程实践与营销叙事（立即抄 / 探索性抄 / 永不抄三类）。
+- 配套调研报告：`docs/research/2026-05-06-orchesis-analysis.md`。
+
+### Changed — SPEC-005 listeners[] 数组扩展（commit 7108a45）
+
+- **SPEC-005 §9.5 health 响应新增 `listeners[]`**（向后兼容 v2 内扩展）：每项含 `provider_id` / `protocol`；旧 `listen` 字段保留为 `listeners[0].addr` 别名并标 deprecated。
+- `manual-integration-test.md` 勾选 fmt clean / clippy 0 issues 两项已完成。
+
+### Chore — ADR-005 措辞中性化（commit 14269f8）
+
+- ADR-005 把「doskey 在中国大陆...」等个人身份表述改为「创始人/境内自然人身份」，避免 ADR 公开后绑定个人信息。
+
+---
+
 ## [Unreleased] — 2026-05-05
 
 > **本日完成 unix-style 改造 v2.x 全部 5 项 TODO**（13 commits）：
