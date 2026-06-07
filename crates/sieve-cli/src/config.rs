@@ -74,9 +74,18 @@ pub struct UpstreamListener {
     #[serde(default)]
     pub provider_id: String,
 
-    /// 上游协议（默认 `anthropic`，向后兼容旧单上游 schema）。
+    /// 上游协议（默认 `auto`：按 path 自适应、不强制错位，向后兼容；ADR-026）。
     #[serde(default)]
     pub protocol: Protocol,
+
+    /// 该 listener 专属上游代理 URL（覆盖全局 [`Config::proxy`]）。
+    /// 形如 `socks5://127.0.0.1:6153` / `http://127.0.0.1:6152`（SPEC-007）。
+    #[serde(default)]
+    pub proxy: Option<String>,
+
+    /// 显式直连，无视全局 proxy 与 env（优先级最高）。
+    #[serde(default)]
+    pub no_proxy: bool,
 }
 
 impl UpstreamListener {
@@ -170,6 +179,11 @@ pub struct Config {
     /// （强制 `127.0.0.1`）。
     #[serde(default, rename = "upstream")]
     pub upstreams: Vec<UpstreamListener>,
+
+    /// 全局兜底上游代理 URL（可选）。每个 upstream 未设 proxy 且未 no_proxy 时继承。
+    /// 也可由 env `ALL_PROXY` / `HTTPS_PROXY` 兜底（config 优先）。SPEC-007。
+    #[serde(default)]
+    pub proxy: Option<String>,
 
     /// 监听地址。**强制 `127.0.0.1`**（ADR-003 / PRD §9 #2 完全本地）。
     /// 任何其他值都会触发 [`Config::enforce_safety_invariants`] 中的 exit(1)。
@@ -308,6 +322,7 @@ impl Default for Config {
             upstream_url: default_upstream(),
             port: default_port(),
             upstreams: Vec::new(),
+            proxy: None,
             bind_addr: default_bind_addr(),
             log_path: None,
             tls_verify_upstream: default_tls_verify(),
@@ -429,7 +444,39 @@ impl Config {
             // legacy 单 upstream 未声明协议 → Auto：按 path 自适应，不强制错位
             // （ADR-026 §决策 1 向后兼容 + PRD §9 #16/#9 双协议）。
             protocol: Protocol::Auto,
+            proxy: None,
+            no_proxy: false,
         }]
+    }
+
+    /// 计算某 upstream 的有效代理 URL（SPEC-007 §2 优先级链）。
+    /// no_proxy > upstream.proxy > 全局 proxy > env(HTTPS_PROXY/ALL_PROXY) > 直连(None)。
+    pub fn effective_proxy(&self, up: &UpstreamListener) -> Option<String> {
+        if up.no_proxy {
+            return None;
+        }
+        if let Some(p) = up.proxy.as_ref().filter(|s| !s.is_empty()) {
+            return Some(p.clone());
+        }
+        self.global_proxy()
+    }
+
+    /// 全局代理：`config.proxy` > env(`HTTPS_PROXY`/`ALL_PROXY`)。
+    /// 供 header-routing 等无 upstream 上下文复用（SPEC-007）。
+    pub fn global_proxy(&self) -> Option<String> {
+        if let Some(p) = self.proxy.as_ref().filter(|s| !s.is_empty()) {
+            return Some(p.clone());
+        }
+        // env 兜底：HTTPS_PROXY 优先于 ALL_PROXY（scheme-specific 优先）。
+        for key in ["HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"] {
+            if let Some(v) = std::env::var_os(key) {
+                let v = v.to_string_lossy().trim().to_string();
+                if !v.is_empty() {
+                    return Some(v);
+                }
+            }
+        }
+        None
     }
 
     /// 解析出站规则路径。显式给定时直接用，否则回退到 `crates/sieve-rules/rules/outbound.toml`（相对 cwd）。
@@ -671,6 +718,46 @@ mod tests {
     }
 
     #[test]
+    fn upstream_proxy_overrides_global() {
+        let toml_str = r#"
+            proxy = "socks5://127.0.0.1:1"
+            [[upstream]]
+            port = 11453
+            url = "https://api.anthropic.com"
+            proxy = "http://127.0.0.1:2"
+            [[upstream]]
+            port = 11454
+            url = "http://127.0.0.1:8080"
+            no_proxy = true
+        "#;
+        let c: Config = toml::from_str(toml_str).unwrap();
+        let ups = c.resolved_upstreams();
+        // upstream[0] 自身 proxy 覆盖全局
+        assert_eq!(
+            c.effective_proxy(&ups[0]),
+            Some("http://127.0.0.1:2".to_string())
+        );
+        // upstream[1] no_proxy → 直连，无视全局
+        assert_eq!(c.effective_proxy(&ups[1]), None);
+    }
+
+    #[test]
+    fn global_proxy_applies_when_upstream_unset() {
+        let toml_str = r#"
+            proxy = "socks5://127.0.0.1:6153"
+            [[upstream]]
+            port = 11453
+            url = "https://api.anthropic.com"
+        "#;
+        let c: Config = toml::from_str(toml_str).unwrap();
+        let ups = c.resolved_upstreams();
+        assert_eq!(
+            c.effective_proxy(&ups[0]),
+            Some("socks5://127.0.0.1:6153".to_string())
+        );
+    }
+
+    #[test]
     fn parse_multi_upstream_toml() {
         let toml_str = r#"
             [[upstream]]
@@ -744,6 +831,8 @@ mod tests {
             url: "https://api.deepseek.com/anthropic".to_string(),
             provider_id: "my-deepseek-relay".to_string(),
             protocol: Protocol::Anthropic,
+            proxy: None,
+            no_proxy: false,
         };
         assert_eq!(u.resolved_provider_id(), "my-deepseek-relay");
     }
@@ -755,6 +844,8 @@ mod tests {
             url: "https://api.deepseek.com/anthropic".to_string(),
             provider_id: String::new(),
             protocol: Protocol::Anthropic,
+            proxy: None,
+            no_proxy: false,
         };
         assert_eq!(u.resolved_provider_id(), "api.deepseek.com");
     }
@@ -766,6 +857,8 @@ mod tests {
             url: "not a uri !!!".to_string(),
             provider_id: String::new(),
             protocol: Protocol::Anthropic,
+            proxy: None,
+            no_proxy: false,
         };
         // 不应 panic，给出 fallback 标识
         assert_eq!(u.resolved_provider_id(), "unknown");
@@ -780,12 +873,16 @@ mod tests {
                     url: "https://api.anthropic.com".to_string(),
                     provider_id: "anthropic".to_string(),
                     protocol: Protocol::Anthropic,
+                    proxy: None,
+                    no_proxy: false,
                 },
                 UpstreamListener {
                     port: 11454, // duplicate
                     url: "https://api.deepseek.com/anthropic".to_string(),
                     provider_id: "deepseek".to_string(),
                     protocol: Protocol::Anthropic,
+                    proxy: None,
+                    no_proxy: false,
                 },
             ],
             ..Config::default()
@@ -825,18 +922,24 @@ mod tests {
                     url: "https://api.anthropic.com".to_string(),
                     provider_id: "anthropic".to_string(),
                     protocol: Protocol::Anthropic,
+                    proxy: None,
+                    no_proxy: false,
                 },
                 UpstreamListener {
                     port: 11454,
                     url: "https://api.deepseek.com/anthropic".to_string(),
                     provider_id: "deepseek".to_string(),
                     protocol: Protocol::Anthropic,
+                    proxy: None,
+                    no_proxy: false,
                 },
                 UpstreamListener {
                     port: 11455,
                     url: "https://api.openai.com".to_string(),
                     provider_id: "openai".to_string(),
                     protocol: Protocol::Openai,
+                    proxy: None,
+                    no_proxy: false,
                 },
             ],
             ..Config::default()
