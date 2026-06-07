@@ -385,7 +385,7 @@
 **作为** P0 crypto-native 开发者，**我希望** Sieve 能拦住我作为 crypto 开发者最怕的五类攻击 —— **签名诱导 / 转账伪造 / .env 外泄 / 私钥外泄 / shell RCE** —— 同时不会在我做这五类的合法日常工作（写转账逻辑、读 dotenv 文档、用 systemctl 配服务、教徒弟 ssh-keygen）时弹窗骚扰，**以便** 我可以信任 Sieve 一直挂着用一周不需要二次确认。
 
 **关联 PRD**：[PRD v2.0 §5.2 IN-CR-* + §9 #7](../prd/sieve-prd-v2.0.md)
-**关联文档**：[CHANGELOG v1.5.4](../changelog/CHANGELOG.md#v154-non-streaming-json-inbound-fix---2026-05-01) / [tasks/2026-05-01-test-data-expansion-report.md](../../tasks/2026-05-01-test-data-expansion-report.md) / [SECURITY.md 历史 Advisories](../../SECURITY.md#历史-advisories)
+**关联文档**：[CHANGELOG v1.5.4](../changelog/CHANGELOG.md#v154-non-streaming-json-inbound-fix---2026-05-01) / [tasks/2026-05-01-test-data-expansion-report.md](../../tasks/_archive/2026-05-01-test-data-expansion-report.md) / [SECURITY.md 历史 Advisories](../../SECURITY.md#历史-advisories)
 **优先级**：P0（Phase 1 v1.5.4，付费门槛级）
 
 > ⚠️ **历史说明**：v1.5.0~v1.5.3 实测数字仅在 SSE 流响应模式有效，非流式 `application/json` + OpenAI `stream=false` 路径有 P0 绕过漏洞（v1.5.4 已修）。本 US 验收标准基于 v1.5.4 后所有响应模式实测。
@@ -396,7 +396,7 @@
 2. **零误伤**：benign-near/ 10 桶（含 near-IN-CR-02-rce 100 条 systemctl/eval/dd 教学样本、near-IN-CR-04-persistence 100 条 cron/launchd 文档样本等）整体 Critical FP rate < 0.5%（当前 0.00%）
 3. **回归门禁**：任何新规则 / allowlist 调整 PR 必须跑 `cargo test -p sieve-rules --release --test dataset_fp_rate -- --ignored` 且 per-bucket 报告贴 PR description
 4. **数据集长期持有**：bench-data 不可删除，`benign-near/`、`attacks-by-fear/` 命名 + 桶结构作为长期 baseline，新增样本只增不删
-5. **盲区透明**：当前已知盲区记录在 [tasks/2026-05-01-rule-gaps.md](../../tasks/2026-05-01-rule-gaps.md)，营销文案不夸大覆盖率
+5. **盲区透明**：当前已知盲区记录在 [tasks/2026-05-01-rule-gaps.md](../../tasks/_archive/2026-05-01-rule-gaps.md)，营销文案不夸大覆盖率
 
 ---
 

@@ -12,11 +12,11 @@
 
 ## 0. v1.5 → v2.0 修订说明
 
-v1.5 在 2026-04-28 锁定 multi-agent 扩展（Claude Code + OpenClaw + Hermes 三家适配）后，doskey 在 2026-05-01 完成 v1.5.1 ~ v1.5.4 共 4 次规则集扩充（35 → 70 入站规则 + 1951 测试样本 + 修 Week 4 P0 非流式 JSON 入站绕过漏洞）。基于 [HIPS Readiness Assessment](../review/2026-05-01-hips-readiness-assessment.md) 评估结论 "**Sieve 当前是 HIPS 70%**"，v2.0 启动**完整 HIPS 改造**，目标 GA 时达到 **HIPS 90%**。
+v1.5 在 2026-04-28 锁定 multi-agent 扩展（Claude Code + OpenClaw + Hermes 三家适配）后，doskey 在 2026-05-01 完成 v1.5.1 ~ v1.5.4 共 4 次规则集扩充（35 → 70 入站规则 + 1951 测试样本 + 修 Week 4 P0 非流式 JSON 入站绕过漏洞）。基于 [HIPS Readiness Assessment](../review/_archive/2026-05-01-hips-readiness-assessment.md) 评估结论 "**Sieve 当前是 HIPS 70%**"，v2.0 启动**完整 HIPS 改造**，目标 GA 时达到 **HIPS 90%**。
 
 ### 触发原因
 
-[HIPS Readiness Assessment](../review/2026-05-01-hips-readiness-assessment.md) 列出 14 项经典 HIPS 标准对照，Sieve 满足 8 项 / 部分 4 项 / 不满足 2 项 = **70%**。距离合格 HIPS（CrowdStrike Falcon / Microsoft Defender ATP / OSSEC 级别）还差 **5 项关键能力**：
+[HIPS Readiness Assessment](../review/_archive/2026-05-01-hips-readiness-assessment.md) 列出 14 项经典 HIPS 标准对照，Sieve 满足 8 项 / 部分 4 项 / 不满足 2 项 = **70%**。距离合格 HIPS（CrowdStrike Falcon / Microsoft Defender ATP / OSSEC 级别）还差 **5 项关键能力**：
 
 1. **可编程 policy 引擎**（不满足）：用户不能加自定义规则，所有规则项目内置 TOML
 2. **三态决策 + 灰名单**（部分）：当前只有 allow/deny，缺持久化 ask 状态对接 GUI
@@ -888,7 +888,7 @@ PID → CallerInfo 映射缓存 30 秒（同一调用方多次请求复用），
 
 沿用 v1.5 §15，新增：
 
-- [HIPS Readiness Assessment 2026-05-01](../review/2026-05-01-hips-readiness-assessment.md) —— v2.0 启动依据
+- [HIPS Readiness Assessment 2026-05-01](../review/_archive/2026-05-01-hips-readiness-assessment.md) —— v2.0 启动依据
 - [CHANGELOG v1.5.4](../changelog/CHANGELOG.md#v154-non-streaming-json-inbound-fix---2026-05-01) —— v1.5 → v2.0 启动前最后一个 patch
 - HIPS 经典实现参考：CrowdStrike Falcon / Microsoft Defender ATP / OSSEC
 - 用户规则系统参考：Wireshark display filters / Snort 规则 / Suricata 规则

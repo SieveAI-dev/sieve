@@ -306,7 +306,7 @@ protocol = "openai"
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `port` | `u16` | 监听端口，必须 `127.0.0.1` 绑定，不可指向公网（[ADR-003](../design/ADR-003-local-only-binding.md)） |
+| `port` | `u16` | 监听端口，必须 `127.0.0.1` 绑定，不可指向公网（[ADR-003](../design/ADR-003-local-only-no-cloud-verifier.md)） |
 | `url` | `String` | 真实上游地址，含 path prefix（如 `https://api.deepseek.com/anthropic`）|
 | `provider_id` | `String` | 用于审计日志、IPC 事件标注 |
 | `protocol` | `anthropic` \| `openai` | 显式声明协议，不再靠 path 猜；错位请求 fail-closed（400）|
@@ -318,7 +318,7 @@ protocol = "openai"
 - 默认起 `11453`，递增分配（`11454` / `11455` / ...）
 - 避开常见冲突端口（`80` / `443` / `8080` / `5000` / `3000`）
 - 同一 daemon 实例内端口必须唯一（启动时端口冲突 → 立即 `exit 1`，不进入 partial-start）
-- 仅本地回环（`127.0.0.1`）—— `bind_addr` 任何非 `127.0.0.1` 值会触发 FATAL exit（[ADR-003](../design/ADR-003-local-only-binding.md) / [PRD §9 #2](../prd/sieve-prd-v2.0.md)）
+- 仅本地回环（`127.0.0.1`）—— `bind_addr` 任何非 `127.0.0.1` 值会触发 FATAL exit（[ADR-003](../design/ADR-003-local-only-no-cloud-verifier.md) / [PRD §9 #2](../prd/sieve-prd-v2.0.md)）
 
 ### 6a.3 launchd plist 不需改动
 

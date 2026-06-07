@@ -14,7 +14,7 @@
 
 > **当前活动 PRD 全文 → [../prd/sieve-prd-v2.0.md](../prd/sieve-prd-v2.0.md)**
 
-v2.0 在 v1.5 基础上启动**完整 HIPS 改造**（依据 [HIPS Readiness Assessment](../review/2026-05-01-hips-readiness-assessment.md) 评估"Sieve 当前 HIPS 70%"），目标 GA 时达到 HIPS 90%。Phase A（Week 5-8）+ Phase B（Week 9-12）拆分，**GA Week 12 时间表不变**。
+v2.0 在 v1.5 基础上启动**完整 HIPS 改造**（依据 [HIPS Readiness Assessment](../review/_archive/2026-05-01-hips-readiness-assessment.md) 评估"Sieve 当前 HIPS 70%"），目标 GA 时达到 HIPS 90%。Phase A（Week 5-8）+ Phase B（Week 9-12）拆分，**GA Week 12 时间表不变**。
 
 5 项 HIPS 能力改造（codex review 后瘦身 + 加固）：
 
