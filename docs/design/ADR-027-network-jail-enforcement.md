@@ -243,6 +243,6 @@ openrouter.ai
 - [PRD v2.0 §11.5](../prd/sieve-prd-v2.0.md) —— 营销：[redacted] 差异化卖点
 - [ADR-006](./ADR-006-sigstore-reproducible-build.md) —— sigstore + reproducible build（hostname 列表分发走签名通道）
 - [ADR-007](./ADR-007-fail-closed-critical-actions.md) —— fail-closed Critical actions（jail 把 fail-closed 延伸到网络层；ADR-007 §背景第一句「YOLO mode 下的不可逆动作一旦发生无法回滚」是本 ADR 网络层 fail-closed 的精神来源）
-- [ADR-009](./ADR-009-windows-service-deployment.md)（候选）—— Windows 服务部署（jail Windows WFP 实现等待 ADR-009）
+- [ADR-009](./ADR-INDEX.md#候选--计划中-adr)（候选,待落地）—— Windows 服务部署（jail Windows WFP 实现等待 ADR-009）
 - [ADR-015](./ADR-015-sieve-setup-tool.md) —— sieve setup 工具（`--jail` 子命令是 ADR-015 工具链的延伸）
 - [ADR-026](./ADR-026-port-based-listener-routing.md) —— Port-based listener routing（jail 按 LLM endpoint host 切片，sieve 按 listener port 切片，两侧对齐）
