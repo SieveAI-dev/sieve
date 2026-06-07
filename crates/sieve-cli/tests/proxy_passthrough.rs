@@ -93,7 +93,9 @@ async fn spawn_minimal_sieve_proxy(upstream_url: String) -> (SocketAddr, oneshot
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let forwarder = Arc::new(Forwarder::new(&upstream_url).unwrap());
+    let forwarder = Arc::new(
+        Forwarder::new(&upstream_url, sieve_core::forwarder::ProxyConfig::Direct).unwrap(),
+    );
     let (tx, mut rx) = oneshot::channel::<()>();
 
     tokio::spawn(async move {

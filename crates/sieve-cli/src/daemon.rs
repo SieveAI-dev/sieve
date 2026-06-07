@@ -36,6 +36,7 @@ use sieve_core::pipeline::outbound_redact::{redact_segments, RedactHit};
 use sieve_core::pipeline::streaming::StreamingPipelineNode as _;
 use sieve_core::sse::parser::SseParser;
 use sieve_core::tool_use_aggregator::Aggregator;
+use sieve_core::forwarder::ProxyConfig;
 use sieve_core::Forwarder;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -650,7 +651,10 @@ pub async fn run(
         let mut specs = Vec::with_capacity(upstreams.len());
         for u in upstreams {
             let provider_id = u.resolved_provider_id();
-            let f = Arc::new(Forwarder::new(&u.url).map_err(|e| {
+            let proxy = ProxyConfig::parse(cfg.effective_proxy(&u).as_deref()).map_err(|e| {
+                anyhow!("invalid proxy for listener port {} (url {}): {e}", u.port, u.url)
+            })?;
+            let f = Arc::new(Forwarder::new(&u.url, proxy).map_err(|e| {
                 anyhow!(
                     "init forwarder for listener port {} (provider {}, url {}): {e}",
                     u.port,
@@ -705,8 +709,11 @@ pub async fn run(
         };
 
         let mut map: HashMap<String, Arc<Forwarder>> = HashMap::new();
+        // header-routing 上游统一走全局代理（受限网络下同样需要出网）。SPEC-007。
+        let header_route_proxy = ProxyConfig::parse(cfg.global_proxy().as_deref())
+            .unwrap_or(ProxyConfig::Direct);
         for (provider_id, upstream_url) in routes.iter() {
-            match Forwarder::new(upstream_url) {
+            match Forwarder::new(upstream_url, header_route_proxy.clone()) {
                 Ok(f) => {
                     tracing::debug!(provider = %provider_id, upstream = %upstream_url, "provider forwarder ready");
                     map.insert(provider_id.to_owned(), Arc::new(f));
