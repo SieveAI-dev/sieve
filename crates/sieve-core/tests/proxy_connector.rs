@@ -32,7 +32,10 @@ async fn direct_connects_to_target() {
     let target = spawn_listener().await;
     let mut conn = ProxyConnector::new(ProxyConfig::Direct);
     let uri: http::Uri = format!("http://{target}").parse().unwrap();
-    assert!(conn.call(uri).await.is_ok(), "direct connect should succeed");
+    assert!(
+        conn.call(uri).await.is_ok(),
+        "direct connect should succeed"
+    );
 }
 
 /// mock HTTP CONNECT 代理：读 CONNECT 请求头 → 标记 → 回 200。

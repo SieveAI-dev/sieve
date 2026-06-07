@@ -211,9 +211,11 @@ impl Service<http::Uri> for ProxyConnector {
             let (host, port) = target_host_port(&dst)?;
             let stream = match cfg {
                 ProxyConfig::Direct => {
-                    let s = TcpStream::connect((host.as_str(), port)).await.map_err(|e| {
-                        SieveCoreError::Forwarder(format!("direct connect failed: {e}"))
-                    })?;
+                    let s = TcpStream::connect((host.as_str(), port))
+                        .await
+                        .map_err(|e| {
+                            SieveCoreError::Forwarder(format!("direct connect failed: {e}"))
+                        })?;
                     MaybeProxyStream::Tcp(s)
                 }
                 ProxyConfig::Socks5 { addr, auth } => {
@@ -235,7 +237,9 @@ impl Service<http::Uri> for ProxyConnector {
                             .await
                         }
                     }
-                    .map_err(|e| SieveCoreError::Forwarder(format!("socks5 connect failed: {e}")))?;
+                    .map_err(|e| {
+                        SieveCoreError::Forwarder(format!("socks5 connect failed: {e}"))
+                    })?;
                     MaybeProxyStream::Socks(Box::new(s))
                 }
                 ProxyConfig::Http { addr, auth } => {
