@@ -775,6 +775,7 @@ pub async fn run(
                     port: s.port,
                     provider_id: s.provider_id.clone(),
                     protocol: match s.protocol {
+                        crate::config::Protocol::Auto => "auto".to_owned(),
                         crate::config::Protocol::Anthropic => "anthropic".to_owned(),
                         crate::config::Protocol::Openai => "openai".to_owned(),
                     },
@@ -1342,6 +1343,10 @@ async fn proxy_inner(
     // listener 声明的协议与请求 path 隐含的协议不一致时立即 400 拒绝，不进入路径分发。
     // 仅检查 LLM endpoint（/v1/messages 与 /v1/chat/completions）；其他 path（健康
     // 检查 / 透传 / 未知）保持现有透传行为，不强制。
+    //
+    // listener_protocol == Auto（legacy upstream_url / 省略 protocol 字段的 [[upstream]]）
+    // 不匹配下列任一条件，按请求 path 自适应放行，保留 v1.x 单 upstream 双协议能力
+    // （ADR-026 §决策 1 向后兼容 + PRD §9 #16/#9）。仅显式声明 anthropic/openai 才错位拒绝。
     //
     // 即便请求带 X-Sieve-Provider header（已在前面 routing 选择 forwarder），listener
     // 协议依然是硬约束——header routing 不能 override（PRD §9 #3 fail-closed 一致性）。
@@ -4171,6 +4176,8 @@ fn build_protocol_mismatch_400(
     listener_protocol: crate::config::Protocol,
 ) -> Response<ResponseBody> {
     let listener_proto_str = match listener_protocol {
+        // Auto 永不进入本函数（Auto listener 不触发错位检查），保留以满足穷尽性。
+        crate::config::Protocol::Auto => "auto",
         crate::config::Protocol::Anthropic => "anthropic",
         crate::config::Protocol::Openai => "openai",
     };
