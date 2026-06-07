@@ -221,7 +221,8 @@ async fn process_manifest(
     );
 
     // Download with exponential back-off.
-    let payload = match retry_with_backoff(|| download_rules(&rules.url, MAX_RULES_SIZE, proxy)).await
+    let payload = match retry_with_backoff(|| download_rules(&rules.url, MAX_RULES_SIZE, proxy))
+        .await
     {
         Ok(b) => b,
         Err(e) => {
@@ -377,7 +378,12 @@ mod tests {
         };
 
         // Must not attempt download — so no error even though URL is unreachable.
-        process_manifest(&manifest, Some(&dest), &sieve_core::forwarder::ProxyConfig::Direct).await;
+        process_manifest(
+            &manifest,
+            Some(&dest),
+            &sieve_core::forwarder::ProxyConfig::Direct,
+        )
+        .await;
     }
 
     /// Manifest with client info only (no rules) — process_manifest must not
@@ -398,7 +404,12 @@ mod tests {
             next_check_after_seconds: Some(3600),
         };
         // Must not download anything; dest_dir does not even need to exist.
-        process_manifest(&manifest, Some(&dest), &sieve_core::forwarder::ProxyConfig::Direct).await;
+        process_manifest(
+            &manifest,
+            Some(&dest),
+            &sieve_core::forwarder::ProxyConfig::Direct,
+        )
+        .await;
         assert!(!dest.exists(), "dest_dir must not be created when no rules");
     }
 }

@@ -135,7 +135,7 @@ mod tests {
             &sieve_core::forwarder::ProxyConfig::Direct,
         )
         .await
-            .expect_err("invalid URL must fail");
+        .expect_err("invalid URL must fail");
         assert!(
             matches!(err, UpdaterError::Http(_)),
             "expected Http error, got: {err:?}"
