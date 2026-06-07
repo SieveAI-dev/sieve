@@ -1,7 +1,7 @@
 # SPEC-007: 上游转发代理支持
 
 > Version: v0.1 — 2026-06-07
-> 状态：Draft（设计已评审，待实现）
+> 状态：Stable（已实现并验证）
 > 关联：ADR-018（双协议）、ADR-026（multi-listener）、ADR-027（network jail，区分系统代理）、ADR-030（updater）、PRD §9 #2/#12
 > 决策记录：本 spec §9（实现时固化为 ADR-033）
 

@@ -340,6 +340,70 @@ daemon 内部完成多 `bind`，launchd plist 只需启动 `sieve start --config
 
 ---
 
+## 6b. 受限网络（Shadowrocket / Clash 等）部署（ADR-033）
+
+在「不挂代理连不上 LLM」的网络（规则代理 + 分流、非全局 TUN 透明代理——大量 crypto 开发者所处环境）下，sieve 默认对上游**硬直连**会第一跳即断。从 v2.x 起，daemon 转发上游与 updater 出站均可经配置的 **HTTP CONNECT / SOCKS5 代理**出网。详见 [ADR-033](../design/ADR-033-upstream-proxy.md) / [SPEC-007](../specs/SPEC-007-upstream-proxy.md)。
+
+> **TLS 端到端到上游，代理只见密文、不 MITM**（不解密、不装 CA，符合 [PRD §9 #12](../prd/sieve-prd-v2.0.md)）。代理仅是传输层隧道，出站目的地不变（仍仅上游 LLM / `sieveai.dev`），不违反 [PRD §9 #2](../prd/sieve-prd-v2.0.md)。
+
+### 6b.1 最简配置（全局代理）
+
+`~/.sieve/sieve.toml`，把 `<你的端口>` 换成本地代理实际监听端口（Shadowrocket / Clash 的 SOCKS / HTTP 入口）：
+
+```toml
+# 全局兜底代理：所有 upstream 默认经它出网
+proxy = "socks5://127.0.0.1:<你的 SOCKS 端口>"   # Clash 默认常见 7891；Shadowrocket 自定
+# 或 HTTP CONNECT 代理：
+# proxy = "http://127.0.0.1:<你的 HTTP 端口>"     # Clash 默认常见 7890
+
+[[upstream]]
+port = 11453
+url = "https://api.anthropic.com"
+protocol = "anthropic"
+# 继承全局 proxy
+```
+
+### 6b.2 每 upstream 单独配代理 / 强制直连
+
+```toml
+proxy = "socks5://127.0.0.1:7891"   # 全局兜底
+
+[[upstream]]
+port = 11453
+url = "https://api.anthropic.com"
+protocol = "anthropic"
+proxy = "http://127.0.0.1:7890"     # 该 upstream 专属代理，覆盖全局
+
+[[upstream]]
+port = 11455
+url = "http://127.0.0.1:8080"       # 本地中转站，无需走代理
+protocol = "openai"
+no_proxy = true                      # 显式直连，无视全局 proxy 与 env
+```
+
+**优先级链（高 → 低）**：`upstream.no_proxy`(直连) > `upstream.proxy` > 全局 `proxy` > env(`HTTPS_PROXY` 优先于 `ALL_PROXY`) > 直连。
+
+### 6b.3 env 兜底（零配置）
+
+不想改 config 时可直接用标准环境变量（config 的 `proxy` / `no_proxy` 优先于 env）：
+
+```bash
+export HTTPS_PROXY="socks5://127.0.0.1:7891"   # 优先于 ALL_PROXY
+# 或
+export ALL_PROXY="socks5://127.0.0.1:7891"
+```
+
+env 同时覆盖 daemon 上游转发与 sieve-updater 出站（manifest / 规则下载），受限网络下更新检查与装机遥测一并可用（[ADR-030](../design/ADR-030-update-telemetry-channel.md)）。
+
+### 6b.4 proxy URL 格式 & 注意事项
+
+- scheme：`http://`（CONNECT）/ `socks5://` / `socks5h://`（`h` = 远程 DNS）；带认证用 `scheme://user:pass@host:port`
+- 解析失败 → 启动期 config 校验 **fail-fast 报错**
+- 代理连接失败（拒绝 / 超时 / 认证失败 / CONNECT 非 200 / SOCKS 握手失败）→ **明确报错，绝不静默回退直连**（防止你以为走代理实则直连）
+- **隐私提示**：经**远程**代理时代理可见 SNI 目标 / 目标 IP（即「你在连 `api.anthropic.com`」），但**不可见** prompt / response / API key。**推荐使用可信本地代理出口（Shadowrocket / Clash）**，不要把目标元数据交给不可信远端。
+
+---
+
 ## 7. 日志 & 审计
 
 ### 7.1 文本日志

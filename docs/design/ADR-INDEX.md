@@ -47,6 +47,7 @@
 | [ADR-030](./ADR-030-update-telemetry-channel.md)          | 更新通道复用为遥测信标 + Install UUID + 三个环境变量开关（部分修订 ADR-003）         | Accepted | 2026-05-05 | 新增,关联 ADR-003/006/029 |
 | [ADR-031](./ADR-031-cc-switch-compatibility.md)           | 与 cc-switch 互操作（Sieve 作为 cc-switch 一档供应商，路径 A 必做 / 路径 B 候选 / 路径 C 排除） | Proposed（草案，未通过） | 2026-05-06 | 关联 ADR-015/026/029/030 |
 | [ADR-032](./ADR-032-orchesis-strategy.md)                  | 借鉴 Orchesis 的架构与产品策略——三阶段学习路线、分阶段管线、营销叙事升级 | Proposed（草案，未通过） | 2026-05-06 | 关联 ADR-022/026/027/029/006/003 |
+| [ADR-033](./ADR-033-upstream-proxy.md)                     | 上游转发代理支持（HTTP CONNECT + SOCKS5） | Accepted | 2026-06-07 | 关联 §6.1、§9 #2 |
 
 
 ---

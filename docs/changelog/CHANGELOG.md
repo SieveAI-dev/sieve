@@ -13,6 +13,15 @@
 
 ## [Unreleased] — 2026-05-07
 
+### Added — 上游转发代理支持（ADR-033 / SPEC-007，2026-06-07）
+
+- **daemon 转发上游可经配置的 HTTP CONNECT / SOCKS5 代理出网**，解决受限网络（Shadowrocket / Clash 等规则代理 + 分流、非全局 TUN）下 sieve 上游硬直连不可用的产品缺口。
+- config 新增：顶层 `proxy`（全局兜底）+ 每 `[[upstream]]` 的 `proxy` / `no_proxy` 字段。优先级链（高 → 低）：`upstream.no_proxy`(直连) > `upstream.proxy` > 全局 `proxy` > env(`HTTPS_PROXY` 优先于 `ALL_PROXY`) > 直连。
+- proxy URL 格式：`http://` / `socks5://` / `socks5h://`，可带 `user:pass@` 认证；解析失败启动期 fail-fast；代理连接失败**明确报错、绝不静默回退直连**。
+- 实现：sieve-core 新增 `ProxyConnector`（tower Service）替换 `Forwarder` 底层 connector；**TLS 仍由 hyper-rustls 在隧道之上做——端到端到上游，代理只见密文、不 MITM**（不解密、不装 CA，符合 PRD §9 #12）。
+- **updater 复用同机制**（`updates` / `cdn.sieveai.dev`），daemon 用全局代理注入；受限网络下规则更新 / 装机遥测一并可用。
+- 详见 [ADR-033](../design/ADR-033-upstream-proxy.md) / [SPEC-007](../specs/SPEC-007-upstream-proxy.md)；文档同步：api-reference §3.3.2 + §4.2、deployment §6b。
+
 ### Fixed — legacy/单-upstream OpenAI 路径被协议错位检查误判 400 的回归（2026-06-07）
 
 - **修复 legacy / 单-upstream（未显式声明 `protocol`）配置下 OpenAI `/v1/chat/completions` 请求被 [ADR-026](../design/ADR-026-port-based-listener-routing.md) §决策 4 协议错位检查误判返回 400 的回归**。根因：`config.rs::resolved_upstreams()` 把 legacy `upstream_url` 与省略 `protocol` 字段的 `[[upstream]]` 硬编码映射成 `Protocol::Anthropic`，导致这些 listener 在收到 OpenAI 请求时被 fail-closed 400，违反 ADR-026 §决策 1 向后兼容承诺与 PRD §9 #16 / #9 双协议硬约束。
