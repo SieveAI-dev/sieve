@@ -494,6 +494,58 @@ bind_addr = "127.0.0.1"
 - 其他 path（健康检查 / 透传）保持原行为
 - X-Sieve-Provider header routing 不能 override listener 协议
 
+### 3.3.2 ADR-033 上游转发代理配置（HTTP CONNECT + SOCKS5）
+
+> 见 [ADR-033](../design/ADR-033-upstream-proxy.md) / [SPEC-007](../specs/SPEC-007-upstream-proxy.md)。解决受限网络（Shadowrocket / Clash 等规则代理 + 分流，非全局 TUN）下 sieve 上游硬直连不可用的问题。daemon 转发上游与 updater 出站均可经配置的代理出网，**TLS 端到端到上游，代理只见密文、不 MITM**。
+
+```toml
+# 全局兜底代理（可选）：所有未单独配置且未声明 no_proxy 的 upstream 继承
+proxy = "socks5://127.0.0.1:6153"
+
+[[upstream]]
+port = 11453
+url = "https://api.anthropic.com"
+protocol = "anthropic"
+# 未写 proxy 也未写 no_proxy → 继承全局 proxy
+
+[[upstream]]
+port = 11454
+url = "https://api.openai.com"
+protocol = "openai"
+proxy = "http://127.0.0.1:7890"   # 该 upstream 专属代理，覆盖全局
+
+[[upstream]]
+port = 11455
+url = "http://127.0.0.1:8080"     # 本地中转站
+protocol = "openai"
+no_proxy = true                    # 显式直连，无视全局 proxy 与 env
+```
+
+字段：
+
+| 段 | 字段 | 类型 | 默认 | 说明 |
+|----|------|------|------|------|
+| 顶层 | `proxy` | string? | `null` | 全局兜底代理 URL，所有未单独配置且未 `no_proxy` 的 upstream 继承 |
+| `[[upstream]]` | `proxy` | string? | `null` | 该 upstream 专属代理 URL，**覆盖全局 `proxy`** |
+| `[[upstream]]` | `no_proxy` | bool | `false` | 显式直连，**优先级最高**，无视全局 `proxy` 与 env |
+
+**优先级链（高 → 低）**：
+1. `upstream.no_proxy = true` → 直连
+2. `upstream.proxy` → 用之
+3. 全局顶层 `proxy` → 用之
+4. env `HTTPS_PROXY` / `ALL_PROXY`（`HTTPS_PROXY` 优先于 `ALL_PROXY`，零配置便利兜底）
+5. 直连
+
+> 显式 config 优先于 env；`no_proxy = true` 可在任意层级强制直连。
+
+**proxy URL 格式**：
+- scheme：`http://`（HTTP CONNECT）/ `socks5://` / `socks5h://`（`h` = 远程 DNS，由代理侧解析），按 scheme 自动选实现
+- 认证：`scheme://user:pass@host:port`（本地代理通常无需，远程代理用）
+- 解析失败 → **启动期 config 校验 fail-fast 报错**，不静默忽略
+- 代理连接失败（拒绝 / 超时 / 认证失败 / CONNECT 非 200 / SOCKS 握手失败）→ **明确报错，绝不静默回退直连**；日志记录代理 `host:port` 但**脱去密码**
+
+> **隐私提示**：经**远程**代理时代理可见 SNI 目标 / 目标 IP（即「你在连 `api.anthropic.com`」），但**不可见** prompt / response / API key。推荐使用**可信本地代理出口**（Shadowrocket / Clash）。
+
 ### 3.3 完整示例 `config.toml`
 
 ```toml
@@ -575,6 +627,8 @@ sieve setup
 | `SIEVE_NO_UPDATE` | sieve 进程 | 否 | 未设置 | 完全跳过 manifest 更新检查（不发请求,规则冻结,无遥测）—— 离线 / 隔离网络 / CI 测试。命中时启动 banner 必打印 `update check disabled by SIEVE_NO_UPDATE`。详见 [ADR-030 §5](../design/ADR-030-update-telemetry-channel.md) |
 | `SIEVE_NO_TELEMETRY` | sieve 进程 | 否 | 未设置 | 仍发 manifest 请求但省略 `uid` 字段（隐私敏感用户仍能拿规则更新） |
 | `SIEVE_UPDATE_URL` | sieve 进程 | 否 | `https://updates.sieveai.dev/v1/manifest` | 覆盖默认更新源 URL（企业自托管镜像 / 私有内网 / 本地 mock）|
+| `HTTPS_PROXY` | sieve 进程 | 否 | 未设置 | 上游转发 + updater 出站的兜底代理（[ADR-033](../design/ADR-033-upstream-proxy.md) 优先级链第 4 级，**优先于 `ALL_PROXY`**）；config `proxy` / `no_proxy` 优先于此 |
+| `ALL_PROXY` | sieve 进程 | 否 | 未设置 | 同上兜底代理，`HTTPS_PROXY` 未设时生效（[ADR-033](../design/ADR-033-upstream-proxy.md)）|
 | ~~`SIEVE_DISABLE_RULES_UPDATE`~~ | ~~sieve 进程~~ | — | — | **已被 `SIEVE_NO_UPDATE` 替换（ADR-030,2026-05-05）**,旧字段不再读取 |
 
 > 环境变量优先级 **高于** 配置文件，但 **低于** CLI flag（如有）。`SIEVE_HOME` 是总控变量，设置后无需分别覆盖各子路径。

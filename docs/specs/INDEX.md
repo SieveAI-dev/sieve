@@ -16,7 +16,7 @@
 | SPEC-004 | multi-agent setup 配置注入规格 | v1.0 | Stable | ADR-015, ADR-018, ADR-019 | v2.0 §6.6 / §6.7 / §10 W6 | [SPEC-004-multi-agent-setup.md](SPEC-004-multi-agent-setup.md) |
 | SPEC-005 | Sieve daemon ↔ GUI IPC 协议 | v2.0 | Frozen | ADR-013, ADR-014, ADR-016, ADR-019, ADR-021 | v2.0 §5.4 / §5.7 / §6.5 + GUI PRD v1.0 | [SPEC-005-ipc-protocol.md](SPEC-005-ipc-protocol.md) |
 | SPEC-006 | 更新通道 + 装机遥测 manifest 协议 | v0.1 | Draft | ADR-030 | v2.0 §11 / 关联 ADR-003/006/029 | [SPEC-006-update-and-telemetry.md](SPEC-006-update-and-telemetry.md) |
-| SPEC-007 | 上游转发代理支持 | v0.1 | Draft | ADR-033(待), ADR-018/026/027/030 | v2.0 §6.1 / §9 #2 | [SPEC-007-upstream-proxy.md](SPEC-007-upstream-proxy.md) |
+| SPEC-007 | 上游转发代理支持 | v0.1 | Stable | ADR-033, ADR-018/026/027/030 | v2.0 §6.1 / §9 #2 | [SPEC-007-upstream-proxy.md](SPEC-007-upstream-proxy.md) |
 
 ---
 
