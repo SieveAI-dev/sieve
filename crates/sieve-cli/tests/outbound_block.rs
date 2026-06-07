@@ -496,14 +496,21 @@ async fn mock_gui_respond_with_ready(
     let (reader, mut writer) = stream.into_split();
     let mut lines = BufReader::new(reader).lines();
 
-    // 读服务端推来的 request_decision 帧
+    // 读服务端推来的帧。daemon 在连接建立后先发 `sieve.hello` 握手帧（SPEC-005 §3，
+    // 有 params 但无 request_id），连接期还会周期发 `sieve.heartbeat`——必须跳过这些通知帧，
+    // 只处理 `sieve.request_decision`。否则对握手帧解析 request_id 会失败 → mock 连接断开
+    // → daemon try_send Closed → fallback Block，把被测的 Allow/RedactAndAllow 路径污染成 426。
     while let Some(line) = lines.next_line().await? {
         let line = line.trim().to_owned();
         if line.is_empty() {
             continue;
         }
-        // 从 JSON-RPC 帧中提取真实 request_id
         let rpc: serde_json::Value = serde_json::from_str(&line)?;
+        // 只处理决策请求帧，跳过 hello / heartbeat / 其他通知（method 正过滤，容纳未来新增通知）
+        if rpc.get("method").and_then(|m| m.as_str()) != Some("sieve.request_decision") {
+            continue;
+        }
+        // 从 JSON-RPC 帧中提取真实 request_id
         let params = rpc.get("params").ok_or("no params")?;
         let real_id: uuid::Uuid =
             serde_json::from_value(params["request_id"].clone()).map_err(|e| e.to_string())?;
