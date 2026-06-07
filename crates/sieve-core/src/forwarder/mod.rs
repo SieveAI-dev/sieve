@@ -12,6 +12,9 @@ use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
 use std::sync::OnceLock;
 
+mod proxy;
+pub use proxy::{MaybeProxyStream, ProxyConfig, ProxyConnector, ProxyStream};
+
 type BoxBody = http_body_util::combinators::BoxBody<bytes::Bytes, hyper::Error>;
 
 /// 全局 crypto provider 安装标志（aws-lc-rs，与 hyper-rustls feature 对齐）。
@@ -29,10 +32,7 @@ fn install_crypto_provider() {
 
 /// 上游转发器（全局复用，内置连接池）。
 pub struct Forwarder {
-    client: Client<
-        hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>,
-        BoxBody,
-    >,
+    client: Client<hyper_rustls::HttpsConnector<proxy::ProxyConnector>, BoxBody>,
     upstream_host: String,
     upstream_scheme: String,
     /// 上游 URL 中的 path 前缀（已 trim 末尾 `/`）。
@@ -54,7 +54,7 @@ impl Forwarder {
     /// # Errors
     /// URI 格式非法或 TLS 配置失败时返回 [`SieveCoreError::Forwarder`] /
     /// [`SieveCoreError::TlsConfig`]。
-    pub fn new(upstream_url: &str) -> SieveCoreResult<Self> {
+    pub fn new(upstream_url: &str, proxy: ProxyConfig) -> SieveCoreResult<Self> {
         install_crypto_provider();
 
         let url = http::Uri::try_from(upstream_url)
@@ -87,7 +87,7 @@ impl Forwarder {
             .https_or_http()
             .enable_http1()
             .enable_http2()
-            .build();
+            .wrap_connector(proxy::ProxyConnector::new(proxy));
 
         let client = Client::builder(TokioExecutor::new()).build::<_, BoxBody>(connector);
 
@@ -155,19 +155,19 @@ mod tests {
 
     #[test]
     fn forwarder_new_parses_https_uri() {
-        let f = Forwarder::new("https://api.anthropic.com").unwrap();
+        let f = Forwarder::new("https://api.anthropic.com", ProxyConfig::Direct).unwrap();
         assert_eq!(f.upstream_host(), "api.anthropic.com");
     }
 
     #[test]
     fn forwarder_new_invalid_uri_returns_error() {
-        let result = Forwarder::new("not a uri !!!");
+        let result = Forwarder::new("not a uri !!!", ProxyConfig::Direct);
         assert!(result.is_err());
     }
 
     #[test]
     fn rewrite_uri_keeps_path_and_query() {
-        let f = Forwarder::new("https://api.anthropic.com").unwrap();
+        let f = Forwarder::new("https://api.anthropic.com", ProxyConfig::Direct).unwrap();
         let original: http::Uri = "/v1/messages?beta=1".parse().unwrap();
         let new = f.rewrite_uri(&original).unwrap();
         assert_eq!(
@@ -178,7 +178,7 @@ mod tests {
 
     #[test]
     fn rewrite_uri_root_path() {
-        let f = Forwarder::new("https://api.anthropic.com").unwrap();
+        let f = Forwarder::new("https://api.anthropic.com", ProxyConfig::Direct).unwrap();
         let original: http::Uri = "/".parse().unwrap();
         let new = f.rewrite_uri(&original).unwrap();
         assert_eq!(new.to_string(), "https://api.anthropic.com/");
@@ -189,7 +189,7 @@ mod tests {
     #[test]
     fn rewrite_uri_with_path_prefix() {
         // DeepSeek Anthropic 兼容入口：含 /anthropic 前缀
-        let f = Forwarder::new("https://api.deepseek.com/anthropic").unwrap();
+        let f = Forwarder::new("https://api.deepseek.com/anthropic", ProxyConfig::Direct).unwrap();
         let original: http::Uri = "/v1/messages".parse().unwrap();
         let new = f.rewrite_uri(&original).unwrap();
         assert_eq!(
@@ -200,7 +200,7 @@ mod tests {
 
     #[test]
     fn rewrite_uri_path_prefix_with_query() {
-        let f = Forwarder::new("https://api.deepseek.com/anthropic").unwrap();
+        let f = Forwarder::new("https://api.deepseek.com/anthropic", ProxyConfig::Direct).unwrap();
         let original: http::Uri = "/v1/messages?beta=1".parse().unwrap();
         let new = f.rewrite_uri(&original).unwrap();
         assert_eq!(
@@ -212,7 +212,7 @@ mod tests {
     #[test]
     fn rewrite_uri_path_prefix_trailing_slash_normalized() {
         // 用户配置末尾带 `/`，结果应与不带 `/` 一致（无双斜杠）
-        let f = Forwarder::new("https://api.deepseek.com/anthropic/").unwrap();
+        let f = Forwarder::new("https://api.deepseek.com/anthropic/", ProxyConfig::Direct).unwrap();
         let original: http::Uri = "/v1/messages".parse().unwrap();
         let new = f.rewrite_uri(&original).unwrap();
         assert_eq!(
@@ -224,7 +224,7 @@ mod tests {
     #[test]
     fn rewrite_uri_multi_segment_path_prefix() {
         // 多层前缀也支持（某些中转站会用 /api/v2 这种结构）
-        let f = Forwarder::new("https://relay.example.com/api/v2").unwrap();
+        let f = Forwarder::new("https://relay.example.com/api/v2", ProxyConfig::Direct).unwrap();
         let original: http::Uri = "/v1/messages".parse().unwrap();
         let new = f.rewrite_uri(&original).unwrap();
         assert_eq!(
@@ -237,7 +237,7 @@ mod tests {
     fn upstream_host_excludes_path_prefix() {
         // 关键不变量：upstream_host() 必须只返回 authority（用于 HTTP Host header），
         // 绝不能含 path 前缀，否则上游会拒绝请求。
-        let f = Forwarder::new("https://api.deepseek.com/anthropic").unwrap();
+        let f = Forwarder::new("https://api.deepseek.com/anthropic", ProxyConfig::Direct).unwrap();
         assert_eq!(f.upstream_host(), "api.deepseek.com");
     }
 }
