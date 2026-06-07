@@ -472,10 +472,12 @@ protocol = "openai"
 | `port` | u16 | (必填) | 监听端口（127.0.0.1:port），同 daemon 内必须唯一 |
 | `url` | string | (必填) | 上游真实 endpoint，**含 path 前缀**（如 `/anthropic`） |
 | `provider_id` | string | URL host 派生 | 审计 / 日志 / IPC 事件标注 |
-| `protocol` | enum | `"anthropic"` | `"anthropic"` \| `"openai"`，错位请求 fail-closed 400 |
+| `protocol` | enum | `"auto"` | `"auto"`（默认）\| `"anthropic"` \| `"openai"`。`auto` 按请求 path 自适应、**不强制错位**；显式声明 `anthropic`/`openai` 才对 path 做严格校验、错位请求 fail-closed 400 |
 
 **向后兼容**：旧 schema（`upstream_url` + `port` 单字段）继续工作，自动映射成单元素
-`upstreams` vec（provider_id = `"anthropic"`，protocol = `Anthropic`）。新旧字段同时给
+`upstreams` vec（provider_id = `"anthropic"`，protocol = `Auto`）。省略 `protocol` 字段的
+`[[upstream]]` 同样映射为 `Auto`——按 path 自适应、不做错位拒绝，保留单 upstream 双协议能力
+（详见 [ADR-026 §决策 4 补充说明](../design/ADR-026-port-based-listener-routing.md)）。新旧字段同时给
 时新字段优先，旧字段被忽略并 WARN。
 
 ```toml
@@ -485,9 +487,10 @@ port = 11453
 bind_addr = "127.0.0.1"
 ```
 
-**协议错位 fail-closed 拒绝**（ADR-026 §决策 4）：
+**协议错位 fail-closed 拒绝**（ADR-026 §决策 4，**仅对显式声明 protocol 的 listener 生效**）：
 - `protocol = "anthropic"` listener 收到 `/v1/chat/completions` → 400 + `sieve_blocked` event
 - `protocol = "openai"` listener 收到 `/v1/messages` → 400
+- `protocol = "auto"`（默认 / 未声明 / legacy `upstream_url`）listener **不做错位拒绝**：按请求 path 自适应路由（`/v1/messages` → Anthropic，`/v1/chat/completions` → OpenAI），保留单 upstream 双协议能力
 - 其他 path（健康检查 / 透传）保持原行为
 - X-Sieve-Provider header routing 不能 override listener 协议
 

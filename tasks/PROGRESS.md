@@ -1,6 +1,6 @@
 # Sieve daemon · 进度
 
-> 上次更新：2026-05-12
+> 上次更新：2026-06-07
 > 当前阶段：**dogfood 等验证；运维侧 TODO-13~16 待海外主体落地；ADR-031/032 草案待决策通过**
 
 ## 当前阶段一句话
@@ -15,9 +15,19 @@ TODO-6 Network jail enforcement 推后到 v3.x post-GA opt-in。
 
 ADR-030 sieve-updater crate + SPEC-006 + docs 同步 2026-05-05 同日完成（TODO-7~12 + TODO-17/18）。
 
+**2026-06-07 P0 修复（workflow 全量审查发现）**：daemon 全量测试实为 747 passed / 13 failed / 7 ignored——此前本文与 CLAUDE.md 记的「760 passed / 0 failed」把测试**总数**误作通过数（CHANGELOG 当时如实记了 13 failed 但未跟进）。已修复全部 13 个：**簇 A**（产品 bug，9 个）legacy/单-upstream 未声明 protocol 配置下 OpenAI `/v1/chat/completions` 被 ADR-026 协议错位误判 400 → 新增 `Protocol::Auto` 默认态按 path 自适应；**簇 B**（测试 bug，4 个）GUI popup mock 未跳过 SPEC-005 `sieve.hello` 握手帧致假性 426。现 **760 passed / 0 failed / 7 ignored**，fmt/clippy 全绿。详见主里程碑 2026-06-07 条目。
+
 ---
 
 ## ✅ 主里程碑
+
+### 2026-06-07 P0 修复：13 个红测试归零（workflow 全量审查）
+
+全量工程状态审查（11-agent workflow）实跑 `cargo test --workspace --no-fail-fast`，发现真实基线是 **747 passed / 13 failed / 7 ignored**，而非本文/CLAUDE.md 长期声称的「760 passed / 0 failed」（760 实为测试**总数**被误作通过数；CHANGELOG 当时如实记了 13 failed 但未跟进修复，随后进入 dogfood 冻结期）。
+
+- **簇 A（产品 bug，9 个测试）**：`config.rs::resolved_upstreams()` 把 legacy `upstream_url` 硬编码成 `protocol: Protocol::Anthropic`，叠加 ADR-026 §决策4 协议错位检查 → 任何 legacy/未声明协议配置发 OpenAI `/v1/chat/completions` 都被 fail-closed 400，违反 ADR-026 §决策1 向后兼容 + PRD §9 #16/#9。修复（产品负责人拍板方向）：`config::Protocol` 加 `#[default] Auto` 第三态，legacy/省略 protocol 映射为 Auto 按 path 自适应、不错位；仅**显式声明** anthropic/openai 才强制错位 400（fail-closed 对显式声明者完全保留）。改 config.rs + daemon.rs（2 处 match 补 Auto）+ sieve-ipc/health.rs 文档，**0 改业务/集成测试**。
+- **簇 B（测试 bug，4 个测试）**：`outbound_block.rs::mock_gui_respond_with_ready` 未跳过 SPEC-005 §3 `sieve.hello` 握手帧 → 解析 request_id 失败 → mock 断连 → daemon try_send Closed → fallback Block → 假性 426。产品代码正确（真实 GUI 连接实测 200）。修复：mock 加 method 正过滤只处理 `sieve.request_decision`；连带修正 `outbound_gui_popup_deny_returns_426` 此前的假阳性（崩溃 fallback 恰好=426）。
+- **验证**：`cargo test --workspace --no-fail-fast` → **760 passed / 0 failed / 7 ignored**；`cargo fmt --all --check` 干净；`cargo clippy --workspace --all-targets -- -D warnings` 0 warning。下游文档（CHANGELOG/ADR-026/api-reference/data-model）同步更新。
 
 ### 2026-05-07 文档 + 配置层后续收尾（commits 2e38e44 / 7cd60e7 / b299463 / 14269f8 / ac12a70 / 7108a45）
 
