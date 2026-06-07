@@ -40,6 +40,8 @@ pub struct UpdaterConfig {
     pub client_version: String,
     /// Release channel (default `"stable"`).
     pub channel: String,
+    /// 上游代理 URL（全局，SPEC-007）。`None` → 直连。daemon 侧已合并 config+env。
+    pub proxy: Option<String>,
 }
 
 /// Runs the update check loop forever.
@@ -62,6 +64,7 @@ pub async fn run(cfg: UpdaterConfig) -> ! {
             None
         }
     };
+
     tracing::info!(
         url = %cfg.base_url,
         interval_secs = cfg.interval_secs,
@@ -131,6 +134,10 @@ async fn run_one_check(
         ch: cfg.channel.clone(),
     };
 
+    // SPEC-007: 全局上游代理（受限网络下 updates/cdn.sieveai.dev 也需走代理）。
+    let proxy = sieve_core::forwarder::ProxyConfig::parse(cfg.proxy.as_deref())
+        .unwrap_or(sieve_core::forwarder::ProxyConfig::Direct);
+
     // Exponential back-off: 1 s, 4 s, 16 s.
     let backoff_secs: [u64; 3] = [1, 4, 16];
     let mut last_err = String::new();
@@ -146,9 +153,9 @@ async fn run_one_check(
             tokio::time::sleep(Duration::from_secs(wait)).await;
         }
 
-        match fetch_manifest(&cfg.base_url, params.clone()).await {
+        match fetch_manifest(&cfg.base_url, params.clone(), &proxy).await {
             Ok(manifest) => {
-                process_manifest(&manifest, rules_dir).await;
+                process_manifest(&manifest, rules_dir, &proxy).await;
                 return Ok(manifest.next_check_after_seconds);
             }
             Err(e) => {
@@ -177,6 +184,7 @@ async fn run_one_check(
 async fn process_manifest(
     manifest: &crate::manifest::Manifest,
     rules_dir: Option<&std::path::Path>,
+    proxy: &sieve_core::forwarder::ProxyConfig,
 ) {
     if let Some(client) = &manifest.client {
         tracing::info!(
@@ -213,7 +221,8 @@ async fn process_manifest(
     );
 
     // Download with exponential back-off.
-    let payload = match retry_with_backoff(|| download_rules(&rules.url, MAX_RULES_SIZE)).await {
+    let payload = match retry_with_backoff(|| download_rules(&rules.url, MAX_RULES_SIZE, proxy)).await
+    {
         Ok(b) => b,
         Err(e) => {
             tracing::error!(error = %e, version = %rules.version, "rules download failed (all retries exhausted)");
@@ -298,6 +307,7 @@ mod tests {
             no_telemetry: false,
             client_version: "0.1.0-alpha".to_string(),
             channel: DEFAULT_CHANNEL.to_string(),
+            proxy: None,
         };
         assert_eq!(cfg.interval_secs, 21600);
         assert!(!cfg.no_telemetry);
@@ -335,7 +345,7 @@ mod tests {
             next_check_after_seconds: None,
         };
         // Should log a warning and return without panicking.
-        process_manifest(&manifest, None).await;
+        process_manifest(&manifest, None, &sieve_core::forwarder::ProxyConfig::Direct).await;
     }
 
     /// Same version already installed → skip download (no network call attempted).
@@ -367,7 +377,7 @@ mod tests {
         };
 
         // Must not attempt download — so no error even though URL is unreachable.
-        process_manifest(&manifest, Some(&dest)).await;
+        process_manifest(&manifest, Some(&dest), &sieve_core::forwarder::ProxyConfig::Direct).await;
     }
 
     /// Manifest with client info only (no rules) — process_manifest must not
@@ -388,7 +398,7 @@ mod tests {
             next_check_after_seconds: Some(3600),
         };
         // Must not download anything; dest_dir does not even need to exist.
-        process_manifest(&manifest, Some(&dest)).await;
+        process_manifest(&manifest, Some(&dest), &sieve_core::forwarder::ProxyConfig::Direct).await;
         assert!(!dest.exists(), "dest_dir must not be created when no rules");
     }
 }

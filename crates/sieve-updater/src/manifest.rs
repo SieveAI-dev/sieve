@@ -78,9 +78,11 @@ pub struct ManifestParams {
 
 // ── HTTP client ──────────────────────────────────────────────────────────────
 
-fn build_tls_client() -> Result<
+fn build_tls_client(
+    proxy: &sieve_core::forwarder::ProxyConfig,
+) -> Result<
     Client<
-        hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>,
+        hyper_rustls::HttpsConnector<sieve_core::forwarder::ProxyConnector>,
         http_body_util::Full<bytes::Bytes>,
     >,
     UpdaterError,
@@ -89,7 +91,7 @@ fn build_tls_client() -> Result<
         .with_webpki_roots()
         .https_only()
         .enable_http1()
-        .build();
+        .wrap_connector(sieve_core::forwarder::ProxyConnector::new(proxy.clone()));
     let client = Client::builder(TokioExecutor::new()).build(tls);
     Ok(client)
 }
@@ -104,14 +106,18 @@ fn build_tls_client() -> Result<
 /// # Errors
 /// Returns [`UpdaterError::Http`] on transport/status failures,
 /// [`UpdaterError::SerdeJson`] on parse failure.
-pub async fn fetch_manifest(url: &str, params: ManifestParams) -> Result<Manifest, UpdaterError> {
+pub async fn fetch_manifest(
+    url: &str,
+    params: ManifestParams,
+    proxy: &sieve_core::forwarder::ProxyConfig,
+) -> Result<Manifest, UpdaterError> {
     let query = build_query(&params);
     let full_url = format!("{url}?{query}");
     let uri: Uri = full_url
         .parse()
         .map_err(|e| UpdaterError::Http(format!("invalid manifest URL: {e}")))?;
 
-    let client = build_tls_client()?;
+    let client = build_tls_client(proxy)?;
     let req = http::Request::builder()
         .method("GET")
         .uri(uri)

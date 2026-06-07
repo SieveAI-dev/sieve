@@ -13,9 +13,11 @@ use crate::error::UpdaterError;
 /// limit memory use and guard against hostile CDN responses.
 pub const DEFAULT_MAX_RULES_SIZE: usize = 50 * 1024 * 1024;
 
-fn build_tls_client() -> Result<
+fn build_tls_client(
+    proxy: &sieve_core::forwarder::ProxyConfig,
+) -> Result<
     Client<
-        hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>,
+        hyper_rustls::HttpsConnector<sieve_core::forwarder::ProxyConnector>,
         http_body_util::Full<bytes::Bytes>,
     >,
     UpdaterError,
@@ -24,7 +26,7 @@ fn build_tls_client() -> Result<
         .with_webpki_roots()
         .https_only()
         .enable_http1()
-        .build();
+        .wrap_connector(sieve_core::forwarder::ProxyConnector::new(proxy.clone()));
     let client = Client::builder(TokioExecutor::new()).build(tls);
     Ok(client)
 }
@@ -42,12 +44,16 @@ fn build_tls_client() -> Result<
 /// # Errors
 /// - [`UpdaterError::Http`] on transport or status errors.
 /// - [`UpdaterError::ResponseTooLarge`] if the body exceeds `max_size`.
-pub async fn download_rules(url: &str, max_size: usize) -> Result<Vec<u8>, UpdaterError> {
+pub async fn download_rules(
+    url: &str,
+    max_size: usize,
+    proxy: &sieve_core::forwarder::ProxyConfig,
+) -> Result<Vec<u8>, UpdaterError> {
     let uri: Uri = url
         .parse()
         .map_err(|e| UpdaterError::Http(format!("invalid rules URL: {e}")))?;
 
-    let client = build_tls_client()?;
+    let client = build_tls_client(proxy)?;
     let version = env!("CARGO_PKG_VERSION");
     let req = http::Request::builder()
         .method("GET")
@@ -123,8 +129,12 @@ mod tests {
     /// Invalid URL returns Http error without panicking.
     #[tokio::test]
     async fn invalid_url_returns_http_error() {
-        let err = download_rules("not a valid url !!!", 1024)
-            .await
+        let err = download_rules(
+            "not a valid url !!!",
+            1024,
+            &sieve_core::forwarder::ProxyConfig::Direct,
+        )
+        .await
             .expect_err("invalid URL must fail");
         assert!(
             matches!(err, UpdaterError::Http(_)),
