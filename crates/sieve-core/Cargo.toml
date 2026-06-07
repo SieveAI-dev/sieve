@@ -32,6 +32,9 @@ forwarder = [
     "dep:http-body",
     "dep:http-body-util",
     "dep:bytes",
+    "dep:tokio-socks",
+    "dep:base64",
+    "dep:tower-service",
 ]
 
 [dependencies]
@@ -45,6 +48,9 @@ http = { workspace = true, optional = true }
 http-body = { workspace = true, optional = true }
 http-body-util = { workspace = true, optional = true }
 bytes = { workspace = true, optional = true }
+tokio-socks = { workspace = true, optional = true }
+base64 = { workspace = true, optional = true }
+tower-service = { workspace = true, optional = true }
 # v1.4：sieve-ipc 用于 pipeline dispatch / hook / hold 路径（forwarder feature 下）
 sieve-ipc = { path = "../sieve-ipc" }
 serde = { workspace = true }

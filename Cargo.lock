@@ -1775,6 +1775,7 @@ dependencies = [
 name = "sieve-core"
 version = "0.1.0-alpha"
 dependencies = [
+ "base64",
  "bytes",
  "chrono",
  "http",
@@ -1792,6 +1793,8 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-socks",
+ "tower-service",
  "tracing",
  "uuid",
  "webpki-roots 0.26.11",
@@ -2105,6 +2108,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1729aa945f29d91ba541258c8df89027d5792d85a8841fb65e8bf0f4ede4ef61"
 dependencies = [
  "rustls",
+ "tokio",
+]
+
+[[package]]
+name = "tokio-socks"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7e2948f60dbe26b35f2c7fb74ac2854c1fddded0fe9d7548fcc674a246f7615"
+dependencies = [
+ "either",
+ "futures-util",
+ "thiserror 1.0.69",
  "tokio",
 ]
 
