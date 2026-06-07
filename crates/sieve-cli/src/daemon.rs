@@ -909,6 +909,7 @@ pub async fn run(
                 no_telemetry,
                 client_version: env!("CARGO_PKG_VERSION").to_string(),
                 channel: cfg.update.channel.clone(),
+                proxy: cfg.global_proxy(),
             };
             tracing::info!(
                 url = %url,
