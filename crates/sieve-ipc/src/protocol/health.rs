@@ -47,8 +47,9 @@ pub struct ListenerSnapshot {
     pub port: u16,
     /// 上游身份标识（来自 `sieve.toml [[upstream]] provider_id`，留空时从 URL host 派生）。
     pub provider_id: String,
-    /// 协议声明（`"anthropic"` | `"openai"`）。
-    /// 错位请求会被 daemon fail-closed 400（ADR-026 §决策 4）。
+    /// 协议声明（`"auto"` | `"anthropic"` | `"openai"`）。
+    /// `"auto"`（未显式声明，含 legacy `upstream_url`）按请求 path 自适应，不做错位拒绝；
+    /// 显式 `"anthropic"` / `"openai"` 的错位请求会被 daemon fail-closed 400（ADR-026 §决策 4）。
     pub protocol: String,
 }
 

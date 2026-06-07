@@ -32,16 +32,20 @@ pub enum Preset {
 
 /// 上游协议（ADR-018 / ADR-026 §决策 4）。
 ///
-/// listener 显式声明协议，daemon 收到请求后按本字段决策路由 + 严格校验请求 path：
-/// - `Anthropic` listener 仅接受 `/v1/messages`
-/// - `Openai` listener 仅接受 `/v1/chat/completions`
+/// `Auto`（默认，未显式声明）：daemon 按请求 path 自适应路由，**不做协议错位拒绝**。
+/// legacy `upstream_url` 与省略 `protocol` 字段的 `[[upstream]]` 均映射为此态，保留 v1.x
+/// 单 upstream 双协议能力（ADR-026 §决策 1 向后兼容 + PRD §9 #16/#9 双协议硬约束）。
 ///
-/// 错位请求（如 Anthropic listener 收到 `/v1/chat/completions`）→ daemon
-/// fail-closed 400 + sieve_blocked event 注入（PRD §9 #3）。
+/// `Anthropic` / `Openai`（显式声明）：daemon 严格校验请求 path——`Anthropic` listener 仅
+/// 接受 `/v1/messages`，`Openai` listener 仅接受 `/v1/chat/completions`。错位请求（如
+/// Anthropic listener 收到 `/v1/chat/completions`）→ daemon fail-closed 400 + sieve_blocked
+/// event 注入（PRD §9 #3）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Protocol {
+    /// 协议未显式声明——按请求 path 自适应，不强制错位（向后兼容默认值）。
     #[default]
+    Auto,
     Anthropic,
     Openai,
 }
@@ -409,7 +413,8 @@ impl Config {
     ///
     /// - `upstreams` 非空时直接克隆返回
     /// - `upstreams` 为空时从旧 `upstream_url` + `port` 字段映射成单元素 vec
-    ///   （向后兼容路径，provider_id = `"anthropic"`，protocol = `Anthropic`）
+    ///   （向后兼容路径，provider_id = `"anthropic"`，protocol = `Auto`：按请求
+    ///   path 自适应，不强制协议错位，保留 v1.x 单 upstream 双协议能力）
     ///
     /// daemon 启动后所有 listener 创建逻辑应走此方法，不直接读
     /// [`Config::upstream_url`] / [`Config::port`]。
@@ -421,7 +426,9 @@ impl Config {
             port: self.port,
             url: self.upstream_url.clone(),
             provider_id: "anthropic".to_string(),
-            protocol: Protocol::Anthropic,
+            // legacy 单 upstream 未声明协议 → Auto：按 path 自适应，不强制错位
+            // （ADR-026 §决策 1 向后兼容 + PRD §9 #16/#9 双协议）。
+            protocol: Protocol::Auto,
         }]
     }
 
@@ -659,7 +666,8 @@ mod tests {
         assert_eq!(ups[0].port, 11453);
         assert_eq!(ups[0].url, "https://api.anthropic.com");
         assert_eq!(ups[0].provider_id, "anthropic");
-        assert_eq!(ups[0].protocol, Protocol::Anthropic);
+        // legacy 未声明协议 → Auto（按 path 自适应；显式声明才强制错位）
+        assert_eq!(ups[0].protocol, Protocol::Auto);
     }
 
     #[test]
@@ -713,8 +721,9 @@ mod tests {
     }
 
     #[test]
-    fn protocol_default_is_anthropic() {
-        // 未指定 protocol 字段时默认 Anthropic（向后兼容）
+    fn protocol_default_is_auto() {
+        // 未指定 protocol 字段时默认 Auto：按请求 path 自适应，不强制协议错位
+        // （ADR-026 §决策 1 向后兼容 + PRD §9 #16/#9 双协议）。
         let toml_str = r#"
             [[upstream]]
             port = 11454
@@ -722,7 +731,7 @@ mod tests {
         "#;
         let c: Config = toml::from_str(toml_str).unwrap();
         let ups = c.resolved_upstreams();
-        assert_eq!(ups[0].protocol, Protocol::Anthropic);
+        assert_eq!(ups[0].protocol, Protocol::Auto);
         // provider_id 留空时由 resolved_provider_id 派生
         assert!(ups[0].provider_id.is_empty());
         assert_eq!(ups[0].resolved_provider_id(), "api.deepseek.com");
