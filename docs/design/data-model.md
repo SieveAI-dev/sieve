@@ -232,7 +232,7 @@ deadbeef00112233  # known dev fixture address 0x000...dead
 
 | 字段 | 类型 | 默认 | 说明 |
 |------|------|------|------|
-| `upstream_url` | string | `"https://api.anthropic.com"` | **已废弃**（向后兼容）：上游 API base URL；ADR-026 后推荐用 `[[upstream]]` 数组（见下方 §5.1a） |
+| `upstream_url` | string | `"https://api.anthropic.com"` | **已废弃**（向后兼容）：上游 API base URL；映射为单元素 `[[upstream]]`（`protocol = auto`，按 path 自适应、保留双协议）；ADR-026 后推荐用 `[[upstream]]` 数组（见下方 §5.1a） |
 | `port` | u16 | `11453` | **已废弃**（向后兼容）：本地监听端口 |
 | `[[upstream]]` | array | `[]` | **ADR-026 推荐**：multi-listener 配置数组，每项含 `port` / `url` / `provider_id` / `protocol`（见 §5.1a） |
 | `bind_addr` | string | `"127.0.0.1"` | 监听地址，**禁止**改成 `0.0.0.0`（启动时报错） |
@@ -261,10 +261,11 @@ deadbeef00112233  # known dev fixture address 0x000...dead
 | `port` | u16 | (必填) | 监听端口；同一 daemon 内必须唯一（启动时端口冲突 → exit 1） |
 | `url` | string | (必填) | 真实上游 endpoint（**含 path 前缀**，如 `https://api.deepseek.com/anthropic`） |
 | `provider_id` | string | URL host 派生 | 上游身份标识；写入 audit `provider_id` 列 + IPC `ListenerSnapshot.provider_id` |
-| `protocol` | enum | `"anthropic"` | `"anthropic"` \| `"openai"`；请求 path 错位时 fail-closed 400 拒绝（[ADR-026 §决策 4](./ADR-026-port-based-listener-routing.md)） |
+| `protocol` | enum | `"auto"` | `"auto"`（默认）\| `"anthropic"` \| `"openai"`。`auto` 按请求 path 自适应路由（`/v1/messages` → Anthropic，`/v1/chat/completions` → OpenAI）、**不做错位拒绝**；仅显式声明 `anthropic`/`openai` 时才对 path 错位 fail-closed 400 拒绝（[ADR-026 §决策 4 补充说明](./ADR-026-port-based-listener-routing.md)） |
 
 向后兼容：`[[upstream]]` 为空时，从旧 `upstream_url` + `port` 字段映射成单元素 vec
-（`provider_id = "anthropic"`，`protocol = anthropic`）。两套配置同时给时，`[[upstream]]`
+（`provider_id = "anthropic"`，`protocol = auto`）；省略 `protocol` 字段的 `[[upstream]]` 同样
+映射为 `auto`，按 path 自适应、保留单 upstream 双协议能力。两套配置同时给时，`[[upstream]]`
 优先，旧字段 ignored 并打 WARN。
 
 ### 5.2 `~/.sieve/` 目录结构
