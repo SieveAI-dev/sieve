@@ -24,6 +24,29 @@ use crate::protocol::SourceAgent;
 /// 当前使用全零占位——`parse_and_verify_origin_header` 在占位阶段不可用于生产。
 pub const SIEVE_ORIGIN_PUBLIC_KEY: &[u8; 32] = &[0u8; 32];
 
+/// ADR-034 GA 编译期密钥 gate。
+///
+/// 启用 `ga_keys` feature（GA release build）时，若 [`SIEVE_ORIGIN_PUBLIC_KEY`]
+/// 仍为全零占位，则**编译失败**——阻止 X-Sieve-Origin 验签 fail-open 进入 GA
+/// 二进制。alpha build（默认无此 feature）行为不变。关联 ADR-019、SECURITY.md。
+#[cfg(feature = "ga_keys")]
+const _: () = {
+    const fn is_all_zeros(key: &[u8; 32]) -> bool {
+        let mut i = 0;
+        while i < 32 {
+            if key[i] != 0 {
+                return false;
+            }
+            i += 1;
+        }
+        true
+    }
+    assert!(
+        !is_all_zeros(SIEVE_ORIGIN_PUBLIC_KEY),
+        "ga_keys feature enabled but SIEVE_ORIGIN_PUBLIC_KEY is all zeros — GA build must embed a real Ed25519 public key (ADR-034)"
+    );
+};
+
 // ── 错误类型 ─────────────────────────────────────────────────────────────────
 
 /// X-Sieve-Origin header 解析 / 验证错误。
@@ -373,6 +396,17 @@ mod tests {
         assert!(
             matches!(err, OriginHeaderError::SignatureMissing),
             "expected SignatureMissing, got: {err}"
+        );
+    }
+
+    // 11. ADR-034: 默认/alpha build（无 `ga_keys` feature）下占位公钥保持全零。
+    // `ga_keys` 启用时由文件顶部 const 断言在编译期阻止全零（无法运行时测试）。
+    #[test]
+    fn ga_keys_gate_inactive_in_default_build() {
+        #[cfg(not(feature = "ga_keys"))]
+        assert_eq!(
+            SIEVE_ORIGIN_PUBLIC_KEY, &[0u8; 32],
+            "default/alpha build must keep placeholder all-zeros key"
         );
     }
 }

@@ -173,6 +173,8 @@ shasum -a 256 ../Sieve-<version>.dmg
 # 期望：两个 SHA-256 完全一致
 ```
 
+> **GA build 密钥 gate（[ADR-034](../design/ADR-034-ga-key-gate.md)）**：GA release 二进制必须用 `cargo build --release --features ga_keys` 构建。该 feature 在编译期断言规则签名公钥（`sieve-updater::TRUSTED_PUBKEY`）与 X-Sieve-Origin 公钥（`sieve-ipc::SIEVE_ORIGIN_PUBLIC_KEY`）已填真实值——若仍是占位（`None` / 全零）则 **编译失败（E0080）**，杜绝 fail-open 验签进入 GA 二进制。alpha / dogfood build（默认）不启用，行为不变。
+
 实现细节见 [ADR-006](../design/ADR-006-sigstore-reproducible-build.md)。任何 SHA-256 差异 → **不要安装该二进制**，立即在 [GitHub Issues](https://github.com/doskey/sieve/issues) 报告。
 
 ---

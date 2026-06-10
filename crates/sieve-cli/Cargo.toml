@@ -19,6 +19,11 @@ path = "src/main.rs"
 # 触发 sieve-core 内 SessionState.sequence_window + 3 条 IN-SEQ-* 启发式。
 default = []
 sequence_detection = ["sieve-core/sequence_detection"]
+# ADR-034 GA 编译期密钥 gate：传递给 sieve-updater + sieve-ipc。
+# GA release build 用 `cargo build --features ga_keys` 强制真实签名公钥就位，
+# 占位（TRUSTED_PUBKEY=None / SIEVE_ORIGIN_PUBLIC_KEY 全零）则编译失败。
+# alpha build（default）不启用，行为不变。
+ga_keys = ["sieve-updater/ga_keys", "sieve-ipc/ga_keys"]
 
 [dependencies]
 sieve-core = { path = "../sieve-core" }
