@@ -17,15 +17,18 @@ use std::path::{Path, PathBuf};
 /// 检测预设级别（SPEC-003 / data-model.md §5）。
 ///
 /// - `Strict`：所有规则最高灵敏度
-/// - `Default`：推荐平衡配置（默认）
+/// - `Standard`：推荐平衡配置（默认；v1 旧值 `default` 在 v2 重命名，SPEC-005 §5.6）
 /// - `Relaxed`：降低误报，适合受信任环境
 /// - `Custom`：完全自定义（忽略内置默认值）
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Preset {
     Strict,
+    /// 推荐平衡配置（默认）。SPEC-005 §5.6：v1 旧值 `default` 在 v2 重命名为 `standard`；
+    /// `alias = "default"` 兼容旧 sieve.toml，wire 输出统一 `standard`（与 GUI Preset enum 对齐）。
     #[default]
-    Default,
+    #[serde(alias = "default")]
+    Standard,
     Relaxed,
     Custom,
 }

@@ -248,7 +248,7 @@ deadbeef00112233  # known dev fixture address 0x000...dead
 | `ipc_socket_path` | path | `"~/.sieve/ipc.sock"` | Unix socket 路径（IPC 通道 A，代理 ↔ GUI App）；可被 `SIEVE_HOME` 覆盖 |
 | `pending_dir` | path | `"~/.sieve/pending/"` | Hook 类规则 pending 文件目录（IPC 通道 B）；`sieve setup` 自动创建（权限 0700） |
 | `decisions_dir` | path | `"~/.sieve/decisions/"` | Hook 类规则 decisions 文件目录（IPC 通道 B）；`sieve setup` 自动创建（权限 0700） |
-| `preset` | enum | `"default"` | 规则集预设：`"strict"` / `"default"` / `"relaxed"` / `"custom"`；影响 StatusBar 类规则阈值，**不影响 Critical**（详见 [ADR-016](./ADR-016-disposition-matrix-2d.md)） |
+| `preset` | enum | `"standard"` | 规则集预设：`"strict"` / `"standard"` / `"relaxed"` / `"custom"`（v1 旧值 `"default"` 在 v2 重命名为 `"standard"`，SPEC-005 §5.6；config 仍兼容旧 `"default"` alias）；影响 StatusBar 类规则阈值，**不影响 Critical**（详见 [ADR-016](./ADR-016-disposition-matrix-2d.md)） |
 | `launchd_plist_path` | path | `"~/Library/LaunchAgents/com.sieve.daemon.plist"` | launchd plist 路径（macOS only）；`sieve setup` 生成并 `launchctl bootstrap` |
 | `gui_socket_enabled` | bool | `true` | 是否启用 GUI App Unix socket（IPC 通道 A）；设为 `false` 时降级为 macOS `osascript` 系统通知，不弹 HIPS 弹窗（仍 fail-closed） |
 
@@ -293,7 +293,7 @@ deadbeef00112233  # known dev fixture address 0x000...dead
 upstream_url = "https://api.anthropic.com"
 port = 11453
 bind_addr = "127.0.0.1"
-preset = "default"
+preset = "standard"
 
 rules_path = "~/.sieve/rules"
 sieveignore_path = "~/.sieve/sieveignore"

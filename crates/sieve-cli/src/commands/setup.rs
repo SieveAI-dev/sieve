@@ -1850,7 +1850,7 @@ port = 11453
 bind_addr = "127.0.0.1"
 tls_verify_upstream = true
 dry_run = false
-preset = "default"
+preset = "standard"
 gui_socket_enabled = false
 
 # 出站规则文件路径（绝对路径，launchd 从 / 启动时不依赖 cwd）
