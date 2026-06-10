@@ -9,6 +9,11 @@ authors.workspace = true
 description = "Sieve IPC: JSON-RPC 2.0 over Unix socket + pending/decision file protocol (ADR-013)"
 publish = false
 
+[features]
+# ADR-034 GA 编译期密钥 gate：启用时 `SIEVE_ORIGIN_PUBLIC_KEY` 全零占位触发编译失败，
+# 阻止 X-Sieve-Origin 验签 fail-open 进入 GA 二进制。默认（alpha）不启用，行为不变。
+ga_keys = []
+
 [dependencies]
 tokio = { workspace = true, features = ["net", "fs", "sync", "time", "rt-multi-thread", "macros", "io-util"] }
 serde = { workspace = true }

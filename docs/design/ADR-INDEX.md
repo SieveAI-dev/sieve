@@ -48,6 +48,7 @@
 | [ADR-031](./ADR-031-cc-switch-compatibility.md)           | 与 cc-switch 互操作（Sieve 作为 cc-switch 一档供应商，路径 A 必做 / 路径 B 候选 / 路径 C 排除） | Proposed（草案，未通过） | 2026-05-06 | 关联 ADR-015/026/029/030 |
 | [ADR-032](./ADR-032-orchesis-strategy.md)                  | 借鉴 Orchesis 的架构与产品策略——三阶段学习路线、分阶段管线、营销叙事升级 | Proposed（草案，未通过） | 2026-05-06 | 关联 ADR-022/026/027/029/006/003 |
 | [ADR-033](./ADR-033-upstream-proxy.md)                     | 上游转发代理支持（HTTP CONNECT + SOCKS5） | Accepted | 2026-06-07 | 关联 §6.1、§9 #2 |
+| [ADR-034](./ADR-034-ga-key-gate.md)                        | GA 编译期密钥 gate：`ga_keys` feature 下占位公钥（updater `TRUSTED_PUBKEY` / origin `SIEVE_ORIGIN_PUBLIC_KEY`）编译失败，阻 fail-open 验签进 GA 二进制 | Accepted | 2026-06-11 | 关联 ADR-006/019/030、§9 #3/#6 |
 
 
 ---

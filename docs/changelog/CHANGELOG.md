@@ -13,6 +13,13 @@
 
 ## [Unreleased] — 2026-05-07
 
+### Security — GA 编译期密钥 gate（ADR-034，2026-06-11）
+
+- **新增 `ga_keys` cargo feature 作为 GA release build 的编译期密钥 gate**：启用时，若规则签名公钥（`sieve-updater::TRUSTED_PUBKEY = None`）或 X-Sieve-Origin 公钥（`sieve-ipc::SIEVE_ORIGIN_PUBLIC_KEY` 全零）仍为占位，则 **编译失败（E0080）**，阻止 fail-open 验签进入 GA 二进制，机器强制兑现 `SECURITY.md` 验签承诺（修复 2026-06-07 审查 §5 标记的 GA 硬阻塞）。
+- **alpha build（默认无 `ga_keys`）行为完全不变**：规则验签仍 skip+warn、origin 公钥仍占位，逐字节一致、零运行时开销、零新依赖。
+- 实现：`sieve-cli` 的 `ga_keys` 传递给 `sieve-updater` + `sieve-ipc`；各 crate 用 `#[cfg(feature = "ga_keys")]` const assert（Rust const panic）在编译期判定占位。GA release pipeline 须 `cargo build --release --features ga_keys`，公钥未就位即无法出包。
+- 详见 [ADR-034](../design/ADR-034-ga-key-gate.md)；关联 ADR-006 签名基建（GCP KMS，TODO-14）。
+
 ### Added — 上游转发代理支持（ADR-033 / SPEC-007，2026-06-07）
 
 - **daemon 转发上游可经配置的 HTTP CONNECT / SOCKS5 代理出网**，解决受限网络（Shadowrocket / Clash 等规则代理 + 分流、非全局 TUN）下 sieve 上游硬直连不可用的产品缺口。

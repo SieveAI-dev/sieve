@@ -17,6 +17,18 @@ use crate::error::UpdaterError;
 /// ed25519 verifying key once the signing infrastructure is set up.
 pub const TRUSTED_PUBKEY: Option<[u8; 32]> = None;
 
+/// ADR-034 GA 编译期密钥 gate。
+///
+/// 启用 `ga_keys` feature（GA release build）时，若 [`TRUSTED_PUBKEY`] 仍为占位
+/// `None`，则**编译失败**——阻止 fail-open 的规则签名校验进入 GA 二进制，兑现
+/// `SECURITY.md` 验签承诺。alpha build（默认无此 feature）行为完全不变
+/// （`verify_signature` 仍 skip+warn）。
+#[cfg(feature = "ga_keys")]
+const _: () = assert!(
+    TRUSTED_PUBKEY.is_some(),
+    "ga_keys feature enabled but TRUSTED_PUBKEY is None — GA build must embed a real Ed25519 verifying key (ADR-034)"
+);
+
 /// Verifies an Ed25519 signature over `data`.
 ///
 /// ADR-030 §5.5:
@@ -123,6 +135,18 @@ mod tests {
         assert!(
             result.is_ok(),
             "None pubkey must return Ok (with warn): {result:?}"
+        );
+    }
+
+    /// ADR-034: 默认/alpha build（无 `ga_keys` feature）下占位公钥保持 `None`，
+    /// fail-open skip+warn 契约不变。`ga_keys` 启用时由本文件顶部 const 断言在
+    /// 编译期阻止 `None`（无法运行时测试），故此处仅守护默认契约。
+    #[test]
+    fn ga_keys_gate_inactive_in_default_build() {
+        #[cfg(not(feature = "ga_keys"))]
+        assert!(
+            TRUSTED_PUBKEY.is_none(),
+            "default/alpha build must keep placeholder TRUSTED_PUBKEY = None"
         );
     }
 }

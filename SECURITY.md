@@ -73,7 +73,7 @@
 - 所有 release 二进制 **sigstore 签名 + Rekor 透明日志**（cosign verify-blob 可验证）
 - **Tier 1（macOS / Linux）reproducible build** 双构建 SHA-256 必须一致才能 release
 - **Tier 2（Windows）** 提供二进制 + sigstore 签名，reproducible build 推到 Phase 2
-- 规则包 **Ed25519 签名 + fail-closed 验证**（签名失败 → 沿用上一份已验证规则）
+- 规则包 **Ed25519 签名 + fail-closed 验证**（签名失败 → 沿用上一份已验证规则）。alpha build 公钥占位、暂为 fail-open（skip+warn，靠同源 SHA-256 兜底）；**GA build 经 `ga_keys` 编译期 gate 强制真实公钥就位**，占位则编译失败（[ADR-034](docs/design/ADR-034-ga-key-gate.md)）
 - **pinned dependencies**：`Cargo.lock` 入库 + Dependabot 周更（major 升级单独评估）
 
 供应链审计建议：

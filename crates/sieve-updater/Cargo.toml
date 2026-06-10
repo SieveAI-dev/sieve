@@ -9,6 +9,11 @@ authors.workspace = true
 description = "Update + telemetry beacon (ADR-030)"
 publish = false
 
+[features]
+# ADR-034 GA 编译期密钥 gate：启用时占位公钥 `TRUSTED_PUBKEY = None` 触发编译失败，
+# 阻止 fail-open 的规则签名校验进入 GA 二进制。默认（alpha）不启用，行为不变。
+ga_keys = []
+
 [dependencies]
 tokio = { workspace = true, features = ["rt", "macros", "time", "fs"] }
 hyper = { workspace = true, features = ["http1", "client"] }
