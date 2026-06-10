@@ -475,7 +475,11 @@ impl IpcServer {
                     let (tx, rx) = mpsc::channel::<String>(32);
                     let conn_tx = tx.clone();
                     {
-                        let mut writers = gui_writers.lock().expect("gui_writers lock poisoned");
+                        // 毒化恢复：持锁线程 panic 不破坏 Vec 结构，into_inner 取出数据继续
+                        // 注册（审查 §6——原 .expect 在毒化时 panic = DoS）。
+                        let mut writers = gui_writers
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
                         writers.push(tx);
                         let count = writers.len();
                         if count == 1 {
@@ -584,7 +588,11 @@ impl IpcServer {
         };
         payload.push('\n');
 
-        let mut writers = self.gui_writers.lock().expect("gui_writers lock poisoned");
+        // 毒化恢复：持锁线程 panic 不破坏 Vec 结构，into_inner 取出数据继续（审查 §6）。
+        let mut writers = self
+            .gui_writers
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
 
         if writers.is_empty() {
             debug!(
@@ -663,7 +671,11 @@ impl IpcServer {
 
         // 1. 检查 GUI 是否已连接（取第一个 sender 用于决策请求，决策请求不 fan-out）。
         let sender = {
-            let writers = self.gui_writers.lock().expect("gui_writers lock poisoned");
+            // 毒化恢复：持锁线程 panic 不破坏 Vec 结构，into_inner 取出数据继续（审查 §6）。
+            let writers = self
+                .gui_writers
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             writers.first().cloned()
         };
 
@@ -1779,5 +1791,28 @@ mod tests {
         let meta = std::fs::metadata(&socket_path).expect("metadata");
         let mode = meta.permissions().mode() & 0o777;
         assert_eq!(mode, 0o600, "socket 文件应为 0600，实际为 {mode:o}");
+    }
+
+    /// 审查 §6：gui_writers 锁毒化恢复依赖 `PoisonError::into_inner()` 保留 Vec 数据。
+    /// 本测试固化该 idiom 语义——持锁线程 panic 毒化 Mutex 后，`into_inner` 仍取回完整
+    /// 数据，守护 478/587/666 三处从 `.expect()`（毒化时 panic = DoS）改为毒化恢复的
+    /// 正确性前提。
+    #[test]
+    fn poisoned_mutex_into_inner_recovers_data() {
+        use std::sync::{Arc, Mutex};
+        let m: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(vec![7, 8, 9]));
+        let m2 = Arc::clone(&m);
+        let _ = std::thread::spawn(move || {
+            let _g = m2.lock().expect("first lock");
+            panic!("poison the mutex on purpose");
+        })
+        .join();
+        assert!(m.lock().is_err(), "持锁线程 panic 后 Mutex 必须处于毒化态");
+        let recovered = m.lock().unwrap_or_else(|p| p.into_inner());
+        assert_eq!(
+            &*recovered,
+            &[7, 8, 9],
+            "into_inner 必须取回完整 Vec（重构所依赖的恢复语义）"
+        );
     }
 }

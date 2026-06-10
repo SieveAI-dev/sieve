@@ -1423,24 +1423,37 @@ async fn proxy_inner(
     let is_skill_post = method == http::Method::POST
         && sieve_core::skill_install_guard::is_skill_install_path(&path);
 
+    // proxy_inner 请求体两态：白名单路径 collect 成 Bytes（出站扫描需要），其余路径
+    // 保持流式 Incoming（零缓冲透传，无 DoS 向量）。两态互斥——用 enum 而非
+    // `(Option<Bytes>, Option<Incoming>)` 让「既非 collected 又非 streaming」的非法态
+    // 在类型层不可表达，消除后续取出点的热路径 `.expect()`（CLAUDE.md 请求路径禁 panic）。
+    enum ProxyRequestBody {
+        /// 白名单路径（/v1/messages、/v1/chat/completions、skill install）已收集的 body。
+        Collected(Bytes),
+        /// 其余路径的流式 body，原样透传。
+        Streaming(hyper::body::Incoming),
+    }
+
     // 只对白名单路径 collect body；其余 POST 保留为流式 body，完全不缓冲。
-    let (post_body_bytes, non_post_body): (Option<Bytes>, Option<hyper::body::Incoming>) =
-        if is_messages_post || is_chat_completions_post || is_skill_post {
-            let collected = body
-                .collect()
-                .await
-                .map_err(|e| anyhow!("collect body (post): {e}"))?;
-            (Some(collected.to_bytes()), None)
-        } else {
-            (None, Some(body))
-        };
+    let proxy_body = if is_messages_post || is_chat_completions_post || is_skill_post {
+        let collected = body
+            .collect()
+            .await
+            .map_err(|e| anyhow!("collect body (post): {e}"))?;
+        ProxyRequestBody::Collected(collected.to_bytes())
+    } else {
+        ProxyRequestBody::Streaming(body)
+    };
 
     // ── IN-CR-06 OpenClaw skill install 检测（路径白名单 only）──────────────────
     if is_skill_post {
-        // unwrap 安全：is_skill_post 分支已 collect
-        let body_bytes_skill = post_body_bytes
-            .as_ref()
-            .expect("body_bytes set for skill_post");
+        // 不变量：is_skill_post → collect 块走 Collected 分支。借用做 manifest 检测，不 move。
+        let ProxyRequestBody::Collected(body_bytes_skill) = &proxy_body else {
+            tracing::error!("BUG: is_skill_post but request body not collected");
+            return Ok(build_500_internal_response(
+                "skill install body not collected",
+            ));
+        };
 
         // body ≤ 4KB 时才做 manifest 检测（> 4KB 多半不是 manifest，跳过减少误判）
         let body_json: serde_json::Value = if body_bytes_skill.len() <= 4096 {
@@ -1580,7 +1593,10 @@ async fn proxy_inner(
 
     if is_messages_post {
         // body 已在 POST 预收集块中 collect，直接取出
-        let body_bytes = post_body_bytes.expect("body_bytes set for POST");
+        let ProxyRequestBody::Collected(body_bytes) = proxy_body else {
+            tracing::error!("BUG: is_messages_post but request body not collected");
+            return Ok(build_500_internal_response("messages body not collected"));
+        };
 
         // 2. 解析 AnthropicRequest；解析失败则直接透传（上游会返回 400）
         let anthropic_req: sieve_core::protocol::anthropic::AnthropicRequest =
@@ -2057,7 +2073,12 @@ async fn proxy_inner(
     // ── OpenAI Chat Completions 路径（v1.5，ADR-018）────────────────────────────
     if is_chat_completions_post {
         // body 已在 POST 预收集块中 collect，直接取出
-        let body_bytes = post_body_bytes.expect("body_bytes set for POST");
+        let ProxyRequestBody::Collected(body_bytes) = proxy_body else {
+            tracing::error!("BUG: is_chat_completions_post but request body not collected");
+            return Ok(build_500_internal_response(
+                "chat completions body not collected",
+            ));
+        };
         return proxy_openai(
             forwarder,
             filter,
@@ -2081,17 +2102,12 @@ async fn proxy_inner(
         .await;
     }
 
-    // 其他路径：流式透传（Week 1 行为）
-    // POST 路径已预收集 body bytes，用 forward_raw；非 POST 保持流式透传。
-    if let Some(body_bytes) = post_body_bytes {
-        forward_raw(forwarder, parts, body_bytes).await
-    } else {
-        forward_streaming(
-            forwarder,
-            parts,
-            non_post_body.expect("non_post_body set for non-POST"),
-        )
-        .await
+    // 其他路径：流式透传（Week 1 行为）。
+    // Collected（白名单 POST 未命中检测，fall through）→ forward_raw；
+    // Streaming（非白名单）→ forward_streaming。enum 两态穷尽，无非法态可表达。
+    match proxy_body {
+        ProxyRequestBody::Collected(body_bytes) => forward_raw(forwarder, parts, body_bytes).await,
+        ProxyRequestBody::Streaming(stream) => forward_streaming(forwarder, parts, stream).await,
     }
 }
 
@@ -4183,6 +4199,26 @@ async fn forward_streaming(
 /// 返回 400 Bad Request + sieve_blocked event payload。
 /// 例：Anthropic listener 收到 `/v1/chat/completions` → 400。
 /// 关联：ADR-026 §决策 4、PRD §9 #3 fail-closed、ADR-007。
+/// 构造 500 响应——仅用于「类型不变量被违反」的不可达 BUG 兜底，把原热路径
+/// `.expect()` 的 panic（= DoS 向量）降级为明确的 500 + error log。正常控制流
+/// 永不命中（请求体两态在 collect 块就已确定，见 proxy_inner 的 `ProxyRequestBody`）。
+fn build_500_internal_response(reason: &str) -> Response<ResponseBody> {
+    let body_json = serde_json::json!({
+        "type": "sieve_error",
+        "error": "internal_invariant_violation",
+        "reason": reason,
+    });
+    let body_bytes = Bytes::from(body_json.to_string());
+    Response::builder()
+        .status(http::StatusCode::INTERNAL_SERVER_ERROR) // 500
+        .header(
+            http::header::CONTENT_TYPE,
+            "application/json; charset=utf-8",
+        )
+        .body(bytes_body(body_bytes))
+        .unwrap_or_else(|_| Response::new(empty_body()))
+}
+
 fn build_protocol_mismatch_400(
     path: &str,
     listener_protocol: crate::config::Protocol,
