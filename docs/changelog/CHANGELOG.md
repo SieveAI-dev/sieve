@@ -20,6 +20,17 @@
 - 实现：`sieve-cli` 的 `ga_keys` 传递给 `sieve-updater` + `sieve-ipc`；各 crate 用 `#[cfg(feature = "ga_keys")]` const assert（Rust const panic）在编译期判定占位。GA release pipeline 须 `cargo build --release --features ga_keys`，公钥未就位即无法出包。
 - 详见 [ADR-034](../design/ADR-034-ga-key-gate.md)；关联 ADR-006 签名基建（GCP KMS，TODO-14）。
 
+### Fixed — preset mode 跨仓契约漂移：daemon 仍发 v1 旧值 `default`（2026-06-11）
+
+- **修复 daemon health / set_preset 发送 v1 旧值 `"default"`、与 SPEC-005 §5.6 + GUI `Preset` enum（`"standard"`）漂移的 bug**。SPEC-005 §5.6 规定 v1 preset mode `"default"` 在 v2 重命名为 `"standard"`、daemon 与各端必须同步替换，但 daemon 侧（`config::Preset::Default` variant + `daemon_control_plane` String 字面量 + setup 模板）从未替换——daemon 推送 `"default"` 时 GUI 解码 `Preset` enum 失败 → disconnected（直接影响真机 dogfood 连通）。
+- 修复：`config::Preset` enum `Default` → `Standard`（`#[serde(alias = "default")]` 兼容旧 sieve.toml）；`daemon_control_plane::default_mode` + `handle_set_preset` 校验统一 `"standard"`（兼容旧 client 发来的 `"default"` → normalize）；`sieve setup` 模板 `preset = "standard"`。
+- **由本次新落地的 GUI 端 `IPCSchemaV2FixtureTests` 首次消费 daemon 权威 fixture 时发现**——印证 fixture 防漂移机制价值。文档同步：data-model.md / api-reference.md。
+
+### Tested — SPEC §14 fixture 防漂移机制落地（2026-06-11）
+
+- **daemon 权威 fixture `sieve.health/response.full.json` 补 `listeners[]`（ADR-026 multi-listener），`schema_v2_fixtures.rs` 新增 health full 全 result 双向稳定校验**（`to_value(HealthResult) == fixture result`），落实 SPEC §14.1（此前全文件仅单向反序列化、fixture 缺 listeners[] 漂移无人发现）。
+- **GUI 仓新增 `Tests/SieveGUITests/Fixtures/v2/` daemon fixture 副本 + `IPCSchemaV2FixtureTests.swift`**（SPEC §14.2），GUI 解码消费 daemon 权威 fixture 而非内联 JSON，杜绝跨仓 schema 漂移。立即发现上条 preset 漂移 bug。
+
 ### Added — 上游转发代理支持（ADR-033 / SPEC-007，2026-06-07）
 
 - **daemon 转发上游可经配置的 HTTP CONNECT / SOCKS5 代理出网**，解决受限网络（Shadowrocket / Clash 等规则代理 + 分流、非全局 TUN）下 sieve 上游硬直连不可用的产品缺口。

@@ -85,12 +85,13 @@ pub struct RuntimePreset {
 }
 
 impl RuntimePreset {
-    /// 默认 preset（mode=default + 空 overrides）。
+    /// 默认 preset（mode=standard + 空 overrides）。
     /// 主要供 daemon::run 初始化失败兜底 + 单元测试构造。
+    /// SPEC-005 §5.6：v2 preset mode 用 `standard`（v1 旧值 `default` 已重命名）。
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn default_mode() -> Self {
         Self {
-            mode: "default".to_owned(),
+            mode: "standard".to_owned(),
             overrides: HashMap::new(),
         }
     }
@@ -326,7 +327,13 @@ async fn handle_set_preset(
     state: &Arc<RuntimeState>,
 ) -> Result<(SetPresetResult, Option<BroadcastPlan>), ControlError> {
     let mode = params.mode.to_lowercase();
-    if !matches!(mode.as_str(), "strict" | "default" | "relaxed" | "custom") {
+    // SPEC-005 §5.6：v1 旧值 `default` 在 v2 重命名为 `standard`；兼容旧 client 发来的 `default`。
+    let mode = if mode == "default" {
+        "standard".to_owned()
+    } else {
+        mode
+    };
+    if !matches!(mode.as_str(), "strict" | "standard" | "relaxed" | "custom") {
         return Err(ControlError::invalid_params(format!(
             "unknown preset mode: {}",
             params.mode
