@@ -1,7 +1,8 @@
 # Sieve daemon · 进度
 
-> 上次更新：2026-06-07
-> 当前阶段：**dogfood 等验证；运维侧 TODO-13~16 待海外主体落地；ADR-031/032 草案待决策通过**
+> 上次更新：2026-06-11
+> 当前阶段：**dogfood 等验证（SPEC-007 上游代理 + preset 漂移修复后真机应可连通）；SPEC-007 8 commits 本地未 push 待 dogfood 冲烟；运维侧 TODO-13~16 待海外主体落地；ADR-031/032 草案待决策通过**
+> 质量基线：**workspace 775 passed / 0 failed / 7 ignored**；fmt/clippy/deny 全绿；GUI swift test 137 passed
 
 ## 当前阶段一句话
 
@@ -20,6 +21,17 @@ ADR-030 sieve-updater crate + SPEC-006 + docs 同步 2026-05-05 同日完成（T
 ---
 
 ## ✅ 主里程碑
+
+### 2026-06-10~11 SPEC-007 上游代理 + 三项 dev 债清理 + preset 跨仓漂移修复（审查 follow-up）
+
+承接 2026-06-07 审查：先落地 **SPEC-007 上游转发代理**（8 commits，本地未 push 待 dogfood 冲烟），再清剩余可做 dev 债三项 + 修一个由防漂移测试现场抓出的真 bug。质量基线 **775 passed / 0 failed / 7 ignored**，fmt/clippy/deny 全绿；GUI swift test 137 passed。
+
+- **SPEC-007 上游转发代理（HTTP CONNECT + SOCKS5）**：ProxyConnector 替换 Forwarder 底层 connector，TLS 端到端不变（不 MITM）；每 upstream + 全局 + env 优先级链；updater 复用；ADR-033 + 8 commits（`b480736`..`9604926`，**本地未 push**）。解决受限网络 dogfood 第一跳直连即断。Task 11 真机冲烟 = 用户 action item。
+- **① Ed25519 GA 编译期密钥 gate（ADR-034，`1fffb8e`）**：`ga_keys` feature 下占位公钥（updater `TRUSTED_PUBKEY=None` / origin `SIEVE_ORIGIN_PUBLIC_KEY` 全零）编译失败（E0080），阻 fail-open 验签进 GA 二进制；alpha build 逐字节不变。修审查 §5 GA 硬阻塞。
+- **② 热路径 7 处 expect 重构（`16bd513`）**：daemon proxy_inner 4 处用 `ProxyRequestBody` enum 让非法态类型层不可表达（不可达兜底 500）；socket_server 3 处 lock 改 `into_inner` 毒化恢复。消除 panic=DoS，兑现 CLAUDE.md「请求路径禁 panic」。content-type 路由矩阵 + 全集成测试零回归。
+- **③ SPEC §14 fixture 防漂移落地（sieve `2c51c96` + GUI `b3075b0`）**：daemon health fixture 补 `listeners[]` + `schema_v2_fixtures.rs` 落实 §14.1 全 result 双向稳定（此前全单向、名存实亡）；GUI 仓建 `Tests/SieveGUITests/Fixtures/v2/` + `IPCSchemaV2FixtureTests.swift` 消费 daemon 权威 fixture 副本（§14.2）。
+- **④ preset mode 跨仓漂移修复（`ae20fd3`）—— 由 ③ 现场抓出**：daemon 漏做 SPEC-005 §5.6 的 v1→v2 `default`→`standard` 重命名（`config::Preset::Default` variant + daemon_control_plane String + setup 模板仍发旧值），GUI 只认 `standard` → 解码失败 → disconnected（**直接卡死真机 dogfood 连通，极可能是 dogfood 跑不起来的元凶之一**）。config enum 改名 Standard（`serde alias="default"` 兼容旧 toml）+ daemon_control_plane normalize + setup 模板 + 文档同步。详见 [lessons.md](lessons.md) 同日条目。
+- **GUI 仓 follow-up（待 daemon push）**：`upstream-references.md` pin 待 daemon push 后回填到含 fixture 改动的 commit；SPEC §14.3 release 打包 + sync 脚本自动化属发布基建，记 GA 前 follow-up。
 
 ### 2026-06-07 P0 修复：13 个红测试归零（workflow 全量审查）
 
