@@ -20,6 +20,20 @@
       "addr": "127.0.0.1",
       "port": 11453
     },
+    "listeners": [
+      {
+        "addr": "127.0.0.1",
+        "port": 11453,
+        "provider_id": "anthropic",
+        "protocol": "anthropic"
+      },
+      {
+        "addr": "127.0.0.1",
+        "port": 11454,
+        "provider_id": "deepseek",
+        "protocol": "auto"
+      }
+    ],
     "audit_db": {
       "path": "~/.sieve/audit.db",
       "size_bytes": 102400,

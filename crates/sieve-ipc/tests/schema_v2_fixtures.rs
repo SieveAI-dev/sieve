@@ -78,6 +78,62 @@ fn health_response_minimal_deserializes() {
     assert_eq!(health.protocol_version, "v2");
     assert!(!health.paused);
     assert_eq!(health.rules.system_count, 12);
+    // SPEC-005 §9.5：minimal fixture 省略 listeners，#[serde(default)] 解析为空 vec。
+    assert!(
+        health.listeners.is_empty(),
+        "minimal fixture 省略 listeners 时应回落为空 vec（ADR-026 向后兼容）"
+    );
+}
+
+/// health response full fixture 可反序列化 + listeners[] 完整 + 双向稳定（SPEC-005 §14.1）。
+///
+/// 双向稳定是 §14.1 的核心防漂移约束：fixture MUST 等于 daemon 序列化输出，
+/// 任何 HealthResult schema 变更（如新增 listeners[] 却忘了更新 fixture）都会让本
+/// 测试失败——这正是 2026-06-07 审查发现 fixture 缺 listeners[] 漂移本该触发的防线。
+#[test]
+fn health_response_full_deserializes_and_roundtrips() {
+    let json = include_str!("fixtures/v2/sieve.health/response.full.json");
+    let val: serde_json::Value = serde_json::from_str(json).unwrap();
+    let result = val.get("result").unwrap().clone();
+    let health: HealthResult = serde_json::from_value(result.clone()).unwrap();
+
+    // ADR-026 multi-listener：full fixture 列出 2 个 listener，含 provider_id + protocol。
+    assert_eq!(health.listeners.len(), 2, "full fixture 应含 2 个 listener");
+    assert_eq!(health.listeners[0].provider_id, "anthropic");
+    assert_eq!(health.listeners[0].protocol, "anthropic");
+    assert_eq!(health.listeners[1].provider_id, "deepseek");
+    assert_eq!(health.listeners[1].protocol, "auto");
+    // 向后兼容：listen 单字段仍等价 listeners[0] 地址。
+    assert_eq!(health.listen.port, 11453);
+
+    // §14.1 双向稳定：序列化回 Value 必须与 fixture result 逐字段一致。
+    let reserialized = serde_json::to_value(&health).expect("serialize HealthResult");
+    assert_eq!(
+        reserialized, result,
+        "health full fixture 双向不稳定——fixture 与 daemon 序列化输出漂移（SPEC-005 §14.1）"
+    );
+}
+
+/// health response null_optional fixture：可选字段显式 null + listeners 显式空数组。
+#[test]
+fn health_response_null_optional_deserializes() {
+    let json = include_str!("fixtures/v2/sieve.health/response.null_optional.json");
+    let val: serde_json::Value = serde_json::from_str(json).unwrap();
+    let result = val.get("result").unwrap().clone();
+    let health: HealthResult = serde_json::from_value(result).unwrap();
+    assert!(!health.paused);
+    assert!(
+        health.paused_until.is_none(),
+        "null_optional: paused_until 应为 None"
+    );
+    assert!(
+        health.rules.last_reload.is_none(),
+        "null_optional: last_reload 应为 None"
+    );
+    assert!(
+        health.listeners.is_empty(),
+        "null_optional: listeners 显式空数组应解析为空 vec"
+    );
 }
 
 // ── sieve.request_decision（P1-5 wire DTO）───────────────────────────────────
