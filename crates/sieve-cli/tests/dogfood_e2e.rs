@@ -344,6 +344,17 @@ async fn phase_b_inbound_anthropic_json_blocks_signing_tool() {
         body_str.contains("IN-CR-05"),
         "应含 IN-CR-05 rule_id:\n{body_str}"
     );
+
+    // 审计完整性（2026-06-18 接线，硬约束 #16 anthropic_json 路径）：该入站 block 必须落
+    // audit（direction=inbound + disposition=blocked）。fire-and-forget spawn，sleep 后再读。
+    tokio::time::sleep(Duration::from_millis(800)).await;
+    let rows = read_audit_rows(&guard.audit_db());
+    assert!(
+        rows.iter().any(|(rule, _sev, direction, disposition, _dec, _provider)| {
+            direction == "inbound" && disposition == "blocked" && rule.contains("IN-CR-05")
+        }),
+        "anthropic JSON 入站 block 应落 inbound/blocked 审计行；实际: {rows:?}"
+    );
 }
 
 /// Phase B-3：OpenAI SSE —— prompt seed 地址 A，上游 SSE 仅含近似地址 B（Levenshtein=1）→
@@ -380,6 +391,86 @@ async fn phase_b_inbound_openai_sse_blocks_address_substitution() {
     assert!(
         body_str.contains("IN-CR-01"),
         "应含 IN-CR-01 rule_id:\n{body_str}"
+    );
+
+    // 审计完整性（2026-06-18 接线，openai_sse 路径）：该入站 block 应落 inbound/blocked 审计。
+    // fire-and-forget spawn，sleep 后再读（SSE 路径落库窗口可能略长，给充足时间）。
+    tokio::time::sleep(Duration::from_millis(800)).await;
+    let rows = read_audit_rows(&guard.audit_db());
+    assert!(
+        rows.iter().any(|(rule, _sev, direction, disposition, _dec, _provider)| {
+            direction == "inbound" && disposition == "blocked" && rule.contains("IN-CR-01")
+        }),
+        "OpenAI SSE 入站 block 应落 inbound/blocked 审计行；实际: {rows:?}"
+    );
+}
+
+/// Phase B-3b：OpenAI 非流式 JSON —— `choices[].message.tool_calls` 含 `eth_signTransaction`
+/// 的 JSON 响应被替换为含 `sieve_blocked` + IN-CR-05，且该入站 block 落 audit（inbound/blocked）。
+///
+/// 补 ADR-025 content-type 矩阵 openai_json 路径的 audit 覆盖——此前 OpenAI 入站 block 测试
+/// 只有 SSE 路径，JSON 路径无 block 审计断言（重蹈「只挂一条路径」P0 漏洞风险）。
+/// 关联硬约束 #16 / handle_openai_json_inbound / PRD §5.2 IN-CR-05-EVM。
+#[tokio::test]
+async fn phase_b_inbound_openai_json_blocks_signing_tool() {
+    // IN-CR-05-EVM 触发 payload：choices[].message.tool_calls 含 eth_signTransaction。
+    let attack_json = serde_json::json!({
+        "id": "chatcmpl-01", "object": "chat.completion", "created": 1_700_000_000u64,
+        "model": "gpt-4o",
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant", "content": serde_json::Value::Null,
+                "tool_calls": [{
+                    "id": "tc1", "type": "function",
+                    "function": {
+                        "name": "eth_signTransaction",
+                        "arguments": "{\"to\":\"0xdeadbeef\",\"value\":\"1000000000000000000\"}"
+                    }
+                }]
+            },
+            "finish_reason": "tool_calls"
+        }],
+        "usage": { "prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30 }
+    });
+    let attack_bytes = bytes::Bytes::from(attack_json.to_string());
+    let mock = spawn_mock_upstream(move |_req| {
+        let b = attack_bytes.clone();
+        async move {
+            http::Response::builder()
+                .status(200)
+                .header(hyper::header::CONTENT_TYPE, "application/json")
+                .body(http_body_util::Full::new(b))
+                .unwrap()
+        }
+    })
+    .await;
+
+    let guard = spawn_daemon(DaemonConfig::new(mock.url()));
+    // 无 stream:true → 非流式 JSON 路径（handle_openai_json_inbound）。
+    let body = r#"{"model":"gpt-4o","messages":[{"role":"user","content":"run"}]}"#.to_string();
+    let (status, _h, raw) = post_json(&guard.base_url(), "/v1/chat/completions", body).await;
+    let body_str = String::from_utf8_lossy(&raw);
+
+    assert_eq!(status, 200, "上游 200 应保留（sieve_blocked 注入 body）");
+    assert!(
+        body_str.contains("sieve_blocked"),
+        "OpenAI 非流式 JSON 含签名工具应触发 sieve_blocked:\n{body_str}"
+    );
+    assert!(
+        body_str.contains("IN-CR-05"),
+        "应含 IN-CR-05 rule_id:\n{body_str}"
+    );
+
+    // 审计完整性（2026-06-18 接线，硬约束 #16 openai_json 路径）：入站 block 必须落
+    // audit（direction=inbound + disposition=blocked）。fire-and-forget spawn，sleep 后读。
+    tokio::time::sleep(Duration::from_millis(800)).await;
+    let rows = read_audit_rows(&guard.audit_db());
+    assert!(
+        rows.iter().any(|(rule, _sev, direction, disposition, _dec, _provider)| {
+            direction == "inbound" && disposition == "blocked" && rule.contains("IN-CR-05")
+        }),
+        "openai JSON 入站 block 应落 inbound/blocked 审计行；实际: {rows:?}"
     );
 }
 
@@ -685,6 +776,82 @@ async fn phase_d_detection_audit_wired_and_queryable() {
     assert!(
         stdout.contains("OUT-01"),
         "sieve audit query jsonl 输出应含 OUT-01 detection 行: {stdout}"
+    );
+
+    // 正向断言③（入站拦截审计，2026-06-18 接线）：入站 Critical fail-closed block
+    // 此前一律不落 audit（真机 dogfood 抓出），现 spawn_inbound_blocked_audit 补齐。
+    // 复用 phase_b 的 eth_signTransaction → IN-CR-05 触发一次 anthropic JSON block，
+    // 断言 audit 出现 direction=inbound + disposition=blocked + rule_id 含 IN-CR-05 的行。
+    let json_block_body = serde_json::json!({
+        "id": "msg_01", "type": "message", "role": "assistant", "model": "claude-sonnet-4-5",
+        "content": [{
+            "type": "tool_use", "id": "toolu_01", "name": "eth_signTransaction",
+            "input": { "to": "0xdeadbeef", "value": "1000000000000000000" }
+        }],
+        "stop_reason": "tool_use",
+        "usage": { "input_tokens": 10, "output_tokens": 50 }
+    });
+    let block_bytes = bytes::Bytes::from(json_block_body.to_string());
+    let block_mock = spawn_mock_upstream(move |_req| {
+        let b = block_bytes.clone();
+        async move {
+            http::Response::builder()
+                .status(200)
+                .header(hyper::header::CONTENT_TYPE, "application/json")
+                .body(http_body_util::Full::new(b))
+                .unwrap()
+        }
+    })
+    .await;
+    let block_guard = spawn_daemon(DaemonConfig::new(block_mock.url()));
+    let req_body = serde_json::json!({
+        "model": "claude-sonnet-4-5", "max_tokens": 16,
+        "messages": [{ "role": "user", "content": "hi" }],
+    })
+    .to_string();
+    let (_s, _h, raw) = post_json(&block_guard.base_url(), "/v1/messages", req_body).await;
+    let raw_str = String::from_utf8_lossy(&raw);
+    assert!(
+        raw_str.contains("sieve_blocked") && raw_str.contains("IN-CR-05"),
+        "前置条件：入站 JSON 应被 IN-CR-05 拦截:\n{raw_str}"
+    );
+
+    // fire-and-forget 审计（tokio::spawn），断言前给落库窗口（同 phase_d 上面 800ms）。
+    tokio::time::sleep(Duration::from_millis(800)).await;
+    let block_db = block_guard.audit_db();
+    let inbound_block_rows = read_audit_rows(&block_db);
+    assert!(
+        inbound_block_rows.iter().any(
+            |(rule, _sev, direction, disposition, _dec, _provider)| {
+                direction == "inbound" && disposition == "blocked" && rule.contains("IN-CR-05")
+            }
+        ),
+        "入站 anthropic JSON block 应写入 direction=inbound + disposition=blocked + IN-CR-05 审计行；实际: {inbound_block_rows:?}"
+    );
+
+    // 正向断言④（`--severity` 过滤回归，2026-06-18 真机 dogfood 抓出）：审计列存**小写**
+    // severity，此前 `run_query` 用首字母大写字面量 "Critical" 匹配小写列，致 `--severity`
+    // 过滤**永远返回空**；现 `LOWER(severity)` 大小写不敏感。用 block_guard 的 critical
+    // 入站行端到端验证 CLI 真实路径（单测走 query_rows 绕过了 run_query 的 match）。
+    let block_home = block_guard.sieve_home().to_owned();
+    let sev_out = tokio::task::spawn_blocking(move || {
+        sieve_testing::cli::run_sieve_cli_with_home(
+            &["audit", "query", "--severity", "critical", "--format", "jsonl"],
+            &block_home,
+        )
+    })
+    .await
+    .unwrap();
+    assert!(
+        sev_out.status.success(),
+        "sieve audit query --severity critical 应成功: {}",
+        String::from_utf8_lossy(&sev_out.stderr)
+    );
+    let sev_stdout = String::from_utf8_lossy(&sev_out.stdout);
+    assert!(
+        sev_stdout.contains("IN-CR-05"),
+        "sieve audit query --severity critical 应查到 critical 入站拦截行\
+         （此前大写字面量匹配小写列致空）；实际: {sev_stdout}"
     );
 }
 
