@@ -6,6 +6,26 @@
 
 ---
 
+## ⚙️ 自动化状态（2026-06-18）
+
+> **本清单大部分已被自动化覆盖**，无需逐项手动跑。一键 hermetic 验证（无真 API key / 无网络 / 无 GUI）：
+> ```bash
+> scripts/dogfood.sh        # 构建 + cargo e2e + smoke + updater 闭环，全过即 dogfood 就绪
+> ```
+> 自动化映射（详见 [SPEC-008 dogfood 自动化](../specs/SPEC-008-dogfood-automation.html)）：
+> - **§1 基线** → `cargo fmt/clippy/test/deny/build`（CI `fmt`/`clippy`/`test`/`deny` job）
+> - **§3-§5 multi-listener/协议错位/doctor** → `crates/sieve-cli/tests/{multi_agent_routing,content_type_matrix,doctor}.rs`
+> - **§6-§9 audit/decisions CLI + 决策流** → `crates/sieve-cli/tests/dogfood_e2e.rs`（出站脱敏/入站拦截/no-client-policy 三策略/mock-GUI 决策流/audit 闭环）
+> - **§14 sieve-updater 闭环** → `crates/sieve-updater/tests/updater_e2e.rs`（install-id/fetch→download→sha256→zstd 解压→原子落盘/失败模式/公钥 None skip），**已替代 §14.3 的 caddy+mkcert 手动 mock**
+> - **透传/SSE/tool_use/脱敏黑盒** → `python3 scripts/smoke_test.py --mock-only`
+> - **§13 跨仓一致性** → GUI 仓 `IPCSchemaV2FixtureTests.swift`（81 fixture 消费测试，防漂移红线）
+>
+> **仍需手动**（自动化收益低/依赖外部）：§3.3/§10 真 API key 实打、GUI 可视层（菜单栏/Toast/Settings/Onboarding）、真 Claude Code 流量触发 OUT-*/IN-CR-*。
+>
+> ⚠️ 自动化首轮抓出多个真 bug（见 [PROGRESS.md 🚫 段](../../tasks/PROGRESS.md) + [lessons.md 2026-06-18](../../tasks/lessons.md)）：zstd 字节序（已修）、headless CLI 嵌套 runtime panic（已修）、detection 审计未接线 + 6 类跨仓 schema 漂移（待排期）。
+
+---
+
 ## 0. 文档目的
 
 把 2026-05-05 完成的 13 commits（unix-style 改造）+ ADR-030 sieve-updater 客户端闭环转化为**可逐项勾选**的人工验证步骤。所有步骤跑完且勾选 → daemon 侧 dogfood 就绪。GUI 仓侧的联调（sieve-gui-macos）见该仓自己的 checklist，本文档不覆盖。服务端（CF Workers + D1）尚未实施,§14 用本地 mock 服务器即可验证客户端独立闭环。

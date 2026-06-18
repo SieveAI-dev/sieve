@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SPEC-008 · Dogfood 完全自动化</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1d212b; --ink:#e6e9ef; --ink-dim:#9aa3b2;
+    --line:#2a2f3a; --accent:#5b9dff;
+    --auto:#3fb950;   --auto-bg:rgba(63,185,80,.12);
+    --mock:#58a6ff;   --mock-bg:rgba(88,166,255,.12);
+    --manual:#8b949e; --manual-bg:rgba(139,148,158,.12);
+    --bug:#f85149;    --bug-bg:rgba(248,81,73,.12);
+    --warn:#d29922;   --warn-bg:rgba(210,153,34,.12);
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.65;font-size:15px}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,pre{font-family:var(--mono)}
+  .wrap{max-width:1100px;margin:0 auto;padding:0 20px}
+
+  header.hero{border-bottom:1px solid var(--line);padding:34px 0 26px;background:linear-gradient(180deg,#13161d,#0f1115)}
+  header.hero h1{margin:0 0 6px;font-size:26px;letter-spacing:.3px}
+  header.hero .sub{color:var(--ink-dim);font-size:15px}
+  .meta{margin-top:14px;display:flex;flex-wrap:wrap;gap:8px}
+  .meta .pill{font-size:12px;color:var(--ink-dim);background:var(--panel2);border:1px solid var(--line);border-radius:999px;padding:3px 11px}
+
+  nav.toc{position:sticky;top:0;z-index:20;background:rgba(15,17,21,.93);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+  nav.toc .wrap{display:flex;flex-wrap:wrap;gap:4px;padding-top:9px;padding-bottom:9px}
+  nav.toc a{font-size:12.5px;color:var(--ink-dim);padding:4px 9px;border-radius:6px;white-space:nowrap}
+  nav.toc a:hover{background:var(--panel2);color:var(--ink);text-decoration:none}
+
+  section{padding:30px 0 8px;border-bottom:1px solid var(--line)}
+  section h2{font-size:20px;margin:0 0 4px;scroll-margin-top:60px}
+  section h2 .num{color:var(--accent);font-variant-numeric:tabular-nums;margin-right:8px}
+  section h3{font-size:16px;color:#cdd4e0;margin:24px 0 8px}
+  p{margin:10px 0}
+
+  .lead{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:8px;padding:14px 18px;margin:16px 0}
+  .lead strong{color:#fff}
+
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:760px){.grid2{grid-template-columns:1fr}}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px}
+  .card h4{margin:0 0 8px;font-size:14px;color:#cdd4e0}
+
+  ul.tight{margin:8px 0;padding-left:20px}
+  ul.tight li{margin:5px 0}
+
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13.5px;display:block;overflow-x:auto}
+  th,td{border:1px solid var(--line);padding:8px 11px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);color:#cdd4e0;font-weight:600;white-space:nowrap}
+  td.center,th.center{text-align:center}
+
+  .tag{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:5px;white-space:nowrap}
+  .tag.auto{color:var(--auto);background:var(--auto-bg);border:1px solid rgba(63,185,80,.3)}
+  .tag.mock{color:var(--mock);background:var(--mock-bg);border:1px solid rgba(88,166,255,.3)}
+  .tag.manual{color:var(--manual);background:var(--manual-bg);border:1px solid rgba(139,148,158,.3)}
+  .tag.bug{color:var(--bug);background:var(--bug-bg);border:1px solid rgba(248,81,73,.3)}
+  .tag.warn{color:var(--warn);background:var(--warn-bg);border:1px solid rgba(210,153,34,.3)}
+
+  pre{background:#0b0d11;border:1px solid var(--line);border-radius:8px;padding:13px 15px;overflow-x:auto;font-size:12.8px;line-height:1.55;margin:12px 0}
+  pre code{color:#d6deeb}
+  .cmt{color:#5c6370}
+  p code,li code,td code{background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:12.5px;color:#e7c08a}
+
+  figure{margin:18px 0;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}
+  figure svg{width:100%;height:auto;display:block}
+  figcaption{color:var(--ink-dim);font-size:12.5px;margin-top:10px;text-align:center}
+
+  .legend{display:flex;flex-wrap:wrap;gap:14px;margin:6px 0 2px;font-size:12px;color:var(--ink-dim)}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .legend i{width:13px;height:13px;border-radius:3px;display:inline-block}
+
+  .bug-case{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--bug);border-radius:8px;padding:16px;margin:16px 0}
+  .bug-case h4{margin:0 0 6px;color:var(--bug);font-size:15px}
+  .bug-case .why{background:var(--bug-bg);border-radius:6px;padding:10px 13px;margin-top:10px;font-size:13.5px}
+
+  .copybtn{cursor:pointer;font-family:var(--sans);font-size:13px;font-weight:600;color:#fff;background:var(--accent);border:none;border-radius:7px;padding:9px 16px;transition:background .15s}
+  .copybtn:hover{background:#4a8af0}
+  .copybtn.done{background:var(--auto)}
+
+  footer{padding:26px 0 50px;color:var(--ink-dim);font-size:13px}
+  .kbd{font-family:var(--mono);font-size:12px;background:var(--panel2);border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:1px 6px}
+</style>
+</head>
+<body>
+
+<header class="hero"><div class="wrap">
+  <h1>SPEC-008 · Dogfood 完全自动化</h1>
+  <div class="sub">把 821 行手动联调 checklist 变成无真 API / 无真网络 / 无真 GUI 的一键 + 零 secret CI 端到端测试</div>
+  <div class="meta">
+    <span class="pill">Version: v1.0 — 2026-06-18</span>
+    <span class="pill">关联 ADR-026 / ADR-028 / ADR-030</span>
+    <span class="pill">替代对象：docs/guides/manual-integration-test.md（16 节）</span>
+    <span class="pill">进度真实源：tasks/PROGRESS.md「当前 Epic」</span>
+  </div>
+</div></header>
+
+<nav class="toc"><div class="wrap">
+  <a href="#overview">1 · 概述与结论</a>
+  <a href="#arch">2 · 架构总览</a>
+  <a href="#matrix">3 · 自动化缺口矩阵</a>
+  <a href="#hermetic">4 · hermetic mock 基建</a>
+  <a href="#updater">5 · updater 闭环时序</a>
+  <a href="#value">6 · 价值印证（2 个真 bug）</a>
+  <a href="#run">7 · 运行方式</a>
+  <a href="#manual">8 · 保留手动的部分</a>
+</div></nav>
+
+<div class="wrap">
+
+<!-- ════════════════ 1 概述 ════════════════ -->
+<section id="overview">
+  <h2><span class="num">1.</span>概述与核心结论</h2>
+
+  <div class="lead">
+    <strong>结论先行：</strong>Sieve 此前的 dogfood 是一份 821 行、需要真 <code>ANTHROPIC_API_KEY</code> + 真网络 + 真 macOS GUI 才能逐项勾选的手动 checklist——进入 dogfood 冻结期后几乎没人完整跑过，导致错误断言与生产级 bug 静默存活数月。本 Epic 把它重构为<strong>全程 hermetic（本地 mock 上游 + headless CLI）、一条命令 <code>scripts/dogfood.sh</code> 跑通、CI 零 secret 复现</strong>的自动化端到端测试。28/32 能力块（去掉外部依赖后 87.5%）可自动化；自动化首跑即抓出 2 个真 bug（其一会让整条规则热更新在生产中失效）。
+  </div>
+
+  <h3>两条范围决策（2026-06-18 用户签字）</h3>
+  <div class="grid2">
+    <div class="card">
+      <h4>① headless 客户端替代 GUI</h4>
+      <p>决策客户端不再依赖真 macOS GUI App。daemon 已经是 client-agnostic（ADR-028 协议中性化）：用 <code>sieve decisions</code> headless CLI / 直连 IPC socket 的 mock GUI 当决策客户端，跑通 watch / approve / block / warn 全链路。GUI 仓只保留<strong>跨仓 17-method fixture 一致性测试</strong>，不碰 XCUITest 可视层。</p>
+    </div>
+    <div class="card">
+      <h4>② 全程 hermetic mock 上游</h4>
+      <p>本地一键 <strong>和</strong> CI 无 secret 都要能跑 → 唯一可行解是全程 mock 上游。mock 同时覆盖 Anthropic（SSE + 非流式 JSON）和 OpenAI（SSE + JSON）四类 content-type 组合（硬约束 #16）；daemon 经 <code>tls_verify_upstream=false</code> 走 plain HTTP 连 mock。出站拦截（426 / 脱敏）由 daemon 自身完成，与上游无关。</p>
+    </div>
+  </div>
+
+  <h3>harness 形态</h3>
+  <ul class="tight">
+    <li><strong>新 dev crate <code>crates/sieve-testing</code></strong>：把分散在 <code>sieve-cli/tests/*</code> 的 mock 上游 / daemon 进程管理 / 原始 HTTP client / CLI 驱动 helper 抽取为可复用库。模块：<code>paths</code>（端口 / 二进制 / 规则路径）· <code>upstream</code>（mock 上游 + Anthropic/OpenAI 响应生成器）· <code>daemon</code>（<code>DaemonGuard</code> + <code>DaemonConfig</code> + <code>wait_for_ipc</code>）· <code>http</code>（含 <code>decode_chunked</code>）· <code>cli</code>（<code>run_sieve_cli</code> shell out 真 CLI）。</li>
+    <li><strong>cargo 集成测试为主</strong>：<code>sieve-cli/tests/dogfood_e2e.rs</code>（Phase A–D，11 个测试）+ <code>sieve-updater/tests/updater_e2e.rs</code>（§14 闭环，8 个测试）。</li>
+    <li><strong>Python smoke 为辅</strong>：<code>scripts/smoke_test.py --mock-only</code>（黑盒，29/29 通过）。</li>
+    <li><strong>一键入口</strong>：<code>scripts/dogfood.sh</code> 串起构建 → cargo e2e → smoke → updater 闭环，退出码 0/非 0 供 CI 直接判定。</li>
+  </ul>
+</section>
+
+<!-- ════════════════ 2 架构总览 ════════════════ -->
+<section id="arch">
+  <h2><span class="num">2.</span>架构总览</h2>
+  <p>测试驱动器（cargo test / smoke）在同一进程内起 <strong>mock 上游</strong>，spawn 真实 <strong>sieve daemon</strong> 进程指向它，再以 <strong>headless CLI / mock GUI</strong> 当决策客户端，最后对 HTTP 响应、上游收到的 body、audit.db 做断言。整条链路无真 key、无真网络、无真 GUI。</p>
+
+  <div class="legend">
+    <span><i style="background:var(--auto)"></i>已自动化（真 daemon / 真断言）</span>
+    <span><i style="background:var(--mock)"></i>hermetic mock（替身）</span>
+    <span><i style="background:var(--manual)"></i>保留手动</span>
+  </div>
+
+  <figure>
+  <svg viewBox="0 0 1040 470" role="img" aria-label="dogfood 自动化架构图">
+    <defs>
+      <marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto">
+        <path d="M0,0 L8,3.2 L0,6.4 Z" fill="#8a93a6"/></marker>
+      <marker id="ahg" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto">
+        <path d="M0,0 L8,3.2 L0,6.4 Z" fill="#3fb950"/></marker>
+    </defs>
+    <style>
+      .lbl{font:600 13px var(--sans,sans-serif);fill:#e6e9ef}
+      .sub{font:11px var(--sans,sans-serif);fill:#9aa3b2}
+      .ed{font:11px var(--sans,sans-serif);fill:#8a93a6}
+      .boxauto{fill:rgba(63,185,80,.10);stroke:#3fb950;stroke-width:1.4}
+      .boxmock{fill:rgba(88,166,255,.10);stroke:#58a6ff;stroke-width:1.4}
+      .boxn{fill:#1d212b;stroke:#2a2f3a;stroke-width:1.2}
+    </style>
+
+    <!-- harness boundary -->
+    <rect x="14" y="12" width="1012" height="446" rx="12" fill="none" stroke="#2a2f3a" stroke-dasharray="6 5"/>
+    <text x="30" y="34" class="sub">sieve-testing harness · 单进程内 hermetic 边界（无真网络出口）</text>
+
+    <!-- driver -->
+    <rect x="36" y="60" width="200" height="92" rx="9" class="boxauto"/>
+    <text x="50" y="86" class="lbl">测试驱动器</text>
+    <text x="50" y="106" class="sub">cargo test / smoke_test.py</text>
+    <text x="50" y="124" class="sub">spawn_daemon · http_post</text>
+    <text x="50" y="142" class="sub">断言 status/body/audit</text>
+
+    <!-- mock upstream -->
+    <rect x="36" y="230" width="200" height="116" rx="9" class="boxmock"/>
+    <text x="50" y="256" class="lbl">mock 上游</text>
+    <text x="50" y="276" class="sub">spawn_mock_upstream</text>
+    <text x="50" y="293" class="sub">spawn_mock_streaming_*</text>
+    <text x="50" y="312" class="sub">Anthropic SSE / JSON</text>
+    <text x="50" y="329" class="sub">OpenAI SSE / JSON · 401</text>
+
+    <!-- daemon -->
+    <rect x="420" y="100" width="220" height="210" rx="9" class="boxauto"/>
+    <text x="438" y="126" class="lbl">sieve daemon（真二进制）</text>
+    <text x="438" y="148" class="sub">target/release/sieve start</text>
+    <line x1="438" y1="160" x2="622" y2="160" stroke="#2a2f3a"/>
+    <text x="438" y="180" class="sub">· 出站规则引擎（OUT-*）</text>
+    <text x="438" y="198" class="sub">· 入站 SSE/JSON 矩阵检测</text>
+    <text x="438" y="216" class="sub">· content-type 路由</text>
+    <text x="438" y="234" class="sub">· gated_request_decision</text>
+    <text x="438" y="252" class="sub">· no_client_policy 兜底</text>
+    <text x="438" y="270" class="sub">· audit.db (SQLite v3)</text>
+    <text x="438" y="294" class="sub">tls_verify_upstream=false</text>
+
+    <!-- decision client -->
+    <rect x="812" y="60" width="196" height="118" rx="9" class="boxauto"/>
+    <text x="826" y="86" class="lbl">决策客户端（headless）</text>
+    <text x="826" y="107" class="sub">mock GUI 直连 IPC sock</text>
+    <text x="826" y="125" class="sub">sieve.request_decision</text>
+    <text x="826" y="143" class="sub">→ Allow / Deny / Warn</text>
+    <text x="826" y="166" class="sub">（替代 macOS GUI App）</text>
+
+    <!-- assertion sink -->
+    <rect x="812" y="230" width="196" height="116" rx="9" class="boxauto"/>
+    <text x="826" y="256" class="lbl">断言面</text>
+    <text x="826" y="277" class="sub">· HTTP status (200/426)</text>
+    <text x="826" y="294" class="sub">· 上游收到 body（脱敏）</text>
+    <text x="826" y="311" class="sub">· 注入 sieve_blocked</text>
+    <text x="826" y="328" class="sub">· audit.db rows / schema</text>
+
+    <!-- GUI 保留手动 -->
+    <rect x="420" y="356" width="220" height="78" rx="9" class="boxn" stroke="#8b949e" stroke-dasharray="5 4"/>
+    <text x="438" y="382" class="lbl" fill="#8b949e">GUI 可视层（保留手动）</text>
+    <text x="438" y="402" class="sub">菜单栏 5 状态 / Toast</text>
+    <text x="438" y="419" class="sub">Settings / Onboarding 权限</text>
+
+    <!-- edges -->
+    <path d="M236,108 L416,150" fill="none" stroke="#8a93a6" stroke-width="1.4" marker-end="url(#ah)"/>
+    <text x="262" y="118" class="ed">① POST /v1/messages</text>
+
+    <path d="M420,260 L240,288" fill="none" stroke="#8a93a6" stroke-width="1.4" marker-end="url(#ah)"/>
+    <text x="262" y="282" class="ed">② 转发（plain HTTP）</text>
+
+    <path d="M640,150 L808,108" fill="none" stroke="#3fb950" stroke-width="1.4" marker-end="url(#ahg)"/>
+    <text x="660" y="120" class="ed">③ 决策请求（IPC）</text>
+
+    <path d="M808,150 L642,178" fill="none" stroke="#3fb950" stroke-width="1.4" marker-end="url(#ahg)"/>
+    <text x="660" y="172" class="ed">④ 决策回执</text>
+
+    <path d="M640,250 L808,278" fill="none" stroke="#8a93a6" stroke-width="1.4" marker-end="url(#ah)"/>
+    <text x="660" y="248" class="ed">⑤ 响应 / 落库</text>
+
+    <path d="M812,300 C720,330 300,250 158,152" fill="none" stroke="#8a93a6" stroke-width="1.2" stroke-dasharray="4 4" marker-end="url(#ah)"/>
+    <text x="430" y="330" class="ed">⑥ 驱动器读断言面</text>
+  </svg>
+  <figcaption>图 1 · 自动化架构：测试驱动 → mock 上游 → sieve daemon（真二进制）→ headless 决策客户端 → 断言面。所有 sieve-testing harness 组件标绿/蓝，GUI 可视层是唯一灰色（保留手动）。</figcaption>
+  </figure>
+
+  <p class="card" style="border-left:3px solid var(--warn)"><span class="tag warn">写测试时探针核实的 daemon 真实行为</span> dogfood_e2e 不是凭空写的——落地时用探针逐项核实并在文件头记录了 4 条非显然行为：① <code>no_client_policy</code> 只从 CLI flag 读、从不读 <code>sieve.toml</code>（且 <code>Config</code> 有 <code>deny_unknown_fields</code>），故 Phase C 改用直接 spawn 二进制 + flag；② <code>wait_for_ipc</code> 探测连接会污染 <code>connected_clients</code>，测「无 client」路径时刻意不调它；③④ 是下文第 6 节锚定的 2 个缺口/bug。</p>
+</section>
+
+<!-- ════════════════ 3 矩阵 ════════════════ -->
+<section id="matrix">
+  <h2><span class="num">3.</span>自动化缺口矩阵</h2>
+  <p>手动 checklist 各能力块 → 自动化状态。数据取自 PROGRESS.md 能力块测绘（去 EXT 后 28/32 可自动化）。</p>
+  <div class="legend">
+    <span><i style="background:var(--auto)"></i>已自动化</span>
+    <span><i style="background:var(--mock)"></i>mock 替身</span>
+    <span><i style="background:var(--manual)"></i>保留手动</span>
+  </div>
+
+  <table>
+    <thead><tr>
+      <th>手动 checklist 节</th><th>能力块</th><th class="center">状态</th><th>自动化载体</th>
+    </tr></thead>
+    <tbody>
+      <tr><td>§1 基线</td><td>fmt / clippy / test / deny / build</td><td class="center"><span class="tag auto">已自动化</span></td><td>CI 矩阵 + dogfood.sh step 1</td></tr>
+      <tr><td>§2 旧 schema 兼容</td><td>legacy upstream_url/port 仍可用</td><td class="center"><span class="tag auto">已自动化</span></td><td>config 单测 + harness DaemonConfig</td></tr>
+      <tr><td>§3 multi-listener</td><td>多 bind / 端口冲突 fail-fast</td><td class="center"><span class="tag auto">已自动化</span></td><td>multi_agent_routing.rs / config 单测</td></tr>
+      <tr><td>§4 协议错位 fail-closed</td><td>path mismatch + header 不能 override</td><td class="center"><span class="tag auto">已自动化</span></td><td>content_type_matrix.rs / doctor.rs</td></tr>
+      <tr><td>§3.3 / §10 实打上游</td><td>真 Anthropic/DeepSeek/OpenAI 流量</td><td class="center"><span class="tag mock">mock</span></td><td>mock 上游（Phase A/B，path prefix）</td></tr>
+      <tr><td>§5 doctor 体检</td><td>multi-listener 端口可达</td><td class="center"><span class="tag auto">已自动化</span></td><td>doctor.rs 集成测试</td></tr>
+      <tr><td>§6/§7/§8 audit</td><td>tail/query/show · provider_id · v2→v3 migration</td><td class="center"><span class="tag auto">已自动化</span></td><td>audit_append_only.rs + Phase D（含 CLI bug 锚定）</td></tr>
+      <tr><td>§9 decisions</td><td>watch/show/resolve + no-client-policy 三策略</td><td class="center"><span class="tag auto">已自动化</span></td><td>Phase C / C2（mock GUI 直连 IPC）</td></tr>
+      <tr><td>—（出站脱敏）</td><td>OUT-01 AutoRedact 转发脱敏 body</td><td class="center"><span class="tag auto">已自动化</span></td><td>Phase A + smoke --mock-only</td></tr>
+      <tr><td>—（入站拦截）</td><td>IN-CR-05 / IN-CR-01 跨 4 类 content-type</td><td class="center"><span class="tag auto">已自动化</span></td><td>Phase B（SSE+JSON）+ inbound_block.rs</td></tr>
+      <tr><td>§11/§12 中性化/模块化</td><td>SPEC-005 措辞 / sieve-ipc 目录结构</td><td class="center"><span class="tag auto">已自动化</span></td><td>结构断言 + grep（文档/结构级）</td></tr>
+      <tr><td>§13 跨仓 follow-up</td><td>GUI 仓 17-method fixture 一致性</td><td class="center"><span class="tag mock">mock</span></td><td>P1.3 跨仓 fixture 对账测试（进行中）</td></tr>
+      <tr><td>§14.1 install-id</td><td>首启 / 幂等 / 删后重生</td><td class="center"><span class="tag auto">已自动化</span></td><td>updater_e2e.rs（SIEVE_CACHE_DIR 隔离）</td></tr>
+      <tr><td>§14.2 三个 env var</td><td>NO_UPDATE / NO_TELEMETRY / UPDATE_URL</td><td class="center"><span class="tag auto">已自动化</span></td><td>updater_e2e telemetry uid 开关</td></tr>
+      <tr><td>§14.3 mock + https 反代</td><td>caddy + mkcert TLS 反代</td><td class="center"><span class="tag auto">已自动化</span></td><td>改用 SIEVE_UPDATE_ALLOW_HTTP 接缝（去 TLS 依赖）</td></tr>
+      <tr><td>§14.4 完整闭环</td><td>fetch→download→sha256→zstd→原子落盘</td><td class="center"><span class="tag auto">已自动化</span></td><td>updater_e2e closure_* 测试</td></tr>
+      <tr><td>§14.5 失败模式</td><td>sha256 mismatch / 不可达 / 坏 zstd / 超大</td><td class="center"><span class="tag auto">已自动化</span></td><td>updater_e2e failure_* 测试</td></tr>
+      <tr><td>§14.6 公钥 None skip</td><td>签名校验非静默跳过 + WARN</td><td class="center"><span class="tag auto">已自动化</span></td><td>updater_e2e pubkey_none_*</td></tr>
+      <tr><td>—（真 API 触发）</td><td>真 Claude Code OUT-*/IN-CR-* 触发</td><td class="center"><span class="tag manual">保留手动</span></td><td>离线 vectorscan fuzz + deterministic 样本集</td></tr>
+      <tr><td>—（GUI 可视层）</td><td>菜单栏 5 状态 / Toast / Settings / Onboarding</td><td class="center"><span class="tag manual">保留手动</span></td><td>人工 dogfood，一轮 2–3h</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ════════════════ 4 hermetic 基建 ════════════════ -->
+<section id="hermetic">
+  <h2><span class="num">4.</span>hermetic mock 基建</h2>
+
+  <h3>4.1 mock 上游（Anthropic + OpenAI 全协议）</h3>
+  <p><code>sieve-testing::upstream</code> 提供两类 mock：<code>spawn_mock_upstream</code>（<code>Full&lt;Bytes&gt;</code> body，模拟非流式 JSON）和 <code>spawn_mock_streaming_upstream</code>（<code>StreamBody</code> chunked，无 <code>content-length</code>，模拟 SSE）。<code>responses</code> 子模块按真实协议骨架生成 Anthropic（<code>message_start</code>…<code>message_stop</code>、<code>tool_use</code> + <code>input_json_delta</code>）和 OpenAI（<code>chat.completion.chunk</code> + <code>[DONE]</code>）的 SSE/JSON，外加 <code>auth_error_401</code>。这覆盖硬约束 #16 要求的 4 类 content-type 组合。</p>
+
+  <h3>4.2 <code>SIEVE_UPDATE_ALLOW_HTTP</code> 接缝（release 编译期消除）</h3>
+  <p>updater 的 <code>download.rs</code> / <code>manifest.rs</code> 原本双 <code>https_only()</code>，使本地 plain-HTTP mock 无法联调。手动 checklist §14.3 的旧方案是 caddy + mkcert 起 https 反代——复杂、依赖外部工具、CI 不友好。新方案改在 <code>tls.rs</code> 加一个<strong>编译期接缝</strong>：仅 <code>#[cfg(debug_assertions)]</code> 下读 <code>SIEVE_UPDATE_ALLOW_HTTP</code> 放宽为 <code>https_or_http()</code>；release/GA 构建里 <code>allow_plain_http()</code> 恒返回 <code>false</code> 且整个降级分支被编译期消除——<strong>生产二进制根本不存在降级到明文的代码路径</strong>。这保住了 PRD §9 #2「唯一允许出站是 TLS manifest/CDN」的安全不变量，同时让测试零 TLS 依赖。</p>
+
+  <figure>
+  <svg viewBox="0 0 1000 270" role="img" aria-label="SIEVE_UPDATE_ALLOW_HTTP cfg 分支图">
+    <style>
+      .t{font:600 13px var(--sans,sans-serif);fill:#e6e9ef}
+      .s{font:11.5px var(--sans,sans-serif);fill:#9aa3b2}
+      .mono{font:12px var(--mono,monospace);fill:#e7c08a}
+      .ok{fill:rgba(63,185,80,.10);stroke:#3fb950;stroke-width:1.4}
+      .dbg{fill:rgba(88,166,255,.10);stroke:#58a6ff;stroke-width:1.4}
+      .rel{fill:rgba(248,81,73,.06);stroke:#f85149;stroke-width:1.4}
+      .n{fill:#1d212b;stroke:#2a2f3a;stroke-width:1.2}
+    </style>
+    <defs><marker id="a2" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto">
+      <path d="M0,0 L8,3.2 L0,6.4 Z" fill="#8a93a6"/></marker></defs>
+
+    <rect x="30" y="100" width="180" height="62" rx="9" class="n"/>
+    <text x="46" y="126" class="t">build_update_client()</text>
+    <text x="46" y="146" class="s">tls.rs · 共享 client 构造</text>
+
+    <!-- diamond -->
+    <path d="M340,131 L420,96 L500,131 L420,166 Z" fill="#171a21" stroke="#d29922" stroke-width="1.4"/>
+    <text x="368" y="128" class="s">cfg = ?</text>
+    <text x="356" y="146" class="mono" font-size="10.5">debug_assertions</text>
+
+    <!-- debug branch -->
+    <rect x="600" y="26" width="360" height="86" rx="9" class="dbg"/>
+    <text x="618" y="50" class="t">debug 构建</text>
+    <text x="618" y="70" class="mono">allow_plain_http()=env SIEVE_UPDATE_ALLOW_HTTP</text>
+    <text x="618" y="90" class="s">置位 → https_or_http()（测试允许明文 mock）</text>
+    <text x="618" y="106" class="s">未置位 → https_only()</text>
+
+    <!-- release branch -->
+    <rect x="600" y="150" width="360" height="92" rx="9" class="rel"/>
+    <text x="618" y="174" class="t" fill="#f85149">release / GA 构建</text>
+    <text x="618" y="194" class="mono">#[cfg(not(debug_assertions))] allow_plain_http()=false</text>
+    <text x="618" y="214" class="s">恒 https_only() —— env 不被读取</text>
+    <text x="618" y="232" class="s">降级分支编译期消除（dead-code-eliminated）</text>
+
+    <line x1="210" y1="131" x2="338" y2="131" stroke="#8a93a6" stroke-width="1.4" marker-end="url(#a2)"/>
+    <path d="M460,108 L598,69" fill="none" stroke="#3fb950" stroke-width="1.4" marker-end="url(#a2)"/>
+    <path d="M460,154 L598,196" fill="none" stroke="#f85149" stroke-width="1.4" marker-end="url(#a2)"/>
+  </svg>
+  <figcaption>图 2 · <code>SIEVE_UPDATE_ALLOW_HTTP</code> 的 cfg 分支：明文降级只活在 debug，release 编译期消除——安全不变量与 GA 等价。</figcaption>
+  </figure>
+
+  <h3>4.3 <code>SIEVE_CACHE_DIR</code> 隔离</h3>
+  <p><code>cache_dir.rs</code> 原本硬用 <code>$HOME/Library/Caches/sieve</code>，测试会污染真实用户缓存。P0.1 新增 <code>CACHE_DIR_ENV</code>：置非空值时<strong>逐字用作缓存目录</strong>（verbatim），绕过平台检测。install-id 与 updater runner 都经 <code>cache_dir()</code> 自动获益。override 优先级用纯函数 <code>resolve_cache_dir_with_override</code> 单测，避免改进程全局 env 在并行 runner 下竞态。这只控制文件落点，签名校验等安全行为不受影响。</p>
+</section>
+
+<!-- ════════════════ 5 updater 闭环 ════════════════ -->
+<section id="updater">
+  <h2><span class="num">5.</span>updater 闭环时序（§14 自动化）</h2>
+  <p><code>updater_e2e.rs</code> 用本地 plain-HTTP mock（复用 <code>spawn_mock_upstream</code>）跑通完整规则热更新闭环，跨平台 hermetic（非 macOS-only）。mock manifest 的 <code>rules.url</code> 自引用本机 Host，下载回环到同一 mock。</p>
+
+  <figure>
+  <svg viewBox="0 0 1000 430" role="img" aria-label="updater 闭环时序图">
+    <style>
+      .actor{font:600 12.5px var(--sans,sans-serif);fill:#e6e9ef}
+      .step{font:11.5px var(--sans,sans-serif);fill:#cdd4e0}
+      .note{font:11px var(--sans,sans-serif);fill:#9aa3b2}
+      .life{stroke:#2a2f3a;stroke-width:1.2;stroke-dasharray:4 4}
+      .msg{stroke:#58a6ff;stroke-width:1.4}
+      .ret{stroke:#3fb950;stroke-width:1.4}
+      .self{stroke:#d29922;stroke-width:1.4}
+    </style>
+    <defs>
+      <marker id="m1" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto"><path d="M0,0 L8,3.2 L0,6.4 Z" fill="#58a6ff"/></marker>
+      <marker id="m2" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto"><path d="M0,0 L8,3.2 L0,6.4 Z" fill="#3fb950"/></marker>
+      <marker id="m3" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto"><path d="M0,0 L8,3.2 L0,6.4 Z" fill="#d29922"/></marker>
+    </defs>
+
+    <!-- actors -->
+    <rect x="60" y="18" width="180" height="34" rx="7" fill="#1d212b" stroke="#2a2f3a"/>
+    <text x="80" y="40" class="actor">sieve-updater runner</text>
+    <line x1="150" y1="52" x2="150" y2="410" class="life"/>
+
+    <rect x="560" y="18" width="200" height="34" rx="7" fill="rgba(88,166,255,.10)" stroke="#58a6ff"/>
+    <text x="580" y="40" class="actor">mock manifest + CDN</text>
+    <line x1="660" y1="52" x2="660" y2="410" class="life"/>
+
+    <rect x="830" y="18" width="150" height="34" rx="7" fill="rgba(63,185,80,.10)" stroke="#3fb950"/>
+    <text x="850" y="40" class="actor">cache dir（隔离）</text>
+    <line x1="905" y1="52" x2="905" y2="410" class="life"/>
+
+    <!-- 1 fetch_manifest -->
+    <line x1="150" y1="80" x2="658" y2="80" class="msg" marker-end="url(#m1)"/>
+    <text x="170" y="74" class="step">① fetch_manifest GET /v1/manifest?v&amp;os&amp;arch&amp;uid&amp;ch</text>
+    <line x1="660" y1="106" x2="152" y2="106" class="ret" marker-end="url(#m2)"/>
+    <text x="200" y="100" class="step">manifest{version,url,sha256,size,signature}</text>
+
+    <!-- 2 download -->
+    <line x1="150" y1="140" x2="658" y2="140" class="msg" marker-end="url(#m1)"/>
+    <text x="170" y="134" class="step">② download_rules GET rules.url（≤ 50 MiB 上限）</text>
+    <line x1="660" y1="166" x2="152" y2="166" class="ret" marker-end="url(#m2)"/>
+    <text x="220" y="160" class="step">zstd 压缩字节</text>
+
+    <!-- 3 sha256 -->
+    <path d="M150,188 h44 v18 h-44" fill="none" class="self" marker-end="url(#m3)"/>
+    <text x="205" y="202" class="step">③ sha256(payload) == manifest.sha256 ?</text>
+
+    <!-- 4 signature -->
+    <path d="M150,224 h44 v18 h-44" fill="none" class="self" marker-end="url(#m3)"/>
+    <text x="205" y="238" class="step">④ ed25519 verify_signature —— TRUSTED_PUBKEY=None → skip + WARN（非静默）</text>
+
+    <!-- 5 zstd -->
+    <path d="M150,260 h44 v18 h-44" fill="none" class="self" marker-end="url(#m3)"/>
+    <text x="205" y="274" class="step">⑤ zstd decode（magic 0x28 B5 2F FD）→ 规则 JSON 明文</text>
+
+    <!-- 6 atomic write -->
+    <line x1="150" y1="300" x2="903" y2="300" class="ret" marker-end="url(#m2)"/>
+    <text x="205" y="294" class="step">⑥ write .tmp → 原子 rename → &lt;version&gt;.json</text>
+
+    <!-- 7 symlink -->
+    <line x1="150" y1="334" x2="903" y2="334" class="ret" marker-end="url(#m2)"/>
+    <text x="205" y="328" class="step">⑦ current.json symlink → &lt;version&gt;.json</text>
+
+    <!-- 8 latest -->
+    <line x1="150" y1="368" x2="903" y2="368" class="ret" marker-end="url(#m2)"/>
+    <text x="205" y="362" class="step">⑧ latest_version.json {version,installed_at,sha256}</text>
+
+    <text x="60" y="402" class="note">失败模式（§14.5）：sha256 mismatch / 不可达 / 坏 zstd / 超大 —— 各自精确报错、清理半成品、不 panic、不击穿 daemon。</text>
+  </svg>
+  <figcaption>图 3 · updater 闭环时序：fetch_manifest → download_rules → sha256 校验 → 签名 skip(None) → zstd 解压 → 原子 rename → current.json symlink → latest_version.json。</figcaption>
+  </figure>
+
+  <p><strong>断言强度</strong>：闭环测试不止查「文件存在」，而是断言 <code>&lt;version&gt;.json</code> 内容 == 解压后的原始规则 JSON、<code>current.json</code> 解析到同一内容、<code>latest_version.json</code> 记录版本号——正是这个端到端内容回环断言抓出了下文第 6 节的 ZSTD_MAGIC bug。遥测维度：telemetry 开启时 <code>uid</code> 出现在 manifest query，关闭（<code>uid=None</code>）时缺失。</p>
+</section>
+
+<!-- ════════════════ 6 价值印证 ════════════════ -->
+<section id="value">
+  <h2><span class="num">6.</span>价值印证：自动化首跑抓出的 2 个真 bug</h2>
+  <p>自动化的价值不是「让绿灯更绿」，而是把<strong>没法自动跑 = 必然漂移</strong>的验证拉回每次都跑。首次落地即抓出 2 个真问题——其一是错误断言，其二会让整条生产功能失效。</p>
+
+  <div class="bug-case">
+    <h4><span class="tag bug">BUG-1</span> OUT-01 出站断言滞后于 disposition 改动（426 → auto_redact）</h4>
+    <p>给 <code>smoke_test.py</code> 加 <code>--mock-only</code> 时，<code>test_outbound_block_fake_key</code> 断言「OUT-01 fake key → HTTP 426 + sieve_blocked」实跑得到 401。OUT-01 的 disposition 早已从 <code>block</code> 改为 <code>auto_redact</code>（ADR-016 二维处置矩阵 + PRD v1.4 §6.1）——daemon 现在<strong>脱敏后转发</strong>而非 426 拦截。Rust 集成测试当时同步改对了，Python smoke 没改，断言变成错的。</p>
+    <div class="why"><strong>为什么旧测试没抓到：</strong>smoke 默认要真 <code>ANTHROPIC_API_KEY</code> + 真网络才跑全套，进 dogfood 冻结期后几乎没人拿真 key 跑过，错误断言静默存活数月。<strong>修复：</strong>smoke 断言改为验「转发到上游的 body 已脱敏」（mock 捕获 body 比对，含 <code>REDACTED</code> 占位符）而非验状态码，<code>--mock-only</code> 29/29 通过。</div>
+  </div>
+
+  <div class="bug-case">
+    <h4><span class="tag bug">BUG-2</span> sieve-updater ZSTD_MAGIC 字节序反置 —— 真实规则包永不解压（生产级）</h4>
+    <p><code>install.rs</code> 里 <code>ZSTD_MAGIC = [0xFD,0x2F,0xB5,0x28]</code> 字节序反了。zstd 帧 magic 是 <code>0xFD2FB528</code>，磁盘小端存储为 <code>28 B5 2F FD</code>（RFC 8878 §3.1.1）。于是 <code>data[..4] == ZSTD_MAGIC</code> 对<strong>任何真 zstd 流永远为假</strong> → <code>decompress_zstd</code> 永远走「当原始字节」fallback → 规则包被原样（压缩态）写盘 → sieve-rules 加载必失败。<strong>整个 ADR-030 规则热更新功能在生产中是坏的。</strong></p>
+    <div class="why"><strong>为什么旧测试没抓到：</strong>现有 4 个 zstd 单测全部假阳性掩盖——要么用明文走 fallback、要么用<strong>同一个错误常量</strong>当 payload 前缀（与 bug 自洽）、要么只断言「文件存在 / 版本号」从不断言解压后内容。「测试通过」≠「功能正确」。唯有 <code>updater_e2e.rs</code> 用真实 zstd payload 做 encode→install→read 端到端内容回环断言才能抓出。<strong>修复：</strong>常量改 <code>[0x28,0xB5,0x2F,0xFD]</code> + happy_path 补解压内容断言；updater 39 单测 + 8 e2e 全绿。</div>
+  </div>
+
+  <h3>同时锚定的 2 个已知缺口（dogfood_e2e 内）</h3>
+  <p>除上面两个已修 bug，dogfood_e2e 还把另外两个真实缺口<strong>锚成回归断言</strong>（断言「当前坏行为」，一旦修复断言会失败提示改正向断言）：</p>
+  <ul class="tight">
+    <li><span class="tag warn">缺口 A</span> <strong>detection 审计未接线</strong>：OUT-* 脱敏 / IN-CR-* 拦截 / GUI 决策都不写 <code>audit_events</code> 行（<code>OutboundRedacted</code> / <code>DecisionMade</code> 等变体零调用点）。Phase D 断言「detection 行缺失」锚定。</li>
+    <li><span class="tag warn">缺口 B</span> <strong><code>sieve audit</code> / <code>sieve decisions</code> CLI nested-runtime panic</strong>：<code>main()</code> 是 <code>#[tokio::main]</code>，子命令 <code>run()</code> 内又 <code>new_current_thread().block_on()</code> → "Cannot start a runtime from within a runtime" panic（exit 134）。Phase D 断言该 panic 锚定（决策流改用 mock GUI 直连 IPC 绕过）。</li>
+  </ul>
+</section>
+
+<!-- ════════════════ 7 运行方式 ════════════════ -->
+<section id="run">
+  <h2><span class="num">7.</span>运行方式</h2>
+
+  <h3>7.1 本地一键</h3>
+  <button class="copybtn" id="copyBtn" onclick="copyRun()">复制本地运行命令</button>
+  <pre id="runCmd"><code><span class="cmt"># 完全 hermetic：无需真 ANTHROPIC_API_KEY、无需真网络、无需真 GUI</span>
+cd ~/src/sieve-suite/sieve
+scripts/dogfood.sh            <span class="cmt"># 全套：构建 → cargo e2e → smoke → updater 闭环</span>
+scripts/dogfood.sh --fast     <span class="cmt"># 复用已存在二进制，跳过 release 构建</span></code></pre>
+  <p><code>dogfood.sh</code> 自带 PATH 兜底（cargo 装在 <code>~/.cargo/bin</code> 但 shim 未必进 PATH），CI 无 tty 时降级为纯文本输出，退出码 0/非 0 直接供 CI 判定。它只跑 <code>-p sieve-testing</code> + <code>dogfood_e2e</code> + smoke + <code>updater_e2e</code>，不触全 workspace 高并发下 <code>outbound_block.rs::r11</code> 的存量 flake。</p>
+
+  <h3>7.2 CI 无 secret 跑法</h3>
+  <p>因全程 hermetic，CI 不需要任何 secret。规划矩阵（P2）：</p>
+  <pre><code><span class="cmt"># ubuntu 通用 job（无 macOS-only 依赖，updater_e2e 跨平台 hermetic）</span>
+cargo build --release -p sieve-cli --locked
+cargo test -p sieve-testing --locked
+cargo test -p sieve-cli --test dogfood_e2e --locked
+cargo test -p sieve-updater --test updater_e2e --locked
+python3 scripts/smoke_test.py --mock-only
+
+<span class="cmt"># macOS 全套 job + 跨仓 fixture block PR（P1.3）—— 零 secret</span></code></pre>
+  <p class="note" style="color:var(--ink-dim);font-size:13px"><strong>注</strong>：基线 cargo 是 <code>~/.cargo/bin</code> 的 1.88，非 PATH 默认；脚本自带兜底。CI 用 nextest <code>retries</code> 治理高并发 flake（P2）。</p>
+</section>
+
+<!-- ════════════════ 8 保留手动 ════════════════ -->
+<section id="manual">
+  <h2><span class="num">8.</span>保留手动的部分（及理由）</h2>
+  <div class="grid2">
+    <div class="card" style="border-left:3px solid var(--manual)">
+      <h4><span class="tag manual">保留手动</span> 真 API 出/入站规则触发</h4>
+      <p>真 Claude Code / Codex 发起的 OUT-* / IN-CR-* 真实流量触发不进 e2e。理由：Critical FP &lt; 0.5%（PRD §9 #7）这条质量承诺由<strong>离线 vectorscan fuzz + deterministic 样本集</strong>保证，确定性远高于真模型的随机输出；e2e 用 mock 固定 payload 验「检测逻辑接线正确」即可，FP 率不该靠端到端跑真模型来证明。</p>
+    </div>
+    <div class="card" style="border-left:3px solid var(--manual)">
+      <h4><span class="tag manual">保留手动</span> GUI 可视层</h4>
+      <p>菜单栏 5 状态 / Toast / Settings 6 Tab / Onboarding 权限引导仍由人工 dogfood（一轮 2–3h）。理由：决策<strong>逻辑</strong>已被 headless 客户端完整覆盖（Phase C/C2），剩下的是纯视觉/交互层，自动化它需要 XCUITest 且收益低；范围决策 ① 明确 GUI 仓只保跨仓 fixture 一致性测试，不碰 XCUITest。</p>
+    </div>
+  </div>
+</section>
+
+<footer><div>
+  <p>SPEC-008 · Dogfood 完全自动化 · v1.0 — 2026-06-18 · Sieve daemon</p>
+  <p>关联：<a href="../guides/manual-integration-test.md">manual-integration-test.md</a>（被自动化对象）·
+     <a href="../design/ADR-026-port-based-listener-routing.md">ADR-026</a> ·
+     <a href="../design/ADR-028-ipc-protocol-neutralization.md">ADR-028</a> ·
+     <a href="../design/ADR-030-update-telemetry-channel.md">ADR-030</a> ·
+     <a href="../specs/SPEC-006-update-and-telemetry.md">SPEC-006</a> ·
+     <a href="../../tasks/PROGRESS.md">PROGRESS.md</a></p>
+</div></footer>
+
+</div>
+
+<script>
+function copyRun(){
+  const txt = "cd ~/src/sieve-suite/sieve && scripts/dogfood.sh";
+  const btn = document.getElementById('copyBtn');
+  const done = () => { btn.textContent='已复制 ✓'; btn.classList.add('done'); setTimeout(()=>{btn.textContent='复制本地运行命令';btn.classList.remove('done');},1800); };
+  if (navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(done).catch(fallback);
+  } else { fallback(); }
+  function fallback(){
+    const ta=document.createElement('textarea'); ta.value=txt; ta.style.position='fixed'; ta.style.opacity='0';
+    document.body.appendChild(ta); ta.select();
+    try{ document.execCommand('copy'); done(); }catch(e){ btn.textContent='复制失败，请手动复制'; }
+    document.body.removeChild(ta);
+  }
+}
+</script>
+</body>
+</html>

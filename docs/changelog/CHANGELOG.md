@@ -13,6 +13,33 @@
 
 ## [Unreleased] — 2026-05-07
 
+### Fixed — 跨仓 IPC wire schema 漂移 ×6 + detection 审计接线（dogfood 自动化抓出，2026-06-18）
+
+- **修复 6 类 daemon↔GUI wire schema 漂移**（跨仓 fixture 一致性测试抓出，多个致命——daemon 推这些通知时 GUI 解码失败 disconnected、阻塞真机 GUI dogfood）。以 SPEC-005 为权威源逐个判定 canonical：
+  - **D4 `sieve.paused_changed` 缺 `source`**（SPEC §10.2 required）→ daemon `PausedChangedNotify` 补 `source` 字段。
+  - **D6 `sieve.purge_history.purged_at` 类型错**：daemon 发 epoch ms 数字，SPEC §11B 规定 `Timestamp`(ISO8601) → daemon `PurgeHistoryResult.purged_at` `i64`→`DateTime<Utc>`(ISO 串)。
+  - **D3 `sieve.preset_changed`**：GUI 多要 SPEC 无的 `preset` 字段 → GUI `PresetChangedParams` 删 `preset`。
+  - **D5 `sieve.notify_status_bar`**：GUI `EventNotifyParams` schema 整体错位 → 重写为 daemon `StatusBarNotify`(notify_id/created_at/kind/title/detail/rule_id/auto_dismiss_seconds)。
+  - **D7 `sieve.evaluate.would_recommendation`**：GUI 当 String，SPEC §6.1.4 是 `Recommendation` 对象 → GUI 改对象。
+  - **D1/D2 `preset`/`mode` 值 `"default"`**：实为 2026-06-11 改名前的**陈旧 fixture**（daemon live 经 `format!("{:?}", Preset::Standard)` 实发 `"standard"`），仅校正 fixture。两仓 fixture 字节对齐 + 跨仓断言翻转为解码成功。
+- **接线 detection 审计**（此前出/入站/决策结果零 audit 写入，`sieve audit query` 查不到核心流量）：`gated_request_decision` 写 `DecisionMade`（所有 gui_popup 决策 + no-client-policy auto-block/warn）、出站脱敏（Anthropic + OpenAI）写 `OutboundRedacted`（fire-and-forget，不阻塞热路径，PRD §9 性能预算；raw_json=None 不持久化 secret）。`dogfood_e2e.rs` Phase D 正向断言审计可经 SQLite + `sieve audit query` 查到。
+- **修 `sieve audit` / `sieve decisions` CLI 嵌套 runtime panic**：`#[tokio::main]` 内又 `block_on` → "Cannot start a runtime from within a runtime"(exit 134)，两命令完全不可用。`run()` 改 async 委托 `run_async`、由 `main` 直接 `.await`。
+- 详见 [tasks/lessons.md 2026-06-18](../../tasks/lessons.md)（含「Explore agent 把陈旧 fixture 误当 live 漂移」元教训）。
+
+### Fixed — sieve-updater ZSTD 解压魔数字节序反置，规则包永不解压（2026-06-18）
+
+- **修复 `sieve-updater::install.rs::ZSTD_MAGIC` 字节序写反的 bug**：常量为 `[0xFD,0x2F,0xB5,0x28]`，但 zstd 帧 magic `0xFD2FB528` 在磁盘上小端存储为 `28 B5 2F FD`（RFC 8878 §3.1.1）。魔数检查对**任何真实 zstd 流永远不匹配** → `decompress_zstd` 永远走「当原始字节」fallback → 下载的规则包被**原样（压缩态）写盘**，sieve-rules 加载必失败。**整条 ADR-030 规则热更新通道在生产中是坏的**，因现有 zstd 单测全部假阳性（用明文走 fallback / 用同一错误常量当输入 / 只断言文件存在）而隐藏。
+- 修复：常量改为 `[0x28,0xB5,0x2F,0xFD]`；`happy_path` 单测补「安装内容 = 解压后 JSON」回环断言；新增 `tests/updater_e2e.rs` 闭环 e2e 断言端到端内容。详见 [tasks/lessons.md 2026-06-18](../../tasks/lessons.md)。
+
+### Added — dogfood 自动化基建（2026-06-18）
+
+- **`crates/sieve-testing`**（新 dev crate，`publish=false`）：共享 e2e harness——`DaemonGuard`/`spawn_daemon`（SIEVE_HOME tempdir 隔离 + 端口/IPC 就绪轮询）、`spawn_mock_upstream`（Anthropic+OpenAI，SSE/JSON/tool_use 响应构造）、`http_post`（内置瞬时连接错误重试，消除并发 flake）、`run_sieve_cli`（驱动真实子命令）。
+- **`sieve-updater` 加 `SIEVE_CACHE_DIR` env 覆盖**（`cache_dir.rs`）：缓存路径可隔离到临时目录，hermetic 测试不污染真实用户缓存（install-id / 规则 staging 经 `cache_dir()` 自动覆盖）。
+- **`sieve-updater` 加 `SIEVE_UPDATE_ALLOW_HTTP` 测试接缝**（`tls.rs`，`#[cfg(debug_assertions)]`）：debug 构建允许明文 HTTP 出站以指向 localhost mock；**release/GA 构建编译期消除该分支，恒 `https_only()`**（PRD §9 #2 不破）。
+- **`scripts/smoke_test.py --mock-only`**：本地 mock Anthropic 上游（`tls_verify_upstream=false`），无需真 API key/网络即跑全套透传/SSE/tool_use/脱敏断言；修出 OUT-01 426→auto_redact 过时断言。
+- **`scripts/dogfood.sh`**：一键 hermetic dogfood 入口（构建 + cargo e2e + smoke + updater 闭环）。
+- **`crates/sieve-updater/tests/updater_e2e.rs`**：§14 闭环自动化（install-id 首启/幂等/删后重生、fetch→download→sha256→zstd 解压→原子落盘、失败模式、公钥 None skip、遥测 uid 开关）。
+
 ### Security — GA 编译期密钥 gate（ADR-034，2026-06-11）
 
 - **新增 `ga_keys` cargo feature 作为 GA release build 的编译期密钥 gate**：启用时，若规则签名公钥（`sieve-updater::TRUSTED_PUBKEY = None`）或 X-Sieve-Origin 公钥（`sieve-ipc::SIEVE_ORIGIN_PUBLIC_KEY` 全零）仍为占位，则 **编译失败（E0080）**，阻止 fail-open 验签进入 GA 二进制，机器强制兑现 `SECURITY.md` 验签承诺（修复 2026-06-07 审查 §5 标记的 GA 硬阻塞）。
