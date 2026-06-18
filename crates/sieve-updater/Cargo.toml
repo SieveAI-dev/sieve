@@ -38,6 +38,9 @@ zstd = "0.13"
 tokio = { workspace = true, features = ["rt", "macros", "time", "fs", "rt-multi-thread"] }
 tempfile = "3"
 serial_test = { workspace = true }
+# hermetic updater 闭环 e2e（updater_e2e.rs）：复用 sieve-testing 的 plain-HTTP mock。
+# hyper/http-body-util/bytes/sha2/zstd/sieve-core 已在 [dependencies]，集成测试可直接用。
+sieve-testing = { path = "../sieve-testing" }
 
 [lints]
 workspace = true

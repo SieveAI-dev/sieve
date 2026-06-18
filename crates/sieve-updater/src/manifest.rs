@@ -2,8 +2,6 @@
 
 use http::Uri;
 use http_body_util::BodyExt;
-use hyper_util::client::legacy::Client;
-use hyper_util::rt::TokioExecutor;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -78,24 +76,6 @@ pub struct ManifestParams {
 
 // ── HTTP client ──────────────────────────────────────────────────────────────
 
-fn build_tls_client(
-    proxy: &sieve_core::forwarder::ProxyConfig,
-) -> Result<
-    Client<
-        hyper_rustls::HttpsConnector<sieve_core::forwarder::ProxyConnector>,
-        http_body_util::Full<bytes::Bytes>,
-    >,
-    UpdaterError,
-> {
-    let tls = hyper_rustls::HttpsConnectorBuilder::new()
-        .with_webpki_roots()
-        .https_only()
-        .enable_http1()
-        .wrap_connector(sieve_core::forwarder::ProxyConnector::new(proxy.clone()));
-    let client = Client::builder(TokioExecutor::new()).build(tls);
-    Ok(client)
-}
-
 /// Fetches the update manifest from `url` with the given parameters.
 ///
 /// ADR-030 §5.4:
@@ -117,7 +97,7 @@ pub async fn fetch_manifest(
         .parse()
         .map_err(|e| UpdaterError::Http(format!("invalid manifest URL: {e}")))?;
 
-    let client = build_tls_client(proxy)?;
+    let client = crate::tls::build_update_client(proxy)?;
     let req = http::Request::builder()
         .method("GET")
         .uri(uri)

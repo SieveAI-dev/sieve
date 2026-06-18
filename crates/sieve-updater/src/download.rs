@@ -2,8 +2,6 @@
 
 use http::Uri;
 use http_body_util::BodyExt;
-use hyper_util::client::legacy::Client;
-use hyper_util::rt::TokioExecutor;
 
 use crate::error::UpdaterError;
 
@@ -12,24 +10,6 @@ use crate::error::UpdaterError;
 /// ADR-030: rule bundles are expected to be small; reject anything larger to
 /// limit memory use and guard against hostile CDN responses.
 pub const DEFAULT_MAX_RULES_SIZE: usize = 50 * 1024 * 1024;
-
-fn build_tls_client(
-    proxy: &sieve_core::forwarder::ProxyConfig,
-) -> Result<
-    Client<
-        hyper_rustls::HttpsConnector<sieve_core::forwarder::ProxyConnector>,
-        http_body_util::Full<bytes::Bytes>,
-    >,
-    UpdaterError,
-> {
-    let tls = hyper_rustls::HttpsConnectorBuilder::new()
-        .with_webpki_roots()
-        .https_only()
-        .enable_http1()
-        .wrap_connector(sieve_core::forwarder::ProxyConnector::new(proxy.clone()));
-    let client = Client::builder(TokioExecutor::new()).build(tls);
-    Ok(client)
-}
 
 /// Downloads a rules bundle from `url` and returns the raw bytes.
 ///
@@ -53,7 +33,7 @@ pub async fn download_rules(
         .parse()
         .map_err(|e| UpdaterError::Http(format!("invalid rules URL: {e}")))?;
 
-    let client = build_tls_client(proxy)?;
+    let client = crate::tls::build_update_client(proxy)?;
     let version = env!("CARGO_PKG_VERSION");
     let req = http::Request::builder()
         .method("GET")
