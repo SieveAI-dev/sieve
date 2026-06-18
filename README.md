@@ -1,113 +1,125 @@
 # Sieve
 
-> **本地 LLM 流量代理 · Crypto-native 开发者的最后一道闸**
+English | [中文](./README.zh-CN.md)
 
-Sieve 是一个完全本地运行的 LLM 流量代理（Rust 单二进制），夹在 AI 编码 agent（Claude Code / Codex CLI / Cursor 等）和上游模型（Anthropic / OpenAI / 中转站）之间，做双向安全检测，专门服务 crypto-native 开发者。在不可逆动作（签名 / 转账 / 部署）前强制插入认知摩擦，防止私钥泄漏、地址替换、危险工具调用导致的资产损失。
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
+[![Platform: macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](#installation-phase-1-macos-only)
+[![Status: pre-GA beta](https://img.shields.io/badge/status-pre--GA%20beta-orange.svg)](#project-status)
 
-```
-┌─────────────┐    ┌─────────────┐    ┌─────────────────┐
-│ Claude Code │───▶│    Sieve    │───▶│  Anthropic API  │
-│  / Codex /  │    │   (本地)     │    │  / OpenAI / 中转 │
-│   Cursor    │◀───│             │◀───│                 │
-└─────────────┘    └─────────────┘    └─────────────────┘
-                          │
-                          ▼
-                   出入站规则匹配
-                   Critical 拦截
-                   人工确认（HIPS）
-```
+> **A fully local LLM-traffic security proxy — the last gate before irreversible actions.**
+
+Sieve is a fully local LLM-traffic security proxy (a single Rust binary) that sits between your AI coding agent (Claude Code / Codex CLI / Cursor) and the upstream model API (Anthropic / OpenAI / relays). It inspects traffic in both directions — redacting secrets on the way out, and blocking dangerous tool calls on the way in (fail-closed) — to force a moment of cognitive friction before irreversible actions (signing, transfers, deploys). Built for crypto-native developers.
+
+All detection reasoning runs 100% on your machine. Sieve never uploads your prompts, responses, or API keys.
 
 ---
 
-## 核心叙事
+## How it works
 
-1. **上游不可信**：你用的中转站可能在改你的 tool_call，官方 API 出问题不会赔你私钥被盗的钱
-2. **没人能替你兜底**：钱包安全产品看不见你的 prompt，LLM 安全产品不懂 crypto，DLP 不在你工作流里
-3. **Sieve 在客户端最后一道闸**：检测推理完全本地，字节流双向扫描，**永不上传 prompt / response / API key / 使用记录**
-4. **你不只是相信我们，你能验证我们**：开源核心引擎、sigstore 签名、可复现构建、透明规则更新日志
+Your agent points its base URL at a loopback listener (`127.0.0.1`). Sieve forwards traffic to the real upstream over end-to-end TLS — it does **not** install a local CA or MITM your connection. On the way out it matches outbound rules and redacts secrets in place; on the way in it intercepts Critical tool calls and holds them for human confirmation (HIPS — Host Intrusion Prevention System).
 
-> 详见 [PRD §1.2](./docs/prd/sieve-prd-v2.0.md)
+```mermaid
+flowchart LR
+    A["AI agent<br/>Claude Code / Codex / Cursor"]
+    S["Sieve<br/>(local · 127.0.0.1)"]
+    U["Upstream<br/>Anthropic / OpenAI / relay"]
 
-### 隐私声明
+    A -- "request" --> S
+    S -- "outbound: redact secrets<br/>(OUT-01..05/12, auto, no popup)" --> U
+    U -- "response" --> S
+    S -- "inbound: block Critical tool calls<br/>fail-closed + HIPS confirmation" --> A
 
-Sieve 每天 4 次连接更新服务器获取最新规则，请求附带 5 个字段：版本 / OS / CPU 架构 / 本地随机生成的安装 ID（不绑定账号或设备）/ 通道。**不上传 prompt、response、API key 或任何使用记录**。
+    S -.-> D["100% local detection<br/>no cloud verifier"]
+```
 
-- `SIEVE_NO_TELEMETRY=1` — 关闭装机统计（规则更新不受影响）
-- `SIEVE_NO_UPDATE=1` — 完全禁用更新检查
-
-详见 [SPEC-006](./docs/specs/SPEC-006-update-and-telemetry.md) / [ADR-030](./docs/design/ADR-030-update-telemetry-channel.md)。
+The only outbound traffic Sieve itself makes is to fetch signed rule updates — see [Privacy](#privacy).
 
 ---
 
-## 关键差异化（四点护城河）
+## Why Sieve
 
-1. **LLM 流量层位置**——独占
-2. **本地推理 + 边界明确的更新通道**——检测全本地零云依赖
-3. **Crypto 专项检测**——19 家 LLM/DLP 全无，9 家 AI Agent 安全工具全无
-4. **双向检测 + fail-closed**——钱包安全产品看不到 prompt，Sieve 看得到
+1. **The upstream is untrusted** — the relay you route through can rewrite your `tool_call`; the official API will not reimburse you when a leaked key drains a wallet.
+2. **Nobody else has your back** — wallet-security products never see your prompt, LLM-security products do not understand crypto, and DLP does not live in your workflow.
+3. **Sieve is the last gate on the client** — detection reasoning is fully local, the byte stream is scanned in both directions, and Sieve **never uploads your prompt, response, API key, or any usage record**.
+4. **You do not just trust us, you can verify us** — public source code, signed releases, reproducible builds, and a transparent rule-update changelog.
 
-> 详见 [PRD §2.3](./docs/prd/sieve-prd-v2.0.md)
+---
+
+## Privacy
+
+Sieve connects to the update server **4 times a day** to fetch the latest rules. Each request carries only **5 fields**: version / OS / CPU architecture / a locally generated random install-id (not tied to any account or device) / channel. It **never uploads prompts, responses, API keys, or any usage record**.
+
+- `SIEVE_NO_TELEMETRY=1` — disable install-count telemetry (rule updates are unaffected).
+- `SIEVE_NO_UPDATE=1` — disable update checks entirely.
+
+See [SPEC-006](./docs/specs/SPEC-006-update-and-telemetry.md) / [ADR-030](./docs/design/ADR-030-update-telemetry-channel.md).
+
+---
+
+## What sets Sieve apart (the moat)
+
+1. **Exclusive position at the LLM-traffic layer** — wallet-security products cannot see the prompt; DLP is not in the workflow.
+2. **Local inference + a clearly bounded update channel** — detection is 100% local, zero cloud dependency.
+3. **Crypto-specific detection** — none of the 19 surveyed LLM/DLP products and none of the 9 surveyed AI-agent security tools have this capability.
+4. **Bidirectional detection + fail-closed** — Critical cannot be disabled in any mode.
 
 ---
 
 ## Quick Start
 
-> ⚠️ Sieve 当前为 GA 前闭测阶段（详见 [项目阶段](#项目阶段)）。下方命令为 GA 后正式发布形态。
+> ⚠️ Sieve is currently in **pre-GA closed beta** (see [Project status](#project-status)). The commands below describe the post-GA released form.
 
-### 1. 安装（Phase 1 仅 macOS）
+### Installation (Phase 1: macOS only)
 
-> **Sieve 不提供 `curl ... | sh` 一键安装脚本。** 远程脚本盲跑正是 Sieve 反对的攻击面（[PRD §9](./docs/prd/sieve-prd-v2.0.md)）——安全产品不能反着做。
+> **Sieve does not provide a `curl ... | sh` one-line installer.** Blindly piping a remote script into a shell is exactly the attack surface Sieve exists to oppose — a security product must not do the opposite of what it preaches.
 
-GA 后通过**签名 .dmg** 经 [GitHub Releases](https://github.com/doskey/sieve/releases) 分发：
+Sieve is distributed as a **signed `.dmg`** via [GitHub Releases](https://github.com/SieveAI-dev/sieve/releases):
 
-1. 从 GitHub Releases 下载 `Sieve-<version>.dmg`
-2. **cosign 验证 .dmg 签名（必做）** —— 见 [deployment.md §3.1](./docs/guides/deployment.md#31-sigstore--cosign-验证)
-3. 双击挂载，将 `Sieve.app` 拖入 `/Applications`，首次启动按引导运行 `sieve setup`
+1. Download `Sieve-<version>.dmg` from GitHub Releases.
+2. **Verify the `.dmg` signature with `cosign` (required)** before installing — see [deployment.md](./docs/guides/deployment.md).
+3. Mount it, drag `Sieve.app` into `/Applications`, and on first launch follow the guide to run `sieve setup`.
 
-Homebrew tap（`brew install sieve`）推 Phase 2，当前不可用。Linux / Windows 同样推 Phase 2。
+Homebrew tap (`brew install sieve`), Linux, and Windows are deferred to Phase 2.
 
-完整安装步骤、cosign + reproducible build 双重验证详见 [docs/guides/deployment.md §2](./docs/guides/deployment.md#2-安装方式phase-1-ga-后) / [§3](./docs/guides/deployment.md#3-二进制签名验证必做)。
-
-### 2. 配置接入
+### Connect your agent
 
 ```bash
-# 一键配置 Claude Code（写 ANTHROPIC_BASE_URL + 注册 PreToolUse hook + 装 launchd plist）
+# One-shot configuration for Claude Code
+# (sets ANTHROPIC_BASE_URL + registers the PreToolUse hook + installs the launchd plist)
 sieve setup
 
-# 体检
+# Health check
 sieve doctor
 ```
 
-`sieve setup` 内部做的事：
-- 检测 Claude Code / Codex CLI / Cursor 安装状态
-- 写 `~/.claude/settings.json` 的 `ANTHROPIC_BASE_URL=http://127.0.0.1:9119`
-- 注册 PreToolUse hook（[ADR-014 双层防御](./docs/design/ADR-014-dual-layer-defense.md)）
-- 装 macOS launchd plist 让 daemon 开机自启
+What `sieve setup` does internally:
 
-详见 [SPEC-003 sieve setup](./docs/specs/SPEC-003-sieve-setup-tool.md)。
+- detects whether Claude Code / Codex CLI / Cursor are installed;
+- writes `ANTHROPIC_BASE_URL=http://127.0.0.1:9119` into `~/.claude/settings.json`;
+- registers the PreToolUse hook ([ADR-014 dual-layer defense](./docs/design/ADR-014-dual-layer-defense.md));
+- installs a macOS launchd plist so the daemon starts at login.
 
-### 3. 验证拦截
+Full install and operations guide: [docs/guides/deployment.md](./docs/guides/deployment.md). Development and build: [docs/guides/development.md](./docs/guides/development.md).
 
-```bash
-# 让 Claude Code 输出一段「假」助记词（测试样本）
-# Sieve 应当截获并发起 HIPS 弹窗（GUI）或写 IPC pending file（CLI）
-sieve decisions watch  # 在 GUI 不可用时用 CLI 接管决策
-```
-
-### 4. 卸载
+### Verify interception
 
 ```bash
-sieve uninstall   # 反向执行 setup 全部步骤
+# Have Claude Code emit a fake mnemonic (test sample).
+# Sieve should intercept it and raise a HIPS prompt (GUI) or write an IPC pending file (CLI).
+sieve decisions watch   # take over decisions from the CLI when the GUI is unavailable
 ```
 
-完整安装与运维指南：[docs/guides/deployment.md](./docs/guides/deployment.md)
-开发与构建：[docs/guides/development.md](./docs/guides/development.md)
+### Uninstall
+
+```bash
+sieve uninstall   # reverses every step of setup
+```
 
 ---
 
-## 配置
+## Configuration
 
-Sieve 读 `~/.sieve/config.toml`，多上游 listener 同时绑（[ADR-026](./docs/design/ADR-026-port-based-listener-routing.md)）：
+Sieve reads `~/.sieve/config.toml` and can bind multiple upstream listeners at once ([ADR-026](./docs/design/ADR-026-port-based-listener-routing.md)):
 
 ```toml
 [[listener]]
@@ -125,124 +137,106 @@ upstream = "https://your-relay.example.com/v1"
 api_key = "${RELAY_API_KEY}"
 
 [detection]
-sequence_detection = false   # 行为序列检测，GA 默认关闭（ADR-022）
+sequence_detection = false   # behavioral-sequence detection, off by default at GA
 
 [telemetry]
-# 默认开启装机量统计；环境变量 SIEVE_NO_TELEMETRY=1 可全局关闭
+# Install-count telemetry is on by default; SIEVE_NO_TELEMETRY=1 disables it globally.
 enabled = true
 ```
 
-完整 schema 见 [api-reference §3](./docs/api/api-reference.md) + 注释样例 `sieve.toml.example`。
+Full schema: [api-reference §3](./docs/api/api-reference.md).
 
 ---
 
-## 项目阶段
+## Project status
 
-Sieve 采用三阶段路线：
+The repository is now **public**, in **pre-GA closed beta** (invited testers only). The source is public to make good on the trust narrative — *verifiable, not merely trusted*.
 
-| 阶段 | 时间窗 | 描述 |
-|------|--------|------|
-| **闭测** | GA 前 | 仅小范围邀请用户参与（hackathon builder / 审计研究员）。仓库 private（[ADR-011](./docs/design/ADR-011-private-until-ga.md)）|
-| **GA** | Week 12 | 一次性公开 repo + 代码 + 文档。同步发"中转站揭黑" + "自证清白"两篇技术文章 |
-| **维护** | GA+ | 规则库每周更新、季度大版本、按真实需求推进 Phase 2 |
-
-**当前**：v2.0 + v2.1 + unix-style v2.x 代码全部落地，等闭测用户验证。质量基线：workspace 725 tests passed / clippy 0 warning / 累计入站规则 70 + 测试样本 1951（含 55 条真实攻击复现），Critical FP 0.00% / Attack Recall 99.71%。
-
-> 详见 [PRD §10 12 周里程碑](./docs/prd/sieve-prd-v2.0.md)
+Quality baseline (per [`tasks/PROGRESS.md`](./tasks/PROGRESS.md)): Critical false-positive rate **0.00%** / attack recall **99.71%**; **clippy 0 warnings** (`fmt` / `deny` all green); an extensive test suite that includes real attack-reproduction samples.
 
 ---
 
-## 定价
+## Self-custody trust
 
-**Phase 1（GA 后 6–12 个月）：完全免费，无任何付费门槛**——见 [ADR-029](./docs/design/ADR-029-free-first-defer-monetization.md)。
+Sieve holds itself to the same standard it applies to the upstream:
 
-| 阶段 | 价格 | 内容 |
-|------|------|------|
-| **Phase 1**（GA 后 6–12 个月） | $0 | 全功能 / 无 freemium 限速 / 无用量上限。唯一指标：装机量 |
-| **Phase 2+**（[redacted]后） | TBD | 用户端 Pro 订阅（多账号聚合 / 高级用量分析）和/或 [redacted]（监控告警工具，**非结论型认证**）|
-
-**永久排除的方向**（[ADR-029](./docs/design/ADR-029-free-first-defer-monetization.md) §决策 2）：「中转站认证 + 排名广告」收费——评级机构利益冲突会摧毁 Sieve「客观本地审计」的产品定位。
+- **sigstore signing + reproducible builds** — every release can be independently reproduced and verified ([ADR-006](./docs/design/ADR-006-sigstore-reproducible-build.md)).
+- **Pinned dependencies** — to avoid supply-chain incidents.
+- **Public source** — the interception logic is fully auditable.
+- **Transparent rule-update log** — every update ships a changelog and hashes so users can verify independently.
 
 ---
 
-## 自证清白（[redacted]）
+## Pricing
 
-Sieve 自己被同一套标准审视：
-
-- **sigstore 签名** + **reproducible build**：每个 release 可独立复现验证
-- **pinned dependencies**：避免 LiteLLM 类供应链事件
-- **核心引擎 GA 后开源（MIT）**：拦截逻辑全部可审；Phase 2 高级规则集闭源
-- **透明规则更新日志**：每次更新发布 changelog + 哈希，用户可独立验证
-
-> 详见 [PRD §1.2 / §9 #6 / §11.3](./docs/prd/sieve-prd-v2.0.md) / [ADR-006](./docs/design/ADR-006-sigstore-reproducible-build.md)
+Free during Phase 1; future monetization directions are tracked in [ADR-029](./docs/design/ADR-029-free-first-defer-monetization.md).
 
 ---
 
-## 技术栈
+## Tech stack
 
-**Rust** + **hyper**（HTTP/反代）+ **tokio**（async）+ **rustls**（TLS）+ **vectorscan-rs**（SIMD 多模式正则）+ **serde_json**（JSON 解析）
+**Daemon:** Rust + hyper (HTTP / reverse proxy) + tokio (async) + rustls (TLS) + vectorscan-rs (SIMD multi-pattern regex) + serde_json.
 
-> 详见 [PRD §6.3](./docs/prd/sieve-prd-v2.0.md)
+**GUI:** SwiftUI + Combine (macOS 13+, Apple Silicon + Intel) — maintained in the separate [`SieveAI-dev/sieve-gui-macos`](https://github.com/SieveAI-dev/sieve-gui-macos) repository.
 
 ---
 
-## 文档导航
+## Documentation
 
-| 入口 | 用途 |
+| Entry | Purpose |
 |------|------|
-| [docs/requirements/PRD-sieve.md](./docs/requirements/PRD-sieve.md) | 需求文档活动版本入口（指向 PRD v2.0）|
-| [docs/glossary.md](./docs/glossary.md) | 术语表（54 条专业术语统一定义）|
-| [docs/design/ADR-INDEX.md](./docs/design/ADR-INDEX.md) | ADR 索引 |
-| [docs/design/architecture.md](./docs/design/architecture.md) | 架构设计 |
-| [docs/api/api-reference.md](./docs/api/api-reference.md) | API 参考 |
-| [docs/guides/development.md](./docs/guides/development.md) | 开发指南 |
-| [docs/guides/deployment.md](./docs/guides/deployment.md) | 部署与运维指南 |
-| [docs/changelog/CHANGELOG.md](./docs/changelog/CHANGELOG.md) | 变更日志 |
-| [SECURITY.md](./SECURITY.md) | 安全策略 + 漏洞报告流程 |
-| [LICENSE](./LICENSE) | 许可说明（文档 CC BY-NC-SA 4.0 / 代码 MIT 待 GA）|
-| [CLAUDE.md](./CLAUDE.md) | Claude Code 项目指引（贡献者参考）|
+| [docs/requirements/PRD-sieve.md](./docs/requirements/PRD-sieve.md) | Product requirements (active version) |
+| [docs/glossary.md](./docs/glossary.md) | Glossary — unified definitions of domain terms |
+| [docs/design/ADR-INDEX.md](./docs/design/ADR-INDEX.md) | Architecture decision records, index |
+| [docs/design/architecture.md](./docs/design/architecture.md) | Architecture design |
+| [docs/design/data-model.md](./docs/design/data-model.md) | Data model |
+| [docs/api/api-reference.md](./docs/api/api-reference.md) | API reference (incl. config schema) |
+| [docs/specs/INDEX.md](./docs/specs/INDEX.md) | Technical specifications, index |
+| [docs/guides/development.md](./docs/guides/development.md) | Development & build guide |
+| [docs/guides/deployment.md](./docs/guides/deployment.md) | Deployment & operations guide |
+| [docs/changelog/CHANGELOG.md](./docs/changelog/CHANGELOG.md) | Changelog |
+| [CLAUDE.md](./CLAUDE.md) | Project guide for contributors using Claude Code |
 
----
+Project site: [sieveai.dev](https://sieveai.dev)
 
-## 合规提示
-
-> ⚠️ **[redacted] + 中国大陆[redacted] to-C 公开商业化**
->
-> - 公司[redacted]（首选[redacted]或[redacted] Ltd），不接受大陆个人/个体户作为收款主体
-> - 境内渠道发研究内容，境外渠道发产品营销——Twitter / Hacker News / Mirror 是主战场
-> - Sieve 完全本地运行 + 不上传 prompt → 不触发数据出境合规
-> - 详见 [PRD §11.5](./docs/prd/sieve-prd-v2.0.md)
-
----
-
-## 反馈渠道
-
-- **GitHub Issues**：本仓库 issue 列表（公开样本提交也走这里）
-- **安全漏洞**：见 [SECURITY.md](./SECURITY.md)
-- **社区**：Twitter / Hacker News / Mirror（GA 后启用）
-
----
-
-## 文档关联图
+### Documentation map
 
 ```mermaid
 graph TD
-    README[README.md<br/>项目入口]
-    REQ[docs/requirements/PRD-sieve.md<br/>需求活动版本指针]
-    PRDv20[docs/prd/sieve-prd-v2.0.md<br/>当前活动 PRD]
-    DESIGN[docs/design/architecture.md<br/>架构设计]
-    API[docs/api/api-reference.md<br/>API 参考]
-    GUIDES[docs/guides/<br/>development + deployment]
-    CL[docs/changelog/CHANGELOG.md<br/>变更日志]
+    README["README.md<br/>project entry"]
+    PRD["docs/requirements/PRD-sieve.md<br/>active PRD"]
+    ADR["docs/design/ADR-INDEX.md<br/>decision records"]
+    ARCH["docs/design/architecture.md<br/>architecture"]
+    DATA["docs/design/data-model.md<br/>data model"]
+    API["docs/api/api-reference.md<br/>API reference"]
+    SPECS["docs/specs/INDEX.md<br/>specifications"]
+    GUIDES["docs/guides/<br/>development + deployment"]
+    CL["docs/changelog/CHANGELOG.md<br/>changelog"]
 
-    README --> REQ
-    README --> DESIGN
+    README --> PRD
+    README --> ADR
     README --> GUIDES
-    README --> CL
-    REQ --> PRDv20
-    DESIGN --> API
+    PRD --> ARCH
+    ARCH --> DATA
+    ARCH --> API
+    ARCH --> SPECS
     API --> CL
-    DESIGN --> CL
+    ARCH --> CL
 ```
 
-> 派生关系：上游文档变更时，必须检查并更新所有下游文档（详见 [.cursorrules](./.cursorrules) 文档规则段落）。
+> Derivation rule: when an upstream document changes, all downstream documents must be checked and updated.
+
+---
+
+## Contributing
+
+Contributions are welcome. Please read [CONTRIBUTING.md](./CONTRIBUTING.md) and our [Code of Conduct](./CODE_OF_CONDUCT.md) before opening a pull request. Public sample submissions and bug reports go through [GitHub Issues](https://github.com/SieveAI-dev/sieve/issues).
+
+## Security
+
+Please **do not** report security vulnerabilities through public GitHub issues. See [SECURITY.md](./SECURITY.md) for the private disclosure process. Contact: doskey.lee@gmail.com.
+
+## License
+
+- **Code** — [Apache License 2.0](./LICENSE)
+- **Documentation** (everything under `docs/`, plus README / CLAUDE.md and other non-source Markdown / configuration) — [CC BY-NC-SA 4.0](./LICENSE-DOCS)
