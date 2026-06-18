@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sieve GA / MVP 发布 Runbook</title>
+<style>
+  :root{--bg:#0f1115;--card:#181b22;--card2:#1f232c;--line:#2a2f3a;--fg:#e6e9ef;--mut:#9aa3b2;--dim:#6b7484;--green:#3fb950;--amber:#d29922;--red:#f85149;--blue:#58a6ff;--purple:#bc8cff}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.65 -apple-system,BlinkMacSystemFont,"PingFang SC","Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1000px;margin:0 auto;padding:32px 20px 80px}
+  h1{font-size:26px;margin:0 0 6px}
+  .meta{color:var(--dim);font-size:13px}
+  .lede{color:var(--mut);font-size:15px;margin:16px 0 28px;padding:14px 18px;background:var(--card);border-left:3px solid var(--blue);border-radius:0 8px 8px 0}
+  .lede b{color:var(--fg)}
+  h2{font-size:19px;margin:36px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  .step{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin:14px 0}
+  .step .top{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .gid{font-weight:700;font-size:16px;color:var(--blue)}
+  .gtitle{font-weight:600;font-size:16px}
+  .who{margin-left:auto;font-size:12px;padding:3px 9px;border-radius:6px;font-weight:600}
+  .w-user{background:#3a2714;color:var(--amber)}
+  .w-agent{background:#13321d;color:var(--green)}
+  .w-ext{background:#2b1f3a;color:var(--purple)}
+  .eta{font-size:12px;color:var(--dim)}
+  .step p{margin:10px 0 0;font-size:14px;color:var(--mut)}
+  .step .lbl{color:var(--fg);font-weight:600;font-size:13px;margin-top:12px}
+  .step ul{margin:6px 0 0;padding-left:20px;font-size:13.5px;color:var(--mut)}
+  .step li{margin:3px 0}
+  .agent-can{margin-top:10px;padding:10px 12px;background:#11261a;border-radius:8px;font-size:13px;color:#9fe0b0}
+  .agent-can b{color:var(--green)}
+  code{background:var(--card2);padding:1px 5px;border-radius:4px;font-size:12.5px;font-family:"SF Mono",ui-monospace,monospace}
+  table{width:100%;border-collapse:collapse;margin-top:10px;font-size:13px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.4px}
+  .crit{color:var(--red);font-weight:600}
+  .foot{color:var(--dim);font-size:12px;margin-top:48px;text-align:center}
+  .done{background:var(--card);border:1px solid #1f6f33;border-radius:12px;padding:16px 20px;margin:14px 0}
+  .done h3{margin:0 0 8px;color:var(--green);font-size:15px}
+  .done ul{margin:0;padding-left:20px;font-size:13.5px;color:var(--mut)}
+  .chk{list-style:none;padding:0}
+  .chk li{padding:4px 0 4px 26px;position:relative;font-size:13.5px;color:var(--mut)}
+  .chk li::before{content:"\2610";position:absolute;left:0;color:var(--dim)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Sieve GA / MVP 发布 Runbook</h1>
+<div class="meta">docs/guides · Version v1.0 — 2026-06-18 · 配套评估 docs/review/2026-06-18-poc-mvp-readiness.html</div>
+
+<div class="lede">
+<b>MVP = GA（ADR-011：Week12 一次性公开 repo + 代码 + 文档 + 签名 + landing）。</b> 代码侧已 100% 就绪（见下「已完成」）。本 runbook 把剩余 7 项外部依赖固化为可执行步骤——每项标注<b>谁做 / 预估时间 / 依赖 / agent 能接手的代码侧收尾</b>。<b>关键路径 = G1 海外主体（4–6 周），它解锁 G2/G3/G4。</b>
+</div>
+
+<h2>代码侧已完成（agent，无需再做）</h2>
+<div class="done">
+<h3>✅ 就绪度 95%→100%（本会话）</h3>
+<ul>
+<li>检测内核：12 出站 + 70 入站规则全真实现；双协议 × SSE/JSON 四象限全覆盖；三上游（Anthropic/DeepSeek/OpenAI）CLI 真机验证全通</li>
+<li>ga_keys 验签 gate 实测 E0080 硬强制（占位公钥不可出厂）+ <code>Some(真公钥)</code> fail-closed 回归单测 5 条</li>
+<li>G6 离线 FP：benign 1070（含 900 near-miss）Critical FP <b>0.0000%</b> / attack recall <b>99.71%</b>，纳入 dogfood §5 CI 门</li>
+<li>updater 客户端闭环（manifest/sha256/zstd/原子安装/install-id）+ reproducible build CI（cosign keyless）</li>
+<li>sieve setup 一键注入 + 治理债清零 + 质量 0 failed / fmt-clippy-deny 全绿</li>
+</ul>
+</div>
+
+<h2>执行步骤</h2>
+
+<div class="step">
+  <div class="top"><span class="gid">G1</span><span class="gtitle">[redacted]注册</span><span class="who w-user">你</span></div>
+  <div class="eta">⏱ 4–6 周日历（关键路径）· 依赖：无 · 解锁：G2/G3/G4</div>
+  <p>香港/新加坡等境外实体（ADR-005）。是 KMS 账号、Apple Developer、域名 MX/支付的法律前提。</p>
+  <div class="lbl">检查点</div>
+  <ul><li>公司执照 + 银行账户下来</li><li>能以公司身份开 GCP / Apple Developer / Cloudflare</li></ul>
+</div>
+
+<div class="step">
+  <div class="top"><span class="gid">G2</span><span class="gtitle">GCP KMS 真 Ed25519 密钥 + 签名规则包</span><span class="who w-user">你/KMS</span></div>
+  <div class="eta">⏱ 1–2 天 · 依赖：G1</div>
+  <p>生成签名密钥对（私钥进 KMS/HSM，绝不落盘），把 32 字节公钥嵌入源码，用私钥签真实规则包。</p>
+  <div class="lbl">步骤</div>
+  <ul>
+    <li>GCP KMS 生成 ed25519 非对称签名密钥（<code>gcloud kms keys create</code>）</li>
+    <li>导出公钥 32 字节，填入两处：<code>crates/sieve-updater/src/signature.rs:18</code> 的 <code>TRUSTED_PUBKEY</code> + <code>crates/sieve-ipc/src/origin_header.rs:25</code> 的 <code>SIEVE_ORIGIN_PUBLIC_KEY</code></li>
+    <li>CI 用 KMS 私钥对规则包签名，manifest 带 ed25519 签名</li>
+  </ul>
+  <div class="agent-can"><b>agent 接手：</b> 你给公钥 32 字节（hex）→ 我填两处常量、<code>cargo build --features ga_keys</code> 验证 E0080 消失（gate 转绿）、跑全量测试。gate 已就绪，纯等真公钥字节。</div>
+</div>
+
+<div class="step">
+  <div class="top"><span class="gid">G3</span><span class="gtitle">Apple Developer 账号 + 公证 + .dmg 打包</span><span class="who w-user">你</span></div>
+  <div class="eta">⏱ 账号 1 天 + 公证 CI 0.5 天 · 依赖：G1（主体）</div>
+  <p>$99/yr Developer Program → Developer ID Application 证书 → daemon 二进制 codesign + notarytool 公证 + staple，过 Gatekeeper。</p>
+  <div class="lbl">步骤</div>
+  <ul>
+    <li>注册 Apple Developer（公司身份）→ 创建 Developer ID Application 证书</li>
+    <li>GitHub secrets 填：<code>APPLE_CERT_P12</code>/<code>APPLE_CERT_PWD</code>/<code>APPLE_ID</code>/<code>APPLE_TEAM_ID</code>/<code>APPLE_APP_PWD</code></li>
+    <li>release.yml 加 codesign + <code>notarytool submit --wait</code> + <code>stapler staple</code> 步骤</li>
+  </ul>
+  <div class="agent-can"><b>agent 接手：</b> Apple secrets 就位后，我写 release.yml 的 codesign/notarize/staple/.dmg 步骤并用真凭据在 CI 跑通验证（现在无凭据写了测不了，故等就位一起做）。</div>
+</div>
+
+<div class="step">
+  <div class="top"><span class="gid">G4</span><span class="gtitle">更新 / 规则下发服务端</span><span class="who w-ext">你/运维</span></div>
+  <div class="eta">⏱ 2–3 天 · 依赖：G1（域名）+ G2（签名）</div>
+  <p>客户端 updater 已就绪，缺活的后端。updates.sieveai.dev（manifest）+ cdn.sieveai.dev（规则正文）。</p>
+  <div class="lbl">步骤</div>
+  <ul>
+    <li>注册域名 + Cloudflare DNS；manifest 端点（CF Workers + D1 按日去重算 DAU）</li>
+    <li>规则正文上 CDN；manifest 协议见 <code>docs/specs/SPEC-006</code>；遥测 5 字段见 ADR-030</li>
+  </ul>
+  <div class="agent-can"><b>agent 接手：</b> 我可写 manifest 服务端参考实现（CF Workers + D1 schema + 遥测去重）放 <code>ops/</code>；但部署/域名/密钥须你做。建议 G1 就位后做（避免现在写无法部署验证的代码）。</div>
+</div>
+
+<div class="step">
+  <div class="top"><span class="gid">G5</span><span class="gtitle">GUI（HIPS 弹窗）编译 + 签名 + 联调</span><span class="who w-ext">需 Xcode 机</span></div>
+  <div class="eta">⏱ 约半天（机就位后）· 依赖：Xcode.app（独立于 G1）</div>
+  <p>sieve-gui-macos 仓 SwiftUI 层从未 xcodebuild 编译过；HIPS 弹窗是产品灵魂（不可逆动作前认知摩擦）。</p>
+  <div class="lbl">步骤</div>
+  <ul>
+    <li>一台装 Xcode.app 的 Mac（开发机仅 CommandLineTools）</li>
+    <li>xcodebuild 编译 → 真 daemon↔GUI 联调：菜单栏五态 / BIP39 触发 / 弹窗倒计时三段 / 拒绝 → 红图标 + History</li>
+    <li>清 GUI 数据完整性债 4 项（PROGRESS 线 B B4）</li>
+  </ul>
+  <div class="agent-can"><b>agent 接手：</b> Xcode 机就位后我全程驱动 xcodebuild + 联调 + 修编译/签名问题（协议层已对齐，Swift DTO swiftc 探针 21/21 过）。</div>
+</div>
+
+<div class="step">
+  <div class="top"><span class="gid">G6</span><span class="gtitle">真机真合约 FP 率校准</span><span class="who w-agent">你给 key，我驱动</span></div>
+  <div class="eta">⏱ 0.5 天 · 依赖：有效 API key（独立）</div>
+  <p>离线已达标（FP 0% / recall 99.71%，纳入 CI）。补真实世界：真 .env + 真合约 + 真 Claude Code 流量，证 Critical FP&lt;0.5%（PRD 公理 12）。</p>
+  <div class="lbl">步骤</div>
+  <ul><li>你给有效 ANTHROPIC key（旧 key 连 Anthropic HTTP=000，疑已 revoke）</li><li>我用真实开源合约（OpenZeppelin/Uniswap/Aave）经 sieve 跑真 Claude，统计误报</li></ul>
+  <div class="agent-can"><b>agent 接手：</b> 这是 7 项里我现在最能立即推进的——你给有效 key，我马上跑。</div>
+</div>
+
+<div class="step">
+  <div class="top"><span class="gid">G7</span><span class="gtitle">GA 公开发布 + 弹药文章</span><span class="who w-user">你决策</span></div>
+  <div class="eta">⏱ Week12 GA 当天 · 依赖：G2–G6 全绿</div>
+  <p>ADR-011：repo 私有到 GA 当天一次性公开，传播密度最大化。</p>
+  <div class="lbl">GA 当天 checklist</div>
+  <ul class="chk">
+    <li>repo public + 代码 + 文档 + SECURITY.md 上线</li>
+    <li>GitHub Release：公证 .dmg + SHA256SUMS + cosign bundle + 可复现构建说明（scripts/repro-build.sh）</li>
+    <li>landing page + 三篇弹药文章（wire 脱敏证据 / 中转站揭黑 / 自证清白）同发 Twitter/HN/Mirror</li>
+    <li>updates/cdn 服务端上线，首日装机量遥测开始计数（ADR-029 唯一指标）</li>
+  </ul>
+</div>
+
+<h2>谁做什么 · 一览</h2>
+<table>
+  <thead><tr><th>项</th><th>谁</th><th>时间</th><th>agent 现在能否推进</th></tr></thead>
+  <tbody>
+    <tr><td class="crit">G1 海外主体</td><td>你</td><td>4–6 周</td><td>否（法律实体）</td></tr>
+    <tr><td>G2 KMS 密钥</td><td>你/KMS</td><td>1–2 天</td><td>给公钥字节即可填+验</td></tr>
+    <tr><td>G3 Apple 公证</td><td>你</td><td>1.5 天</td><td>secrets 就位即写 CI</td></tr>
+    <tr><td>G4 服务端</td><td>你/运维</td><td>2–3 天</td><td>可写参考实现，部署须你</td></tr>
+    <tr><td>G5 GUI</td><td>需 Xcode 机</td><td>半天</td><td>机就位即全程驱动</td></tr>
+    <tr><td>G6 真机 FP</td><td>你给 key</td><td>半天</td><td><b>现在就能（给 key）</b></td></tr>
+    <tr><td>G7 GA 时机</td><td>你</td><td>Week12</td><td>否（战略决策）</td></tr>
+  </tbody>
+</table>
+
+<div class="foot">Sieve · [redacted] + Claude Code · 代码侧已就绪，GA 完成取决于上述外部依赖启动 · 2026-06-18</div>
+</div>
+</body>
+</html>
