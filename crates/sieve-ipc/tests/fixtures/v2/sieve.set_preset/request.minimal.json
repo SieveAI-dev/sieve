@@ -2,7 +2,7 @@
   "jsonrpc": "2.0",
   "method": "sieve.set_preset",
   "params": {
-    "mode": "default"
+    "mode": "standard"
   },
   "id": "req-preset-1"
 }

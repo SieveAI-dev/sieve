@@ -306,6 +306,8 @@ async fn handle_set_paused(
         paused_until: until,
         reason: "user_request".to_owned(),
         applies_to: paused_applies_to(),
+        // SPEC-005 §10.2 required；client 触发的 set_paused，与上方 PausedSet 审计 source 一致。
+        source: "gui".to_owned(),
         origin_request_id,
     });
 
@@ -957,19 +959,20 @@ async fn handle_purge_history(
         .await
         .map_err(|e| ControlError::internal(format!("purge_history delete failed: {e}")))?;
 
-    let purged_at = chrono::Utc::now().timestamp_millis();
+    let purged_now = chrono::Utc::now();
 
-    // 写 purge_completed 审计事件
+    // 写 purge_completed 审计事件（内部记录用 epoch ms）
     spawn_audit(
         audit,
         AuditEvent::PurgeHistoryCompleted {
             rows_deleted,
-            purged_at_ms: purged_at,
+            purged_at_ms: purged_now.timestamp_millis(),
         },
     );
 
+    // wire 响应用 ISO8601 Timestamp（SPEC-005 §11B）
     Ok(PurgeHistoryResult {
-        purged_at,
+        purged_at: purged_now,
         rows_deleted,
     })
 }

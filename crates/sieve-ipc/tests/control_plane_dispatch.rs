@@ -42,6 +42,7 @@ fn spawn_mock_daemon(server: Arc<IpcServer>) {
                         paused_until: None,
                         reason: "user_request".to_owned(),
                         applies_to: vec!["AutoRedact".to_owned()],
+                        source: "gui".to_owned(),
                         origin_request_id: None,
                     }));
                     let _ = reply.send(Ok((
@@ -449,6 +450,7 @@ async fn set_paused_fan_out_before_result() {
                     paused_until: None,
                     reason: "user_request".to_owned(),
                     applies_to: vec!["AutoRedact".to_owned()],
+                    source: "gui".to_owned(),
                     origin_request_id,
                 }));
                 let _ = reply.send(Ok((
@@ -664,6 +666,7 @@ async fn set_paused_origin_request_id_propagated_to_broadcast() {
                     paused_until: None,
                     reason: "user_request".to_owned(),
                     applies_to: vec!["gui_popup".to_owned()],
+                    source: "gui".to_owned(),
                     origin_request_id,
                 }));
                 let _ = reply.send(Ok((

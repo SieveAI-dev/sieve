@@ -100,6 +100,11 @@ pub struct PausedChangedNotify {
     /// `"user_request"` | `"auto_resumed"` | `"daemon_restart"`。
     pub reason: String,
     pub applies_to: Vec<String>,
+    /// 触发来源（SPEC-005 §10.2 required）：`"cli"` | `"gui"` | `"config_reload"` | `"daemon"`。
+    ///
+    /// 此前漏发此字段导致 GUI `PausedChangedParams` 解码失败（required）→ disconnected
+    /// （跨仓 fixture 一致性测试抓出，2026-06-18）。
+    pub source: String,
     /// 触发本次变更的原始 GUI 请求 ID（SPEC-005 §10.0.2）。
     ///
     /// GUI 触发的 mutating request → 填对应 request id；CLI/daemon 自身触发 → `None`。

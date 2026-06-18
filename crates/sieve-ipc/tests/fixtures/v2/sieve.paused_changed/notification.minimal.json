@@ -4,6 +4,7 @@
   "params": {
     "paused": true,
     "reason": "user_request",
-    "applies_to": ["AutoRedact", "StatusBar"]
+    "applies_to": ["AutoRedact", "StatusBar"],
+    "source": "gui"
   }
 }
