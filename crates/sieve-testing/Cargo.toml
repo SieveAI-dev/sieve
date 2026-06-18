@@ -1,0 +1,38 @@
+[package]
+name = "sieve-testing"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Sieve 共享集成测试 harness：mock 上游 / daemon 进程管理 / HTTP / CLI 驱动"
+publish = false
+
+[dependencies]
+tokio = { workspace = true, features = [
+    "rt-multi-thread",
+    "macros",
+    "net",
+    "fs",
+    "time",
+    "process",
+    "io-util",
+] }
+hyper = { workspace = true, features = ["http1", "server", "client"] }
+hyper-util = { workspace = true, features = [
+    "tokio",
+    "client-legacy",
+    "http1",
+    "service",
+    "server",
+] }
+http-body-util = { workspace = true }
+bytes = { workspace = true }
+tokio-stream = { version = "0.1", features = ["sync"] }
+tempfile = "3"
+serde_json = { workspace = true }
+anyhow = "1"
+
+[lints]
+workspace = true

@@ -8,6 +8,7 @@ members = [
     "crates/sieve-hook",
     "crates/sieve-policy",
     "crates/sieve-updater",
+    "crates/sieve-testing",
     "fuzz",
 ]
 exclude = [
