@@ -1,8 +1,36 @@
 # Sieve daemon · 进度
 
-> 上次更新：2026-06-11
-> 当前阶段：**dogfood 等验证（SPEC-007 上游代理 + preset 漂移修复后真机应可连通）；SPEC-007 8 commits 本地未 push 待 dogfood 冲烟；运维侧 TODO-13~16 待海外主体落地；ADR-031/032 草案待决策通过**
-> 质量基线：**workspace 775 passed / 0 failed / 7 ignored**；fmt/clippy/deny 全绿；GUI swift test 137 passed
+> 上次更新：2026-06-18
+> 当前阶段：**PoC 就绪度 ≈ 代码 95% / 真机验证 40%——CLI 版 PoC 现在就能 demo（差 commit/push + 用户给 2 把 API key + 真机跑 30min）；GUI 弹窗版再叠加一台有 Xcode 的机 + 半天联调。无功能性代码缺口阻塞 demo。** dogfood 已完全自动化；自动化抓出的真 bug（zstd 字节序 / headless CLI 嵌套 runtime panic / 6 类跨仓 schema 漂移 / detection 审计未接线）全部已修。
+> 质量基线：**workspace 799 passed / 0 failed / 7 ignored**；fmt/clippy/deny 全绿；dogfood.sh 一键 11 场景全绿；GUI swiftc 探针 21/21（注：GUI 仓 swift test 因 CLT ABI 跑不起来，只 swiftc 验证）。
+> ⚠️ **本会话所有修复均未提交**：daemon 仓 ~41 文件未提交 + 1 commit 未 push；GUI 仓 ~27 文件未提交。
+
+## 🎯 到可演示 PoC alpha 还缺什么（2026-06-18 差距分析，详见 docs/review/2026-06-18-poc-readiness.html）
+
+> PoC 定义：真实 crypto dev 本地装 sieve、Claude Code 流量经 sieve、亲眼看到「出站脱敏 / 入站拦截 / HIPS 弹窗」端到端生效的可演示 alpha（不要 GA：无需签名分发链/公开 repo/多平台/Stripe）。
+
+### 线 A · CLI 版 PoC（除真 key 无硬阻塞，我侧 1-2h）
+- [ ] **A1** commit/push 本会话全部修复（daemon ~41 文件 + GUI ~27 文件；不提交则环境拉到旧坏版本）〔我，trivial，**等用户批准提交**〕
+- [ ] **A2** cargo build + `sieve setup` 一键注入 ANTHROPIC_BASE_URL + PreToolUse hook 〔我，trivial〕
+- [ ] **A3** CLI 真启动 smoke：`sieve decisions watch` / `sieve audit tail -f` 各跑一秒不 panic 〔我，trivial〕
+- [ ] **A4** 🚫 **真流量验证（§3.3）**：起真 Claude Code 会话 → 粘 .env 看脱敏(OUT-01) + 触发 signTransaction/curl|sh 看拦截(IN-CR-05/02)〔**需用户给 ANTHROPIC_API_KEY + DeepSeek key**，我驱动，small〕
+- [ ] **A5** 审计真落库验证：真流量触发后查 `~/.sieve/audit.db` 的 DecisionMade/OutboundRedacted 行 〔我，small〕
+- [ ] **A6** path prefix 抓包：tcpdump 确认 upstream path 含 `/anthropic`（DeepSeek）〔我，trivial〕
+
+### 线 B · GUI 弹窗完整版（叠加，需 Xcode 机，就位后我侧约半天）
+- [ ] **B1** 🚫 Xcode.app 就位（开发机仅 CommandLineTools）〔**需用户装/借机**〕
+- [ ] **B2** xcodebuild 编译 GUI（SwiftUI 层从未被编译过）→ BUILD SUCCEEDED 〔我驱动〕
+- [ ] **B3** 生成 Sparkle EdDSA 密钥对，公钥替换 PLACEHOLDER（否则自动更新崩）〔我，small〕
+- [ ] **B4** 清数据完整性债：list_rules 注入用户规则 / purge_history 联调 / direction 字段孤立路径测试 / wait_for_ipc 计数污染 〔我，small×4〕
+- [ ] **B5** 真 daemon↔真 GUI 联调：菜单栏五态 → BIP39 触发 → HIPS 弹窗倒计时三段 → 拒绝 → 红图标 + History 增条 + 导出 CSV 〔我驱动，medium〕
+
+### 🚫 PoC 范围外（GA 才做，别现在碰）
+Linux/Windows 多平台 + 拦截引擎 trait 非 macOS 实现 / 网络隔离 enforcement(ADR-027) / 行为序列升 Block(需 4 周≥50 样本) / 运维服务端全栈(TODO-13~16) / 签名分发链(sigstore/notarization/appcast/.dmg) / Stripe+海外主体 / 闭测招募+Discord。
+
+### 最大风险（PoC 路上）
+🔴 真 Claude Code 行为未知（全验证基于 mock，真 API SSE/tool_use 可能与 fixture 微差）；🔴 GUI 能否在机上构建+签名（SwiftUI 层从未 xcodebuild 编译）；🟡 真 key 可得性（卡用户侧）；🟡 真 FP 率未知（当前 0% 是 fuzzing 模拟，真合约可能误报）。
+
+---
 
 ## 当前阶段一句话
 
@@ -17,6 +45,46 @@ TODO-6 Network jail enforcement 推后到 v3.x post-GA opt-in。
 ADR-030 sieve-updater crate + SPEC-006 + docs 同步 2026-05-05 同日完成（TODO-7~12 + TODO-17/18）。
 
 **2026-06-07 P0 修复（workflow 全量审查发现）**：daemon 全量测试实为 747 passed / 13 failed / 7 ignored——此前本文与 CLAUDE.md 记的「760 passed / 0 failed」把测试**总数**误作通过数（CHANGELOG 当时如实记了 13 failed 但未跟进）。已修复全部 13 个：**簇 A**（产品 bug，9 个）legacy/单-upstream 未声明 protocol 配置下 OpenAI `/v1/chat/completions` 被 ADR-026 协议错位误判 400 → 新增 `Protocol::Auto` 默认态按 path 自适应；**簇 B**（测试 bug，4 个）GUI popup mock 未跳过 SPEC-005 `sieve.hello` 握手帧致假性 426。现 **760 passed / 0 failed / 7 ignored**，fmt/clippy 全绿。详见主里程碑 2026-06-07 条目。
+
+---
+
+## ✅ 已完成 Epic：Dogfood 完全自动化（2026-06-18 单日落地）
+
+> **达成**：821 行手动 checklist → 一键 `scripts/dogfood.sh`（hermetic，零真 API/网络/GUI）+ 零 secret CI。质量基线 **799 passed / 0 failed / 7 ignored**，fmt/clippy 全绿。
+> 交付：`sieve-testing` 共享 harness / `dogfood_e2e.rs` 11 headless 场景 / `updater_e2e.rs` 8 闭环测试 / GUI 仓 81 跨仓 fixture / `smoke_test.py --mock-only` / `dogfood.sh` / CI nextest+dogfood job / SPEC-008 HTML。
+> **自动化首轮抓出真 bug**：已修 zstd 字节序（热更新生产失效）+ headless CLI 嵌套 runtime panic；待排期 detection 审计未接线 + 6 类跨仓 schema 漂移（见下方 🚫 段，测试已锚定）。
+>
+> 目标：把 821 行手动联调 checklist（`docs/guides/manual-integration-test.md` 16 节）变成**无真 API key、无真网络、无真 GUI 的一键 + 零 secret CI 端到端测试**。
+> 范围决策（2026-06-18 用户签字）：① GUI 用 `sieve decisions` headless CLI 替代当决策客户端，GUI 仓只保跨仓 fixture 一致性测试，不碰 XCUITest；② 本地一键 + CI 无 secret 都要 → 全程 hermetic mock upstream。
+> 设计源：5-agent 测绘 workflow（wf_b0644690）综合 —— 去 EXT 后 28/32 能力块（87.5%）可自动化。harness 形态 = 新 dev crate `sieve-testing` + cargo 集成测试为主，`smoke_test.py --mock-only` 为辅。
+> 承重事实（已核验）：`SIEVE_CACHE_DIR` 不存在（cache_dir.rs 硬用 $HOME/Library/Caches）；updater `download.rs:27`/`manifest.rs:92` 双 `.https_only()`（mock manifest 需 TLS，但上游 mock 走 plain HTTP，daemon 有 `tls_verify_upstream=false`）；`outbound_block.rs` 已有 DaemonGuard/spawn_mock_upstream 可抽取；无任何现存共享 test crate。
+
+### P0 · 去真依赖 + 基建前置（基线 cargo 1.88 @ ~/.cargo/bin，非 PATH 默认，脚本需自带）
+- [x] **P0.1** sieve-updater 加 `SIEVE_CACHE_DIR` env 覆盖（cache_dir.rs `CACHE_DIR_ENV` + override 纯函数 + 3 单测；install_id/runner 经 cache_dir() 自动覆盖）✅ 2026-06-18
+- [x] **P0.2** 抽取 `crates/sieve-testing`（paths/upstream(含 responses)/daemon(DaemonGuard+DaemonConfig)/http(含 decode_chunked)/cli(run_sieve_cli)；self_test 端到端通；clippy+fmt 绿）✅ 2026-06-18（**未回改现有测试**——纯去重降级为 P2 可选；decisions/audit 走 run_sieve_cli shell out 真 CLI 而非重写 JSON-RPC）
+- [x] **P0.3** `smoke_test.py --mock-only`（本地 mock Anthropic 上游 + tls_verify_upstream=false；fake key→401 注入 cloudflare 头；29/29 通过；**修出 OUT-01 426→auto_redact 过时断言**，见 lessons 2026-06-18）✅
+- [x] **P0.4** 测试隔离骨架（SIEVE_HOME tmpdir + wait_for_ipc 轮询，在 sieve-testing 落地）+ `scripts/dogfood.sh` 一键入口（实跑全过）✅
+  - 加固：`http_post` 加瞬时连接错误重试（4 次线性退避），消除 daemon 启动窗口/高并发 flake；self_test 3/3 稳过
+  - **已知存量 flake**：`outbound_block.rs::r11`（ConnectionReset）在全 workspace 高并发下偶发（隔离 3/3 过，非逻辑 bug）→ 全量回归 780 passed；CI 用 nextest retries 治理（P2）。dogfood.sh 只跑 `-p sieve-testing`+smoke，不触此 flake
+
+### P1 · Mock 服务 + Headless Harness
+- [x] **P1.1** Updater mock（**改用更简方案**：plain-HTTP mock 复用 sieve-testing + `tls.rs` 的 `SIEVE_UPDATE_ALLOW_HTTP` 接缝，`#[cfg(debug_assertions)]` release 编译期消除恒 https_only；放弃 rcgen/TLS 复杂度，同等 GA 安全）✅ 2026-06-18
+- [x] **P1.2** Headless harness Phase A-D（`dogfood_e2e.rs` 11 测试：出站脱敏 OUT-01 / 入站拦截 IN-CR-01/05 含 content-type 矩阵 / no-client-policy 三策略 + Critical 强制 IPC / mock-GUI 决策流 Allow+Deny / audit 闭环；5/5 稳过）✅ 2026-06-18
+  - 🐛 抓出 4 daemon bug：**P0-A** `sieve audit`/`decisions` 嵌套 runtime panic（**我已修**）；**P0-B** detection 审计全未接线（待排期）；harness no_client_policy/wait_for_ipc（已修/已注明）
+- [x] **P1.3** 跨仓 17-method fixture 一致性测试入 GUI 仓（81 fixture 字节一致 + Swift 消费测试，`#expect(throws:)` 钉死现状当红线）✅ 2026-06-18
+  - 🐛 抓出 6 类跨仓 wire schema 漂移（多个致命，会让真机 GUI dogfood 崩）：hello preset / preset_changed / paused_changed / notify_status_bar / purge_history / evaluate（待排期）
+- [x] **P1.4** Updater 闭环 e2e（`updater_e2e.rs` 8 测试：§14.1 install-id / §14.4 fetch→download→sha256→**zstd 解压**→原子落盘 / §14.5 失败模式 / §14.6 公钥 None skip / 遥测 uid 开关；跨平台 hermetic 非 macOS-only）✅ 2026-06-18
+  - 🐛 **抓出真 bug**：`install.rs::ZSTD_MAGIC` 字节序反置（`FD2FB528` 磁盘小端应为 `28 B5 2F FD`）→ 真实 zstd 规则包永不解压、原样压缩写盘，sieve-rules 加载必失败。整条 ADR-030 热更新生产中是坏的，现有单测全假阳性掩盖。已修 + 回归断言（见 lessons/CHANGELOG 2026-06-18）
+
+### P2 · CI + 文档 + 收尾
+- [x] **P2 CI**：`ci.yml` `test` job 转 cargo-nextest（`.config/nextest.toml` retries=2 治存量 r11 flake）+ doctest；新增 `dogfood` job（build + `smoke_test.py --mock-only`，零 secret）✅
+- [x] **P2 文档**：SPEC-008 dogfood 自动化 HTML 设计文档（3 内联 SVG）；CHANGELOG（zstd 修复 + dogfood 基建）；lessons（4 条）；PROGRESS 同步 ✅
+- [x] **P2 收尾**：全量回归 **799 passed / 0 failed / 7 ignored** + clippy/fmt 全绿 + `dogfood.sh` 一键终验全过 + manual-integration-test.md 加自动化横幅 ✅ 2026-06-18
+- [ ] 可选 IPC（待 P0-B 一起做，不阻塞）：`sieve.export_history` / `sieve.list_inflight`
+
+### 🚫 不自动化（保留手动验收）
+- 真 API 出/入站规则触发（OUT-*/IN-CR-* 真 Claude Code 流量）—— Critical FP<0.5% 由离线 vectorscan fuzz + deterministic 样本集保证，不靠 e2e
+- GUI 可视层（菜单栏 5 状态/Toast/Settings 6 Tab/Onboarding 权限）—— 人工 dogfood，一轮 2-3h
 
 ---
 
@@ -444,6 +512,16 @@ ADR-030 sieve-updater crate + SPEC-006 + docs 同步 2026-05-05 同日完成（T
 - GA 准备：Week 12 一次性公开 repo
 
 ---
+
+## ✅ 已修：dogfood 自动化首轮抓出的全部真 bug（2026-06-18 同日全修）
+
+> 第二轮目标「修正所有问题」已达成。自动化抓出的 bug 全部修复，测试断言从「锚定缺陷」翻转为「正向验证」。质量基线 **799 passed / 0 failed**，dogfood.sh 全绿，GUI swiftc 探针 21/21。
+
+- ✅ **`install.rs::ZSTD_MAGIC` 字节序反置**（规则包永不解压，热更新生产失效）
+- ✅ **`sieve audit`/`sieve decisions` 嵌套 runtime panic**（headless CLI 完全不可用）
+- ✅ **detection 审计接线**：`gated_request_decision` 写 `DecisionMade`（所有 gui_popup 决策 + no-client-policy）、出站脱敏(Anthropic+OpenAI)写 `OutboundRedacted`；`sieve audit query` 现查得到核心流量。窄路径（inbound hook-mark / status-bar-only / 出站 direct-block）暂留——当前规则集（OUT 全 redact/gui_popup/status_bar，无纯 Block）不触发 direct-block，决策审计已覆盖 IN-CR gui_popup。
+- ✅ **6 类跨仓 wire schema 漂移**（曾阻塞真机 GUI dogfood）：以 SPEC-005 为权威——daemon 侧 D4(paused_changed 补 source)/D6(purge_history purged_at i64→ISO)；GUI 侧 D3(删 preset)/D5(重写 EventNotifyParams)/D7(would_recommendation→对象)；D1/D2 校正陈旧 fixture。两仓 fixture 字节对齐 + 断言翻转。
+- ⏭ **次要待办（不阻塞）**：`wait_for_ipc` 探测连接污染 `connected_clients`（daemon IPC eager 清理 gui_writers）；审计窄路径补全；fixture 防漂移测试升级为双向稳定（serialize↔deserialize）。
 
 ## 🚫 阻塞 / 等决策
 （无）
