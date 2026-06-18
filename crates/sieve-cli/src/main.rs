@@ -235,10 +235,10 @@ async fn main() -> Result<()> {
             commands::rules::run(&args)?;
         }
         Command::Decisions(args) => {
-            commands::decisions::run(args)?;
+            commands::decisions::run(args).await?;
         }
         Command::Audit(args) => {
-            commands::audit::run(args)?;
+            commands::audit::run(args).await?;
         }
     }
 
