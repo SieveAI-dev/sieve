@@ -222,6 +222,20 @@ pub enum AuditEvent {
         #[serde(default)]
         caller: CallerContext,
     },
+    /// 入站 Critical 工具调用被 fail-closed 自动拦截（无用户决策，PRD §9 #3）。
+    ///
+    /// 接线背景：入站 block 路径（SSE + JSON、Anthropic + OpenAI）此前一律不落 audit
+    /// （真机 dogfood 抓出，2026-06-18），`sieve audit query` 查不到任何拦截记录。
+    /// 仅记录元数据（无 payload），整体序列化天然零 secret（PRD §5.6.1 / §9 #13）。
+    InboundBlocked {
+        rule_id: String,
+        severity: String,
+        request_id: String,
+        /// "anthropic_sse" | "openai_sse" | "anthropic_json" | "openai_json"
+        path_label: String,
+        #[serde(default)]
+        caller: CallerContext,
+    },
     /// IPC socket 收到超大帧，关闭连接（SPEC-005 §1.1 / §1.3.1）。
     ///
     /// **禁止**记录任何 raw payload；只记录 `peer / size_bytes / closed_at_ms`。
@@ -261,6 +275,7 @@ impl AuditEvent {
             | Self::GraylistHit { .. }
             | Self::GraylistAddFailed { .. }
             | Self::SequenceHit { .. }
+            | Self::InboundBlocked { .. }
             | Self::AutoDecidedPaused { .. } => "inbound",
             Self::UserRulesReloaded { .. }
             | Self::CriticalLockBlocked { .. }
@@ -289,6 +304,7 @@ impl AuditEvent {
             | Self::GraylistHit { rule_id, .. }
             | Self::GraylistAddFailed { rule_id, .. }
             | Self::SequenceHit { rule_id, .. }
+            | Self::InboundBlocked { rule_id, .. }
             | Self::CriticalLockBlocked { rule_id, .. }
             | Self::PresetOverrideApplied { rule_id, .. }
             | Self::PresetOverrideRejected { rule_id, .. }
@@ -311,7 +327,8 @@ impl AuditEvent {
             | Self::InboundDecisionRequested { severity, .. }
             | Self::InboundDecisionResolved { severity, .. }
             | Self::StatusBarNotified { severity, .. }
-            | Self::DecisionMade { severity, .. } => severity,
+            | Self::DecisionMade { severity, .. }
+            | Self::InboundBlocked { severity, .. } => severity,
             Self::GraylistAdded { .. }
             | Self::GraylistCriticalRejected { .. }
             | Self::GraylistHit { .. }
@@ -345,6 +362,7 @@ impl AuditEvent {
             Self::GraylistHit { .. } => "graylist_hit",
             Self::GraylistAddFailed { .. } => "graylist_add_failed",
             Self::SequenceHit { .. } => "sequence_hit",
+            Self::InboundBlocked { .. } => "blocked",
             Self::UserRulesReloaded { .. } => "user_rules_reloaded",
             Self::CriticalLockBlocked { .. } => "critical_lock_blocked",
             Self::PresetChanged { .. } => "preset_changed",
@@ -381,6 +399,7 @@ impl AuditEvent {
             | Self::GraylistCriticalRejected { request_id, .. }
             | Self::GraylistHit { request_id, .. }
             | Self::GraylistAddFailed { request_id, .. }
+            | Self::InboundBlocked { request_id, .. }
             | Self::AutoDecidedPaused { request_id, .. } => request_id,
             Self::SequenceHit { .. }
             | Self::UserRulesReloaded { .. }
@@ -422,6 +441,7 @@ impl AuditEvent {
             | Self::GraylistHit { caller, .. }
             | Self::GraylistAddFailed { caller, .. }
             | Self::SequenceHit { caller, .. }
+            | Self::InboundBlocked { caller, .. }
             | Self::AutoDecidedPaused { caller, .. } => caller.pid,
             Self::UserRulesReloaded { .. }
             | Self::CriticalLockBlocked { .. }
@@ -451,6 +471,7 @@ impl AuditEvent {
             | Self::GraylistHit { caller, .. }
             | Self::GraylistAddFailed { caller, .. }
             | Self::SequenceHit { caller, .. }
+            | Self::InboundBlocked { caller, .. }
             | Self::AutoDecidedPaused { caller, .. } => caller.exe.as_deref(),
             Self::UserRulesReloaded { .. }
             | Self::CriticalLockBlocked { .. }

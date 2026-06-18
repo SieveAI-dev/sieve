@@ -364,6 +364,44 @@ fn spawn_decision_audit(
     });
 }
 
+/// 入站 Critical 拦截写审计（fail-closed 自动 block，无用户决策；PRD §9 #3）。
+///
+/// 接线背景：入站 block 路径（SSE + JSON、Anthropic + OpenAI）此前一律不落 audit
+/// （真机 dogfood 抓出，2026-06-18）。每条 detection 写一条 InboundBlocked 事件，
+/// 仅含元数据（rule_id / severity / path_label / caller），零 secret 落盘。
+/// fire-and-forget：tokio::spawn 不阻塞热路径（PRD §9 性能预算）。
+fn spawn_inbound_blocked_audit(
+    audit: &Arc<crate::audit::AuditStore>,
+    provider_id: &str,
+    caller: &Option<crate::process_context::CallerInfo>,
+    detections: &[sieve_core::Detection],
+    path_label: &str,
+) {
+    let caller_ctx = crate::audit::CallerContext {
+        pid: caller.as_ref().map(|c| c.pid),
+        exe: caller
+            .as_ref()
+            .and_then(|c| c.exe.as_ref())
+            .map(|p| p.display().to_string()),
+    };
+    for d in detections {
+        let event = crate::audit::AuditEvent::InboundBlocked {
+            rule_id: d.rule_id.clone(),
+            severity: format!("{:?}", d.severity).to_lowercase(),
+            request_id: uuid::Uuid::new_v4().to_string(),
+            path_label: path_label.to_owned(),
+            caller: caller_ctx.clone(),
+        };
+        let store = Arc::clone(audit);
+        let provider_id_owned = provider_id.to_owned();
+        tokio::spawn(async move {
+            if let Err(e) = store.append(event, &provider_id_owned).await {
+                tracing::warn!(error = %e, "audit append InboundBlocked failed");
+            }
+        });
+    }
+}
+
 /// 写灰名单条目，二次校验 Critical 锁（PRD v2.0 §5.4.2 二次校验）。
 ///
 /// 调用时机：daemon 收到 `DecisionResponse { decision=Allow, remember=true }` 之后。
@@ -2908,6 +2946,13 @@ async fn forward_with_inbound_inspection(
                         for d in &blocking {
                             tracing::warn!(rule = %d.rule_id, "inbound detection");
                         }
+                        spawn_inbound_blocked_audit(
+                            &audit_store,
+                            &listener_provider_id,
+                            &caller,
+                            &blocking,
+                            "anthropic_sse",
+                        );
                         let blocked_payload = build_sieve_blocked_sse(&blocking);
                         let _ = tx.send(Ok(hyper::body::Frame::data(blocked_payload))).await;
                         return;
@@ -3057,6 +3102,13 @@ async fn forward_with_inbound_inspection(
                                 Ok(sieve_core::pipeline::HoldOutcome::Deny { reason }) => {
                                     // 修 R2-#3：用户拒绝时不发触发帧，直接注入 sieve_blocked 并关流。
                                     tracing::warn!(%reason, "INBOUND BLOCKED by GUI decision");
+                                    spawn_inbound_blocked_audit(
+                                        &audit_store,
+                                        &listener_provider_id,
+                                        &caller,
+                                        &hold_detections,
+                                        "anthropic_sse",
+                                    );
                                     let blocked_payload = build_sieve_blocked_sse(&hold_detections);
                                     let _ = tx
                                         .send(Ok(hyper::body::Frame::data(blocked_payload)))
@@ -3137,6 +3189,13 @@ async fn forward_with_inbound_inspection(
             for d in &blocking {
                 tracing::warn!(rule = %d.rule_id, "inbound detection (flush)");
             }
+            spawn_inbound_blocked_audit(
+                &audit_store,
+                &listener_provider_id,
+                &caller,
+                &blocking,
+                "anthropic_sse",
+            );
             let blocked_payload = build_sieve_blocked_sse(&blocking);
             let _ = tx.send(Ok(hyper::body::Frame::data(blocked_payload))).await;
             return;
@@ -3154,6 +3213,13 @@ async fn forward_with_inbound_inspection(
             for d in &flush_hold_detections {
                 tracing::warn!(rule = %d.rule_id, "flush-hold detection → fail-closed");
             }
+            spawn_inbound_blocked_audit(
+                &audit_store,
+                &listener_provider_id,
+                &caller,
+                &flush_hold_detections,
+                "anthropic_sse",
+            );
             let blocked_payload = build_sieve_blocked_sse(&flush_hold_detections);
             let _ = tx.send(Ok(hyper::body::Frame::data(blocked_payload))).await;
         }
@@ -3311,6 +3377,13 @@ async fn forward_with_openai_inbound_inspection(
                         for d in &blocking {
                             tracing::warn!(rule = %d.rule_id, "openai inbound detection");
                         }
+                        spawn_inbound_blocked_audit(
+                            &audit_store,
+                            &listener_provider_id,
+                            &caller,
+                            &blocking,
+                            "openai_sse",
+                        );
                         let blocked_payload = build_sieve_blocked_sse(&blocking);
                         let _ = tx.send(Ok(hyper::body::Frame::data(blocked_payload))).await;
                         return;
@@ -3447,6 +3520,13 @@ async fn forward_with_openai_inbound_inspection(
                                 }
                                 Ok(sieve_core::pipeline::HoldOutcome::Deny { reason }) => {
                                     tracing::warn!(%reason, "INBOUND BLOCKED (openai) by GUI decision");
+                                    spawn_inbound_blocked_audit(
+                                        &audit_store,
+                                        &listener_provider_id,
+                                        &caller,
+                                        &hold_detections,
+                                        "openai_sse",
+                                    );
                                     let blocked_payload = build_sieve_blocked_sse(&hold_detections);
                                     let _ = tx
                                         .send(Ok(hyper::body::Frame::data(blocked_payload)))
@@ -3525,6 +3605,13 @@ async fn forward_with_openai_inbound_inspection(
             for d in &blocking {
                 tracing::warn!(rule = %d.rule_id, "openai inbound detection (flush)");
             }
+            spawn_inbound_blocked_audit(
+                &audit_store,
+                &listener_provider_id,
+                &caller,
+                &blocking,
+                "openai_sse",
+            );
             let blocked_payload = build_sieve_blocked_sse(&blocking);
             let _ = tx.send(Ok(hyper::body::Frame::data(blocked_payload))).await;
             return;
@@ -3538,6 +3625,13 @@ async fn forward_with_openai_inbound_inspection(
             for d in &flush_hold_detections {
                 tracing::warn!(rule = %d.rule_id, "openai flush-hold detection → fail-closed");
             }
+            spawn_inbound_blocked_audit(
+                &audit_store,
+                &listener_provider_id,
+                &caller,
+                &flush_hold_detections,
+                "openai_sse",
+            );
             let blocked_payload = build_sieve_blocked_sse(&flush_hold_detections);
             let _ = tx.send(Ok(hyper::body::Frame::data(blocked_payload))).await;
         }
@@ -4027,6 +4121,13 @@ async fn handle_anthropic_json_inbound(
         for d in &all_blocking {
             tracing::warn!(rule = %d.rule_id, "anthropic json inbound detection");
         }
+        spawn_inbound_blocked_audit(
+            &audit_store,
+            &listener_provider_id,
+            &caller,
+            &all_blocking,
+            "anthropic_json",
+        );
         return Ok(build_sieve_blocked_json_response(&all_blocking));
     }
 
@@ -4181,6 +4282,13 @@ async fn handle_openai_json_inbound(
         for d in &all_blocking {
             tracing::warn!(rule = %d.rule_id, "openai json inbound detection");
         }
+        spawn_inbound_blocked_audit(
+            &audit_store,
+            &listener_provider_id,
+            &caller,
+            &all_blocking,
+            "openai_json",
+        );
         return Ok(build_sieve_blocked_json_response(&all_blocking));
     }
 
