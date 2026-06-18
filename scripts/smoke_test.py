@@ -6,10 +6,16 @@
 依赖:Python 3.10+,仅 stdlib(无需 pip)。
 
 用法:
-    scripts/smoke_test.py                                 # 仅无 key 透传测试
-    ANTHROPIC_API_KEY=sk-ant-... scripts/smoke_test.py    # 加 200/SSE/tool_use
+    scripts/smoke_test.py --mock-only                     # hermetic：本地 mock 上游，无需真 key/网络（CI 用）
+    scripts/smoke_test.py                                 # 仅无 key 透传测试（打真 api.anthropic.com）
+    ANTHROPIC_API_KEY=sk-ant-... scripts/smoke_test.py    # 加 200/SSE/tool_use（真 key + 真网络）
     scripts/smoke_test.py --port 12000                    # 指定端口
     scripts/smoke_test.py --debug                         # daemon stderr 打到屏幕
+
+--mock-only 下启动一个本地 mock Anthropic 上游（http），daemon 经 tls_verify_upstream=false
+转发到它。fake key → 401（注入 cloudflare 头，模拟真上游）；valid key → 200/SSE/tool_use。
+全套断言（含 200/SSE/tool_use/benign 透传）无真 key 无网络即可跑。出站拦截(426)由 daemon
+自身完成，与上游无关。
 """
 
 from __future__ import annotations
@@ -18,6 +24,7 @@ import argparse
 import contextlib
 import dataclasses
 import http.client
+import http.server
 import json
 import os
 import signal
@@ -91,7 +98,11 @@ def find_free_port() -> int:
         return s.getsockname()[1]
 
 
-def write_config(port: int, upstream: str = "https://api.anthropic.com") -> Path:
+def write_config(
+    port: int,
+    upstream: str = "https://api.anthropic.com",
+    tls_verify: bool = True,
+) -> Path:
     rules_path = REPO_ROOT / "crates" / "sieve-rules" / "rules" / "outbound.toml"
     inbound_rules_path = REPO_ROOT / "crates" / "sieve-rules" / "rules" / "inbound.toml"
     f = tempfile.NamedTemporaryFile(
@@ -104,17 +115,26 @@ def write_config(port: int, upstream: str = "https://api.anthropic.com") -> Path
         f'rules_path = "{rules_path}"\n'
         f'inbound_rules_path = "{inbound_rules_path}"\n'
     )
+    if not tls_verify:
+        # mock 上游是 plain HTTP，关掉上游 TLS 校验（与 Rust 集成测试一致）。
+        f.write("tls_verify_upstream = false\n")
     f.close()
     return Path(f.name)
 
 
 @contextlib.contextmanager
-def sieve_daemon(port: int, debug: bool = False) -> Iterator[subprocess.Popen[bytes]]:
+def sieve_daemon(
+    port: int,
+    debug: bool = False,
+    upstream: str = "https://api.anthropic.com",
+    tls_verify: bool = True,
+) -> Iterator[subprocess.Popen[bytes]]:
     binary = find_daemon_binary()
-    config = write_config(port)
-    print(dim(f"  binary:  {binary}"))
-    print(dim(f"  config:  {config}"))
-    print(dim(f"  port:    {port}"))
+    config = write_config(port, upstream, tls_verify)
+    print(dim(f"  binary:   {binary}"))
+    print(dim(f"  config:   {config}"))
+    print(dim(f"  upstream: {upstream}"))
+    print(dim(f"  port:     {port}"))
 
     stderr_dst = None if debug else subprocess.DEVNULL
     stdout_dst = None if debug else subprocess.DEVNULL
@@ -122,7 +142,13 @@ def sieve_daemon(port: int, debug: bool = False) -> Iterator[subprocess.Popen[by
         [str(binary), "start", "--config", str(config)],
         stdout=stdout_dst,
         stderr=stderr_dst,
-        env={**os.environ, "SIEVE_LOG": "warn"},
+        # smoke test 绝不联网做更新/遥测，保持 hermetic。
+        env={
+            **os.environ,
+            "SIEVE_LOG": "warn",
+            "SIEVE_NO_UPDATE": "1",
+            "SIEVE_NO_TELEMETRY": "1",
+        },
     )
     try:
         wait_for_listen(port, timeout=10.0)
@@ -149,6 +175,160 @@ def wait_for_listen(port: int, timeout: float) -> None:
         except OSError:
             time.sleep(0.1)
     raise TimeoutError(f"daemon did not listen on :{port} within {timeout}s")
+
+
+# ──────────── mock 上游(--mock-only,去真 API 依赖)────────────
+
+# mock 模式下 real 测试用的「有效 key」(任何不含 "fake" 的 key 都被 mock 视为有效)。
+MOCK_VALID_KEY = "sk-ant-mock-valid-key"
+
+# mock 上游收到的请求体(供出站脱敏断言：验证 key 在转发前已被 daemon 脱敏)。
+# CPython list.append/clear 是原子的，线程间共享安全。
+_MOCK_RECEIVED: list[bytes] = []
+
+
+def _compact(obj: object) -> str:
+    """紧凑 JSON(无空格),匹配真 Anthropic wire 格式(断言找 '"type":"message"')。"""
+    return json.dumps(obj, separators=(",", ":"))
+
+
+def _sse(events: list[tuple[str, dict[str, object]]]) -> bytes:
+    """把 (event_name, data) 列表编码为 Anthropic SSE wire 格式。"""
+    return "".join(
+        f"event: {name}\ndata: {_compact(data)}\n\n" for name, data in events
+    ).encode()
+
+
+def _mock_json_message() -> bytes:
+    return _compact(
+        {
+            "id": "msg_mock_0001",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-haiku-4-5",
+            "content": [{"type": "text", "text": "ok"}],
+            "stop_reason": "end_turn",
+            "stop_sequence": None,
+            "usage": {"input_tokens": 5, "output_tokens": 1},
+        }
+    ).encode()
+
+
+def _mock_text_sse() -> bytes:
+    msg = {
+        "id": "msg_mock_0002",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-haiku-4-5",
+        "content": [],
+        "stop_reason": None,
+        "usage": {"input_tokens": 5, "output_tokens": 0},
+    }
+    return _sse(
+        [
+            ("message_start", {"type": "message_start", "message": msg}),
+            (
+                "content_block_start",
+                {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}},
+            ),
+            ("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "1"}}),
+            ("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "2"}}),
+            ("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "3"}}),
+            ("content_block_stop", {"type": "content_block_stop", "index": 0}),
+            ("message_delta", {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 3}}),
+            ("message_stop", {"type": "message_stop"}),
+        ]
+    )
+
+
+def _mock_tool_use_sse() -> bytes:
+    msg = {
+        "id": "msg_mock_0003",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-haiku-4-5",
+        "content": [],
+        "stop_reason": None,
+        "usage": {"input_tokens": 8, "output_tokens": 0},
+    }
+    return _sse(
+        [
+            ("message_start", {"type": "message_start", "message": msg}),
+            (
+                "content_block_start",
+                {
+                    "type": "content_block_start",
+                    "index": 0,
+                    "content_block": {"type": "tool_use", "id": "toolu_mock_1", "name": "get_weather", "input": {}},
+                },
+            ),
+            ("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": '{"city":'}}),
+            ("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": '"Beijing"}'}}),
+            ("content_block_stop", {"type": "content_block_stop", "index": 0}),
+            ("message_delta", {"type": "message_delta", "delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 12}}),
+            ("message_stop", {"type": "message_stop"}),
+        ]
+    )
+
+
+class _MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
+    """本地 mock Anthropic 上游：按 x-api-key 与请求体形状返回确定性响应。"""
+
+    def log_message(self, *_args: object) -> None:  # 静音访问日志
+        return
+
+    def do_POST(self) -> None:  # noqa: N802 (http.server 接口约定)
+        length = int(self.headers.get("content-length", "0") or "0")
+        raw = self.rfile.read(length) if length else b""
+        _MOCK_RECEIVED.append(raw)
+        api_key = self.headers.get("x-api-key", "")
+        try:
+            body = json.loads(raw)
+        except (ValueError, UnicodeDecodeError):
+            self._send(
+                400,
+                b'{"type":"error","error":{"type":"invalid_request_error","message":"mock: bad json"},"request_id":"req_mock_400"}',
+            )
+            return
+        # 空/含 "fake" 的 key → 401（模拟真 Anthropic 拒假 key），注入 cloudflare 头以保留原断言。
+        if (not api_key) or ("fake" in api_key):
+            self._send(
+                401,
+                b'{"type":"error","error":{"type":"authentication_error","message":"mock: invalid x-api-key"},"request_id":"req_mock_401"}',
+                extra_headers={"server": "cloudflare", "cf-ray": "0000000000000000-SJC"},
+            )
+            return
+        stream = bool(body.get("stream"))
+        tools = bool(body.get("tools"))
+        if stream and tools:
+            self._send(200, _mock_tool_use_sse(), content_type="text/event-stream")
+        elif stream:
+            self._send(200, _mock_text_sse(), content_type="text/event-stream")
+        else:
+            self._send(200, _mock_json_message())
+
+    def _send(
+        self,
+        status: int,
+        body: bytes,
+        content_type: str = "application/json",
+        extra_headers: dict[str, str] | None = None,
+    ) -> None:
+        self.send_response(status)
+        self.send_header("content-type", content_type)
+        self.send_header("content-length", str(len(body)))
+        for k, v in (extra_headers or {}).items():
+            self.send_header(k, v)
+        self.end_headers()
+        self.wfile.write(body)
+
+
+def start_mock_upstream() -> tuple[http.server.ThreadingHTTPServer, int]:
+    """在随机端口起 mock 上游，返回 (server, port)。调用方负责 shutdown()。"""
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _MockUpstreamHandler)
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, port
 
 
 # ──────────── HTTP helpers(stdlib only)────────────
@@ -431,8 +611,12 @@ def test_real_tool_use(base_url: str, stats: Stats, api_key: str) -> None:
     assert_contains("partial_json 流式增量", b"input_json_delta", body, stats)
 
 
-def test_outbound_block_fake_key(base_url: str, stats: Stats) -> None:
-    print(bold("\n[9] 出站拦截:fake Anthropic key → 426"))
+def test_outbound_redact_fake_key(
+    base_url: str, stats: Stats, mock_only: bool
+) -> None:
+    print(bold("\n[9] 出站脱敏:fake Anthropic key → OUT-01 auto_redact 转发"))
+    # OUT-01 处置 = auto_redact（severity critical，但 disposition 优先于 action=block，
+    # 见 ADR-016 二维处置矩阵 + PRD v1.4 §6.1）：daemon 脱敏后转发上游，**不返 426**。
     # 构造符合 OUT-01 pattern 的 fake key：sk-ant-api03- + 93 chars + AA
     suffix_93 = ("abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_-" * 2)[:93]
     fake_key = f"sk-ant-api03-{suffix_93}AA"
@@ -441,6 +625,10 @@ def test_outbound_block_fake_key(base_url: str, stats: Stats) -> None:
         "max_tokens": 16,
         "messages": [{"role": "user", "content": f"leaked: {fake_key}"}],
     }).encode()
+    # mock 模式用 valid key（走干净 200 转发路径）；真模式保留 FAKE_KEY。
+    request_key = MOCK_VALID_KEY if mock_only else FAKE_KEY
+    if mock_only:
+        _MOCK_RECEIVED.clear()
     status, _, body_resp = http_request(
         base_url,
         "POST",
@@ -448,14 +636,25 @@ def test_outbound_block_fake_key(base_url: str, stats: Stats) -> None:
         headers={
             "content-type": "application/json",
             "anthropic-version": "2023-06-01",
-            "x-api-key": FAKE_KEY,
+            "x-api-key": request_key,
         },
         body=body,
     )
-    assert_eq("HTTP 426", 426, status, stats)
-    assert_contains("body 是 sieve_blocked", b'"type":"sieve_blocked"', body_resp, stats)
-    assert_contains("body 含 OUT-01", b"OUT-01", body_resp, stats)
-    assert_contains("body 含 guidance", b"guidance", body_resp, stats)
+    # auto_redact ≠ block：不应是 426 / sieve_blocked。
+    assert_eq("非 426（OUT-01 是 auto_redact 不 block）", True, status != 426, stats)
+    assert_eq("非 sieve_blocked", False, b"sieve_blocked" in body_resp, stats)
+    if mock_only:
+        # 关键安全断言：转发到上游的 body 里原始 key 已被脱敏（不再出现）。
+        forwarded = b"".join(_MOCK_RECEIVED)
+        assert_eq("上游收到已转发请求", True, len(_MOCK_RECEIVED) >= 1, stats)
+        assert_eq(
+            "转发 body 已脱敏（原始 key 不出现）",
+            False,
+            fake_key.encode() in forwarded,
+            stats,
+        )
+    else:
+        print(dim(f"    实际 status: {status}（真模式无法窥探上游 body，脱敏由 mock 模式断言）"))
 
 
 def test_benign_passes_through(base_url: str, stats: Stats, api_key: str) -> None:
@@ -521,17 +720,35 @@ def main() -> int:
         action="store_true",
         help="把 daemon stderr 打到屏幕,便于排查",
     )
+    parser.add_argument(
+        "--mock-only",
+        action="store_true",
+        help="用本地 mock 上游(无需真 ANTHROPIC_API_KEY/网络),CI hermetic 用",
+    )
     args = parser.parse_args()
 
     port = args.port or find_free_port()
     base_url = f"http://127.0.0.1:{port}"
     api_key = os.environ.get("ANTHROPIC_API_KEY")
 
+    upstream = "https://api.anthropic.com"
+    tls_verify = True
+    mock_srv: http.server.ThreadingHTTPServer | None = None
+    if args.mock_only:
+        mock_srv, mock_port = start_mock_upstream()
+        upstream = f"http://127.0.0.1:{mock_port}"
+        tls_verify = False
+        # mock 模式下 real 测试也跑——用「有效」mock key 打到 mock 上游。
+        api_key = MOCK_VALID_KEY
+        print(bold(f"[mock] 本地 mock 上游 @ {upstream}"))
+
     stats = Stats()
     print(bold(f"[1] 启动 daemon @ {base_url}"))
 
     try:
-        with sieve_daemon(port, debug=args.debug):
+        with sieve_daemon(
+            port, debug=args.debug, upstream=upstream, tls_verify=tls_verify
+        ):
             test_no_key_passthrough(base_url, stats)
             test_bad_request(base_url, stats)
             test_large_body(base_url, stats)
@@ -542,9 +759,9 @@ def main() -> int:
                 test_real_tool_use(base_url, stats, api_key)
             else:
                 print(bold("\n[6-8] 真 API key 测试"))
-                print(dim("  ⊘ 跳过(未设 ANTHROPIC_API_KEY 环境变量)"))
-            # Week 2 新增：出站拦截验证（不依赖真 key）
-            test_outbound_block_fake_key(base_url, stats)
+                print(dim("  ⊘ 跳过(未设 ANTHROPIC_API_KEY 且非 --mock-only)"))
+            # Week 2 新增：出站脱敏验证（OUT-01 auto_redact，不依赖真 key/上游）
+            test_outbound_redact_fake_key(base_url, stats, args.mock_only)
             if api_key:
                 test_benign_passes_through(base_url, stats, api_key)
                 # Week 3 新增：入站规则集成后 benign 流式仍正常透传
@@ -555,6 +772,9 @@ def main() -> int:
     except TimeoutError as e:
         print(red(f"\n  ✗ {e}"))
         return 2
+    finally:
+        if mock_srv is not None:
+            mock_srv.shutdown()
 
     print(bold("\n结果"))
     if stats.failed == 0:
