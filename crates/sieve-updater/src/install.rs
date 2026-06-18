@@ -78,8 +78,16 @@ pub async fn install_rules(
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
-/// zstd magic bytes: `\xFD\x2F\xB5\x28` (little-endian frame magic).
-const ZSTD_MAGIC: &[u8] = &[0xFD, 0x2F, 0xB5, 0x28];
+/// zstd frame magic number `0xFD2FB528`, stored little-endian on disk as the
+/// 4 bytes `0x28 0xB5 0x2F 0xFD` (RFC 8878 §3.1.1). A real zstd stream begins
+/// with exactly these bytes.
+///
+/// NOTE: this constant was previously byte-reversed (`FD 2F B5 28`), so the
+/// magic check never matched a real zstd stream and `decompress_zstd` silently
+/// fell through to the raw-bytes path — rule bundles were stored **compressed**
+/// and would fail to parse. Caught by `tests/updater_e2e.rs` asserting installed
+/// content equals the decompressed JSON. Fixed 2026-06-18.
+const ZSTD_MAGIC: &[u8] = &[0x28, 0xB5, 0x2F, 0xFD];
 
 /// Decompress `data` with zstd.  If `data` does not begin with the zstd magic
 /// header, return `data` as-is (fallback for plain-JSON payloads in tests).
@@ -258,6 +266,15 @@ mod tests {
             installed,
             dest.join("2026.05.05.1.json"),
             "filename must match version"
+        );
+
+        // 回归（2026-06-18 ZSTD_MAGIC 字节序 bug）：安装的文件必须是**解压后**的原始
+        // JSON，而非 zstd 压缩字节。此前 magic 反序致 decompress_zstd 走 raw fallback，
+        // 把压缩流原样写盘，sieve-rules 加载必失败。
+        assert_eq!(
+            std::fs::read(&installed).unwrap(),
+            raw_json,
+            "installed content must be the DECOMPRESSED rule JSON, not the zstd payload"
         );
 
         // current.json symlink must point at 2026.05.05.1.json.
