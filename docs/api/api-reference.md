@@ -143,7 +143,7 @@ v1.4 将入站规则按 disposition 分为两类，拦截行为不同：
     "Replace the secret with [REDACTED-MNEMONIC] and re-send.",
     "If you believe this is a false positive, run `sieve sieveignore add OUT-09:7a3b9c1d`."
   ],
-  "docs_url": "https://github.com/doskey/sieve/blob/main/docs/api/api-reference.md#5-处置矩阵--http-行为"
+  "docs_url": "https://github.com/SieveAI-dev/sieve/blob/main/docs/api/api-reference.md#5-处置矩阵--http-行为"
 }
 ```
 
@@ -221,7 +221,7 @@ GET /_sieve/v1/version
   "version": "0.1.0-pre",
   "rules_version": "2026-04-26.1",
   "rules_sha256": "9f8e7d6c...",
-  "sigstore_bundle_url": "https://github.com/doskey/sieve/releases/download/v0.1.0/sieve-darwin-arm64.sigstore",
+  "sigstore_bundle_url": "https://github.com/SieveAI-dev/sieve/releases/download/v0.1.0/sieve-darwin-arm64.sigstore",
   "build": {
     "rustc": "1.80.0",
     "git_sha": "abcdef1234567890",

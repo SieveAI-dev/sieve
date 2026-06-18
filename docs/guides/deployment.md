@@ -30,12 +30,12 @@ Phase 1 GA 交付形态：**三件套 .dmg**（Native GUI App + 后台代理 + s
 
 **安装步骤**：
 
-1. 从 [GitHub Releases](https://github.com/doskey/sieve/releases) 下载 `Sieve-<version>.dmg`
+1. 从 [GitHub Releases](https://github.com/SieveAI-dev/sieve/releases) 下载 `Sieve-<version>.dmg`
 
 2. cosign 验证 .dmg 签名（**必做**）：
    ```bash
    cosign verify-blob \
-     --certificate-identity-regexp '^https://github.com/doskey/sieve/\.github/workflows/release\.yml@refs/tags/v[0-9.]+$' \
+     --certificate-identity-regexp '^https://github.com/SieveAI-dev/sieve/\.github/workflows/release\.yml@refs/tags/v[0-9.]+$' \
      --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
      --bundle Sieve-<version>.dmg.sigstore \
      Sieve-<version>.dmg
@@ -123,7 +123,7 @@ Phase 1 仅 macOS：
 ```bash
 # macOS 示例
 cosign verify-blob \
-  --certificate-identity-regexp '^https://github.com/doskey/sieve/\.github/workflows/release\.yml@refs/tags/v[0-9.]+$' \
+  --certificate-identity-regexp '^https://github.com/SieveAI-dev/sieve/\.github/workflows/release\.yml@refs/tags/v[0-9.]+$' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
   --bundle Sieve-<version>.dmg.sigstore \
   Sieve-<version>.dmg
@@ -159,7 +159,7 @@ open "https://search.sigstore.dev/?hash=$SHA"
 
 ```bash
 # 1. clone 当前 release tag
-git clone https://github.com/doskey/sieve.git --branch v0.1.0
+git clone https://github.com/SieveAI-dev/sieve.git --branch v0.1.0
 cd sieve
 
 # 2. 在干净环境内复构建（脚本待写于 GA 前）
@@ -175,7 +175,7 @@ shasum -a 256 ../Sieve-<version>.dmg
 
 > **GA build 密钥 gate（[ADR-034](../design/ADR-034-ga-key-gate.md)）**：GA release 二进制必须用 `cargo build --release --features ga_keys` 构建。该 feature 在编译期断言规则签名公钥（`sieve-updater::TRUSTED_PUBKEY`）与 X-Sieve-Origin 公钥（`sieve-ipc::SIEVE_ORIGIN_PUBLIC_KEY`）已填真实值——若仍是占位（`None` / 全零）则 **编译失败（E0080）**，杜绝 fail-open 验签进入 GA 二进制。alpha / dogfood build（默认）不启用，行为不变。
 
-实现细节见 [ADR-006](../design/ADR-006-sigstore-reproducible-build.md)。任何 SHA-256 差异 → **不要安装该二进制**，立即在 [GitHub Issues](https://github.com/doskey/sieve/issues) 报告。
+实现细节见 [ADR-006](../design/ADR-006-sigstore-reproducible-build.md)。任何 SHA-256 差异 → **不要安装该二进制**，立即在 [GitHub Issues](https://github.com/SieveAI-dev/sieve/issues) 报告。
 
 ---
 

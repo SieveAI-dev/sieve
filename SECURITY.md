@@ -81,13 +81,13 @@
 ```bash
 # 1. 验证二进制签名
 cosign verify-blob \
-  --certificate-identity-regexp '^https://github.com/doskey/sieve/' \
+  --certificate-identity-regexp '^https://github.com/SieveAI-dev/sieve/' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
   --bundle sieve.sigstore \
   ./sieve
 
 # 2. 自己复现构建对比 SHA-256（Tier 1）
-git clone https://github.com/doskey/sieve.git --branch v0.1.0
+git clone https://github.com/SieveAI-dev/sieve.git --branch v0.1.0
 ./scripts/repro-build.sh linux-amd64
 sha256sum target/repro/sieve-linux-amd64
 sha256sum ./sieve   # 必须一致
@@ -113,7 +113,7 @@ sieve --config ~/.sieve/config.toml
 - **严重程度**：P0（PRD §5.2 "入站是 Sieve 真正的护城河"语境下属严重产品级缺陷）
 - **修复**：v1.5.4 commit `14153e2`，详见 [CHANGELOG](docs/changelog/CHANGELOG.md#v154-non-streaming-json-inbound-fix---2026-05-01)
 - **修复验证**：2 条新集成测试 + dataset_fp_rate 0% FP / 99.71% Recall 无回归
-- **披露状态**：Pre-GA 期间 dogfood 实测发现，repo 仍 private（ADR-011），无外部影响
+- **披露状态**：Pre-GA 期间 dogfood 内部测试中发现并修复，发现与修复均在公开发布前完成，无外部用户受影响
 
 ---
 
