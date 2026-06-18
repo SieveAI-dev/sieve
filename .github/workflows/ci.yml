@@ -45,7 +45,32 @@ jobs:
       - name: 安装构建依赖（macOS）
         run: |
           brew install cmake ninja pkg-config boost ragel
-      - run: cargo test --workspace --locked
+      - uses: taiki-e/install-action@nextest
+      # nextest + retries（.config/nextest.toml profile ci）：集成测试 spawn 真 daemon +
+      # mock 上游抢端口，高并发下偶发瞬时 ConnectionReset（如 outbound_block::r11，隔离稳过）。
+      # retries 让这类瞬时 flake 不污染「完全自动化」CI 信号。
+      - name: 单元 + 集成测试（nextest，retries 抗并发 flake）
+        run: cargo nextest run --workspace --locked --profile ci
+      - name: doctests（nextest 不覆盖 doctest）
+        run: cargo test --workspace --locked --doc
+
+  dogfood:
+    name: dogfood hermetic (macos-14)
+    # 完全 hermetic：无真 ANTHROPIC_API_KEY、无真网络、无真 GUI，零 secret。
+    # Rust e2e（dogfood_e2e / updater_e2e / sieve-testing）已在 test job 跑；
+    # 本 job 补 Python smoke 黑盒（起真 daemon + 本地 mock 上游）。
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - name: 安装构建依赖（macOS）
+        run: |
+          brew install cmake ninja pkg-config boost ragel
+      - name: 构建 release 二进制
+        run: cargo build --release -p sieve-cli --locked
+      - name: Python smoke (--mock-only，无真 API/网络)
+        run: python3 scripts/smoke_test.py --mock-only
 
   deny:
     name: cargo-deny

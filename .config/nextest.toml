@@ -1,0 +1,17 @@
+# cargo-nextest 配置。
+#
+# 集成测试（outbound_block / inbound_block / content_type_matrix / sieve-testing /
+# dogfood_e2e / updater_e2e）会 spawn 真 daemon + mock 上游并抢占随机端口；在 CI 高
+# 并发下偶发瞬时 `ConnectionReset by peer`（如 outbound_block::r11，隔离重跑稳过、非
+# 逻辑 bug）。retries 让这类瞬时 flake 不污染「完全自动化」的 CI 信号。
+
+[profile.default]
+# 本地：失败自动重试 1 次。集成测试较慢，放宽超时（4×30s 后才判超时）。
+retries = 1
+slow-timeout = { period = "30s", terminate-after = 4 }
+
+[profile.ci]
+# CI：重试 2 次 + 不 fail-fast（一次看全所有失败）。
+retries = 2
+fail-fast = false
+slow-timeout = { period = "30s", terminate-after = 4 }
