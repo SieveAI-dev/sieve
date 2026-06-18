@@ -224,13 +224,17 @@ async fn run_query(
     }
 
     if let Some(ref sev) = severity {
+        // 审计写入统一小写（daemon 各路径均 `format!("{:?}", sev).to_lowercase()`）。
+        // 用 `LOWER(severity)` 做大小写不敏感比较——此前用首字母大写字面量
+        // （"Critical"）匹配小写列，致 `--severity` 过滤**永远返回空**
+        // （真机 dogfood 抓出，2026-06-18）。
         let sev_str = match sev {
-            Severity::Critical => "Critical",
-            Severity::High => "High",
-            Severity::Medium => "Medium",
-            Severity::Low => "Low",
+            Severity::Critical => "critical",
+            Severity::High => "high",
+            Severity::Medium => "medium",
+            Severity::Low => "low",
         };
-        conditions.push(format!("severity = ?{}", param_values.len() + 1));
+        conditions.push(format!("LOWER(severity) = ?{}", param_values.len() + 1));
         param_values.push(sev_str.to_owned());
     }
 
@@ -491,21 +495,35 @@ mod tests {
         assert!(rows.iter().all(|r| r.provider_id == "anthropic"));
     }
 
-    /// query 按 severity 过滤（大小写敏感，schema 存储为首字母大写）。
+    /// query 按 severity 过滤：审计列存**小写**（daemon `to_lowercase()`），
+    /// `--severity` 经 `LOWER(severity)` 做大小写不敏感匹配。
+    ///
+    /// 回归：此前生产代码用大写字面量 "Critical" 匹配小写列，过滤永远空
+    /// （真机 dogfood 抓出，2026-06-18）。fixture 用小写还原真实写入。
     #[test]
     fn query_severity_filter() {
         let dir = tempdir().unwrap();
         let conn = create_test_db(dir.path());
-        insert_test_row(&conn, "OUT-01", "Critical", "anthropic");
-        insert_test_row(&conn, "OUT-02", "High", "anthropic");
-        insert_test_row(&conn, "OUT-03", "Critical", "anthropic");
+        insert_test_row(&conn, "OUT-01", "critical", "anthropic");
+        insert_test_row(&conn, "OUT-02", "high", "anthropic");
+        insert_test_row(&conn, "OUT-03", "critical", "anthropic");
 
+        // 小写输入匹配小写列。
         let rows = query_rows(
             &conn,
-            "WHERE severity = ?1 ORDER BY id",
-            &[&"Critical" as &dyn rusqlite::ToSql],
+            "WHERE LOWER(severity) = ?1 ORDER BY id",
+            &[&"critical" as &dyn rusqlite::ToSql],
         )
         .unwrap();
-        assert_eq!(rows.len(), 2, "应返回 2 条 Critical 记录");
+        assert_eq!(rows.len(), 2, "应返回 2 条 critical 记录");
+
+        // 大小写不敏感：大写输入经 LOWER 仍匹配小写列（防回归）。
+        let rows_upper = query_rows(
+            &conn,
+            "WHERE LOWER(severity) = LOWER(?1) ORDER BY id",
+            &[&"CRITICAL" as &dyn rusqlite::ToSql],
+        )
+        .unwrap();
+        assert_eq!(rows_upper.len(), 2, "大写输入经 LOWER 仍应匹配小写列");
     }
 }
