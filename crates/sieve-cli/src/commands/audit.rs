@@ -297,12 +297,13 @@ async fn run_show(id: i64) -> Result<()> {
 // ─────────────────────────── 入口 ──────────────────────────────────────────
 
 /// `sieve audit` 命令入口。
-pub fn run(args: AuditArgs) -> Result<()> {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .context("构建 tokio runtime 失败")?
-        .block_on(run_async(args))
+///
+/// 必须是 `async`：`main` 是 `#[tokio::main]`，本命令在该 runtime 内被 `.await`。
+/// 旧实现在此 `Builder::new_current_thread().block_on(...)` 会触发
+/// "Cannot start a runtime from within a runtime" panic（headless dogfood e2e 抓出，
+/// 见 tasks/lessons.md 2026-06-18）——`sieve audit` 任一子命令直接崩溃、exit 134。
+pub async fn run(args: AuditArgs) -> Result<()> {
+    run_async(args).await
 }
 
 async fn run_async(args: AuditArgs) -> Result<()> {
