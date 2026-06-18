@@ -97,6 +97,18 @@ else
   fail "updater 闭环失败"
 fi
 
+# ── 5. FP/recall 数据集门（PRD §9 #7 Critical FP<0.5%；MVP G6 验证维度）──────────
+# benign 1070 样本（含 900 个 near-miss 最严格场景）Critical FP 必须为 0；
+# attack 数据集（含 public-replay 真实攻击复现）recall 必须 ≥99%。
+# 此前 dataset_fp_rate 标 #[ignore] 从未进 CI（PoC/MVP 评估抓出的 gap）——
+# 现纳入 dogfood 作回归门，防 Critical 误报回归（误报 >0.5% 触 PRD 公理 12，用户禁用产品）。
+section "5. FP/recall 数据集门 (§9 #7)"
+if cargo test -p sieve-rules --release --test dataset_fp_rate -- --ignored; then
+  ok "Critical FP<0.5% + attack recall 门通过"
+else
+  fail "FP/recall 门失败（Critical 误报或召回退化）"
+fi
+
 # ── 总结 ──────────────────────────────────────────────────────────────────────
 section "总结"
 if [[ "$FAILED" -eq 0 ]]; then
