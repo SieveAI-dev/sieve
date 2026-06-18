@@ -1,0 +1,87 @@
+Sieve Documentation License
+===========================
+
+This file describes the license that applies to the DOCUMENTATION and other
+non-source-code content in this repository. The SOURCE CODE is licensed
+separately under the Apache License 2.0 — see ./LICENSE.
+
+
+Scope
+-----
+
+This documentation license applies to all non-source-code content, including
+but not limited to:
+
+  - docs/
+  - README.md (and any translated README, e.g. README.zh-CN.md)
+  - CLAUDE.md
+  - .cursorrules
+  - tasks/
+  - SECURITY.md
+  - any other Markdown / configuration / prose files that are NOT source code
+
+Source code (Rust crates, build scripts, and any code intended to be compiled
+or executed) is NOT covered by this file; it is licensed under the Apache
+License 2.0 (see ./LICENSE).
+
+
+License
+-------
+
+The documentation is licensed under the
+
+  Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International
+  (CC BY-NC-SA 4.0)
+
+  Full text / canonical URL:
+  https://creativecommons.org/licenses/by-nc-sa/4.0/
+
+
+You are free to
+---------------
+
+  - Share — copy and redistribute the material in any medium or format.
+  - Adapt — remix, transform, and build upon the material.
+
+The licensor cannot revoke these freedoms as long as you follow the license
+terms below.
+
+
+Under the following terms
+-------------------------
+
+  - Attribution (BY) — You must give appropriate credit, provide a link to
+    the license, and indicate if changes were made. You may do so in any
+    reasonable manner, but not in any way that suggests the licensor endorses
+    you or your use.
+
+  - NonCommercial (NC) — You may not use the material for commercial purposes.
+
+  - ShareAlike (SA) — If you remix, transform, or build upon the material,
+    you must distribute your contributions under the same license as the
+    original (CC BY-NC-SA 4.0).
+
+  - No additional restrictions — You may not apply legal terms or
+    technological measures that legally restrict others from doing anything
+    the license permits.
+
+This is a human-readable summary of (and not a substitute for) the license.
+The full, legally binding terms are at the canonical URL above.
+
+
+Commercial use and partnerships
+-------------------------------
+
+The NonCommercial term above prohibits commercial use of the documentation.
+For commercial licensing of the documentation, or to discuss a partnership,
+please contact:
+
+  doskey.lee@gmail.com
+  (please prefix the email subject with [SIEVE-LICENSE])
+
+
+Source code license
+-------------------
+
+The source code in this repository is licensed under the Apache License 2.0.
+See ./LICENSE for the full terms.

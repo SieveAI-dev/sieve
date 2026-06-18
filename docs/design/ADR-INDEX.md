@@ -26,7 +26,7 @@
 | [ADR-005](./ADR-005-overseas-legal-entity.md)             | [redacted]作为收款与营销载体                                        | Accepted | 2026-04-26 | §1.4、§11.5            |
 | [ADR-006](./ADR-006-sigstore-reproducible-build.md)       | Sigstore 签名 + Reproducible Build + 透明日志                | Accepted | 2026-04-26 | §1.2、§9.6、§10.1、§11.3 |
 | [ADR-007](./ADR-007-fail-closed-critical-actions.md)      | Critical 等级 fail-closed 强制确认，YOLO mode 不可关闭            | Accepted | 2026-04-26 | §5.3、§9.3、§9.8、§11.2  |
-| [ADR-011](./ADR-011-private-until-ga.md)                  | Week 12 GA 前 repo 完全私有，不做任何 public 暴露                 | Accepted | 2026-04-27 | §9 #10、§10.1、§11.3     |
+| [ADR-011](./ADR-011-private-until-ga.md)                  | Week 12 GA 前 repo 完全私有，不做任何 public 暴露（时点被 [ADR-035](./ADR-035-license-apache2-dual-license.md) 修订：仓库已提前公开） | Accepted (amended 2026-06-19) | 2026-04-27 | §9 #10、§10.1、§11.3     |
 | [ADR-012](./ADR-012-native-gui-app-phase1.md)             | Phase 1 必做 Native GUI App（macOS SwiftUI 独立进程）           | Accepted | 2026-04-28 | §6.4、§6.6、§10.1 Week 5 |
 | [ADR-013](./ADR-013-ipc-protocol.md)                      | IPC 协议：JSON-RPC over Unix socket + 文件锁 JSON 文件          | Accepted | 2026-04-28 | §6.5、§10.1 Week 3+5    |
 | [ADR-014](./ADR-014-dual-layer-defense.md)                | 双层防御：Sieve 代理（SSE 层）+ Claude Code PreToolUse Hook     | Accepted | 2026-04-28 | §6.7、§9 第 11 条         |
@@ -49,6 +49,7 @@
 | [ADR-032](./ADR-032-orchesis-strategy.md)                  | 借鉴 Orchesis 的架构与产品策略——三阶段学习路线、分阶段管线、营销叙事升级 | Proposed（草案，未通过） | 2026-05-06 | 关联 ADR-022/026/027/029/006/003 |
 | [ADR-033](./ADR-033-upstream-proxy.md)                     | 上游转发代理支持（HTTP CONNECT + SOCKS5） | Accepted | 2026-06-07 | 关联 §6.1、§9 #2 |
 | [ADR-034](./ADR-034-ga-key-gate.md)                        | GA 编译期密钥 gate：`ga_keys` feature 下占位公钥（updater `TRUSTED_PUBKEY` / origin `SIEVE_ORIGIN_PUBLIC_KEY`）编译失败，阻 fail-open 验签进 GA 二进制 | Accepted | 2026-06-11 | 关联 ADR-006/019/030、§9 #3/#6 |
+| [ADR-035](./ADR-035-license-apache2-dual-license.md)       | License：代码 Apache-2.0（含显式专利授权）+ 文档 CC BY-NC-SA 4.0，即刻生效不等 GA；取代 PRD §11.3 "MIT" 表述，修订 ADR-011 公开时点 | Accepted | 2026-06-19 | 关联 ADR-011/029/006、§11.3 |
 
 
 ---
