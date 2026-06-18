@@ -20,6 +20,7 @@ pub mod install_id;
 pub mod manifest;
 pub mod runner;
 pub mod signature;
+mod tls;
 
 pub use download::download_rules;
 pub use error::UpdaterError;

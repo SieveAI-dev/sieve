@@ -1,24 +1,52 @@
 //! Platform-specific cache directory resolution (ADR-030 §5.1).
 
+use std::ffi::OsString;
 use std::path::PathBuf;
 
 use crate::error::UpdaterError;
+
+/// Env var that overrides the platform-default cache directory.
+///
+/// When set to a non-empty value, its value is used verbatim as the cache
+/// directory (the equivalent of `$HOME/Library/Caches/sieve` on macOS),
+/// bypassing platform detection entirely. Primarily for hermetic test
+/// isolation (so the updater/install-id never touches the real user cache) and
+/// custom/enterprise deployments. Signature verification and all other
+/// security behaviour are unaffected — this only controls *where* files land.
+pub const CACHE_DIR_ENV: &str = "SIEVE_CACHE_DIR";
 
 /// Returns the sieve updater cache directory for the current platform.
 ///
 /// ADR-030 §5.1: directory is created (mode 0700 on Unix) if it does not
 /// already exist.
 ///
-/// | Platform | Path |
-/// |----------|------|
+/// | Source | Path |
+/// |--------|------|
+/// | `SIEVE_CACHE_DIR` (any platform, if non-empty) | the value verbatim |
 /// | macOS    | `$HOME/Library/Caches/sieve/` |
 /// | Linux    | `$XDG_CACHE_HOME/sieve/` or `$HOME/.cache/sieve/` |
 /// | Windows  | `%LOCALAPPDATA%\sieve\Cache\` |
 /// | other    | returns `UpdaterError::UnsupportedPlatform` |
 pub fn cache_dir() -> Result<PathBuf, UpdaterError> {
-    let dir = resolve_cache_dir()?;
+    let dir = resolve_cache_dir_with_override(std::env::var_os(CACHE_DIR_ENV))?;
     create_dir_secure(&dir)?;
     Ok(dir)
+}
+
+/// Resolves the cache dir given an explicit `SIEVE_CACHE_DIR` value.
+///
+/// Split out from [`cache_dir`] so the override precedence can be unit-tested
+/// without mutating the process-global environment (which races under cargo's
+/// parallel test runner).
+fn resolve_cache_dir_with_override(
+    override_val: Option<OsString>,
+) -> Result<PathBuf, UpdaterError> {
+    if let Some(v) = override_val {
+        if !v.is_empty() {
+            return Ok(PathBuf::from(v));
+        }
+    }
+    resolve_cache_dir()
 }
 
 #[cfg(target_os = "macos")]
@@ -113,5 +141,34 @@ mod tests {
         let dir = cache_dir_for_test(tmp.path()).expect("helper must succeed");
         assert!(dir.exists());
         assert_eq!(dir.file_name().unwrap(), "sieve");
+    }
+
+    #[test]
+    fn override_is_used_verbatim() {
+        let want = PathBuf::from("/tmp/sieve-cache-override-xyz");
+        let got = resolve_cache_dir_with_override(Some(want.clone().into_os_string()))
+            .expect("override must resolve");
+        assert_eq!(got, want);
+    }
+
+    #[test]
+    fn empty_override_falls_through_to_platform_default() {
+        // Empty value must be ignored (treated as unset), not used as a path.
+        let got = resolve_cache_dir_with_override(Some(OsString::new()));
+        // On supported platforms this resolves to the platform default; on
+        // unsupported ones it errors. Either way it must NOT be the empty path.
+        if let Ok(dir) = got {
+            assert_ne!(dir.as_os_str(), OsString::new());
+            assert!(dir.to_string_lossy().contains("sieve"));
+        }
+    }
+
+    #[test]
+    fn none_override_falls_through_to_platform_default() {
+        // Mirrors the empty case: no override → platform resolution path.
+        let got = resolve_cache_dir_with_override(None);
+        if let Ok(dir) = got {
+            assert!(dir.to_string_lossy().contains("sieve"));
+        }
     }
 }
