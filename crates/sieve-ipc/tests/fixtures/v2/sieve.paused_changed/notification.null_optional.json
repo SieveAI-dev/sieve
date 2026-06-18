@@ -6,6 +6,7 @@
     "paused_until": null,
     "reason": "auto_resumed",
     "applies_to": [],
+    "source": "gui",
     "origin_request_id": null
   }
 }

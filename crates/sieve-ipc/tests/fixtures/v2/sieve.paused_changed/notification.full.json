@@ -6,6 +6,7 @@
     "paused_until": "2026-05-03T13:00:00.000Z",
     "reason": "user_request",
     "applies_to": ["AutoRedact", "StatusBar", "Ask:non_critical"],
+    "source": "gui",
     "origin_request_id": "01900000-0000-7003-0000-000000000001"
   }
 }

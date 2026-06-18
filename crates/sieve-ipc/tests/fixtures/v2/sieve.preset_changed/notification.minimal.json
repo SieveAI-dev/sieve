@@ -2,7 +2,7 @@
   "jsonrpc": "2.0",
   "method": "sieve.preset_changed",
   "params": {
-    "mode": "default",
+    "mode": "standard",
     "overrides": {},
     "changed_at": "2026-05-03T12:00:00.000Z",
     "source": "gui"

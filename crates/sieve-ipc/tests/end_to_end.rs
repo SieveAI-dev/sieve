@@ -530,6 +530,7 @@ async fn scenario_5_set_paused_serialized_fan_out() {
                     paused_until: None,
                     reason: "user_request".to_owned(),
                     applies_to: vec!["AutoRedact".to_owned()],
+                    source: "gui".to_owned(),
                     origin_request_id,
                 }));
                 let _ = reply.send(Ok((
@@ -776,7 +777,7 @@ async fn scenario_8_purge_history_wire_route() {
         while let Some(req) = rx.recv().await {
             if let ControlPlaneRequest::PurgeHistory { params: _, reply } = req {
                 let _ = reply.send(Ok(PurgeHistoryResult {
-                    purged_at: chrono::Utc::now().timestamp_millis(),
+                    purged_at: chrono::Utc::now(),
                     rows_deleted: 42,
                 }));
             }
@@ -808,7 +809,7 @@ async fn scenario_8_purge_history_wire_route() {
         .expect("result should deserialize to PurgeHistoryResult");
     assert_eq!(result.rows_deleted, 42);
     assert!(
-        result.purged_at >= now_ms,
+        result.purged_at.timestamp_millis() >= now_ms,
         "purged_at should be >= confirmed_at"
     );
 }
