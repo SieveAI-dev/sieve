@@ -185,6 +185,15 @@ async fn gated_request_decision(
                     provider_id,
                     "no client connected → auto-block (ADR-028 no_client_policy=auto-block)"
                 );
+                spawn_decision_audit(
+                    audit,
+                    provider_id,
+                    caller,
+                    &req.detections,
+                    "deny",
+                    false,
+                    req.request_id,
+                );
                 return Ok(sieve_ipc::DecisionResponse {
                     request_id: req.request_id,
                     decision: sieve_ipc::DecisionAction::Deny,
@@ -199,6 +208,15 @@ async fn gated_request_decision(
                 tracing::info!(
                     provider_id,
                     "no client connected → auto-warn allow (ADR-028 no_client_policy=auto-warn)"
+                );
+                spawn_decision_audit(
+                    audit,
+                    provider_id,
+                    caller,
+                    &req.detections,
+                    "allow",
+                    false,
+                    req.request_id,
                 );
                 return Ok(sieve_ipc::DecisionResponse {
                     request_id: req.request_id,
@@ -221,7 +239,27 @@ async fn gated_request_decision(
     }
 
     if any_critical || !ipc.is_paused() {
-        return ipc.request_decision(req, timeout, direction).await;
+        // 捕获 detection / request_id（req 即将被 move 进 request_decision）。
+        let detections = req.detections.clone();
+        let request_id = req.request_id;
+        let resp = ipc.request_decision(req, timeout, direction).await;
+        if let Ok(ref r) = resp {
+            let decision = match r.decision {
+                sieve_ipc::DecisionAction::Allow => "allow",
+                sieve_ipc::DecisionAction::Deny => "deny",
+                sieve_ipc::DecisionAction::RedactAndAllow => "redact_and_allow",
+            };
+            spawn_decision_audit(
+                audit,
+                provider_id,
+                caller,
+                &detections,
+                decision,
+                r.by_user,
+                request_id,
+            );
+        }
+        return resp;
     }
 
     // 暂停 + 全部非 Critical → 自动决策
@@ -280,6 +318,50 @@ async fn gated_request_decision(
         context_hint: None,
         ui_phase_when_clicked: None,
     })
+}
+
+/// 为一次决策结果写 `DecisionMade` 审计事件（fire-and-forget，不阻塞请求热路径，
+/// PRD §9 性能预算 P99<20ms）。沿用 daemon 控制面 spawn-audit 模式。
+///
+/// `decision`：`"allow"` / `"deny"` / `"redact_and_allow"`。`by_user`：true=用户点击，
+/// false=超时/系统自动（no-client policy 等）。取首个 detection 作为主关联规则。
+///
+/// 接线背景：detection 决策结果此前从不落 audit（headless dogfood e2e 抓出，2026-06-18），
+/// `sieve audit query` 查不到任何核心流量决策。
+fn spawn_decision_audit(
+    audit: &Arc<crate::audit::AuditStore>,
+    provider_id: &str,
+    caller: &Option<crate::process_context::CallerInfo>,
+    detections: &[sieve_ipc::DetectionPayload],
+    decision: &str,
+    by_user: bool,
+    request_id: uuid::Uuid,
+) {
+    let Some(primary) = detections.first() else {
+        return;
+    };
+    let caller_ctx = crate::audit::CallerContext {
+        pid: caller.as_ref().map(|c| c.pid),
+        exe: caller
+            .as_ref()
+            .and_then(|c| c.exe.as_ref())
+            .map(|p| p.display().to_string()),
+    };
+    let event = crate::audit::AuditEvent::DecisionMade {
+        rule_id: primary.rule_id.clone(),
+        decision: decision.to_owned(),
+        severity: format!("{:?}", primary.severity).to_lowercase(),
+        by_user,
+        request_id: request_id.to_string(),
+        caller: caller_ctx,
+    };
+    let store = Arc::clone(audit);
+    let provider_id_owned = provider_id.to_owned();
+    tokio::spawn(async move {
+        if let Err(e) = store.append(event, &provider_id_owned).await {
+            tracing::warn!(error = %e, "audit append DecisionMade failed");
+        }
+    });
 }
 
 /// 写灰名单条目，二次校验 Critical 锁（PRD v2.0 §5.4.2 二次校验）。
@@ -1977,6 +2059,29 @@ async fn proxy_inner(
                 "OUTBOUND AUTO-REDACT"
             );
 
+            // audit：OutboundRedacted（fire-and-forget，不阻塞热路径，PRD §9 性能预算）。
+            // 此前出站脱敏从不落 audit（headless dogfood e2e 抓出，2026-06-18）。
+            // raw_json=None：脱敏事件**不持久化原文**（含 secret，PRD §5.6.1 / §9 #13）。
+            if let Some(d) = all_detections
+                .iter()
+                .find(|d| matches!(d.action, Action::Redact { .. }))
+            {
+                let event = crate::audit::AuditEvent::OutboundRedacted {
+                    rule_id: d.rule_id.clone(),
+                    severity: format!("{:?}", d.severity).to_lowercase(),
+                    request_id: uuid::Uuid::new_v4().to_string(),
+                    raw_json: None,
+                    caller: ctx.caller_context(),
+                };
+                let store = Arc::clone(&ctx.audit);
+                let provider_id = ctx.listener_provider_id.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = store.append(event, &provider_id).await {
+                        tracing::warn!(error = %e, "audit append OutboundRedacted failed");
+                    }
+                });
+            }
+
             // 把替换后文本写回 AnthropicRequest，然后重新序列化
             let new_body_bytes =
                 apply_redacted_texts_to_request(&anthropic_req, &texts, &seg_result.texts)
@@ -2502,6 +2607,35 @@ async fn proxy_openai(
             rules = %seg_result.redacted_summary,
             "OUTBOUND AUTO-REDACT (openai)"
         );
+
+        // audit：OutboundRedacted（与 Anthropic 路径对称，fire-and-forget；raw_json=None 不存原文）。
+        // 注：proxy_openai 已把 ctx 析构成局部 caller/audit_store/listener_provider_id。
+        if let Some(d) = all_detections
+            .iter()
+            .find(|d| matches!(d.action, Action::Redact { .. }))
+        {
+            let caller_ctx = crate::audit::CallerContext {
+                pid: caller.as_ref().map(|c| c.pid),
+                exe: caller
+                    .as_ref()
+                    .and_then(|c| c.exe.as_ref())
+                    .map(|p| p.display().to_string()),
+            };
+            let event = crate::audit::AuditEvent::OutboundRedacted {
+                rule_id: d.rule_id.clone(),
+                severity: format!("{:?}", d.severity).to_lowercase(),
+                request_id: uuid::Uuid::new_v4().to_string(),
+                raw_json: None,
+                caller: caller_ctx,
+            };
+            let store = Arc::clone(&audit_store);
+            let provider_id = listener_provider_id.clone();
+            tokio::spawn(async move {
+                if let Err(e) = store.append(event, &provider_id).await {
+                    tracing::warn!(error = %e, "audit append OutboundRedacted (openai) failed");
+                }
+            });
+        }
 
         let new_body_bytes =
             apply_redacted_texts_to_openai_request(&openai_req, &texts, &seg_result.texts)
