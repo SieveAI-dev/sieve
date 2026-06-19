@@ -1,126 +1,152 @@
-# Sieve 安全策略
+# Security Policy
 
-> Sieve 是 LLM 流量层的安全代理（PRD §1.1），自身被攻陷会摧毁产品定位。
-> "自证清白"是产品安全承诺的核心叙事（PRD §1.2 第 4 句 + [ADR-006](docs/design/ADR-006-sigstore-reproducible-build.md)）。
+> Sieve is a security proxy that sits in your LLM traffic (PRD §1.1). If Sieve itself is
+> compromised, its entire value proposition collapses. "Verifiable, not merely trusted" is
+> the core of its security promise (PRD §1.2 + [ADR-006](docs/design/ADR-006-sigstore-reproducible-build.md)).
 >
-> **请不要在 GitHub Issues 公开报告 Sieve 自身的安全漏洞。** 走下方私有渠道。
+> **Please do not report vulnerabilities in Sieve through public GitHub Issues.** Use the
+> private channel below.
 
 ---
 
-## 报告渠道
+## Reporting a vulnerability
 
-| 渠道 | 说明 | 适用阶段 |
-|------|------|---------|
-| **Email** | doskey.lee@gmail.com | Phase 1 GA 之前唯一渠道 |
-| Email | security@sieveai.dev | GA 后启用（域名 sieveai.dev 已确定 2026-05-05；DNS / MX 注册 GA 后启用） |
-| PGP | TBD（Week 6-8 GA 前公布公钥指纹） | GA 后启用 |
+Report privately through **GitHub Security Advisories** — no email involved:
 
-请在邮件标题加前缀 `[SIEVE-SECURITY]`，内容包含：
+1. Open the repository's **[Security tab → Report a vulnerability](https://github.com/SieveAI-dev/sieve/security/advisories/new)**.
+2. GitHub creates a **private** advisory thread (not visible to the public) that the maintainers
+   triage directly. No email address is exposed, and nothing is disclosed until a fix ships.
 
-- **受影响版本**：`sieve --version` 输出（含二进制 SHA-256 + rules version）
-- **平台**：OS / arch / 安装方式（brew / 二进制 / 源码构建）
-- **漏洞类型**（任一）：
-  - 供应链（二进制 / 规则包 / 依赖被篡改）
-  - 数据泄漏（prompt 上传 / 远端 verifier）
-  - fail-closed 失效（YOLO mode 绕过 / Critical 拦截被关闭）
-  - 检测绕过（已知攻击模式未触发）
-  - 配置层校验缺失（如 `bind_address = 0.0.0.0` 未被拒绝）
-  - 拒绝服务（崩溃 / 内存爆炸 / 死锁）
-- **复现步骤**（最小化用例）
-- **影响评估**：可能导致的资产损失风险等级
-- **致谢偏好**：GitHub 用户名 / Twitter / 匿名
+> Why a private advisory rather than a public issue or email? A public issue would disclose the
+> flaw before a fix exists — exactly what a security tool must avoid. A private GitHub advisory
+> keeps the report confidential, tracked, and tied to a coordinated fix. (Non-sensitive security
+> questions — e.g. a suspected false positive — can go in a normal [issue](https://github.com/SieveAI-dev/sieve/issues).)
 
----
+Please include:
 
-## 响应时间承诺
-
-| 阶段 | SLA |
-|------|-----|
-| 邮件确认收到 | **24 小时内** |
-| 初步评估（严重程度 + 复现验证） | **7 天内** |
-| 修复或缓解（按严重程度） | Critical: 7 天 / High: 30 天 / Medium: 90 天 |
-| 公开 advisory | 修复发布后 30 天内 |
-
-> 项目维护团队规模较小，上述 SLA 已据此设定。如涉及**当前正在被利用 + 资产损失风险**，请在邮件标题加 `[URGENT]`，我们会优先响应。
+- **Affected version**: output of `sieve --version` (binary SHA-256 + rules version)
+- **Platform**: OS / arch / install method (brew / binary / source build)
+- **Vulnerability class** (any of):
+  - Supply chain (tampered binary / rules package / dependency)
+  - Data exfiltration (prompt upload / remote verifier)
+  - Fail-closed bypass (YOLO-mode bypass / Critical interception disabled)
+  - Detection bypass (a known attack pattern that does not trigger)
+  - Missing config-layer validation (e.g. `bind_address = 0.0.0.0` not rejected)
+  - Denial of service (crash / memory blow-up / deadlock)
+- **Reproduction** (minimal case)
+- **Impact assessment**: the asset-loss risk it could lead to
+- **Credit preference**: GitHub username, or anonymous
 
 ---
 
-## 责任披露原则
+## Response-time commitments
 
-- 修复发布前请勿公开（包括会议演讲 / 博客 / Twitter / 漏洞数据库）
-- 修复发布同时致谢报告者（除非要求匿名）
-- 涉及 Sieve 用户资产损失风险时，立即推送强制升级 + 透明日志（[ADR-006 §3](docs/design/ADR-006-sigstore-reproducible-build.md)）公示事件
-- 暂不提供 bounty 现金奖励，但对重大发现会在 GA 后的 advisory + 文章中署名致谢
+| Stage | SLA |
+|-------|-----|
+| Acknowledge the advisory | **within 24 hours** |
+| Initial assessment (severity + reproduction) | **within 7 days** |
+| Fix or mitigation (by severity) | Critical: 7 days / High: 30 days / Medium: 90 days |
+| Public advisory | within 30 days of the fix shipping |
 
----
-
-## 不在范围
-
-以下不构成 Sieve 安全漏洞：
-
-- **用户配置错误**：如试图把 `[server].bind_address` 改成 `0.0.0.0`（配置层会拒绝启动）
-- **中转站 / 上游 API 漏洞**：不在 Sieve 责任范围（这恰恰是 Sieve 检测的对象，PRD §1.2 第 1 句）
-- **钱包 / 浏览器扩展钓鱼**：Sieve 是认知摩擦层，不是钱包安全产品
-- **检测规则的误报 / 漏报**（除非违反 PRD §6.5 误报率预算）：误报治理走 [`.sieveignore`](docs/api/api-reference.md) 与 GitHub Issue 普通流程
-- **使用过期 / 未签名的二进制**：用户责任在安装时验证 [sigstore 签名](docs/guides/deployment.md#3-二进制签名验证必做)
+> The maintainer team is small and the SLAs above reflect that. If the issue is **actively
+> exploited with asset-loss risk**, prefix the advisory title with `[URGENT]` and it will be
+> prioritized.
 
 ---
 
-## 自身供应链承诺
+## Coordinated disclosure
 
-详见 [ADR-006: Sigstore 签名 + Reproducible Build + 透明日志](docs/design/ADR-006-sigstore-reproducible-build.md)：
+- Please do not disclose before a fix ships (talks, blog posts, social media, and vulnerability
+  databases included).
+- The reporter is credited when the fix ships (unless you ask to stay anonymous).
+- If user asset-loss risk is involved, a forced upgrade is pushed and the event is published via
+  the transparency log ([ADR-006 §3](docs/design/ADR-006-sigstore-reproducible-build.md)).
+- No cash bounty for now, but significant findings are credited in the post-GA advisory and
+  write-up.
 
-- 所有 release 二进制 **sigstore 签名 + Rekor 透明日志**（cosign verify-blob 可验证）
-- **Tier 1（macOS / Linux）reproducible build** 双构建 SHA-256 必须一致才能 release
-- **Tier 2（Windows）** 提供二进制 + sigstore 签名，reproducible build 推到 Phase 2
-- 规则包 **Ed25519 签名 + fail-closed 验证**（签名失败 → 沿用上一份已验证规则）。alpha build 公钥占位、暂为 fail-open（skip+warn，靠同源 SHA-256 兜底）；**GA build 经 `ga_keys` 编译期 gate 强制真实公钥就位**，占位则编译失败（[ADR-034](docs/design/ADR-034-ga-key-gate.md)）
-- **pinned dependencies**：`Cargo.lock` 入库 + Dependabot 周更（major 升级单独评估）
+---
 
-供应链审计建议：
+## Out of scope
+
+The following are not Sieve security vulnerabilities:
+
+- **User misconfiguration**: e.g. setting `[server].bind_address` to `0.0.0.0` (the config layer
+  refuses to start).
+- **Relay / upstream API vulnerabilities**: outside Sieve's remit (these are precisely what Sieve
+  is built to detect, PRD §1.2).
+- **Wallet / browser-extension phishing**: Sieve is a cognitive-friction layer, not a wallet
+  security product.
+- **Detection false positives / negatives** (unless they violate the PRD §6.5 FP budget): FP
+  handling goes through [`.sieveignore`](docs/api/api-reference.md) and the normal GitHub issue flow.
+- **Using an expired / unsigned binary**: verifying the [sigstore signature](docs/guides/deployment.md)
+  is the user's responsibility at install time — and the installer does it for you automatically.
+
+---
+
+## Our supply-chain commitments
+
+See [ADR-006: Sigstore signing + Reproducible Build + transparency log](docs/design/ADR-006-sigstore-reproducible-build.md):
+
+- Every release binary is **sigstore-signed + logged in Rekor** (verifiable with `cosign verify-blob`).
+- **Tier 1 (macOS / Linux) reproducible builds**: two independent builds must produce an identical
+  SHA-256 before release.
+- **Tier 2 (Windows)**: binary + sigstore signature; reproducible build deferred to Phase 2.
+- Rules packages are **Ed25519-signed + fail-closed verified** (on signature failure, the last
+  verified ruleset is kept). Alpha builds ship a placeholder key and are temporarily fail-open
+  (skip+warn, backed by same-origin SHA-256); **GA builds enforce a real key at compile time via
+  the `ga_keys` gate** — a placeholder fails to compile ([ADR-034](docs/design/ADR-034-ga-key-gate.md)).
+- **Pinned dependencies**: `Cargo.lock` committed + Dependabot weekly (major bumps reviewed individually).
+
+Suggested supply-chain audit:
 
 ```bash
-# 1. 验证二进制签名
+# 1. Verify the binary signature
 cosign verify-blob \
   --certificate-identity-regexp '^https://github.com/SieveAI-dev/sieve/' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-  --bundle sieve.sigstore \
+  --bundle <artifact>.sigstore.json \
   ./sieve
 
-# 2. 自己复现构建对比 SHA-256（Tier 1）
+# 2. Reproduce the build and compare SHA-256 (Tier 1)
 git clone https://github.com/SieveAI-dev/sieve.git --branch v0.1.0
 ./scripts/repro-build.sh linux-amd64
 sha256sum target/repro/sieve-linux-amd64
-sha256sum ./sieve   # 必须一致
+sha256sum ./sieve   # must match
 
-# 3. 抓包验证"不联网 verifier"（ADR-003）
+# 3. Confirm "no networked verifier" (ADR-003) by capturing traffic
 sudo tcpdump -i any -nn host '!api.anthropic.com and !your-relay.com'
 sieve --config ~/.sieve/config.toml
-# 期望：除上游 API 外无任何外发流量
+# expected: no outbound traffic except the upstream API
 ```
 
 ---
 
-## 历史 Advisories
+## Past advisories
 
-> Week 12 GA 前 advisories 不分配正式 `SIEVE-YYYY-NNN` 编号，记录在 CHANGELOG。GA 后启用正式编号。
+> Pre-GA advisories are not assigned formal `SIEVE-YYYY-NNN` IDs; they are recorded in the
+> CHANGELOG. Formal IDs start post-GA.
 
-### Pre-GA P0：非流式 JSON 入站检测绕过（已修复 2026-05-01）
+### Pre-GA P0: non-streaming JSON inbound detection bypass (fixed 2026-05-01)
 
-- **影响版本**：v1.5.0 ~ v1.5.3（v1.5.x 70 条入站规则）
-- **影响范围**：
-  - **漏洞 1（Anthropic）**：`application/json` 非流式响应里的 `tool_use` 绕过所有入站规则（IN-CR-02/03/04/05 / IN-GEN-* 全失效）
-  - **漏洞 2（OpenAI）**：`proxy_openai` `stream=false` 分支跳过入站检测；OpenAI 协议**默认 stream=false**，意味着 OpenAI 入站规则**从未生效过**
-- **严重程度**：P0（PRD §5.2 "入站是 Sieve 真正的护城河"语境下属严重产品级缺陷）
-- **修复**：v1.5.4 commit `14153e2`，详见 [CHANGELOG](docs/changelog/CHANGELOG.md#v154-non-streaming-json-inbound-fix---2026-05-01)
-- **修复验证**：2 条新集成测试 + dataset_fp_rate 0% FP / 99.71% Recall 无回归
-- **披露状态**：Pre-GA 期间 dogfood 内部测试中发现并修复，发现与修复均在公开发布前完成，无外部用户受影响
+- **Affected versions**: v1.5.0 ~ v1.5.3 (v1.5.x, 70 inbound rules)
+- **Scope**:
+  - **Bug 1 (Anthropic)**: `tool_use` inside an `application/json` non-streaming response bypassed
+    all inbound rules (IN-CR-02/03/04/05 / IN-GEN-* all inert).
+  - **Bug 2 (OpenAI)**: the `proxy_openai` `stream=false` branch skipped inbound detection; OpenAI
+    defaults to `stream=false`, so OpenAI inbound rules had **never** taken effect.
+- **Severity**: P0 (a severe product-level defect, given that inbound detection is Sieve's core
+  capability — PRD §5.2).
+- **Fix**: v1.5.4, commit `14153e2`, see the [CHANGELOG](docs/changelog/CHANGELOG.md).
+- **Fix verification**: 2 new integration tests + dataset FP rate 0% / 99.71% recall, no regression.
+- **Disclosure status**: found and fixed during pre-GA internal dogfood; both discovery and fix
+  predate any public release, so no external users were affected.
 
 ---
 
-## 相关文档
+## Related documents
 
-- [ADR-003: 完全本地运行，绝不联网做 token verifier](docs/design/ADR-003-local-only-no-cloud-verifier.md)
-- [ADR-006: Sigstore 签名 + Reproducible Build + 透明日志](docs/design/ADR-006-sigstore-reproducible-build.md)
-- [ADR-007: Critical 等级 fail-closed 强制确认](docs/design/ADR-007-fail-closed-critical-actions.md)
-- PRD §9 工程硬约束
-- [部署指南 §3 二进制签名验证](docs/guides/deployment.md#3-二进制签名验证必做)
+- [ADR-003: Local-only, never a networked token verifier](docs/design/ADR-003-local-only-no-cloud-verifier.md)
+- [ADR-006: Sigstore signing + Reproducible Build + transparency log](docs/design/ADR-006-sigstore-reproducible-build.md)
+- [ADR-007: Fail-closed confirmation for Critical actions](docs/design/ADR-007-fail-closed-critical-actions.md)
+- PRD §9 engineering hard constraints
+- [Deployment guide — binary signature verification](docs/guides/deployment.md)

@@ -1,13 +1,13 @@
 blank_issues_enabled: false
 contact_links:
   - name: 安全漏洞报告（不要在公开 issue 报）
-    url: https://github.com/SieveAI-dev/sieve/blob/main/SECURITY.md
-    about: Sieve 自身的安全漏洞请按 SECURITY.md 走 email 渠道（doskey.lee@gmail.com）。供应链 / fail-closed 失效 / 数据泄漏 / 检测绕过都属于此范围。
+    url: https://github.com/SieveAI-dev/sieve/security/advisories/new
+    about: Sieve 自身的安全漏洞请走 GitHub 私有 Security Advisory（不发邮件、修复前不公开）。供应链 / fail-closed 失效 / 数据泄漏 / 检测绕过都属此范围，详见 SECURITY.md。
 
   - name: 紧急资产损失咨询
-    url: mailto:doskey.lee@gmail.com?subject=%5BSIEVE-URGENT%5D%20
-    about: 如果你怀疑当前正在被攻击且涉及资产损失，请直接 email 而不是开 issue。标题加 [SIEVE-URGENT] 优先响应。
+    url: https://github.com/SieveAI-dev/sieve/security/advisories/new
+    about: 如果你怀疑当前正在被攻击且涉及资产损失，请开一个私有 Security Advisory（而非公开 issue），标题加 [URGENT] 优先响应。
 
   - name: 阅读文档
     url: https://github.com/SieveAI-dev/sieve/blob/main/README.md
-    about: 提 issue 前请先读 README + PRD v1.3（docs/prd/sieve-prd-v1.3.md），常见问题在 docs/guides/deployment.md §12 FAQ 可能已覆盖。
+    about: 提 issue 前请先读 README，常见问题在 docs/guides/deployment.md FAQ 可能已覆盖。

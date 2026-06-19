@@ -22,7 +22,7 @@ rust-version = "1.87"
 license = "MIT"
 repository = "https://github.com/SieveAI-dev/sieve"
 homepage = "https://github.com/SieveAI-dev/sieve"
-authors = ["doskey <doskey.lee@gmail.com>"]
+authors = ["SieveAI-dev"]
 
 [workspace.dependencies]
 # 用于跨 crate 共享版本(各 crate Cargo.toml 用 .workspace = true 引用)

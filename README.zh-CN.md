@@ -201,7 +201,7 @@ macOS 原生 GUI 在独立仓库 [`SieveAI-dev/sieve-gui-macos`](https://github.
 
 - **GitHub Issues** —— [`SieveAI-dev/sieve`](https://github.com/SieveAI-dev/sieve/issues)（公开样本提交也走这里）。
 - **安全漏洞** —— 见 [SECURITY.md](./SECURITY.md)。
-- **联系** —— doskey.lee@gmail.com
+- **联系** —— 通过 [GitHub Issues](https://github.com/SieveAI-dev/sieve/issues) / Discussions
 
 ---
 

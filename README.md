@@ -270,7 +270,7 @@ Contributions are welcome. Please read [CONTRIBUTING.md](./CONTRIBUTING.md) and 
 
 ## Security
 
-Please **do not** report security vulnerabilities through public GitHub issues. See [SECURITY.md](./SECURITY.md) for the private disclosure process. Contact: doskey.lee@gmail.com.
+Please **do not** report security vulnerabilities through public GitHub issues. Report privately via [GitHub Security Advisories](https://github.com/SieveAI-dev/sieve/security/advisories/new) — see [SECURITY.md](./SECURITY.md) for the full disclosure process.
 
 ## License
 

@@ -74,5 +74,3 @@ assignees: doskey
 - [ ] GitHub 用户名（默认）
 - [ ] Twitter 用户名:
 - [ ] 匿名（不致谢）
-
-> 数据合作意向（PRD §13.2）：如果你来自 SlowMist / ScamSniffer / GoPlus / Chainabuse 等机构想做长期数据合作，请同时邮件 doskey.lee@gmail.com。
