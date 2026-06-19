@@ -6,7 +6,13 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Sieve CLI daemon: hyper proxy server, config, audit log"
+homepage.workspace = true
+description = "Sieve: local-only LLM traffic security proxy for crypto developers (CLI/daemon)"
+keywords = ["security", "llm", "proxy", "crypto", "anthropic"]
+categories = ["command-line-utilities", "cryptography"]
+# publish=false：crates.io 发布是 Phase 2（需把 7 个 workspace crate 一并发版）。
+# 当前可用 `cargo install --git https://github.com/SieveAI-dev/sieve sieve-cli`（从 git 装，
+# 不受 publish=false 影响）。
 publish = false
 
 [[bin]]

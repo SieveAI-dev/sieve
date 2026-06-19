@@ -20,7 +20,8 @@ version = "0.1.0-alpha"
 edition = "2021"
 rust-version = "1.87"
 license = "MIT"
-repository = "https://github.com/<owner>/sieve"
+repository = "https://github.com/SieveAI-dev/sieve"
+homepage = "https://github.com/SieveAI-dev/sieve"
 authors = ["doskey <doskey.lee@gmail.com>"]
 
 [workspace.dependencies]

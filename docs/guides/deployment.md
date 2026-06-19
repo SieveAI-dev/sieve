@@ -10,8 +10,8 @@
 ## 1. 安装前提
 
 - 仅支持 macOS（Phase 1）；Linux / Windows 见下文 §2.2 / §2.3。
-- 通过 GitHub Releases 获取 `.dmg`，安装前必做 cosign 签名验证（§3）。
-- 后续版本通过 brew tap + GitHub Releases 公开分发。
+- 安装方式见 §2.1（一行命令优先：Homebrew / 自校验安装器 / cargo）。签名验证由安装器与 Homebrew **自动完成**；想亲手再验的看 §3（可选）。
+- 通过 brew tap + GitHub Releases 公开分发。
 
 ---
 
@@ -19,40 +19,48 @@
 
 ### 2.1 macOS
 
-Phase 1 GA 交付形态：**三件套 .dmg**（Native GUI App + 后台代理 + sieve-hook）。
+> **自校验是卖点，不是门槛。** 大多数 `curl … | sh` 要你盲信一段脚本；Sieve 的安装器在把任何东西落地前，先用 cosign / sigstore（keyless 签名 + Rekor 透明日志）校验自己的 release 产物，被篡改或来源不符就 **fail-closed 拒装**。一行命令，照样可验。决策见 [ADR-036](../design/ADR-036-self-verifying-installer.md)。
 
-**安装步骤**：
+按从无摩擦到硬核的顺序，四条安装路径：
 
-1. 从 [GitHub Releases](https://github.com/SieveAI-dev/sieve/releases) 下载 `Sieve-<version>.dmg`
+**① Homebrew（macOS 首选）**——brew 原生自动校验 sha256。
 
-2. cosign 验证 .dmg 签名（**必做**）：
-   ```bash
-   cosign verify-blob \
-     --certificate-identity-regexp '^https://github.com/SieveAI-dev/sieve/\.github/workflows/release\.yml@refs/tags/v[0-9.]+$' \
-     --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-     --bundle Sieve-<version>.dmg.sigstore \
-     Sieve-<version>.dmg
-   # 期望输出：Verified OK
-   ```
+```bash
+brew tap SieveAI-dev/sieve && brew install sieve   # CLI / daemon
+brew install --cask sieve                          # GUI .app
+```
 
-3. 双击挂载 .dmg，将 Sieve.app 拖入 `/Applications`
+**② 自校验一行安装器**——只装 `sieve` CLI / daemon 二进制（GUI 不走此路）。下载裸二进制 + 同名 `.sigstore.json` bundle，落地前自动校验（有 cosign 用 cosign 验签，无则回退对照 `SHA256SUMS` 校验 sha256 并明确警告），任一不符即 fail-closed 拒装。
 
-4. 首次启动 Sieve.app，按引导运行初始化：
+```bash
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/SieveAI-dev/sieve/main/scripts/install.sh | bash
+```
+
+> GA 后会用品牌短链 `sieveai.dev/install.sh` 代理此脚本（待部署）。
+
+**③ cargo install**——从源码构建。
+
+```bash
+cargo install --git https://github.com/SieveAI-dev/sieve sieve-cli   # 现可用
+cargo install sieve                                                  # crates.io，Phase 2 起
+```
+
+**④ 手动（给偏执狂）**——从 [GitHub Releases](https://github.com/SieveAI-dev/sieve/releases) 下签名 `.dmg`（GUI 三件套：Native GUI App + 后台代理 + sieve-hook）或裸二进制，手动用 cosign 验签（完整命令见 §3.1）。
+
+**GUI 安装后续步骤**（路径 ① cask 或路径 ④ .dmg）：
+
+1. 双击挂载 .dmg，将 Sieve.app 拖入 `/Applications`（cask 已自动放置）
+2. 首次启动 Sieve.app，按引导运行初始化：
    ```bash
    sieve setup
    ```
-
-5. `setup` 自动完成以下操作（详见 [SPEC-003](../specs/SPEC-003-sieve-setup-tool.md)）：
+3. `setup` 自动完成以下操作（详见 [SPEC-003](../specs/SPEC-003-sieve-setup-tool.md)）：
    - 改写 Claude Code `settings.json`，注册 `PreToolUse` hook（sieve-hook 二进制）
    - 写入 `ANTHROPIC_BASE_URL=http://127.0.0.1:11453` 到 shell 配置
    - 注册 `~/Library/LaunchAgents/tools.sieve.agent.plist`，launchd 接管后台代理
+4. `setup` 完成后自动执行 `sieve doctor` 验证所有组件就位
 
-6. `setup` 完成后自动执行 `sieve doctor` 验证所有组件就位
-
-> **Sieve 不提供 `curl ... | sh` 一键安装脚本。**
-> 远程脚本盲跑是 PRD §9 反对的攻击面，自己不能反着做。
-
-> Homebrew tap（`brew install sieve`）推 Phase 2，当前不可用。
+> 验证已由安装器 / Homebrew 自动完成。想手动验的看 §3（可选），或用 `sieve doctor` 查看验证状态。
 
 ### 2.2 Linux
 
@@ -105,13 +113,15 @@ Phase 1 仅 macOS：
 
 ---
 
-## 3. 二进制签名验证（**必做**）
+## 3. 二进制签名验证（**可选 / 给偏执狂**）
 
 > Sieve 把"自证清白"作为产品定位的一部分（PRD §1.2 第 4 句）。**用户不应仅凭信任安装 Sieve，而应能自己验证它。**
+>
+> 常规路径下验证**已由安装器 / Homebrew 自动完成**（见 §2.1，被篡改即 fail-closed 拒装），无需手动操作；`sieve doctor` 可查看验证状态。本节命令保留给想亲手再验一遍、或走手动 .dmg 路径（§2.1 路径 ④）的用户。
 
-### 3.1 sigstore / cosign 验证
+### 3.1 sigstore / cosign 验证（可选）
 
-**首次安装必跑。**
+**走手动 .dmg 路径时必跑；其余路径已自动完成，可选复验。**
 
 ```bash
 # macOS 示例

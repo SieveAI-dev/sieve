@@ -50,6 +50,7 @@
 | [ADR-033](./ADR-033-upstream-proxy.md)                     | 上游转发代理支持（HTTP CONNECT + SOCKS5） | Accepted | 2026-06-07 | 关联 §6.1、§9 #2 |
 | [ADR-034](./ADR-034-ga-key-gate.md)                        | GA 编译期密钥 gate：`ga_keys` feature 下占位公钥（updater `TRUSTED_PUBKEY` / origin `SIEVE_ORIGIN_PUBLIC_KEY`）编译失败，阻 fail-open 验签进 GA 二进制 | Accepted | 2026-06-11 | 关联 ADR-006/019、§9 #3/#6 |
 | [ADR-035](./ADR-035-license-apache2-dual-license.md)       | License：代码 Apache-2.0（含显式专利授权）+ 文档 CC BY-NC-SA 4.0，即刻生效不等 GA；取代 PRD §11.3 "MIT" 表述，修订 ADR-011 公开时点 | Accepted | 2026-06-19 | 关联 ADR-011/006、§11.3 |
+| [ADR-036](./ADR-036-self-verifying-installer.md)           | 自校验安装器：一行 curl\|bash + Homebrew + cargo install，校验自动化（cosign 优先 / sha256 兜底）+ fail-closed；手动 cosign 验签从安装主路径下沉为可选；取代 README "不提供 curl\|sh" 说教 | Accepted | 2026-06-19 | 关联 ADR-006/015/034、§9 #2/#6 |
 
 
 ---

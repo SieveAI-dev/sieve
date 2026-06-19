@@ -71,15 +71,37 @@ See [SPEC-006](./docs/specs/SPEC-006-update-and-telemetry.md).
 
 ### Installation (Phase 1: macOS only)
 
-> **Sieve does not provide a `curl ... | sh` one-line installer.** Blindly piping a remote script into a shell is exactly the attack surface Sieve exists to oppose — a security product must not do the opposite of what it preaches.
+Most `curl … | sh` installers ask you to blindly trust a script piping straight into your shell. Sieve's does the opposite: **before it lands anything on disk, the installer verifies its own release artifacts** with cosign / sigstore (keyless signatures + Rekor transparency log). If a binary has been tampered with or doesn't come from Sieve's release workflow, it **fails closed and refuses to install**. One command, still verifiable. Verification is the homework the installer does for you — not a hurdle it hands you. A security tool's installer should look exactly like this ([ADR-036](./docs/design/ADR-036-self-verifying-installer.md)).
 
-Sieve is distributed as a **signed `.dmg`** via [GitHub Releases](https://github.com/SieveAI-dev/sieve/releases):
+Pick the path that fits you, from frictionless to hardcore:
 
-1. Download `Sieve-<version>.dmg` from GitHub Releases.
-2. **Verify the `.dmg` signature with `cosign` (required)** before installing — see [deployment.md](./docs/guides/deployment.md).
-3. Mount it, drag `Sieve.app` into `/Applications`, and on first launch follow the guide to run `sieve setup`.
+**1. Homebrew (recommended on macOS)** — brew verifies sha256 natively.
 
-Homebrew tap (`brew install sieve`), Linux, and Windows are deferred to Phase 2.
+```bash
+# CLI / daemon
+brew tap SieveAI-dev/sieve && brew install sieve
+# GUI .app
+brew install --cask sieve
+```
+
+**2. Self-verifying one-line installer** — installs the `sieve` CLI / daemon binary. Downloads the bare binary plus its `.sigstore.json` bundle, verifies before install (cosign if present, else falls back to checking sha256 against `SHA256SUMS` with an explicit warning), and fails closed on any mismatch.
+
+```bash
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/SieveAI-dev/sieve/main/scripts/install.sh | bash
+```
+
+> A branded short link `sieveai.dev/install.sh` will front this script after GA (not yet deployed).
+
+**3. cargo install** — build from source.
+
+```bash
+cargo install --git https://github.com/SieveAI-dev/sieve sieve-cli   # available now
+cargo install sieve                                                  # from crates.io, from Phase 2
+```
+
+**4. Manual (for the paranoid)** — download the signed `.dmg` (GUI) or bare binary from [GitHub Releases](https://github.com/SieveAI-dev/sieve/releases) and verify the cosign signature by hand. See [Verify it yourself](#verify-it-yourself) below and [deployment.md](./docs/guides/deployment.md).
+
+After install, GUI users mount the `.dmg`, drag `Sieve.app` into `/Applications`, and on first launch run `sieve setup`. Linux and Windows are deferred to Phase 2.
 
 ### Connect your agent
 
@@ -100,6 +122,23 @@ What `sieve setup` does internally:
 - installs a macOS launchd plist so the daemon starts at login.
 
 Full install and operations guide: [docs/guides/deployment.md](./docs/guides/deployment.md). Development and build: [docs/guides/development.md](./docs/guides/development.md).
+
+### Verify it yourself
+
+Verification already happened automatically during install — the installer (and Homebrew) refuse to land anything that doesn't pass. Run `sieve doctor` to see the verification status. The steps below are **optional**, for those who want to re-verify by hand.
+
+**Manual cosign verification (optional):**
+
+```bash
+cosign verify-blob \
+  --certificate-identity-regexp '^https://github.com/SieveAI-dev/sieve/\.github/workflows/release\.yml@refs/tags/v[0-9.]+$' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+  --bundle Sieve-<version>.dmg.sigstore \
+  Sieve-<version>.dmg
+# expected output: Verified OK
+```
+
+Every signature is also written to the public [Rekor](https://search.sigstore.dev/) transparency log, and every release can be independently reproduced bit-for-bit from source — see [deployment.md §3](./docs/guides/deployment.md) and [ADR-006](./docs/design/ADR-006-sigstore-reproducible-build.md). Any re-signing leaves a trace in Rekor and cannot be done silently.
 
 ### Verify interception
 

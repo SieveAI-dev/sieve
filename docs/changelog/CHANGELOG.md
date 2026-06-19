@@ -11,6 +11,13 @@
 
 ## [Unreleased] — 2026-05-07
 
+### Added — 一行自校验安装：curl|bash + Homebrew + cargo install（2026-06-19，ADR-036）
+
+- **新增自校验 `curl|bash` 安装器 `scripts/install.sh`**：一行装 `sieve` CLI/daemon——`set -euo pipefail` + curl `--proto '=https' --tlsv1.2 -fsSL`；下载 release 裸二进制 + 同名 `.sigstore.json`（cosign keyless bundle），**落地前自动校验**（有 cosign 用 sigstore 验签 / 无 cosign 回退对照 `SHA256SUMS` 的 sha256 + 明确警告），**任一校验失败立即退出、不安装（fail-closed）** → 装 `~/.local/bin` → 提示 `sieve setup`。只装 CLI/daemon，**GUI 不走 curl|sh**（继续签名 .dmg / brew cask）。macOS 工作，Linux 预留位。
+- **新增 Homebrew packaging（`packaging/homebrew/`）**：formula `sieve.rb`（CLI）+ cask `Casks/sieve.rb`（GUI .app）+ `README.md`（复制到独立 tap `SieveAI-dev/homebrew-sieve` + 发版填 sha256 流程）。brew 原生 sha256 自动校验。sha256 当前为 pre-GA 占位（全零，故意 fail-closed）。
+- **cargo install metadata**：补 `sieve-cli` 的 homepage/keywords/categories + workspace `repository` 填实 owner（`<owner>` → `SieveAI-dev`）+ 加 `homepage`。`cargo install --git https://github.com/SieveAI-dev/sieve sieve-cli` 现可用；`cargo install sieve`（crates.io）标注 Phase 2（`publish=false`，需 workspace 全部 crate 发版）。
+- **手动 cosign 验签从安装主路径下沉为"可选"**：README.md / README.zh-CN.md / deployment.md 安装段重排——一行命令（brew / curl|bash / cargo）打头，手动 cosign + 可复现构建下沉到"给偏执狂的完整验证"小节；删去 README 中英 "Sieve does not provide a `curl … | sh`…" 说教段。签名 / 可复现构建本身（ADR-006）与 fail-closed 校验**一字不动**，只是把"用户手动验"自动化为"安装器替你验"。详见 [ADR-036](../design/ADR-036-self-verifying-installer.md)。
+
 ### Fixed — IPC accept 循环遇瞬态错误即退出的可用性单点（工程评估抓出，2026-06-19）
 
 - **修复 `sieve-ipc::socket_server::IpcServer::run` 的 accept 循环遇任何错误即 `break` 终止整个循环的缺陷**（行为变更/可用性）：原 `Err(e) => { error!(...); break; }` 使单次**瞬态**错误——进程/系统 fd 耗尽（EMFILE/ENFILE）或对端在 accept 完成前断开（ECONNABORTED）——永久击穿整个 IPC 控制面 daemon，GUI 弹窗 / hook pending / reload 全部失效且 daemon 无自愈、需重启恢复；对 fail-closed 安全代理是可用性单点。修复：参照 hyper server 的 accept 错误分类，连接级瞬态错误（`is_connection_error`：ConnectionRefused/Aborted/Reset）立即重试、其余错误（典型 fd 耗尽）退避 `ACCEPT_ERROR_BACKOFF`=100ms 后重试避免 busy-loop，**任何 accept 错误都不再退出循环**；真正不可恢复的 listener 损坏交由 launchd KeepAlive 重启进程。新增 2 个单测覆盖错误分类（连接级 → 立即重试 / 资源类 EMFILE=24 → 退避）。
