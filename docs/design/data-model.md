@@ -2,7 +2,7 @@
 
 > **状态**：设计阶段 / 锁定执行
 > **文档版本**：v2.0 / 2026-05-01
-> **依据 PRD**：[`docs/prd/sieve-prd-v2.0.md`](../prd/sieve-prd-v2.0.md)
+> **依据 PRD**：`docs/prd/sieve-prd-v2.0.md`
 > **范围**：Phase 1 内部数据结构、配置文件、审计日志、规则签名、license 数据格式；v2.0 新增灰名单 schema、user.toml schema、HoldOutcome 枚举、AuditEvent v2
 
 ---
@@ -521,9 +521,9 @@ JWT-like，**Ed25519 签名**（不用 RSA / HMAC）：
 |------|------|------|
 | `sub` | string | 用户 email 的 SHA-256 hash（前 16 hex）—— **不存明文 email** |
 | `iat` | int | 签发时间（unix s） |
-| `exp` | int | 过期时间（trial：iat+14d；pro：iat+1y 或 iat+30d 滚动） |
-| `tier` | string | `"trial"` 或 `"pro"` |
-| `device_limit` | int | 设备数上限（Phase 1：trial=1，pro=3） |
+| `exp` | int | 过期时间（unix s） |
+| `tier` | string | 许可级别标识 |
+| `device_limit` | int | 设备数上限 |
 
 ### 8.3 验证流程
 
@@ -540,9 +540,9 @@ JWT-like，**Ed25519 签名**（不用 RSA / HMAC）：
 
 - **完全离线验证**：本地公钥 + 签名校验，**不联网 verify**（详见 [ADR-003](./ADR-003-local-only-no-cloud-verifier.md)）；
 - 设备绑定：用 `device_id`（macOS：硬件 UUID hash / Linux：machine-id hash）+ `sub` 组合的本地 SQLite 记录；超过 `device_limit` 时 daemon 拒绝在新设备上启动；
-- 撤销机制：Phase 1 **不做** CRL —— [redacted]没有撤销基础设施，离线验证 + exp 已经覆盖 99% 场景；
-- **降级模式（降级触发 / license 失效）行为矩阵**——直接对齐 [PRD §7.1 + §9 #8](../prd/sieve-prd-v2.0.md#71-单一定价)：
-  - **Critical**：**全部仍然 fail-closed 拦截**（包括出站 OUT-* 与入站 IN-CR-05 / IN-GEN-01~03 等所有 Critical 规则）。这是产品安全承诺，不是付费用户特权（详见 [ADR-007](./ADR-007-fail-closed-critical-actions.md)）；
+- 撤销机制：Phase 1 **不做** CRL —— 离线验证 + exp 已经覆盖 99% 场景；
+- **降级模式（license 缺失 / 失效）行为矩阵**——对齐 PRD §9 #8：
+  - **Critical**：**全部仍然 fail-closed 拦截**（包括出站 OUT-* 与入站 IN-CR-05 / IN-GEN-01~03 等所有 Critical 规则）。这是产品安全承诺，对任何许可状态都不变（详见 [ADR-007](./ADR-007-fail-closed-critical-actions.md)）；
   - **High**：从"弹窗 + 5 秒倒计时"降级为"仅审计记录，不弹窗"（即"只读警告"）；
   - **Medium / Low**：行为不变（本就静默 / 标记）；
   - **审计日志、规则签名验证、不联网 verifier**（[ADR-003](./ADR-003-local-only-no-cloud-verifier.md)）等数据安全机制全部不受影响。
@@ -812,84 +812,36 @@ pub enum HoldOutcome {
 
 ---
 
-## 13. 服务端遥测日志 schema（ADR-030 §4）
+## 13. manifest 客户端字段约定
 
-> 本节描述 manifest 服务端（`updates.sieveai.dev`）的日志表 schema。服务端实现待 TODO-15 Cloudflare Workers + D1 落地后细化；本节记录字段约定以便客户端和服务端对齐。
+> 本节记录 manifest 请求（`updates.sieveai.dev`）的客户端发送字段约定与服务端隐私原则，供客户端和服务端对齐。manifest 协议详细规格见 [SPEC-006](../specs/SPEC-006-update-and-telemetry.md)。
 
-### 13.1 日志字段
+### 13.1 客户端发送字段
 
-```sql
-CREATE TABLE manifest_requests (
-  ts      TIMESTAMP NOT NULL,          -- 请求时间（精确到秒，UTC）
-  uid     TEXT,                        -- UUIDv4 install-id（SIEVE_NO_TELEMETRY 时为 NULL）
-  v       TEXT      NOT NULL,          -- 客户端版本（如 "0.3.1"）
-  os      TEXT      NOT NULL,          -- 操作系统："mac" / "linux" / "windows"
-  arch    TEXT      NOT NULL,          -- CPU 架构："x64" / "arm64"
-  ch      TEXT      NOT NULL DEFAULT 'stable',  -- 发布通道
-  country TEXT,                        -- 国家代码（geoip 解析后填入，不落原始 IP）
-  PRIMARY KEY (ts, uid)
-);
+manifest 请求随规则更新检查携带以下匿名字段（每天 4 次，复用更新通道，不新增独立网络访问）：
 
--- DAU 统计
-CREATE INDEX idx_date_uid ON manifest_requests(date(ts), uid);
-```
+| 字段 | 含义 | 备注 |
+|------|------|------|
+| `uid`  | UUIDv4 install-id | `SIEVE_NO_TELEMETRY` 时省略 |
+| `v`    | 客户端版本（如 `"0.3.1"`） | — |
+| `os`   | 操作系统：`mac` / `linux` / `windows` | — |
+| `arch` | CPU 架构：`x64` / `arm64` | — |
+| `ch`   | 发布通道（默认 `stable`） | — |
 
-### 13.2 隐私原则
+字段白名单与开关（`SIEVE_NO_TELEMETRY` 等）见 [SPEC-006](../specs/SPEC-006-update-and-telemetry.md) §9.1。
+
+### 13.2 服务端隐私原则
 
 - **原始 IP 不落盘**：geoip 解析后丢弃（或哈希后保留 ≤7 天用于反滥用，过期硬删）
-- **uid 可为 NULL**：`SIEVE_NO_TELEMETRY` 省略 uid 时，country 可落盘但无法追踪留存
+- **uid 可为 NULL**：`SIEVE_NO_TELEMETRY` 省略 uid 时，请求中不包含安装标识符
+- **服务端按日去重**：原始 IP 不持久化
 - 不存 User-Agent 详情、不存 Referer、不存任何用户输入相关字段
-
-### 13.3 核心指标 SQL 模板
-
-```sql
--- DAU（按日独立安装数）
-SELECT date(ts) AS day, COUNT(DISTINCT uid) AS dau
-FROM manifest_requests
-WHERE uid IS NOT NULL
-GROUP BY day
-ORDER BY day DESC;
-
--- MAU（按月独立安装数）
-SELECT strftime('%Y-%m', ts) AS month, COUNT(DISTINCT uid) AS mau
-FROM manifest_requests
-WHERE uid IS NOT NULL
-GROUP BY month;
-
--- 7 天[redacted]（D0 安装，D7 仍活跃）
--- 实现见服务端 analytics 代码（TODO-15）
-
--- 版本分布
-SELECT v, COUNT(DISTINCT uid) AS installs
-FROM manifest_requests
-WHERE date(ts) = date('now')
-GROUP BY v
-ORDER BY installs DESC;
-
--- OS / 平台分布
-SELECT os, arch, COUNT(DISTINCT uid) AS installs
-FROM manifest_requests
-WHERE date(ts) = date('now', '-7 day')
-GROUP BY os, arch;
-```
-
-### 13.4 服务端实现推荐
-
-服务端实现栈推荐：**Cloudflare Workers + D1**（ADR-030 §待决项 #4 默认推荐）。
-
-理由：
-- 零运维（serverless）
-- manifest 接口天然反 DDoS（Cloudflare WAF 级别）
-- D1 SQLite 与本文 schema 直接兼容
-- 免费层（D1 每天 5M row read / 100K row write）够前 6 个月装机量
-
-若服务端代码进本仓，则在 `crates/sieve-manifest-server/` 下实现，本节 schema 同步迁移。
 
 ---
 
 ## 14. 相关文档
 
-- [PRD-sieve v2.0](../prd/sieve-prd-v2.0.md) §5、§6.6、§7、§11
+- PRD-sieve v2.0 §5、§6.6、§7、§11
 - [architecture.md](./architecture.md) —— 模块职责、性能预算、Phase 2 演进路径
 - [ADR-003](./ADR-003-local-only-no-cloud-verifier.md) —— 不联网 verifier 的硬约束
 - [ADR-004](./ADR-004-anthropic-first-unified-interface.md) —— UnifiedMessage 接口预留
@@ -901,6 +853,6 @@ GROUP BY os, arch;
 - [ADR-023](./ADR-023-process-context-audit.md) —— 进程上下文反查（caller_pid / caller_exe）
 - [ADR-024](./ADR-024-rules-engine-abstraction.md) —— 规则引擎抽象 + LayeredEngine
 - [ADR-025](./ADR-025-content-type-routing-matrix.md) —— content-type 路由矩阵
-- [ADR-030](./ADR-030-update-telemetry-channel.md) —— 更新通道复用为遥测信标
+- 更新通道与 install 统计的设计取舍（详见内部记录）
 - [SPEC-006](../specs/SPEC-006-update-and-telemetry.md) —— manifest 协议详细规格
 - `docs/api/api-reference.md` —— 待编写

@@ -8,7 +8,7 @@ assignees: doskey
 
 ## ⚠️ 提交前必读
 
-**Sieve 不通过产品上传任何样本**（[PRD §11.2](../../docs/requirements/PRD-sieve.md)）。你在这里提交的内容是**公开的**——会被 doskey 评估、公开讨论，并可能转化为 Sieve 规则进入下一版规则库。
+**Sieve 不通过产品上传任何样本**（PRD §11.2）。你在这里提交的内容是**公开的**——会被 doskey 评估、公开讨论，并可能转化为 Sieve 规则进入下一版规则库。
 
 ### ❌ 严禁贴出
 
@@ -28,7 +28,7 @@ assignees: doskey
 
 ## 攻击类型
 
-- [ ] 中转站修改 tool_call（[PRD §1.2 第 1 句](../../docs/requirements/PRD-sieve.md)）
+- [ ] 中转站修改 tool_call（PRD §1.2 第 1 句）
 - [ ] 地址替换攻击（IN-CR-01）
 - [ ] 危险工具调用（IN-CR-02 / IN-GEN-01-03：`rm -rf /` / `curl|sh` / `eval(base64)`）
 - [ ] 签名钓鱼（IN-CR-05：EIP-712 数字化绕过 / typed data 滥用）
@@ -67,7 +67,7 @@ assignees: doskey
 - 处置等级（Critical / High / Medium / Low）：
 - 是否被 fail-closed 阻断：
 
-如果**未被捕获**，这是最有价值的样本——会直接驱动新规则加入 [PRD §5.2 Phase 2 表](../../docs/requirements/PRD-sieve.md)。
+如果**未被捕获**，这是最有价值的样本——会直接驱动新规则加入 PRD §5.2 Phase 2 表。
 
 ## 致谢偏好
 
@@ -75,4 +75,4 @@ assignees: doskey
 - [ ] Twitter 用户名:
 - [ ] 匿名（不致谢）
 
-> 数据合作意向（[PRD §13.2](../../docs/requirements/PRD-sieve.md)）：如果你来自 SlowMist / ScamSniffer / GoPlus / Chainabuse 等机构想做长期数据合作，请同时邮件 doskey.lee@gmail.com。
+> 数据合作意向（PRD §13.2）：如果你来自 SlowMist / ScamSniffer / GoPlus / Chainabuse 等机构想做长期数据合作，请同时邮件 doskey.lee@gmail.com。

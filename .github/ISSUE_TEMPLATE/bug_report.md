@@ -36,7 +36,7 @@ sieve --version    # 贴完整输出（含 SHA-256 + rules version）
 
 请贴 `~/.sieve/logs/sieve.log` 的相关片段。
 
-> ⚠️ **不要贴原始 prompt 内容** —— 只贴 fingerprint / rule_id / 时间戳。Sieve 不存原文，你也不应该把原文贴到公开 issue（[PRD §11.2](../../docs/prd/sieve-prd-v1.3.md#112-tos)）。
+> ⚠️ **不要贴原始 prompt 内容** —— 只贴 fingerprint / rule_id / 时间戳。Sieve 不存原文，你也不应该把原文贴到公开 issue（PRD §11.2）。
 
 ```
 （脱敏后的日志）

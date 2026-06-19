@@ -6,7 +6,7 @@
 
 > 决策日期：2026-05-05
 > 范围：Phase 3.x（v3.x post-GA opt-in 高级特性，**不影响 GA 时间表**）
-> 关联 PRD：[v2.0 §1.2](../prd/sieve-prd-v2.0.md)、[v2.0 §9 #12](../prd/sieve-prd-v2.0.md)（不装本地 CA / 不 MITM 硬约束）、[v2.0 §11.2](../prd/sieve-prd-v2.0.md) 信任叙事
+> 关联 PRD：v2.0 §1.2、v2.0 §9 #12（不装本地 CA / 不 MITM 硬约束）、v2.0 §11.2 信任叙事
 
 ---
 
@@ -191,7 +191,7 @@ openrouter.ai
 
 - **安装成功率**：一次性 sudo 会让 GA 安装成功率从预期 > 80% 掉到约 60%，Phase 1 不可接受
 - **hostname 列表观察期**：dogfood 阶段需要观察 hostname 列表是否覆盖足，过早开放会产生 FP（合法流量被 block）
-- **差异化卖点留存**：「Sieve [redacted]：网络层硬隔离」作为 v3 「Sieve [redacted]」的差异化卖点（PRD §11.5），在 GA 时发布会有更高营销价值
+- **能力成熟度**：网络层硬隔离作为 v3.x opt-in 高级特性，需在更早阶段充分验证 hostname 列表覆盖度后再放开
 
 ### 8. 边界声明（不在本 ADR 范围内）
 
@@ -211,7 +211,7 @@ openrouter.ai
 1. **bypass 缺口闭合**：流量层面强制收口，配错 / 偷调 / 第三方组件绕不过去，审计完整性从「尽力而为」变为「jail 开启后 100%」
 2. **fail-closed 在网络层兑现**：sieve crash 时 LLM 流量整体打不出去，符合 ADR-007 fail-closed 原则在网络层的延伸——「sieve 不在了，LLM 也不通了」是产品设计意图，不是副作用
 3. **审计完整性**：jail 启用后，「sieve 没记录的 LLM 流量」= 「LLM 流量不存在」——审计可以 100% 信任
-4. **差异化营销卖点**：「Sieve [redacted]：网络层硬隔离」是 Little Snitch / Lulu / 企业 DLP 难以匹敌的窄面定位；防火墙只阻断不解密，信任叙事完整
+4. **信任叙事完整**：防火墙只阻断不解密，不解 TLS、不装 CA、不动 trust store，jail 启用后信任叙事仍 100% 成立
 5. **PRD §9 #12 不破**：不装 CA、不 MITM、不动 trust store，信任叙事完全保留
 
 ### 负面影响
@@ -224,23 +224,21 @@ openrouter.ai
 
 ### 需要更新的文档
 
-- `docs/design/architecture.md` —— 加 §部署形态：[redacted]（jail-enabled）vs Standard Mode 对比
+- `docs/design/architecture.md` —— 加 §部署形态：jail-enabled vs standard 部署形态对比
 - `docs/design/ADR-INDEX.md` —— 加入本 ADR 条目（ADR-027）
 - `docs/specs/SPEC-003-sieve-setup-tool.md` —— 加 §setup --jail / §doctor --jail / §uninstall --jail 子命令规格
 - `docs/api/api-reference.md` —— §CLI 子命令加 jail 相关条目
-- `docs/guides/deployment.md` —— [redacted] 部署章节
+- `docs/guides/deployment.md` —— jail-enabled 部署章节
 - `SECURITY.md` —— 威胁模型更新（jail 闭合的 bypass 缺口 + 仍开放的 root 级别 bypass）
 - `CHANGELOG.md` —— v3.x feature 条目
-- 营销文案（v3 release 时）：landing page 加 [redacted] 卖点
 
 ---
 
 ## 相关文档
 
-- [PRD v2.0 §1.2](../prd/sieve-prd-v2.0.md) —— 完全本地不联网
-- [PRD v2.0 §9 #12](../prd/sieve-prd-v2.0.md) —— 不装本地 CA、Network Extension / CA 注入 / 系统 proxy 修改推 Phase 3 选购
-- [PRD v2.0 §11.2](../prd/sieve-prd-v2.0.md) —— 信任叙事：「我们从不动你的 trust store」
-- [PRD v2.0 §11.5](../prd/sieve-prd-v2.0.md) —— 营销：[redacted] 差异化卖点
+- PRD v2.0 §1.2 —— 完全本地不联网
+- PRD v2.0 §9 #12 —— 不装本地 CA、Network Extension / CA 注入 / 系统 proxy 修改推 Phase 3 选购
+- PRD v2.0 §11.2 —— 信任叙事：「我们从不动你的 trust store」
 - [ADR-006](./ADR-006-sigstore-reproducible-build.md) —— sigstore + reproducible build（hostname 列表分发走签名通道）
 - [ADR-007](./ADR-007-fail-closed-critical-actions.md) —— fail-closed Critical actions（jail 把 fail-closed 延伸到网络层；ADR-007 §背景第一句「YOLO mode 下的不可逆动作一旦发生无法回滚」是本 ADR 网络层 fail-closed 的精神来源）
 - [ADR-009](./ADR-INDEX.md#候选--计划中-adr)（候选,待落地）—— Windows 服务部署（jail Windows WFP 实现等待 ADR-009）

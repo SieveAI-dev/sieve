@@ -21,7 +21,7 @@ Sieve 是 LLM 流量层代理。理论上"完整版"应该支持：
 如果按"完整版"设计 Phase 1，会陷入两个陷阱：
 
 1. **协议抽象过度**：为支持 N 家协议，要做 LCD（最小公倍数）抽象，最终既不能很好支持 Anthropic 也不能很好支持 OpenAI；
-2. **测试覆盖不可能**：12 周时间、单人开发，每多一家协议都需要至少 2 周（适配 + 边界 fuzz + dogfood）。
+2. **测试覆盖不可能**：12 周时间、资源受限，每多一家协议都需要至少 2 周（适配 + 边界 fuzz + dogfood）。
 
 更关键的是：**P0 用户群的 80% 是 Claude Code 重度用户**（PRD §3.1）。Anthropic Messages API 加 Claude Code 加 SSE，已经覆盖了 P0 用户的全部使用场景。
 
@@ -75,19 +75,19 @@ PRD §9.9 的硬约束给出了答案：**"Phase 1 只做 Claude Code，UnifiedM
 
 ### 3. 第二适配触发条件
 
-**第二个真实付费用户主动要求** OpenAI / OpenRouter 时启动第二适配器开发。
+**有真实活跃用户持续主动要求** OpenAI / OpenRouter 时启动第二适配器开发。
 
 **不算触发条件**：
 
-- ❌ doskey 自己想要（容易过度乐观）；
-- ❌ 0 付费用户的 GitHub issue（信号弱）；
-- ❌ 1 个免费试用用户提（试用期间反馈无承诺）；
-- ❌ 营销文章评论"为什么不支持 X"（噪声）。
+- ❌ 维护者自己想要（容易过度乐观）；
+- ❌ 单条孤立的 GitHub issue（信号弱）；
+- ❌ 一次性的随口提及（无持续性）；
+- ❌ 文章评论"为什么不支持 X"（噪声）。
 
 **算触发条件**：
 
-- ✅ 1 个**已付费 ≥ 1 个月**的用户在 Discord / 邮件主动说"我需要 X 才能继续用"；
-- ✅ 闭测期间 5–10 个 hackathon builder 中**至少 2 人**有同类需求（聚合信号）。
+- ✅ 有真实活跃用户在 Discord / 邮件主动持续说"我需要 X 才能继续用"；
+- ✅ 闭测用户中出现聚合性的同类需求信号（多人同时提出）。
 
 第二适配器开发预算：约 2–3 周。这把 Phase 2 路线图延后 2–3 周是合理代价。
 
@@ -106,7 +106,7 @@ PRD §9.9 的硬约束给出了答案：**"Phase 1 只做 Claude Code，UnifiedM
 ### 负面影响
 
 1. **错过潜在 OpenAI 用户**：OpenAI Codex / Cursor 用户群规模可能比 Claude Code 大；Phase 1 拒绝这部分流量是有机会成本的；用 §3 触发器约束自己别过早响应；
-2. **被竞品抢先**：如果 Lakera 等先支持 OpenAI 协议，可能让"先发优势"被打散；反击 talking point 是"crypto + 可验证 + 完全本地"三连——这是 Lakera 不会做的；
+2. **OpenAI 协议覆盖机会成本**：Phase 1 不支持 OpenAI 协议存在覆盖面上的机会成本；Sieve 的技术差异化仍在"crypto 场景检测 + 可验证 + 完全本地"，这是 SaaS / 闭源方案难以提供的；
 3. **接口预留有维护成本**：如果未来发现接口预留**形状不对**（例如 OpenAI 的 function calling schema 完全不能塞进 `ToolUseBlock`），需要重构；缓解：Phase 1 写代码时**主动用一份 OpenAI 协议样本做 paper exercise**，验证抽象形状能容下；
 4. **Anthropic 自己改协议**：Anthropic 可能在 12 周内改 Messages API（如新增 thinking blocks）；缓解：保持依赖 Anthropic 官方 SDK 的 schema 定义，不自己 fork。
 
@@ -142,6 +142,6 @@ v1.4 §6.7 新增**双层防御**依赖 Claude Code 特有的 `hooks.preToolUse`
 
 换言之，**sieve-hook 这一层的 fail-closed 实现是 Claude Code 专有的**——Phase 2 适配 OpenClaw / Hermes 等客户端时，Hook 类规则（IN-CR-02/03/04 / IN-GEN-01~03）的等效拦截机制需要各自重新实现（对等的 pre-execution hook，或者降级为 GUI 弹窗路径）。
 
-本条补充不改变 §3 的第二适配触发条件——Phase 2 适配仍须等到第二个真实付费用户主动要求。届时适配工作量还需额外包含"Hook 类规则的等效拦截机制"，比 v1.3 时代估算的 2-3 周更长。
+本条补充不改变 §3 的第二适配触发条件——Phase 2 适配仍须等到真实活跃用户持续主动要求。届时适配工作量还需额外包含"Hook 类规则的等效拦截机制"，比 v1.3 时代估算的 2-3 周更长。
 
 相关文档：[ADR-014 双层防御](./ADR-014-dual-layer-defense.md)

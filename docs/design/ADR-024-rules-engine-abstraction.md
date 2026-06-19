@@ -6,8 +6,8 @@
 
 > 决策日期：2026-05-01
 > 范围：Phase A（Week 5-8 ship）；`sieve-rules` crate trait 层 + 新增 `sieve-policy` crate
-> 关联 PRD：[v2.0 §6.3](../prd/sieve-prd-v2.0.md)、[v2.0 §5.5.2.1](../prd/sieve-prd-v2.0.md)、[v2.0 §9 #3](../prd/sieve-prd-v2.0.md)
-> 关联 review：[codex review PRD v2.0 §C3 Must #4](../review/2026-05-01-codex-review-prd-v2.0.md)
+> 关联 PRD：v2.0 §6.3、v2.0 §5.5.2.1、v2.0 §9 #3
+> 关联 review：codex review PRD v2.0 §C3 Must #4
 
 ---
 
@@ -180,10 +180,10 @@ CI 加 `cargo bench --no-default-features --features ci-bench` job，P99 退化 
 
 ## 相关文档
 
-- [PRD v2.0 §6.3 规则引擎抽象](../prd/sieve-prd-v2.0.md)
-- [PRD v2.0 §5.5.2.1 用户规则与系统规则并存原则](../prd/sieve-prd-v2.0.md)
-- [PRD v2.0 §9 #3 fail-closed High-Risk Tool Policy Gate](../prd/sieve-prd-v2.0.md)
-- [codex review v2.0 §C3 Must #4](../review/2026-05-01-codex-review-prd-v2.0.md)
+- PRD v2.0 §6.3 规则引擎抽象
+- PRD v2.0 §5.5.2.1 用户规则与系统规则并存原则
+- PRD v2.0 §9 #3 fail-closed High-Risk Tool Policy Gate
+- codex review v2.0 §C3 Must #4
 - [CHANGELOG v1.5.4](../changelog/CHANGELOG.md) —— content-type 路由 P0 修复，ScanRequest 上下文字段的直接来源
 - [ADR-007](./ADR-007-fail-closed-critical-actions.md) —— fail-closed 原则（LayeredEngine 不变量的上层依据）
 - [ADR-014](./ADR-014-dual-layer-defense.md) —— 双层防御（LayeredEngine 是代理层规则引擎的合并抽象）

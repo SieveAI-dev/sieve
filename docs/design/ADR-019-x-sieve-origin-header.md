@@ -6,7 +6,7 @@
 
 > 决策日期：2026-04-28
 > 范围：Phase 1 Week 7 实现，`crates/sieve-core/src/forwarder/` + IPC schema 扩展
-> 关联 PRD：[v1.5 §4.6 场景 F、§6.5 IPC 协议扩展](../prd/sieve-prd-v2.0.md)
+> 关联 PRD：v1.5 §4.6 场景 F、§6.5 IPC 协议扩展
 
 ---
 
@@ -195,7 +195,7 @@ Hermes 需要在 sub-agent 子进程上注入此 header。两种实现路径：
 
 ### 需要更新的文档
 
-- [PRD v2.0 §6.5](../prd/sieve-prd-v2.0.md) — X-Sieve-Origin header 格式定义（已在 PRD 中预占位，本 ADR 提供完整规范）
+- PRD v2.0 §6.5 — X-Sieve-Origin header 格式定义（已在 PRD 中预占位，本 ADR 提供完整规范）
 - [architecture.md](./architecture.md) — forwarder 模块加 Origin Header 解析节点（G4 子代理）
 - [data-model.md](./data-model.md) — IPC pending 表 schema 加 request_id + chain_depth 字段
 - [api-reference.md](../api/api-reference.md) — §3 代理行为说明中加 X-Sieve-Origin header 文档
@@ -205,8 +205,8 @@ Hermes 需要在 sub-agent 子进程上注入此 header。两种实现路径：
 
 ## 相关文档
 
-- [PRD v2.0 §4.6 场景 F](../prd/sieve-prd-v2.0.md) — Hermes 嵌套调用问题定义
-- [PRD v2.0 §6.5 IPC 协议](../prd/sieve-prd-v2.0.md) — IPC schema 扩展（source_agent / origin_chain 字段）
+- PRD v2.0 §4.6 场景 F — Hermes 嵌套调用问题定义
+- PRD v2.0 §6.5 IPC 协议 — IPC schema 扩展（source_agent / origin_chain 字段）
 - [ADR-013](./ADR-013-ipc-protocol.md) — IPC 协议基础（JSON-RPC over Unix socket），本 ADR 在此基础上扩展
 - [ADR-007](./ADR-007-fail-closed-critical-actions.md) — fail-closed 约束，chain_depth ≥ 5 直接 426 是其体现
 - [ADR-018](./ADR-018-openai-protocol-adaptation.md) — OpenAI 协议适配，嵌套调用链里 OpenAI 请求同样需要传递此 header

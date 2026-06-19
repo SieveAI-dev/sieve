@@ -32,7 +32,7 @@ flowchart LR
 
 Sieve 每天 **4 次**连接更新服务器获取最新规则。每次请求仅附带 **5 个字段**：版本 / OS / CPU 架构 / 本地随机生成的安装 ID（install-id，不绑定任何账号或设备）/ 通道（channel）。它**永不上传 prompt、response、API key 或任何使用记录**。
 
-- `SIEVE_NO_TELEMETRY=1` —— 关闭装机量统计（规则更新不受影响）。
+- `SIEVE_NO_TELEMETRY=1` —— 关闭匿名安装统计（规则更新不受影响）。
 - `SIEVE_NO_UPDATE=1` —— 完全禁用更新检查。
 
 ---
@@ -119,7 +119,7 @@ api_key = "${RELAY_API_KEY}"
 sequence_detection = false   # 行为序列检测，GA 默认关闭
 
 [telemetry]
-# 默认开启装机量统计；SIEVE_NO_TELEMETRY=1 可全局关闭。
+# 默认开启匿名安装统计；SIEVE_NO_TELEMETRY=1 可全局关闭。
 enabled = true
 ```
 
@@ -154,7 +154,7 @@ macOS 原生 GUI 在独立仓库 [`SieveAI-dev/sieve-gui-macos`](https://github.
 
 ## 定价
 
-**Phase 1 完全免费。** 后续商业化方向见内部记录（ADR-029）。
+**Phase 1 完全免费。**
 
 ---
 

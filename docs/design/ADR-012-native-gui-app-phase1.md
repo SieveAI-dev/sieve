@@ -51,8 +51,8 @@ Rust 仓库（本仓库）**不出现任何 Swift 代码、Xcode 工程文件或
 
 理由：
 - Rust CI（cargo clippy / fuzz / bench）与 Xcode CI（swift build / xcodebuild test）完全解耦，避免交叉依赖卡流水线；
-- [redacted]，monorepo 没有协作同步价值，反而拖慢 Rust 的 clean build 时间；
-- `sieve-gui-macos` 仓库遵循与本仓库相同的私有至 GA 原则（ADR-011）。
+- 当前为小团队维护，monorepo 没有协作同步价值，反而拖慢 Rust 的 clean build 时间；
+- `sieve-gui-macos` 仓库遵循与本仓库相同的发布前管理原则（详见内部记录）。
 
 ### 3. GUI 进程独立于代理进程
 
@@ -78,7 +78,7 @@ GUI App 崩溃 **不影响** `sieve-cli` 守护进程的检测能力。失联时
 
 ### 6. Phase 1 只做 macOS
 
-Windows / Linux GUI 推 Phase 2，触发条件与 ADR-004 §3 第二适配器相同（第二个真实付费用户主动要求）。
+Windows / Linux GUI 推 Phase 2，触发条件与 ADR-004 §3 第二适配器相同（有真实用户主动要求时）。
 
 ---
 
@@ -94,7 +94,7 @@ Windows / Linux GUI 推 Phase 2，触发条件与 ADR-004 §3 第二适配器相
 ### 负面影响
 
 1. **跨仓库协调成本**：IPC schema 改动需两仓库同步发版；缓解：SPEC 先写，protocol version 握手严格执行；
-2. **doskey 学习 SwiftUI**：macOS app 开发有学习曲线（Xcode / codesign / Notarization 流程）；Week 4 提前做纸面练习；
+2. **SwiftUI 学习曲线**：macOS app 开发有上手成本（Xcode / codesign / Notarization 流程）；Week 4 提前做纸面练习；
 3. **Windows / Linux 用户等待**：Phase 2 触发前无 GUI，只有 sieve-hook 终端弹窗；README 提前说明；
 4. **macOS Notarization 时间**：第一次走 Apple 审核通道约 1-3 天；提前在 Week 4 建好 Apple Developer 账号和证书。
 
@@ -114,5 +114,5 @@ Windows / Linux GUI 推 Phase 2，触发条件与 ADR-004 §3 第二适配器相
 - [ADR-013](./ADR-013-ipc-protocol.md) —— IPC 协议（JSON-RPC Unix socket + 文件锁）
 - [ADR-014](./ADR-014-dual-layer-defense.md) —— 双层防御（GUI 类规则 hold 流 + GUI 弹窗）
 - [ADR-015](./ADR-015-sieve-setup-tool.md) —— sieve setup 自动配置（含 .dmg 安装链路）
-- [ADR-011](./ADR-011-private-until-ga.md) —— sieve-gui-macos 仓库同样保持私有至 GA
+- sieve-gui-macos 仓库的发布前管理原则详见内部记录
 - [architecture.md](./architecture.md) —— Phase 1 整体架构

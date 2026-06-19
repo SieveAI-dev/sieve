@@ -6,8 +6,8 @@
 
 > 决策日期：2026-05-01
 > 范围：Phase A（Week 5-8 ship），macOS only；cwd / ppid 字段推 v2.1
-> 关联 PRD：[v2.0 §5.6](../prd/sieve-prd-v2.0.md)、[v2.0 §6.6](../prd/sieve-prd-v2.0.md)、[v2.0 §12 R-V20-06](../prd/sieve-prd-v2.0.md)
-> 关联 review：[codex review PRD v2.0 §D1 / §D2 OQ-V20-02 关闭](../review/2026-05-01-codex-review-prd-v2.0.md)
+> 关联 PRD：v2.0 §5.6、v2.0 §6.6、v2.0 §12 R-V20-06
+> 关联 review：codex review PRD v2.0 §D1 / §D2 OQ-V20-02 关闭
 
 ---
 
@@ -161,10 +161,10 @@ const CACHE_MAX_ENTRIES: usize = 64;  // 同时跑 64 个不同 PID 已足够
 
 ## 相关文档
 
-- [PRD v2.0 §5.6 进程上下文记录](../prd/sieve-prd-v2.0.md)
-- [PRD v2.0 §6.6 进程上下文反查](../prd/sieve-prd-v2.0.md)
-- [PRD v2.0 §12 R-V20-06 进程归因错误风险](../prd/sieve-prd-v2.0.md)
-- [PRD v2.0 §9 #2 不联网做 verifier](../prd/sieve-prd-v2.0.md)
-- [codex review v2.0 §D2 / OQ-V20-02](../review/2026-05-01-codex-review-prd-v2.0.md)
+- PRD v2.0 §5.6 进程上下文记录
+- PRD v2.0 §6.6 进程上下文反查
+- PRD v2.0 §12 R-V20-06 进程归因错误风险
+- PRD v2.0 §9 #2 不联网做 verifier
+- codex review v2.0 §D2 / OQ-V20-02
 - [ADR-007](./ADR-007-fail-closed-critical-actions.md) —— fail-closed 不阻塞上下文（反查失败不能阻塞请求处理）
 - [ADR-013](./ADR-013-ipc-protocol.md) —— IPC 协议（audit 事件写入路径）

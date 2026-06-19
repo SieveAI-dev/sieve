@@ -6,9 +6,9 @@
 
 > 决策日期：2026-05-01
 > 范围：Phase A (Week 5-8)，IPC 协议扩展 + `~/.sieve/decisions/` 目录落地
-> 关联 PRD：[v2.0 §5.4、§9 #3、§9 #8](../prd/sieve-prd-v2.0.md)
-> 关联 codex review：[2026-05-01 codex review §A3、§C4、Must #1](../review/2026-05-01-codex-review-prd-v2.0.md)
-> 关联风险：[R-V20-03 灰名单绕过内置 Critical](../prd/sieve-prd-v2.0.md#12-风险登记册)
+> 关联 PRD：v2.0 §5.4、§9 #3、§9 #8
+> 关联 codex review：2026-05-01 codex review §A3、§C4、Must #1
+> 关联风险：R-V20-03 灰名单绕过内置 Critical
 
 ---
 
@@ -171,10 +171,10 @@ ADR-013 定义 IPC 基础协议（JSON-RPC over Unix socket + 文件锁）。本
 
 ## 相关文档
 
-- [PRD v2.0 §5.4](../prd/sieve-prd-v2.0.md) —— 三态决策完整需求 + 灰名单 schema
-- [PRD v2.0 §9 #3、#8](../prd/sieve-prd-v2.0.md) —— fail-closed Critical 不可关（两条原始硬约束）
-- [PRD v2.0 §12 R-V20-03](../prd/sieve-prd-v2.0.md) —— 灰名单绕过 Critical 风险（极高）
-- [codex review 2026-05-01 §A3、§C4、Must #1](../review/2026-05-01-codex-review-prd-v2.0.md) —— 强制补 Critical 锁的来源
+- PRD v2.0 §5.4 —— 三态决策完整需求 + 灰名单 schema
+- PRD v2.0 §9 #3、#8 —— fail-closed Critical 不可关（两条原始硬约束）
+- PRD v2.0 §12 R-V20-03 —— 灰名单绕过 Critical 风险（极高）
+- codex review 2026-05-01 §A3、§C4、Must #1 —— 强制补 Critical 锁的来源
 - [ADR-007](./ADR-007-fail-closed-critical-actions.md) —— fail-closed 原则（本 ADR 延伸，不修改）
 - [ADR-013](./ADR-013-ipc-protocol.md) —— IPC 协议基础（本 ADR 扩展其消息字段）
 - [ADR-014](./ADR-014-dual-layer-defense.md) —— 双层防御（Hook 类规则的 Ask 路径由 sieve-hook 处理，不走灰名单）

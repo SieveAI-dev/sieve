@@ -6,8 +6,8 @@
 
 > 决策日期：2026-05-01
 > 范围：Phase A (Week 5-8)，`sieve-policy` crate 落地
-> 关联 PRD：[v2.0 §5.5、§9 #14](../prd/sieve-prd-v2.0.md)
-> 关联 codex review：[2026-05-01 codex review §B3、Must #2/#3、Should #2](../review/2026-05-01-codex-review-prd-v2.0.md)
+> 关联 PRD：v2.0 §5.5、§9 #14
+> 关联 codex review：2026-05-01 codex review §B3、Must #2/#3、Should #2
 
 ---
 
@@ -132,7 +132,7 @@ PRD §9 #14 硬约束：用户规则文件加载失败不得影响 daemon 启动
 2. **系统规则完全隔离**：用户规则任何形式的失败都不能拖累系统 Critical 防护，PRD §9 #14 工程落地；
 3. **工程量可控**：$EDITOR 方案比 ratatui TUI 节省约 5-6 天，Phase A Week 5-7 不过载；
 4. **LayeredEngine 可测试**：trait 化后系统规则 + 用户规则两层可独立 unit test + benchmark，满足 HIPS 规则引擎抽象标准；
-5. **营销话术支持**：用户规则是"can编程 HIPS"核心差异化，支撑 [redacted]/月 [redacted]"再严一档"叙事。
+5. **可编程差异化检测**：用户规则提供"可编程 HIPS"能力，让用户在系统规则之外按自身场景"再严一档"。
 
 ### 负面影响
 
@@ -151,10 +151,10 @@ PRD §9 #14 硬约束：用户规则文件加载失败不得影响 daemon 启动
 
 ## 相关文档
 
-- [PRD v2.0 §5.5](../prd/sieve-prd-v2.0.md) —— 用户规则系统完整需求
-- [PRD v2.0 §4.7](../prd/sieve-prd-v2.0.md) —— 场景 G：高级用户写自定义规则（验收标准）
-- [PRD v2.0 §9 #14](../prd/sieve-prd-v2.0.md) —— 用户规则 fail-safe 硬约束
-- [codex review 2026-05-01 §B3、Must #2/#3、Should #2](../review/2026-05-01-codex-review-prd-v2.0.md) —— 简化编辑器 + 补安全约束的依据
+- PRD v2.0 §5.5 —— 用户规则系统完整需求
+- PRD v2.0 §4.7 —— 场景 G：高级用户写自定义规则（验收标准）
+- PRD v2.0 §9 #14 —— 用户规则 fail-safe 硬约束
+- codex review 2026-05-01 §B3、Must #2/#3、Should #2 —— 简化编辑器 + 补安全约束的依据
 - [ADR-007](./ADR-007-fail-closed-critical-actions.md) —— fail-closed 原则（用户规则不能 override 的根基）
 - [ADR-021](./ADR-021-tri-state-decision-and-graylist.md) —— 三态决策 + 灰名单（用户规则的 Remember 权限在此定义）
 - [architecture.md](./architecture.md) —— Pipeline 模块与 sieve-policy 关系

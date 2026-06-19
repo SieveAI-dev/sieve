@@ -1,8 +1,8 @@
 # Sieve daemon · 手动联调 Checklist
 
 > 上次更新：2026-05-05（增补 §14 sieve-updater 联调,域名落定 sieveai.dev）
-> 范围：unix-style 改造 v2.x 5 项 TODO + ADR-030 sieve-updater 客户端闭环 的用户验证步骤
-> 关联：[ADR-026](../design/ADR-026-port-based-listener-routing.md) / [ADR-028](../design/ADR-028-ipc-protocol-neutralization.md) / [ADR-030](../design/ADR-030-update-telemetry-channel.md) / [SPEC-006](../specs/SPEC-006-update-and-telemetry.md) / [PROGRESS.md](../../tasks/PROGRESS.md)
+> 范围：unix-style 改造 v2.x 5 项 TODO + sieve-updater 客户端闭环 的用户验证步骤
+> 关联：[ADR-026](../design/ADR-026-port-based-listener-routing.md) / [ADR-028](../design/ADR-028-ipc-protocol-neutralization.md) / 更新通道设计（详见内部记录） / [SPEC-006](../specs/SPEC-006-update-and-telemetry.md) / PROGRESS.md
 
 ---
 
@@ -22,13 +22,13 @@
 >
 > **仍需手动**（自动化收益低/依赖外部）：§3.3/§10 真 API key 实打、GUI 可视层（菜单栏/Toast/Settings/Onboarding）、真 Claude Code 流量触发 OUT-*/IN-CR-*。
 >
-> ⚠️ 自动化首轮抓出多个真 bug（见 [PROGRESS.md 🚫 段](../../tasks/PROGRESS.md) + [lessons.md 2026-06-18](../../tasks/lessons.md)）：zstd 字节序（已修）、headless CLI 嵌套 runtime panic（已修）、detection 审计未接线 + 6 类跨仓 schema 漂移（待排期）。
+> ⚠️ 自动化首轮抓出多个真 bug（见 PROGRESS.md 🚫 段 + lessons.md 2026-06-18）：zstd 字节序（已修）、headless CLI 嵌套 runtime panic（已修）、detection 审计未接线 + 6 类跨仓 schema 漂移（待排期）。
 
 ---
 
 ## 0. 文档目的
 
-把 2026-05-05 完成的 13 commits（unix-style 改造）+ ADR-030 sieve-updater 客户端闭环转化为**可逐项勾选**的人工验证步骤。所有步骤跑完且勾选 → daemon 侧 dogfood 就绪。GUI 仓侧的联调（sieve-gui-macos）见该仓自己的 checklist，本文档不覆盖。服务端（CF Workers + D1）尚未实施,§14 用本地 mock 服务器即可验证客户端独立闭环。
+把 2026-05-05 完成的 13 commits（unix-style 改造）+ sieve-updater 客户端闭环转化为**可逐项勾选**的人工验证步骤。所有步骤跑完且勾选 → daemon 侧 dogfood 就绪。GUI 仓侧的联调（sieve-gui-macos）见该仓自己的 checklist，本文档不覆盖。服务端尚未实施,§14 用本地 mock 服务器即可验证客户端独立闭环。
 
 **前置假设**：你在 macOS（Phase 1 唯一 Tier 1 平台）；本仓 clone 到 `~/src/sieve-suite/sieve`；已经装了 Rust toolchain（见 `rust-toolchain.toml`）+ `sqlite3` CLI + `zstd` CLI（`brew install zstd`,§14 用）+ `python3`（§14 mock server 用,系统自带）+ `caddy` + `mkcert`（§14.3 https 反代,`brew install caddy mkcert`）。
 
@@ -517,10 +517,10 @@ DeepSeek Anthropic 兼容入口 `https://api.deepseek.com/anthropic` 是验证 T
 
 ---
 
-## 14. sieve-updater 客户端独立闭环（ADR-030 / SPEC-006）
+## 14. sieve-updater 客户端独立闭环（SPEC-006）
 
-> 关联：[ADR-030](../design/ADR-030-update-telemetry-channel.md) / [SPEC-006](../specs/SPEC-006-update-and-telemetry.md)
-> **服务端尚未实施（CF Workers + D1,Phase 1B）**。本节用本地 mock HTTP 服务器验证客户端能完整跑通 manifest → 下载 → 校验 → 原子落盘的闭环。
+> 关联：更新通道设计（详见内部记录） / [SPEC-006](../specs/SPEC-006-update-and-telemetry.md)
+> **服务端尚未实施**。本节用本地 mock HTTP 服务器验证客户端能完整跑通 manifest → 下载 → 校验 → 原子落盘的闭环。
 
 ### 14.1 install-id 模块（首启幂等 + 删后重生）
 
@@ -549,7 +549,7 @@ DeepSeek Anthropic 兼容入口 `https://api.deepseek.com/anthropic` 是验证 T
 
   ```bash
   ls -la ~/Library/Caches/sieve/install-id
-  # 期望：-rw-------  1 doskey  staff  36 May  5 12:34
+  # 期望：-rw-------  1 youruser  staff  36 May  5 12:34
   cat ~/Library/Caches/sieve/install-id
   # 期望：UUIDv4 字符串,例如 a1b2c3d4-e5f6-7890-1234-567890abcdef
   ```
@@ -578,7 +578,7 @@ DeepSeek Anthropic 兼容入口 `https://api.deepseek.com/anthropic` 是验证 T
 
 ### 14.2 三个环境变量（SIEVE_NO_UPDATE / SIEVE_NO_TELEMETRY / SIEVE_UPDATE_URL）
 
-- [ ] **SIEVE_NO_UPDATE banner 强制可见**（ADR-030 §5）：
+- [ ] **SIEVE_NO_UPDATE banner 强制可见**（SPEC-006 §5）：
 
   ```bash
   SIEVE_NO_UPDATE=1 cargo run -p sieve-cli -- start --config /tmp/sieve-legacy.toml 2>&1 | head -30 | grep -i "update check disabled"
@@ -618,7 +618,7 @@ DeepSeek Anthropic 兼容入口 `https://api.deepseek.com/anthropic` 是验证 T
   RULES_SHA=$(shasum -a 256 rules.json.zst | awk '{print $1}')
   echo "RULES_SHA=$RULES_SHA"
 
-  # 4. 写 manifest 响应（schema 见 ADR-030 §3 / SPEC-006 §3）
+  # 4. 写 manifest 响应（schema 见 SPEC-006 §3）
   mkdir -p v1
   cat > v1/manifest <<EOF
   {
@@ -748,7 +748,7 @@ CADDY_PID=$!
 
   把 `rules.json.zst` 替换为非 zst 字节（`echo "not zstd" > rules.json.zst`）+ 改 manifest 的 sha256。日志应有 `DecompressFailed`。
 
-### 14.6 公钥 None 占位的 WARN 强制可见（ADR-030 §决策 / SPEC-006 §安全）
+### 14.6 公钥 None 占位的 WARN 强制可见（SPEC-006 §安全）
 
 - [ ] 在 §14.4 完整闭环日志里查找：
 
@@ -789,9 +789,9 @@ rm -rf "$MOCK_DIR"
 - [ ] §14.5 三种失败模式不击穿 daemon（sha256 mismatch / 服务端 down 重试耗尽 / 解压失败）
 - [ ] §14.6 公钥 None 占位 WARN 强制可见
 
-**任一项 fail**：在 [tasks/lessons.md](../../tasks/lessons.md) 记一条 lesson，回报到主上下文准备修复。
+**任一项 fail**：在 tasks/lessons.md 记一条 lesson，回报到主上下文准备修复。
 
-**全过**：unix-style 改造 v2.x + ADR-030 客户端闭环 联调通过 → 进 dogfood 阶段（服务端 CF Workers + D1 是 Phase 1B 工作,与 dogfood 并行启动）。
+**全过**：unix-style 改造 v2.x + sieve-updater 客户端闭环 联调通过 → 进 dogfood 阶段（服务端实现与 dogfood 并行启动）。
 
 ---
 
@@ -831,11 +831,11 @@ unset SIEVE_NO_UPDATE SIEVE_NO_TELEMETRY     # 默认放开
 
 - [ADR-026 Port-based listener routing](../design/ADR-026-port-based-listener-routing.md)
 - [ADR-028 IPC 协议中性化](../design/ADR-028-ipc-protocol-neutralization.md)
-- [ADR-030 更新通道复用为遥测信标](../design/ADR-030-update-telemetry-channel.md)
+- 更新通道与 install 统计设计（详见内部记录）
 - [SPEC-003 sieve setup tool](../specs/SPEC-003-sieve-setup-tool.md) §4.2b doctor multi-listener
 - [SPEC-004 multi-agent setup](../specs/SPEC-004-multi-agent-setup.md) §4.2.6 header vs port routing
 - [SPEC-006 manifest 协议 + sieve-updater 客户端](../specs/SPEC-006-update-and-telemetry.md)
 - [deployment.md §6a Multi-listener 部署](deployment.md#6a-multi-listener-部署) / §13 企业自托管镜像
 - [development.md §3.4a Multi-listener 配置](development.md#34a-multi-listener-配置) / §13 三个 env var
 - [api-reference.md §6.4a sieve decisions / §6.4b sieve audit](../api/api-reference.md#64a-sieve-decisions-cli) / §8 manifest 接口
-- [tasks/PROGRESS.md](../../tasks/PROGRESS.md) 用户验证清单段
+- tasks/PROGRESS.md 用户验证清单段

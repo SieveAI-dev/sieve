@@ -48,4 +48,4 @@
 - [ADR 索引](../design/ADR-INDEX.md)
 - [架构](../design/architecture.md)
 - [API 参考](../api/api-reference.md)
-- [文档规范](../DOCS-STANDARD.md)
+- 文档规范

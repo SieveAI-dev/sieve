@@ -52,7 +52,7 @@ Sieve connects to the update server **4 times a day** to fetch the latest rules.
 - `SIEVE_NO_TELEMETRY=1` — disable install-count telemetry (rule updates are unaffected).
 - `SIEVE_NO_UPDATE=1` — disable update checks entirely.
 
-See [SPEC-006](./docs/specs/SPEC-006-update-and-telemetry.md) / [ADR-030](./docs/design/ADR-030-update-telemetry-channel.md).
+See [SPEC-006](./docs/specs/SPEC-006-update-and-telemetry.md).
 
 ---
 
@@ -152,7 +152,7 @@ Full schema: [api-reference §3](./docs/api/api-reference.md).
 
 The repository is now **public**, in **pre-GA closed beta** (invited testers only). The source is public to make good on the trust narrative — *verifiable, not merely trusted*.
 
-Quality baseline (per [`tasks/PROGRESS.md`](./tasks/PROGRESS.md)): Critical false-positive rate **0.00%** / attack recall **99.71%**; **clippy 0 warnings** (`fmt` / `deny` all green); an extensive test suite that includes real attack-reproduction samples.
+Quality baseline (per `tasks/PROGRESS.md`): Critical false-positive rate **0.00%** / attack recall **99.71%**; **clippy 0 warnings** (`fmt` / `deny` all green); an extensive test suite that includes real attack-reproduction samples.
 
 ---
 
@@ -169,7 +169,7 @@ Sieve holds itself to the same standard it applies to the upstream:
 
 ## Pricing
 
-Free during Phase 1; future monetization directions are tracked in [ADR-029](./docs/design/ADR-029-free-first-defer-monetization.md).
+Free during Phase 1.
 
 ---
 
@@ -185,7 +185,6 @@ Free during Phase 1; future monetization directions are tracked in [ADR-029](./d
 
 | Entry | Purpose |
 |------|------|
-| [docs/requirements/PRD-sieve.md](./docs/requirements/PRD-sieve.md) | Product requirements (active version) |
 | [docs/glossary.md](./docs/glossary.md) | Glossary — unified definitions of domain terms |
 | [docs/design/ADR-INDEX.md](./docs/design/ADR-INDEX.md) | Architecture decision records, index |
 | [docs/design/architecture.md](./docs/design/architecture.md) | Architecture design |
@@ -204,7 +203,6 @@ Project site: [sieveai.dev](https://sieveai.dev)
 ```mermaid
 graph TD
     README["README.md<br/>project entry"]
-    PRD["docs/requirements/PRD-sieve.md<br/>active PRD"]
     ADR["docs/design/ADR-INDEX.md<br/>decision records"]
     ARCH["docs/design/architecture.md<br/>architecture"]
     DATA["docs/design/data-model.md<br/>data model"]
@@ -213,10 +211,9 @@ graph TD
     GUIDES["docs/guides/<br/>development + deployment"]
     CL["docs/changelog/CHANGELOG.md<br/>changelog"]
 
-    README --> PRD
     README --> ADR
+    README --> ARCH
     README --> GUIDES
-    PRD --> ARCH
     ARCH --> DATA
     ARCH --> API
     ARCH --> SPECS

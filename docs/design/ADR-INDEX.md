@@ -10,7 +10,7 @@
 - 三位数递增编号 `ADR-NNN-描述.md`，**不跳号、不复用**
 - 决策被推翻：写新 ADR + 旧 ADR 状态改为 **Superseded by ADR-NNN**，**不删除旧文件**
 - 决策提案中：状态 **Proposed**；接受后改 **Accepted**；废弃改 **Deprecated**
-- 已知编号缺口：ADR-008/009/010 为候选编号（见下方「候选 / 计划中 ADR」表，尚未立项落地）；**ADR-017 编号已跳过未启用**（占位后未形成决策，编号不复用，保留空缺）
+- 已知编号缺口：ADR-008/009 为候选编号（见下方「候选 / 计划中 ADR」表，尚未立项落地）；**ADR-017 编号已跳过未启用**（占位后未形成决策，编号不复用，保留空缺）
 
 ---
 
@@ -21,12 +21,12 @@
 | --------------------------------------------------------- | ------------------------------------------------------ | -------- | ---------- | --------------------- |
 | [ADR-001](./ADR-001-rust-tech-stack.md)                   | 选用 Rust 作为技术栈                                          | Accepted | 2026-04-26 | §6.3、§9.1             |
 | [ADR-002](./ADR-002-rule-engine-only-phase1.md)           | Phase 1 纯规则引擎，不引入本地 ML 模型                              | Accepted | 2026-04-26 | §6.2                  |
-| [ADR-003](./ADR-003-local-only-no-cloud-verifier.md)      | 完全本地运行，绝不联网做 token verifier（2026-05-05 ADR-030 部分修订：放开更新通道遥测）  | Accepted (amended 2026-05-05) | 2026-04-26 | §1.2、§9.2、§11.2       |
+| [ADR-003](./ADR-003-local-only-no-cloud-verifier.md)      | 完全本地运行，绝不联网做 token verifier                          | Accepted | 2026-04-26 | §1.2、§9.2、§11.2       |
 | [ADR-004](./ADR-004-anthropic-first-unified-interface.md) | Phase 1 只适配 Anthropic Messages API，UnifiedMessage 接口预留 | Accepted | 2026-04-26 | §6.1、§9.9             |
-| [ADR-005](./ADR-005-overseas-legal-entity.md)             | [redacted]作为收款与营销载体                                        | Accepted | 2026-04-26 | §1.4、§11.5            |
+| ADR-005                                                   | （编号保留，内容迁内部记录）                                          | —        | —          | —                     |
 | [ADR-006](./ADR-006-sigstore-reproducible-build.md)       | Sigstore 签名 + Reproducible Build + 透明日志                | Accepted | 2026-04-26 | §1.2、§9.6、§10.1、§11.3 |
 | [ADR-007](./ADR-007-fail-closed-critical-actions.md)      | Critical 等级 fail-closed 强制确认，YOLO mode 不可关闭            | Accepted | 2026-04-26 | §5.3、§9.3、§9.8、§11.2  |
-| [ADR-011](./ADR-011-private-until-ga.md)                  | Week 12 GA 前 repo 完全私有，不做任何 public 暴露（时点被 [ADR-035](./ADR-035-license-apache2-dual-license.md) 修订：仓库已提前公开） | Accepted (amended 2026-06-19) | 2026-04-27 | §9 #10、§10.1、§11.3     |
+| ADR-011                  | Week 12 GA 前 repo 完全私有，不做任何 public 暴露（时点被 [ADR-035](./ADR-035-license-apache2-dual-license.md) 修订：仓库已提前公开） | Accepted (amended 2026-06-19) | 2026-04-27 | §9 #10、§10.1、§11.3     |
 | [ADR-012](./ADR-012-native-gui-app-phase1.md)             | Phase 1 必做 Native GUI App（macOS SwiftUI 独立进程）           | Accepted | 2026-04-28 | §6.4、§6.6、§10.1 Week 5 |
 | [ADR-013](./ADR-013-ipc-protocol.md)                      | IPC 协议：JSON-RPC over Unix socket + 文件锁 JSON 文件          | Accepted | 2026-04-28 | §6.5、§10.1 Week 3+5    |
 | [ADR-014](./ADR-014-dual-layer-defense.md)                | 双层防御：Sieve 代理（SSE 层）+ Claude Code PreToolUse Hook     | Accepted | 2026-04-28 | §6.7、§9 第 11 条         |
@@ -43,13 +43,13 @@
 | [ADR-026](./ADR-026-port-based-listener-routing.md)       | Port-based listener routing —— 多上游 listener + path prefix 修复            | Accepted | 2026-05-05 | v2.0 §6.1、§6.5、§9 #2、§9 #16 |
 | [ADR-027](./ADR-027-network-jail-enforcement.md)          | Network jail enforcement —— 防火墙层硬隔离 LLM 流量（v3.x post-GA opt-in） | Proposed | 2026-05-05 | v2.0 §1.2、§9 #12、§11.2、§11.5 |
 | [ADR-028](./ADR-028-ipc-protocol-neutralization.md)       | IPC 协议中性化 —— 去 GUI 假设 + sieve-ipc 内部模块化 + headless decision path | Accepted | 2026-05-05 | v2.0 §6.5、§6.6        |
-| [ADR-029](./ADR-029-free-first-defer-monetization.md)     | 装机量优先,延后商业化 + 拒绝中转站认证收费模式                                | Accepted | 2026-05-05 | v2.0 §11、§1.4        |
-| [ADR-030](./ADR-030-update-telemetry-channel.md)          | 更新通道复用为遥测信标 + Install UUID + 三个环境变量开关（部分修订 ADR-003）         | Accepted | 2026-05-05 | 新增,关联 ADR-003/006/029 |
-| [ADR-031](./ADR-031-cc-switch-compatibility.md)           | 与 cc-switch 互操作（Sieve 作为 cc-switch 一档供应商，路径 A 必做 / 路径 B 候选 / 路径 C 排除） | Proposed（草案，未通过） | 2026-05-06 | 关联 ADR-015/026/029/030 |
-| [ADR-032](./ADR-032-orchesis-strategy.md)                  | 借鉴 Orchesis 的架构与产品策略——三阶段学习路线、分阶段管线、营销叙事升级 | Proposed（草案，未通过） | 2026-05-06 | 关联 ADR-022/026/027/029/006/003 |
+| ADR-029                                                   | （编号保留，内容迁内部记录）                                          | —        | —          | —                     |
+| ADR-030                                                   | （编号保留，更新通道技术说明见 SPEC-006 / architecture）               | —        | —          | —                     |
+| ADR-031                                                   | （编号保留，内容迁内部记录）                                          | —        | —          | —                     |
+| ADR-032                                                   | （编号保留，内容迁内部记录）                                          | —        | —          | —                     |
 | [ADR-033](./ADR-033-upstream-proxy.md)                     | 上游转发代理支持（HTTP CONNECT + SOCKS5） | Accepted | 2026-06-07 | 关联 §6.1、§9 #2 |
-| [ADR-034](./ADR-034-ga-key-gate.md)                        | GA 编译期密钥 gate：`ga_keys` feature 下占位公钥（updater `TRUSTED_PUBKEY` / origin `SIEVE_ORIGIN_PUBLIC_KEY`）编译失败，阻 fail-open 验签进 GA 二进制 | Accepted | 2026-06-11 | 关联 ADR-006/019/030、§9 #3/#6 |
-| [ADR-035](./ADR-035-license-apache2-dual-license.md)       | License：代码 Apache-2.0（含显式专利授权）+ 文档 CC BY-NC-SA 4.0，即刻生效不等 GA；取代 PRD §11.3 "MIT" 表述，修订 ADR-011 公开时点 | Accepted | 2026-06-19 | 关联 ADR-011/029/006、§11.3 |
+| [ADR-034](./ADR-034-ga-key-gate.md)                        | GA 编译期密钥 gate：`ga_keys` feature 下占位公钥（updater `TRUSTED_PUBKEY` / origin `SIEVE_ORIGIN_PUBLIC_KEY`）编译失败，阻 fail-open 验签进 GA 二进制 | Accepted | 2026-06-11 | 关联 ADR-006/019、§9 #3/#6 |
+| [ADR-035](./ADR-035-license-apache2-dual-license.md)       | License：代码 Apache-2.0（含显式专利授权）+ 文档 CC BY-NC-SA 4.0，即刻生效不等 GA；取代 PRD §11.3 "MIT" 表述，修订 ADR-011 公开时点 | Accepted | 2026-06-19 | 关联 ADR-011/006、§11.3 |
 
 
 ---
@@ -61,13 +61,11 @@
 | ------- | ------------------------------------------------------ | ------------------------- | --- | -------- |
 | ADR-008 | Critical 出站状态码（426）+ 入站 SSE event 注入 — Week 2-3 dogfood 期间实测后升 Accepted | api-reference.md §7.2 + §7.3 | P0  | Week 2-3 dogfood 期间 |
 | ADR-009 | Windows 服务部署形态（sc.exe NT Service 选择）                   | guides/deployment.md §5.4 | P2  | Week 6+  |
-| ADR-010 | [redacted]实现路径（Stripe Crypto vs Coinbase Commerce vs 自部署） | ADR-005 §3                | P2  | Week 7+  |
 
-### 候选 ADR 倾向决策（doskey 已签确）
+### 候选 ADR 倾向决策
 
 - **ADR-008**：**维持 `426 Upgrade Required`**（确认日期 2026-04-27）。出站用 426，入站用 sieve_blocked SSE event 注入（Week 3 落地）。Week 2-3 dogfood 期间实测 Claude Code SDK 行为；dogfood 无异常后正式升 Accepted。如 SDK 表现异常（自动重试 / 错误信息丢失等）再切换备选方案。
 - **ADR-009**：待定。Week 6+ Windows 二进制 Tier 2 上线时评估。
-- **ADR-010**：初步方向 = Stripe + Coinbase Commerce 双通道（[ADR-005 §3](./ADR-005-overseas-legal-entity.md)）。Week 7+ 公司主体落地后正式立项。
 
 
 ---
@@ -91,7 +89,7 @@
 **Proposed | Accepted | Deprecated | Superseded by ADR-XXX**
 > 决策日期：YYYY-MM-DD
 > 范围：...
-> 关联 PRD：[v2.0 §X](../prd/sieve-prd-v2.0.md)
+> 关联 PRD：v2.0 §X
 
 ## 背景
 ...
@@ -117,7 +115,7 @@
 
 - [架构](./architecture.md)
 - [数据模型](./data-model.md)
-- [PRD v2.0](../prd/sieve-prd-v2.0.md)
+- PRD v2.0
 - [API 参考](../api/api-reference.md)
 - [部署指南](../guides/deployment.md)
 

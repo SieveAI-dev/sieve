@@ -1777,7 +1777,7 @@ client 端代码 PR **MUST** 在同一 commit 中包含：(a) 更新 `upstream-r
 ## 15. 关联文档
 
 - 项目入口：[../../README.md](../../README.md)
-- 当前活动 PRD：[../prd/sieve-prd-v2.0.md](../prd/sieve-prd-v2.0.md)
+- 当前活动 PRD：../prd/sieve-prd-v2.0.md
 - API 总览：[../api/api-reference.md §6](../api/api-reference.md#6-cli-退出码--decision-request-确认协议)（本 SPEC 取代）
 - 架构：[../design/architecture.md](../design/architecture.md)
 - ADR 索引：[../design/ADR-INDEX.md](../design/ADR-INDEX.md)

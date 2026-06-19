@@ -240,7 +240,7 @@ Sieve Phase 1 引入了三个需要跨进程通信的组件：
 }
 ```
 
-`applies_to` **永远不包含** Critical 锁规则的 disposition——暂停不影响内置 Critical 拦截（[PRD v2.0 §9 #3 #8](../prd/sieve-prd-v2.0.md)）。GUI 据此在 Quick Menu 标注："暂停期间 Critical 拦截仍然生效"。
+`applies_to` **永远不包含** Critical 锁规则的 disposition——暂停不影响内置 Critical 拦截（PRD v2.0 §9 #3 #8）。GUI 据此在 Quick Menu 标注："暂停期间 Critical 拦截仍然生效"。
 
 #### `sieve.request_decision_canceled`
 
@@ -364,7 +364,7 @@ GUI 收到后：(1) 若该 request_id 仍在排队 → 移除；(2) 若弹窗已
 
 约束：
 - 系统规则 lint 失败 → daemon 保留旧规则集 + 返回 `-32603 internal_error` `data.failure="system_rules_lint"`，**不切换**。
-- 用户规则 lint 失败 → 跳过 user rules + 返回 success，`user_rules_errors` 列出违规（[PRD v2.0 §9 #14](../prd/sieve-prd-v2.0.md)）。
+- 用户规则 lint 失败 → 跳过 user rules + 返回 success，`user_rules_errors` 列出违规（PRD v2.0 §9 #14）。
 - 进行中（同时收到第二次 reload）→ 返回 `-32002 daemon_busy`。
 - 审计：`kind=config_reloaded`，含 user_rules_errors 数。
 

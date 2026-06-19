@@ -2,23 +2,16 @@
 
 > Version: v2.0 — 2026-05-01
 >
-> **状态：v2.0 + v2.1 代码落地，Phase A dogfood 进行中。**
-> 用户规则（`~/.sieve/rules/user.toml`）+ 灰名单（`~/.sieve/decisions/`）+ audit v2 schema（含 `caller_pid` / `caller_exe`）已全部落地。GUI 多客户端支持（v2.1 broadcast fan-out）已就绪。对外仍不接受外部安装，Week 12 GA 后公开。
+> **状态：v2.0 + v2.1 代码落地。**
+> 用户规则（`~/.sieve/rules/user.toml`）+ 灰名单（`~/.sieve/decisions/`）+ audit v2 schema（含 `caller_pid` / `caller_exe`）已全部落地。GUI 多客户端支持（v2.1 broadcast fan-out）已就绪。
 
 ---
 
-## 1. 当前状态
+## 1. 安装前提
 
-
-| 阶段              | 时间          | 安装途径                           |
-| --------------- | ----------- | ------------------------------ |
-| Phase A dogfood | Week 1-8    | 仅 doskey 自构建运行                 |
-| Phase B 闭测      | Week 9-12   | 闭测白名单专属 license + 私有二进制        |
-| **GA**          | **Week 12** | brew tap + GitHub Releases（公开） |
-| Phase 2+        | Week 13+    | 慢节奏维护，季度大版本                    |
-
-
-> 在 Phase A / B 期间任何"外部用户"询问安装请回复"等 Week 12 GA 公开发布"，**不要发私有二进制**给非闭测名单。
+- 仅支持 macOS（Phase 1）；Linux / Windows 见下文 §2.2 / §2.3。
+- 通过 GitHub Releases 获取 `.dmg`，安装前必做 cosign 签名验证（§3）。
+- 后续版本通过 brew tap + GitHub Releases 公开分发。
 
 ---
 
@@ -57,7 +50,7 @@ Phase 1 GA 交付形态：**三件套 .dmg**（Native GUI App + 后台代理 + s
 6. `setup` 完成后自动执行 `sieve doctor` 验证所有组件就位
 
 > **Sieve 不提供 `curl ... | sh` 一键安装脚本。**
-> 远程脚本盲跑是 [PRD §9](../prd/sieve-prd-v2.0.md#9-工程上必须做对的硬约束) 反对的攻击面，自己不能反着做。
+> 远程脚本盲跑是 PRD §9 反对的攻击面，自己不能反着做。
 
 > Homebrew tap（`brew install sieve`）推 Phase 2，当前不可用。
 
@@ -114,7 +107,7 @@ Phase 1 仅 macOS：
 
 ## 3. 二进制签名验证（**必做**）
 
-> Sieve 把"自证清白"作为产品定位的一部分（[PRD §1.2 第 4 句](../prd/sieve-prd-v2.0.md#12-四句话核心叙事v13-加第-4-句)）。**用户不应仅凭信任安装 Sieve，而应能自己验证它。**
+> Sieve 把"自证清白"作为产品定位的一部分（PRD §1.2 第 4 句）。**用户不应仅凭信任安装 Sieve，而应能自己验证它。**
 
 ### 3.1 sigstore / cosign 验证
 
@@ -244,7 +237,7 @@ v1.4 起 CI 仅跑 macOS target（`aarch64-apple-darwin` + `x86_64-apple-darwin`
 
 ### 6.1 默认端口
 
-`11453`（[PRD §6.1](../prd/sieve-prd-v2.0.md#61-phase-1-单-agent-架构只-claude-code)）。
+`11453`（PRD §6.1）。
 
 ### 6.2 端口被占用时
 
@@ -269,7 +262,7 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:21453
 - ❌ `0.0.0.0` —— Sieve 启动时 schema 校验会拒绝
 - ❌ 任何公网 IP / LAN IP —— 同上
 
-> Sieve 完全本地运行是产品承诺（[PRD §1.1](../prd/sieve-prd-v2.0.md#11-一句话) / [§9 #2](../prd/sieve-prd-v2.0.md#9-工程上必须做对的硬约束)），暴露公网会**摧毁产品定位**。
+> Sieve 完全本地运行是产品承诺（PRD §1.1 / §9 #2），暴露公网会**摧毁产品定位**。
 
 ---
 
@@ -320,7 +313,7 @@ protocol = "openai"
 - 默认起 `11453`，递增分配（`11454` / `11455` / ...）
 - 避开常见冲突端口（`80` / `443` / `8080` / `5000` / `3000`）
 - 同一 daemon 实例内端口必须唯一（启动时端口冲突 → 立即 `exit 1`，不进入 partial-start）
-- 仅本地回环（`127.0.0.1`）—— `bind_addr` 任何非 `127.0.0.1` 值会触发 FATAL exit（[ADR-003](../design/ADR-003-local-only-no-cloud-verifier.md) / [PRD §9 #2](../prd/sieve-prd-v2.0.md)）
+- 仅本地回环（`127.0.0.1`）—— `bind_addr` 任何非 `127.0.0.1` 值会触发 FATAL exit（[ADR-003](../design/ADR-003-local-only-no-cloud-verifier.md) / PRD §9 #2）
 
 ### 6a.3 launchd plist 不需改动
 
@@ -346,7 +339,7 @@ daemon 内部完成多 `bind`，launchd plist 只需启动 `sieve start --config
 
 在「不挂代理连不上 LLM」的网络（规则代理 + 分流、非全局 TUN 透明代理——大量 crypto 开发者所处环境）下，sieve 默认对上游**硬直连**会第一跳即断。从 v2.x 起，daemon 转发上游与 updater 出站均可经配置的 **HTTP CONNECT / SOCKS5 代理**出网。详见 [ADR-033](../design/ADR-033-upstream-proxy.md) / [SPEC-007](../specs/SPEC-007-upstream-proxy.md)。
 
-> **TLS 端到端到上游，代理只见密文、不 MITM**（不解密、不装 CA，符合 [PRD §9 #12](../prd/sieve-prd-v2.0.md)）。代理仅是传输层隧道，出站目的地不变（仍仅上游 LLM / `sieveai.dev`），不违反 [PRD §9 #2](../prd/sieve-prd-v2.0.md)。
+> **TLS 端到端到上游，代理只见密文、不 MITM**（不解密、不装 CA，符合 PRD §9 #12）。代理仅是传输层隧道，出站目的地不变（仍仅上游 LLM / `sieveai.dev`），不违反 PRD §9 #2。
 
 ### 6b.1 最简配置（全局代理）
 
@@ -395,7 +388,7 @@ export HTTPS_PROXY="socks5://127.0.0.1:7891"   # 优先于 ALL_PROXY
 export ALL_PROXY="socks5://127.0.0.1:7891"
 ```
 
-env 同时覆盖 daemon 上游转发与 sieve-updater 出站（manifest / 规则下载），受限网络下更新检查与装机遥测一并可用（[ADR-030](../design/ADR-030-update-telemetry-channel.md)）。
+env 同时覆盖 daemon 上游转发与 sieve-updater 出站（manifest / 规则下载），受限网络下更新检查与匿名 install 统计一并可用（详见内部记录）。
 
 ### 6b.4 proxy URL 格式 & 注意事项
 
@@ -428,7 +421,7 @@ SIEVE_LOG_LEVEL=debug sieve --config ~/.sieve/config.toml
 
 `~/.sieve/audit.db`（**append-only**）：
 
-- 仅存 fingerprint + 元信息，**绝不存原始 prompt 内容**（[PRD §11.3](../prd/sieve-prd-v2.0.md#113-开源策略) / API 参考 §2.2.3）
+- 仅存 fingerprint + 元信息，**绝不存原始 prompt 内容**（PRD §11.3 / API 参考 §2.2.3）
 - schema 详见 [data-model.md](../design/data-model.md)
 
 ### 7.3 查询 CLI
@@ -645,14 +638,14 @@ export SIEVE_NO_UPDATE=1
 sieve --config ~/.sieve/config.toml
 ```
 
-或在 config 中（ADR-030 §7）：
+或在 config 中（详见 [SPEC-006](../specs/SPEC-006-update-and-telemetry.md)）：
 
 ```toml
 [update]
 enabled = false
 ```
 
-> **说明**：旧字段名 `SIEVE_DISABLE_RULES_UPDATE` / `[rules_update]` 已被 ADR-030 替换为统一的 `SIEVE_NO_UPDATE` / `[update]` 段。详见 §13 自托管镜像 + manifest 接口 + [SPEC-006](../specs/SPEC-006-update-and-telemetry.md)。
+> **说明**：旧字段名 `SIEVE_DISABLE_RULES_UPDATE` / `[rules_update]` 已统一为 `SIEVE_NO_UPDATE` / `[update]` 段。详见 §13 自托管镜像 + manifest 接口 + [SPEC-006](../specs/SPEC-006-update-and-telemetry.md)。
 
 特性：
 
@@ -662,34 +655,17 @@ enabled = false
 
 ---
 
-## 11. License 激活、试用与降级
+## 11. 运行模式与降级
 
-### 11.1 试用期
+Phase 1 完全免费，无需 license、无试用流程，安装后即开放全部检测能力。
 
-- 首次启动注册邮箱（在 CLI 弹窗输入），后端发 license key 邮件
-- 试用期内全功能开放
-- 无网络环境下按 `[license].offline_grace_days`（默认 30 天）使用缓存的最近一次成功验证
-- 离线超过 `offline_grace_days` 时，license 视为过期 → 自动进入 §11.3 降级模式（**Critical 仍阻断**，High/Medium/Low 仅记录）
+### 11.1 降级模式
 
-### 11.2 正式版定价
+在某些异常条件下（如本地配置不完整），Sieve 进入"只读警告"模式：
 
-- **[redacted] / 月**（[PRD §7.1](../prd/sieve-prd-v2.0.md#71-单一定价)）
-- **年付 [redacted]0**（省 2 个月）
-- 支付通道：[redacted]（USDC / USDT）双通道（[PRD §11.5.1](../prd/sieve-prd-v2.0.md#1151-公司主体与收款)）
-
-### 11.3 降级模式（试用结束未付费）
-
-[PRD §7.1](../prd/sieve-prd-v2.0.md#71-单一定价) 描述的"只读警告"模式：
-
-- ✅ **Critical 仍然阻断**（产品安全承诺，[PRD §9 #8](../prd/sieve-prd-v2.0.md#9-工程上必须做对的硬约束)）
+- ✅ **Critical 仍然阻断**（产品安全承诺，PRD §9 #8）
 - ⚠ High / Medium / Low 仅记录，不弹窗、不警告
-- 不停止运行 —— 不让用户因为没付费而失去基本保护
-
-### 11.4 License 验证流程
-
-- **本地 Ed25519 公钥** 验证 license key 签名 → **不联网 verify**（[PRD §9 #2](../prd/sieve-prd-v2.0.md#9-工程上必须做对的硬约束)）
-- 公钥内置在二进制 + 落盘 `~/.sieve/keys/`
-- License 包含：邮箱、签发时间、过期时间、计划等级（trial / paid_monthly / paid_yearly）
+- 不停止运行 —— 任何情况下都不让用户失去基本保护
 
 ---
 
@@ -737,29 +713,13 @@ SIEVE_LOG_LEVEL=debug sieve --config ~/.sieve/config.toml
    sieve sieveignore add <fingerprint> --comment "false positive: <场景>"
   ```
 3. 对 Medium / High 规则可在 `[detection.severity_overrides]` 降级
-4. 报 issue（带 fingerprint + 上下文，**不要贴原始 prompt**），doskey 会评估规则改进
+4. 报 issue（带 fingerprint + 上下文，**不要贴原始 prompt**），维护者会评估规则改进
 
-### 12.4 license 验证失败
-
-```bash
-# 1. 确认 key 完整性（无换行、无空格）
-echo -n "$SIEVE_LICENSE_KEY" | wc -c
-
-# 2. 检查系统时间（license 有过期时间，时间偏差大会过期）
-date -u
-# 与 https://time.is/UTC 对比
-
-# 3. 重新拷贝 key（来源邮件可能有换行符）
-
-# 4. 离线宽限期是否耗尽
-sieve license info
-```
-
-### 12.5 如何完全离线
+### 12.4 如何完全离线
 
 参见 [§10 离线运行](#10-离线运行)。
 
-### 12.6 sieve doctor 新检查项（v2.0）
+### 12.5 sieve doctor 新检查项（v2.0）
 
 `sieve doctor` 在原有检查基础上新增以下项：
 
@@ -790,7 +750,7 @@ launchctl load ~/Library/LaunchAgents/tools.sieve.agent.plist
 
 ---
 
-## 13. 企业自托管镜像 / 私有更新源（ADR-030）
+## 13. 企业自托管镜像 / 私有更新源
 
 > 适合企业内网部署、离线环境（air-gapped）、隐私敏感机构使用。完整协议见 [SPEC-006 §3](../specs/SPEC-006-update-and-telemetry.md)。
 
@@ -861,7 +821,7 @@ enabled = false     # 等价 SIEVE_NO_UPDATE
 
 > 注意：离线模式下规则不更新，规则包会逐渐过期。建议定期通过安全渠道分发最新规则包到 `~/.sieve/rules/`，并验证 ed25519 签名后原子替换。
 
-### 13.4 隐私敏感场景（只想要规则更新，不参与装机统计）
+### 13.4 隐私敏感场景（只想要规则更新，不发送匿名统计字段）
 
 ```bash
 export SIEVE_NO_TELEMETRY=1
@@ -879,7 +839,7 @@ telemetry = false   # 省略 uid 字段，仍发更新请求
 
 - 仍能拉取最新规则（规则更新不受影响）
 - manifest 请求 URL 中省略 `uid=` 参数
-- 服务端无法统计该安装 ID 的 DAU
+- 请求中不再包含任何安装标识符
 
 ### 13.5 优先级汇总
 
@@ -895,13 +855,12 @@ SIEVE_UPDATE_URL=<url>  → 覆盖默认 manifest URL
 ## 相关文档
 
 - 项目入口：[../../README.md](../../README.md)
-- 当前活动 PRD：[../prd/sieve-prd-v2.0.md](../prd/sieve-prd-v2.0.md)
+- 当前活动 PRD：../prd/sieve-prd-v2.0.md
 - API 参考：[../api/api-reference.md](../api/api-reference.md)
 - 开发指南：[development.md](development.md)
 - 变更日志：[../changelog/CHANGELOG.md](../changelog/CHANGELOG.md)
 - 架构文档：[../design/architecture.md](../design/architecture.md)
 - ADR-006 sigstore + reproducible build：[../design/ADR-006-sigstore-reproducible-build.md](../design/ADR-006-sigstore-reproducible-build.md)
-- ADR-030 更新通道遥测：[../design/ADR-030-update-telemetry-channel.md](../design/ADR-030-update-telemetry-channel.md)
 - SPEC-006 manifest 协议规格：[../specs/SPEC-006-update-and-telemetry.md](../specs/SPEC-006-update-and-telemetry.md)
 - 数据模型：[../design/data-model.md](../design/data-model.md)
 - 术语表：[../glossary.md](../glossary.md)
