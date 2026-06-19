@@ -4,7 +4,7 @@
 **Accepted**
 > 决策日期:2026-06-19
 > 范围:仓库代码与文档的正式开源许可证选择 + 生效时点
-> 关联:GA 前私有 + 时点(详见内部记录)/ 免费优先策略(详见内部记录)/ [ADR-006](./ADR-006-sigstore-reproducible-build.md)(签名分发,自证清白叙事)
+> 关联:GA 前私有 + 时点(详见内部记录)/ 阶段性策略(详见内部记录)/ [ADR-006](./ADR-006-sigstore-reproducible-build.md)(签名分发,自证清白叙事)
 > 关联 PRD:v2.0 §11.3(开源策略,本决策取代其中 "core engine MIT at GA" 表述)
 > 取代关系:**Amends** PRD §11.3 的 "core engine MIT" 表述(license 改 Apache-2.0);**Amends** "private until GA / GA 一次性公开" 时点决策(仓库已提前公开,该时点决策详见内部记录)
 
@@ -49,7 +49,7 @@
 - 任何人可在 Apache-2.0 下合法使用 / fork / 验证代码,**含明确的专利授权**——下游用户专利风险更低,契合安全工具定位。
 - 文档 CC BY-NC-SA 4.0 允许自由翻译与传播(利于社区与多语言扩散),同时**禁止商业再打包**,保护项目对自有内容的商业权益。
 - inbound = outbound 简化贡献流程,无 CLA 摩擦。
-- Phase 1 代码完全免费 + 开源;Apache-2.0 为非 copyleft 许可,不对仓外独立内容产生传染。
+- 代码以 Apache-2.0 开源;Apache-2.0 为非 copyleft 许可,不对仓外独立内容产生传染。
 
 ### 负面影响
 
@@ -69,6 +69,6 @@
 
 ## 相关文档
 - GA 前私有时点决策(详见内部记录)
-- 免费优先策略(详见内部记录)
+- 阶段性策略(详见内部记录)
 - [ADR-006: Sigstore 签名 + Reproducible Build + 透明日志](./ADR-006-sigstore-reproducible-build.md)
 - PRD v2.0 §11.3 开源策略

@@ -88,7 +88,7 @@
 > **2026-05-06~07 变更（纯文档 + 配置层）**：
 > 1. SIEVE_HOME 透传 bug fix + 5 个集成测试隔离（commit 2e38e44，2026-05-06）
 > 2. tasks/_archive 清理 + landing-page 占位移除（commit 7cd60e7，2026-05-07）
-> 3. README / LICENSE 重构同步 Phase 1 免费优先（commit b299463，2026-05-07）
+> 3. README / LICENSE 重构（commit b299463，2026-05-07）
 > 4. SPEC-005 listeners[] 数组扩展（commit 7108a45，2026-05-07）
 
 ### Fixed — SIEVE_HOME 透传 + 测试隔离（commit 2e38e44）
@@ -99,10 +99,10 @@
 - 验证：workspace 747 passed / 13 failed / 7 ignored；真实 `~/.sieve/audit.db` mtime 测试前后不变。
 - 2026-06-07 修复：上述 13 个失败（OpenAI 协议错位 9 + GUI popup 测试 mock 4）已全部修复，现 760 passed / 0 failed / 7 ignored，fmt + clippy 全绿。
 
-### Changed — README / LICENSE 同步 Phase 1 免费优先（commit b299463）
+### Changed — README / LICENSE 重构（commit b299463）
 
-- README 重构：加架构图 + 简化项目状态段 + 隐私声明独立成段；支持 client（Claude Code / Codex / Cursor）+ 上游（Anthropic / OpenAI / 中转站）范围精确化。
-- LICENSE：移除历史定价表述，Phase 1 全免费。
+- README 重构：加架构图 + 简化项目状态段 + 隐私声明独立成段；支持 client（Claude Code / Codex / Cursor）+ 上游（Anthropic / OpenAI 兼容端点）范围精确化。
+- LICENSE：简化授权表述。
 
 ### Changed — SPEC-005 listeners[] 数组扩展（commit 7108a45）
 
@@ -121,10 +121,10 @@
 > **本日另立更新通道遥测决策**（无代码变更,纯文档）：更新通道在拉取规则的同请求中附带匿名 install-id（详见内部记录）。
 > 该决策部分修订 [ADR-003](../design/ADR-003-local-only-no-cloud-verifier.md) 的 telemetry 边界条款。
 
-### Changed — 许可与定价模型（纯文档）
+### Changed — 许可表述（纯文档）
 
-- **Phase 1 改为纯免费**——原 PRD §7「试用 + 订阅 + 降级模式」定价模型不再适用。
-- README.md 定价段更新（旧定价 PRD §7 折叠为历史段）+ 核心叙事 / 关键差异化精确化。
+- 原 PRD §7 的历史商务模型表述不再适用（细节见私有规划）。
+- README.md 项目状态段更新（旧 PRD §7 折叠为历史段）+ 核心叙事 / 关键差异化精确化。
 
 ### Changed — 网络边界（ADR-003 amended）
 
@@ -1026,8 +1026,7 @@ PRD §9 #7 规定 Critical FP < 0.5%、Recall > 95% 是硬约束。Week 4 之前
   原样透传，**所有入站规则失效**——IN-CR-02 / IN-CR-03 / IN-CR-04 / IN-CR-05 /
   IN-GEN-* 都被绕过
 - 攻击者只需让 SDK 发非流式请求，就能让模型在 tool_use 里写 `>> ~/.bashrc` /
-  `eth_signTransaction` / `rm -rf /` 而 Sieve 完全看不到。PRD §5.2「入站是 Sieve
-  真正的护城河」语境下属严重产品级缺陷
+  `eth_signTransaction` / `rm -rf /` 而 Sieve 完全看不到。PRD §5.2（入站检测是 Sieve 的核心能力）语境下属严重产品级缺陷
 - **修复进度**：roadmap Week 4 加入硬阻塞项，2026-05-04 前必须关闭。修复路径：
   daemon 按 response content-type 路由，JSON 分支解析 `AnthropicResponse.content[]`
   → 提取 tool_use → 走 `InboundFilter::on_tool_use_complete`；fail-closed Critical
@@ -1409,7 +1408,7 @@ PRD §9 #7 规定 Critical FP < 0.5%、Recall > 95% 是硬约束。Week 4 之前
 - Drainer 黑名单（Chainabuse + ScamSniffer 集成）
 - 协议白名单
 - Solidity 后门检测（Slither）
-- **MCP 拦截 IN-MCP-01~03**（[PRD v1.3 §5.2 修订](../prd/_archive/sieve-prd-v1.3.md#52-入站检测sieve-真正的护城河)，Phase 2 Week 16-20）
+- **MCP 拦截 IN-MCP-01~03**（PRD §5.2 修订，Phase 2 Week 16-20）
 - 桌面 App / VS Code 插件
 - OpenAI / Gemini / OpenRouter 协议适配（**真实用户主动要求时才做**，[PRD §9 #9](../prd/_archive/sieve-prd-v1.3.md#9-工程上必须做对的硬约束)）
 
