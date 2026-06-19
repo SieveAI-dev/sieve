@@ -1,0 +1,21 @@
+# GitGuardian / ggshield configuration
+#
+# Sieve 是一个检测「出站私钥/密钥泄露」的安全代理。其检测引擎的测试套件
+# 必然包含大量私钥/密钥样本（用于验证 OUT-07 等规则能否拦截）。
+# 这些样本是**合成的、不完整的、不可用的**假密钥（例如截断的 PEM header +
+# "samplekey" 占位），从不保护任何真实服务。
+#
+# 因此以下路径下的「密钥」均为预期内的测试语料，不是泄露。
+# 与 gitleaks / trufflehog 等安全工具自身仓库的测试数据被扫描器告警同理。
+
+version: 2
+
+secret:
+  ignored-paths:
+    # 检测引擎基准/攻击语料（attacks / benign / benign-near / attacks-by-fear / attacks-public-replay）
+    - 'crates/sieve-rules/bench-data/**'
+    # 规则匹配单元/集成测试（内嵌私钥头做断言）
+    - 'crates/sieve-rules/tests/**'
+    - 'crates/sieve-cli/tests/**'
+    # 引擎适配层测试断言（"这是我的密钥：-----BEGIN EC PRIVATE KEY----- ... samplekey"）
+    - 'crates/sieve-cli/src/engine_adapter.rs'
