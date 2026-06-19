@@ -215,6 +215,10 @@ const RELOAD_CHANNEL_CAPACITY: usize = 16;
 /// 心跳间隔（秒）。SPEC-005 §4 要求 25 秒内无出站消息时发送 sieve.heartbeat。
 const HEARTBEAT_INTERVAL_SECS: u64 = 25;
 
+/// accept 错误退避时长。非连接级 accept 错误（典型 EMFILE/ENFILE fd 耗尽）后等待此
+/// 时长再重试，给系统回收 fd 的窗口，同时把错误日志限到 ≤10/s、避免 busy-loop 烧 CPU。
+const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_millis(100);
+
 /// GUI 客户端的写通道列表：支持多个并发 GUI 连接（fan-out 广播）。
 ///
 /// 每个 GUI 连接注册一个独立 `mpsc::Sender<String>`；broadcast 时顺序投递。
@@ -512,8 +516,17 @@ impl IpcServer {
                     });
                 }
                 Err(e) => {
-                    error!("IPC accept error: {e}");
-                    break;
+                    // accept 错误绝不击穿整个控制面 daemon（fail-closed 安全代理的可用性
+                    // 单点）：单次瞬态错误——对端在 accept 完成前断开、或 EMFILE/ENFILE fd
+                    // 耗尽——不应让 GUI 弹窗 / hook pending / reload 全部永久失效。参照 hyper：
+                    // 连接级错误立即重试，其余退避后重试避免 busy-loop。真正不可恢复的
+                    // listener 损坏交由 launchd KeepAlive 重启进程，而非让 accept 循环自杀。
+                    if is_connection_error(&e) {
+                        debug!("IPC accept transient connection error, retrying: {e}");
+                    } else {
+                        error!("IPC accept error, backing off {ACCEPT_ERROR_BACKOFF:?}: {e}");
+                        tokio::time::sleep(ACCEPT_ERROR_BACKOFF).await;
+                    }
                 }
             }
         }
@@ -1617,6 +1630,18 @@ async fn dispatch_notification_line(line: &str, reload_tx: &mpsc::Sender<ReloadU
     }
 }
 
+/// 判断 accept() 错误是否为连接级瞬态错误（对端在 accept 完成前断开 / reset / refuse）。
+///
+/// 这类错误立即重试即可、无需退避；其余错误（典型 EMFILE/ENFILE fd 耗尽）走退避重试。
+/// 无论哪类都**不**终止 accept 循环——见 [`IpcServer::run`]。参照 hyper server 的分类。
+fn is_connection_error(e: &std::io::Error) -> bool {
+    use std::io::ErrorKind;
+    matches!(
+        e.kind(),
+        ErrorKind::ConnectionRefused | ErrorKind::ConnectionAborted | ErrorKind::ConnectionReset
+    )
+}
+
 /// 构造 `sieve.heartbeat` 通知帧（换行结尾，SPEC-005 §4）。
 ///
 /// 格式：`{"jsonrpc":"2.0","method":"sieve.heartbeat"}\n`，无 params 字段。
@@ -1662,6 +1687,33 @@ mod tests {
             source_channel: None,
             explicit_chain_depth: None,
             allow_remember: false,
+        }
+    }
+
+    /// accept 错误分类（修复 IPC accept 单点：单次 accept 错误绝不 break 整个 accept
+    /// 循环——否则瞬态 fd 耗尽即永久击穿控制面 daemon）。连接级瞬态错误（对端在 accept
+    /// 完成前断开 / reset / refuse）→ 立即重试，不退避。
+    #[test]
+    fn connection_level_accept_errors_are_immediate_retry() {
+        use std::io::{Error, ErrorKind};
+        for kind in [
+            ErrorKind::ConnectionRefused,
+            ErrorKind::ConnectionAborted,
+            ErrorKind::ConnectionReset,
+        ] {
+            assert!(is_connection_error(&Error::from(kind)), "{kind:?}");
+        }
+    }
+
+    /// 资源类 / 其他 accept 错误（典型 EMFILE/ENFILE fd 耗尽）不算连接级，走退避
+    /// 重试避免 busy-loop——但同样**不会** break 循环。
+    #[test]
+    fn resource_accept_errors_take_backoff_path() {
+        use std::io::{Error, ErrorKind};
+        // EMFILE = 24（POSIX 通用），稳定 Rust 无专门 ErrorKind，归为非连接级 → 退避。
+        assert!(!is_connection_error(&Error::from_raw_os_error(24)));
+        for kind in [ErrorKind::PermissionDenied, ErrorKind::Other] {
+            assert!(!is_connection_error(&Error::from(kind)), "{kind:?}");
         }
     }
 

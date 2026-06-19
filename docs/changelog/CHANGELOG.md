@@ -11,6 +11,10 @@
 
 ## [Unreleased] — 2026-05-07
 
+### Fixed — IPC accept 循环遇瞬态错误即退出的可用性单点（工程评估抓出，2026-06-19）
+
+- **修复 `sieve-ipc::socket_server::IpcServer::run` 的 accept 循环遇任何错误即 `break` 终止整个循环的缺陷**（行为变更/可用性）：原 `Err(e) => { error!(...); break; }` 使单次**瞬态**错误——进程/系统 fd 耗尽（EMFILE/ENFILE）或对端在 accept 完成前断开（ECONNABORTED）——永久击穿整个 IPC 控制面 daemon，GUI 弹窗 / hook pending / reload 全部失效且 daemon 无自愈、需重启恢复；对 fail-closed 安全代理是可用性单点。修复：参照 hyper server 的 accept 错误分类，连接级瞬态错误（`is_connection_error`：ConnectionRefused/Aborted/Reset）立即重试、其余错误（典型 fd 耗尽）退避 `ACCEPT_ERROR_BACKOFF`=100ms 后重试避免 busy-loop，**任何 accept 错误都不再退出循环**；真正不可恢复的 listener 损坏交由 launchd KeepAlive 重启进程。新增 2 个单测覆盖错误分类（连接级 → 立即重试 / 资源类 EMFILE=24 → 退避）。
+
 ### Fixed — 跨仓 IPC wire schema 漂移 ×6 + detection 审计接线（dogfood 自动化抓出，2026-06-18）
 
 - **修复 6 类 daemon↔GUI wire schema 漂移**（跨仓 fixture 一致性测试抓出，多个致命——daemon 推这些通知时 GUI 解码失败 disconnected、阻塞真机 GUI dogfood）。以 SPEC-005 为权威源逐个判定 canonical：
