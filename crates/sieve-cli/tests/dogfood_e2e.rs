@@ -262,6 +262,428 @@ async fn phase_a_outbound_out01_auto_redact_forwards_redacted() {
     );
 }
 
+/// Phase A · ADR-037 full 档：daemon 开启加密审计归档（write-only logging）后，含 OUT-01
+/// 密钥的出站请求 → 脱敏后转发 + **加密归档段落盘**。红线断言：归档段文件**只含密文**，
+/// 绝不出现原始 `sk-ant-api03-` 明文；用 `sieve audit decrypt`（口令解锁私钥）解开后，
+/// 内容是脱敏后的 `[REDACTED:OUT-01]` 占位符——证明 daemon 喂给归档的是脱敏后内容。
+#[tokio::test]
+async fn phase_a_full_archive_stores_ciphertext_only_no_plaintext() {
+    const PASS: &str = "e2e-archive-passphrase";
+    let home = tempfile::tempdir().unwrap();
+
+    // 1. 驱动真实 `sieve audit keygen` 生成密钥对（私钥写 home/audit-identity.age，公钥打印）。
+    let keygen = Command::new(sieve_binary())
+        .args(["audit", "keygen"])
+        .env("SIEVE_HOME", home.path())
+        .env("SIEVE_AUDIT_PASSPHRASE", PASS)
+        .output()
+        .expect("run sieve audit keygen");
+    assert!(
+        keygen.status.success(),
+        "keygen 应成功:\n{}",
+        String::from_utf8_lossy(&keygen.stderr)
+    );
+    let keygen_out = String::from_utf8_lossy(&keygen.stdout);
+    let recipient = keygen_out
+        .lines()
+        .find_map(|l| {
+            l.split_once("recipient = \"")
+                .and_then(|(_, r)| r.strip_suffix('"'))
+        })
+        .map(|s| s.trim().to_owned())
+        .expect("keygen 输出应含 recipient = \"age1...\"");
+    assert!(
+        recipient.starts_with("age1"),
+        "recipient 应为 age1 公钥: {recipient}"
+    );
+    let identity_path = home.path().join("audit-identity.age");
+    assert!(identity_path.exists(), "keygen 应写出口令保护的私钥文件");
+
+    // 2. 起 mock 上游 + full 档 daemon（[audit] level=full + recipient）。
+    let mock = spawn_mock_upstream(|_req| async { responses::anthropic_json_response("ok") }).await;
+    let port = find_free_port();
+    let mut cfg = tempfile::NamedTempFile::new().unwrap();
+    writeln!(
+        cfg,
+        "upstream_url = \"{}\"\n\
+         port = {}\n\
+         bind_addr = \"127.0.0.1\"\n\
+         rules_path = \"{}\"\n\
+         inbound_rules_path = \"{}\"\n\
+         tls_verify_upstream = false\n\
+         dry_run = false\n\
+         [audit]\n\
+         level = \"full\"\n\
+         recipient = \"{}\"\n",
+        mock.url(),
+        port,
+        outbound_rules_path().display(),
+        inbound_rules_path().display(),
+        recipient,
+    )
+    .unwrap();
+    cfg.flush().unwrap();
+    let cfg_path = cfg.path().to_owned();
+    std::mem::forget(cfg);
+
+    let mut proc = Command::new(sieve_binary())
+        .arg("start")
+        .arg("--config")
+        .arg(&cfg_path)
+        .env("SIEVE_LOG", "warn")
+        .env("SIEVE_NO_UPDATE", "1")
+        .env("SIEVE_NO_TELEMETRY", "1")
+        .env("SIEVE_HOME", home.path())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn full-档 daemon");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if std::net::TcpStream::connect_timeout(
+            &format!("127.0.0.1:{port}").parse().unwrap(),
+            Duration::from_millis(300),
+        )
+        .is_ok()
+        {
+            break;
+        }
+        assert!(Instant::now() < deadline, "full-档 daemon 未监听 :{port}");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    // 3. 发含 OUT-01 密钥的出站请求 → 脱敏后转发 + 归档。
+    let base = format!("http://127.0.0.1:{port}");
+    let (status, _h, _b) = post_json(&base, "/v1/messages", out01_key_body()).await;
+    assert_eq!(status, 200, "full 档下 OUT-01 仍应脱敏后转发 200");
+    // 等 fire-and-forget 归档（spawn_blocking）落盘。
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+
+    // 4. 红线断言：归档段文件存在且**只含密文**，无原始密钥明文。
+    let archive_dir = home.path().join("audit-archive");
+    let seg = std::fs::read_dir(&archive_dir)
+        .expect("归档目录应存在")
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .find(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.starts_with("archive-") && n.ends_with(".jsonl"))
+                .unwrap_or(false)
+        })
+        .expect("应有 archive-*.jsonl 归档段");
+    let raw = std::fs::read(&seg).expect("读归档段");
+    assert!(!raw.is_empty(), "归档段不应为空（出站脱敏应已归档一条）");
+    let raw_str = String::from_utf8_lossy(&raw);
+    assert!(
+        !raw_str.contains("sk-ant-api03-"),
+        "红线违反：归档段含原始密钥明文！必须只存密文"
+    );
+
+    // 5. 用 `sieve audit decrypt` 解开，断言是脱敏后内容（含 REDACTED，无明文密钥）。
+    let decrypt = Command::new(sieve_binary())
+        .args(["audit", "decrypt"])
+        .arg("--identity")
+        .arg(&identity_path)
+        .arg(&seg)
+        .env("SIEVE_HOME", home.path())
+        .env("SIEVE_AUDIT_PASSPHRASE", PASS)
+        .output()
+        .expect("run sieve audit decrypt");
+    assert!(
+        decrypt.status.success(),
+        "decrypt 应成功（哈希链校验 + age 解密）:\n{}",
+        String::from_utf8_lossy(&decrypt.stderr)
+    );
+    let plain = String::from_utf8_lossy(&decrypt.stdout);
+    assert!(
+        plain.contains("REDACTED"),
+        "解密内容应是脱敏后（含 REDACTED 占位符）:\n{plain}"
+    );
+    assert!(
+        !plain.contains("sk-ant-api03-"),
+        "解密内容不应含原始密钥明文（脱敏先于落盘）:\n{plain}"
+    );
+
+    let _ = proc.kill();
+    let _ = proc.wait();
+}
+
+/// Phase A · ADR-038：billing daemon（relay 上游）收到 relay **虚高 usage** 的 JSON 响应 →
+/// 独立 token 核算检出超额 → `usage.db` 落 `overbilled` 记录（严格本地）。这是「relay 虚报
+/// 被检出」回归的 daemon 级端到端验证。
+#[tokio::test]
+async fn phase_a_billing_detects_relay_usage_inflation() {
+    // mock relay 对极短内容（"hi"）声明 16 万 token（远超实际）→ 必判 overbilled。
+    let mock = spawn_mock_upstream(|_req| async {
+        responses::anthropic_json_response_with_usage("hi", 80_000, 80_000)
+    })
+    .await;
+    let home = tempfile::tempdir().unwrap();
+    let port = find_free_port();
+    let mut cfg = tempfile::NamedTempFile::new().unwrap();
+    writeln!(
+        cfg,
+        "upstream_url = \"{}\"\n\
+         port = {}\n\
+         bind_addr = \"127.0.0.1\"\n\
+         rules_path = \"{}\"\n\
+         inbound_rules_path = \"{}\"\n\
+         tls_verify_upstream = false\n\
+         dry_run = false\n\
+         [billing_check]\n\
+         enabled = true\n\
+         tolerance_pct = 15.0\n",
+        mock.url(),
+        port,
+        outbound_rules_path().display(),
+        inbound_rules_path().display(),
+    )
+    .unwrap();
+    cfg.flush().unwrap();
+    let cfg_path = cfg.path().to_owned();
+    std::mem::forget(cfg);
+
+    let mut proc = Command::new(sieve_binary())
+        .arg("start")
+        .arg("--config")
+        .arg(&cfg_path)
+        .env("SIEVE_LOG", "warn")
+        .env("SIEVE_NO_UPDATE", "1")
+        .env("SIEVE_NO_TELEMETRY", "1")
+        .env("SIEVE_HOME", home.path())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn billing daemon");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if std::net::TcpStream::connect_timeout(
+            &format!("127.0.0.1:{port}").parse().unwrap(),
+            Duration::from_millis(300),
+        )
+        .is_ok()
+        {
+            break;
+        }
+        assert!(Instant::now() < deadline, "billing daemon 未监听 :{port}");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    let base = format!("http://127.0.0.1:{port}");
+    let benign = serde_json::json!({
+        "model": "claude-sonnet-4-5",
+        "max_tokens": 16,
+        "messages": [{ "role": "user", "content": "hello world" }],
+    })
+    .to_string();
+    let (status, _h, _b) = post_json(&base, "/v1/messages", benign).await;
+    assert_eq!(status, 200, "benign 请求应 200 透传");
+    // 等 fire-and-forget usage 观测落库。
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+
+    let usage_db = home.path().join("usage.db");
+    assert!(usage_db.exists(), "billing 启用应建 usage.db");
+    let conn = rusqlite::Connection::open_with_flags(
+        &usage_db,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .unwrap();
+    let (verdict, trust, dev): (String, String, Option<f64>) = conn
+        .query_row(
+            "SELECT verdict, trust, deviation_pct FROM usage_records ORDER BY id DESC LIMIT 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .expect("usage_records 应有记录");
+    assert_eq!(
+        trust, "relay",
+        "127.0.0.1 mock 上游应判 relay（非官方 host）"
+    );
+    assert_eq!(
+        verdict, "overbilled",
+        "relay 虚高 usage 应被检出 overbilled"
+    );
+    assert!(
+        dev.unwrap_or(0.0) > 15.0,
+        "偏差应远超容差 15%，实际 {dev:?}"
+    );
+
+    let _ = proc.kill();
+    let _ = proc.wait();
+}
+
+// ── ADR-038 × ADR-025：超额计费检测【四路径全覆盖】（同触发=relay usage 虚报，渲染 4 种 wire）──
+//
+// phase_a_billing_detects_relay_usage_inflation（上）= Route Anthropic JSON。
+// 下面补齐 Anthropic SSE / OpenAI JSON / OpenAI SSE，确保 billing 观测器不是 JSON-only
+// （ADR-025 v1.5.4 P0 教训：每个入站特性必须四路径证明）。
+
+/// 起一个开启超额计费检测的 daemon（relay 上游=mock；127.0.0.1 非官方 host → relay）。
+struct BillingDaemon {
+    base_url: String,
+    home: tempfile::TempDir,
+    proc: Child,
+}
+impl Drop for BillingDaemon {
+    fn drop(&mut self) {
+        let _ = self.proc.kill();
+        let _ = self.proc.wait();
+    }
+}
+
+fn spawn_billing_daemon(upstream_url: &str) -> BillingDaemon {
+    let port = find_free_port();
+    let home = tempfile::tempdir().unwrap();
+    let mut cfg = tempfile::NamedTempFile::new().unwrap();
+    writeln!(
+        cfg,
+        "upstream_url = \"{}\"\n\
+         port = {}\n\
+         bind_addr = \"127.0.0.1\"\n\
+         rules_path = \"{}\"\n\
+         inbound_rules_path = \"{}\"\n\
+         tls_verify_upstream = false\n\
+         dry_run = false\n\
+         [billing_check]\n\
+         enabled = true\n\
+         tolerance_pct = 15.0\n",
+        upstream_url,
+        port,
+        outbound_rules_path().display(),
+        inbound_rules_path().display(),
+    )
+    .unwrap();
+    cfg.flush().unwrap();
+    let cfg_path = cfg.path().to_owned();
+    std::mem::forget(cfg);
+
+    let proc = Command::new(sieve_binary())
+        .arg("start")
+        .arg("--config")
+        .arg(&cfg_path)
+        .env("SIEVE_LOG", "warn")
+        .env("SIEVE_NO_UPDATE", "1")
+        .env("SIEVE_NO_TELEMETRY", "1")
+        .env("SIEVE_HOME", home.path())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn billing daemon");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if std::net::TcpStream::connect_timeout(
+            &format!("127.0.0.1:{port}").parse().unwrap(),
+            Duration::from_millis(300),
+        )
+        .is_ok()
+        {
+            break;
+        }
+        assert!(Instant::now() < deadline, "billing daemon 未监听 :{port}");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    BillingDaemon {
+        base_url: format!("http://127.0.0.1:{port}"),
+        home,
+        proc,
+    }
+}
+
+/// 断言 usage.db 最新一条记录是 relay / overbilled / 偏差 >15%。
+fn assert_last_usage_overbilled(home: &Path) {
+    let usage_db = home.join("usage.db");
+    assert!(usage_db.exists(), "billing 应建 usage.db");
+    let conn = rusqlite::Connection::open_with_flags(
+        &usage_db,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .unwrap();
+    let (verdict, trust, dev): (String, String, Option<f64>) = conn
+        .query_row(
+            "SELECT verdict, trust, deviation_pct FROM usage_records ORDER BY id DESC LIMIT 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .expect("usage_records 应有记录");
+    assert_eq!(
+        trust, "relay",
+        "127.0.0.1 mock 上游应判 relay（非官方 host）"
+    );
+    assert_eq!(verdict, "overbilled", "relay 虚高 usage 应检出 overbilled");
+    assert!(
+        dev.unwrap_or(0.0) > 15.0,
+        "偏差应远超容差 15%，实际 {dev:?}"
+    );
+}
+
+fn anthropic_billing_req() -> String {
+    serde_json::json!({
+        "model": "claude-sonnet-4-5",
+        "max_tokens": 16,
+        "messages": [{ "role": "user", "content": "hello world" }],
+    })
+    .to_string()
+}
+fn openai_billing_req() -> String {
+    serde_json::json!({
+        "model": "gpt-4o",
+        "max_tokens": 16,
+        "messages": [{ "role": "user", "content": "hello world" }],
+    })
+    .to_string()
+}
+
+/// Route 2/4 · **Anthropic SSE**：relay 在 `message_start.usage.input_tokens` +
+/// `message_delta.usage.output_tokens` 虚报 → SSE 观测器累计后检出。
+#[tokio::test]
+async fn phase_a_billing_anthropic_sse_overbilled() {
+    let payload = responses::anthropic_sse_bytes_with_usage("hi", 80_000, 80_000);
+    let mock = spawn_mock_streaming_upstream("text/event-stream", move |_req| {
+        let p = payload.clone();
+        async move { (hyper::StatusCode::OK, p) }
+    })
+    .await;
+    let d = spawn_billing_daemon(&mock.url());
+    let (status, _h, _b) = post_json(&d.base_url, "/v1/messages", anthropic_billing_req()).await;
+    assert_eq!(status, 200, "Anthropic SSE benign 应 200 透传");
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+    assert_last_usage_overbilled(d.home.path());
+}
+
+/// Route 3/4 · **OpenAI JSON**：relay 在顶层 `usage.prompt_tokens/completion_tokens` 虚报。
+#[tokio::test]
+async fn phase_a_billing_openai_json_overbilled() {
+    let mock = spawn_mock_upstream(|_req| async {
+        responses::openai_json_response_with_usage("hi", 80_000, 80_000)
+    })
+    .await;
+    let d = spawn_billing_daemon(&mock.url());
+    let (status, _h, _b) =
+        post_json(&d.base_url, "/v1/chat/completions", openai_billing_req()).await;
+    assert_eq!(status, 200, "OpenAI JSON benign 应 200 透传");
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+    assert_last_usage_overbilled(d.home.path());
+}
+
+/// Route 4/4 · **OpenAI SSE**：relay 在末尾 usage chunk（`choices:[]` + `usage`）虚报。
+/// 依赖 `OpenAiSseParser` 把 usage-only chunk 归一化为 `MessageDelta`（ADR-038 扩展）。
+#[tokio::test]
+async fn phase_a_billing_openai_sse_overbilled() {
+    let payload = responses::openai_sse_bytes_with_usage("hi", 80_000, 80_000);
+    let mock = spawn_mock_streaming_upstream("text/event-stream", move |_req| {
+        let p = payload.clone();
+        async move { (hyper::StatusCode::OK, p) }
+    })
+    .await;
+    let d = spawn_billing_daemon(&mock.url());
+    let (status, _h, _b) =
+        post_json(&d.base_url, "/v1/chat/completions", openai_billing_req()).await;
+    assert_eq!(status, 200, "OpenAI SSE benign 应 200 透传");
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+    assert_last_usage_overbilled(d.home.path());
+}
+
 // ════════════════════════════ Phase B：入站拦截 ════════════════════════════════
 
 /// Phase B-1：Anthropic SSE —— 上游返回含 `eth_signTransaction` tool_use 的流式响应 →
@@ -350,9 +772,10 @@ async fn phase_b_inbound_anthropic_json_blocks_signing_tool() {
     tokio::time::sleep(Duration::from_millis(800)).await;
     let rows = read_audit_rows(&guard.audit_db());
     assert!(
-        rows.iter().any(|(rule, _sev, direction, disposition, _dec, _provider)| {
-            direction == "inbound" && disposition == "blocked" && rule.contains("IN-CR-05")
-        }),
+        rows.iter()
+            .any(|(rule, _sev, direction, disposition, _dec, _provider)| {
+                direction == "inbound" && disposition == "blocked" && rule.contains("IN-CR-05")
+            }),
         "anthropic JSON 入站 block 应落 inbound/blocked 审计行；实际: {rows:?}"
     );
 }
@@ -398,9 +821,10 @@ async fn phase_b_inbound_openai_sse_blocks_address_substitution() {
     tokio::time::sleep(Duration::from_millis(800)).await;
     let rows = read_audit_rows(&guard.audit_db());
     assert!(
-        rows.iter().any(|(rule, _sev, direction, disposition, _dec, _provider)| {
-            direction == "inbound" && disposition == "blocked" && rule.contains("IN-CR-01")
-        }),
+        rows.iter()
+            .any(|(rule, _sev, direction, disposition, _dec, _provider)| {
+                direction == "inbound" && disposition == "blocked" && rule.contains("IN-CR-01")
+            }),
         "OpenAI SSE 入站 block 应落 inbound/blocked 审计行；实际: {rows:?}"
     );
 }
@@ -467,9 +891,10 @@ async fn phase_b_inbound_openai_json_blocks_signing_tool() {
     tokio::time::sleep(Duration::from_millis(800)).await;
     let rows = read_audit_rows(&guard.audit_db());
     assert!(
-        rows.iter().any(|(rule, _sev, direction, disposition, _dec, _provider)| {
-            direction == "inbound" && disposition == "blocked" && rule.contains("IN-CR-05")
-        }),
+        rows.iter()
+            .any(|(rule, _sev, direction, disposition, _dec, _provider)| {
+                direction == "inbound" && disposition == "blocked" && rule.contains("IN-CR-05")
+            }),
         "openai JSON 入站 block 应落 inbound/blocked 审计行；实际: {rows:?}"
     );
 }
@@ -836,7 +1261,14 @@ async fn phase_d_detection_audit_wired_and_queryable() {
     let block_home = block_guard.sieve_home().to_owned();
     let sev_out = tokio::task::spawn_blocking(move || {
         sieve_testing::cli::run_sieve_cli_with_home(
-            &["audit", "query", "--severity", "critical", "--format", "jsonl"],
+            &[
+                "audit",
+                "query",
+                "--severity",
+                "critical",
+                "--format",
+                "jsonl",
+            ],
             &block_home,
         )
     })

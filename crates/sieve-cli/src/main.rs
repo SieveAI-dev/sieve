@@ -20,6 +20,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 mod audit;
+mod audit_archive;
+mod billing;
 mod cli;
 mod commands;
 mod config;
@@ -239,6 +241,9 @@ async fn main() -> Result<()> {
         }
         Command::Audit(args) => {
             commands::audit::run(args).await?;
+        }
+        Command::Usage(args) => {
+            commands::usage::run(args).await?;
         }
     }
 

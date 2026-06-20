@@ -83,6 +83,38 @@ pub enum Command {
     ///
     /// 直接读 `~/.sieve/audit.db` SQLite，输出 jsonl 格式方便接 jq / fluentd。
     Audit(AuditArgs),
+
+    /// 本地 token 用量与超额计费检测查询（ADR-038）。
+    ///
+    /// 读 `~/.sieve/usage.db`（严格本地、永不上传），列出独立核算结果与 relay 偏差。
+    Usage(UsageArgs),
+}
+
+/// `sieve usage` 参数（ADR-038 / SPEC-010）。
+#[derive(clap::Args, Debug)]
+pub struct UsageArgs {
+    /// 子命令；省略时等价 `list`。
+    #[command(subcommand)]
+    pub command: Option<UsageCommand>,
+}
+
+/// `sieve usage` 子命令。
+#[derive(Debug, Subcommand)]
+pub enum UsageCommand {
+    /// 列出最近的用量记录（默认 20 条）。
+    List {
+        /// 显示最后 N 条（默认 20）。
+        #[arg(long, default_value_t = 20)]
+        limit: u32,
+
+        /// 只显示检出超额（overbilled）的记录。
+        #[arg(long)]
+        overbilled_only: bool,
+
+        /// 输出格式（jsonl 默认）。
+        #[arg(long, value_enum)]
+        format: Option<OutputFormat>,
+    },
 }
 
 /// `sieve rules` 参数（PRD v2.0 §5.5.2）。
@@ -336,5 +368,40 @@ pub enum AuditCommand {
     Show {
         /// 审计事件 id（INTEGER PRIMARY KEY）。
         id: i64,
+    },
+
+    /// 生成 full 档加密审计的 age 密钥对（ADR-037 决策 5）。
+    ///
+    /// 公钥（recipient）打印到 stdout，由用户粘贴进 `config.toml [audit].recipient`；
+    /// 口令保护后的私钥写 0600 文件，**用户须移出本机**（密码管理器/离线介质）。
+    /// 口令经环境变量 `SIEVE_AUDIT_PASSPHRASE` 提供（不回显）。
+    /// **口令丢失 = 归档永久不可读（by design）。**
+    Keygen {
+        /// 口令保护的私钥输出路径（默认 `~/.sieve/audit-identity.age`）。
+        #[arg(long)]
+        out: Option<PathBuf>,
+
+        /// 覆盖已存在的私钥文件（默认拒绝，防误删旧归档的解密能力）。
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// 轮换 full 档密钥对（生成新对；**旧归档段仍需对应的旧私钥解密**）。
+    RotateKey {
+        /// 新私钥输出路径（默认 `~/.sieve/audit-identity-rotated.age`）。
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+
+    /// 解密并校验 full 档归档段（审计用，**应在离线/另一台机器执行**）。
+    ///
+    /// 用口令（`SIEVE_AUDIT_PASSPHRASE`）解锁私钥，逐条校验哈希链 + 解密，输出脱敏后内容。
+    Decrypt {
+        /// 口令保护的私钥文件路径（keygen 产出）。
+        #[arg(long)]
+        identity: PathBuf,
+
+        /// 要解密的归档段文件（`archive-*.jsonl`）。
+        segment: PathBuf,
     },
 }

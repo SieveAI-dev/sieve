@@ -119,6 +119,9 @@ struct ListenerSpec {
     provider_id: String,
     /// 协议声明（proxy_inner 用此字段做错位 fail-closed 校验）。
     protocol: crate::config::Protocol,
+    /// 上游信任级别（ADR-038）：`Official` 直连 usage 权威、不核算；`Relay` 须独立核算。
+    /// 按 host 派生（`UpstreamListener::resolved_trust`），透传到超额计费观测器。
+    trust: crate::config::Trust,
 }
 
 // ── v2.0：灰名单辅助（PRD v2.0 §5.4.2）─────────────────────────────────────
@@ -786,15 +789,26 @@ pub async fn run(
                     u.url
                 )
             })?);
+            let trust = u.resolved_trust();
             specs.push(ListenerSpec {
                 port: u.port,
                 forwarder: f,
                 provider_id,
                 protocol: u.protocol,
+                trust,
             });
         }
         specs
     };
+
+    // ADR-038：构造超额计费观测器（仅 [billing_check].enabled 时 Some；纯本地、零网络）。
+    // TokenEstimator::new 加载 BPE 词表开销大，启动一次性构造、Arc 透传。
+    let billing_observer = build_billing_observer(&cfg)?;
+
+    // ADR-037 full 档：构造加密审计归档写入器（write-only logging，daemon 只持公钥、
+    // 结构上不可解密）。仅 `audit.level = full` 时为 Some；recipient 不可解析 → fail-fast
+    // （config 校验已查 age1 前缀格式）。启动时清理超期段（保留期，ADR-037 决策 5）。
+    let archive_writer = build_archive_writer(&cfg)?;
 
     // R11-#1：加载 OpenClaw 上游路由表（~/.sieve/upstream-routes.json）。
     // 加载失败（文件不存在 / JSON 非法）时 warn 后继续，所有请求走默认上游兜底。
@@ -1083,6 +1097,8 @@ pub async fn run(
             provider_forwarders.clone(),
             audit_store.clone(),
             ipc_server.clone(),
+            archive_writer.clone(),
+            billing_observer.clone(),
             dry_run,
             no_client_policy,
         ));
@@ -1094,6 +1110,287 @@ pub async fn run(
         }
     }
     Ok(())
+}
+
+/// 构造 `full` 档加密审计归档写入器（ADR-037）。
+///
+/// 仅 `audit.level = full` 时返回 `Some`；否则 `None`（`off` / `metadata` 不归档）。
+/// recipient 不可解析时返回 `Err`（fail-fast；config 校验已查 `age1` 前缀格式）。
+/// 启动时执行一次保留期清理（超期段删除，ADR-037 决策 5）；清理失败仅 warn 不阻断。
+fn build_archive_writer(cfg: &Config) -> Result<Option<Arc<crate::audit_archive::ArchiveWriter>>> {
+    use crate::config::AuditLevel;
+    if cfg.audit.level != AuditLevel::Full {
+        return Ok(None);
+    }
+    let recipient =
+        cfg.audit.recipient.as_deref().ok_or_else(|| {
+            anyhow!("audit.level = full 但缺 audit.recipient（config 校验应已拦截）")
+        })?;
+    let dir = cfg.audit.archive_dir.clone().unwrap_or_else(|| {
+        sieve_ipc::paths::sieve_home()
+            .map(|h| h.join("audit-archive"))
+            .unwrap_or_else(|_| std::path::PathBuf::from("audit-archive"))
+    });
+    let writer = crate::audit_archive::ArchiveWriter::new(
+        recipient,
+        dir,
+        cfg.audit.rotation,
+        cfg.audit.hash_chain,
+    )
+    .context("初始化加密审计归档写入器失败")?;
+
+    match writer.purge_expired(cfg.audit.retention_days) {
+        Ok(deleted) if !deleted.is_empty() => {
+            tracing::info!(count = deleted.len(), "audit archive: 已清理超期段");
+        }
+        Err(e) => tracing::warn!(error = %e, "audit archive: purge_expired 失败"),
+        _ => {}
+    }
+    tracing::info!(
+        hash_chain = cfg.audit.hash_chain,
+        retention_days = cfg.audit.retention_days,
+        "audit archive: full 档加密归档已启用（write-only logging）"
+    );
+    Ok(Some(Arc::new(writer)))
+}
+
+/// 构造超额计费观测器（ADR-038）。仅 `[billing_check].enabled` 时返回 `Some`。
+///
+/// usage 记录落本地 `~/.sieve/usage.db`（严格本地、永不上传）。`TokenEstimator::new`
+/// 加载 bundled BPE 词表（开销大），故启动一次性构造、`Arc` 透传到响应观测点。
+fn build_billing_observer(cfg: &Config) -> Result<Option<Arc<crate::billing::BillingObserver>>> {
+    if !cfg.billing_check.enabled {
+        return Ok(None);
+    }
+    let usage_path = sieve_ipc::paths::sieve_home()
+        .map(|h| h.join("usage.db"))
+        .unwrap_or_else(|_| std::path::PathBuf::from("usage.db"));
+    let usage = crate::billing::UsageStore::init(&usage_path).context("初始化 usage.db 失败")?;
+    let observer = crate::billing::BillingObserver::new(usage, cfg.billing_check.tolerance_pct)
+        .context("初始化超额计费观测器失败")?;
+    tracing::info!(
+        tolerance_pct = cfg.billing_check.tolerance_pct,
+        "billing check: 超额计费检测已启用（独立 token 核算，严格本地、零网络）"
+    );
+    Ok(Some(Arc::new(observer)))
+}
+
+/// 构造每请求超额计费观测上下文（ADR-038）。
+///
+/// 仅 `billing` 为 `Some`（`[billing_check].enabled`）**且** `trust == Relay`（中转，
+/// `usage` 不可信）时返回 `Some`；`Official` 直连 `usage` 权威、不核算。输入 token 用
+/// 请求文本段独立估算（纯本地，不外泄）。`texts` 为 `extract_text_content()` 的 `(offset,
+/// text)` 段列表。
+fn build_billing_context(
+    billing: &Option<Arc<crate::billing::BillingObserver>>,
+    trust: crate::config::Trust,
+    provider_id: &str,
+    model: &str,
+    family: crate::billing::Family,
+    texts: &[(usize, String)],
+) -> Option<crate::billing::BillingContext> {
+    let observer = billing.as_ref()?;
+    if trust != crate::config::Trust::Relay {
+        return None;
+    }
+    let messages: Vec<String> = texts.iter().map(|(_, t)| t.clone()).collect();
+    let independent_input = observer.count_input(family, model, &messages);
+    Some(crate::billing::BillingContext {
+        observer: Arc::clone(observer),
+        trust,
+        provider_id: provider_id.to_string(),
+        request_id: uuid::Uuid::new_v4().to_string(),
+        model: model.to_string(),
+        family,
+        independent_input,
+    })
+}
+
+/// 在响应观测点 spawn 超额计费核算（ADR-038，fire-and-forget）。
+///
+/// `billing_ctx` 为 `None`（非 Relay / 未启用）时 no-op。`completion` 为补全全文（独立
+/// output 计数）；`claimed` 为 relay 声明的 `(input, output)` tokens（`None` = 无声明）。
+/// 写 `usage.db`（严格本地、永不上传）；检出超额时 `warn`（`sieve usage --overbilled-only`
+/// 可查）。**不阻断响应**（计费监督，非安全拦截）。
+fn spawn_billing_observation(
+    billing_ctx: Option<crate::billing::BillingContext>,
+    completion: String,
+    claimed: Option<(u64, u64)>,
+) {
+    let bctx = match billing_ctx {
+        Some(b) => b,
+        None => return,
+    };
+    tokio::spawn(async move {
+        let verdict = bctx
+            .observer
+            .observe(
+                bctx.trust,
+                bctx.family,
+                Some(bctx.request_id.clone()),
+                bctx.provider_id.clone(),
+                bctx.model.clone(),
+                bctx.independent_input,
+                &completion,
+                claimed,
+            )
+            .await;
+        if let crate::billing::Verdict::Overbilled {
+            deviation_pct,
+            claimed_total,
+            independent_total,
+            is_estimate,
+        } = verdict
+        {
+            tracing::warn!(
+                provider_id = %bctx.provider_id,
+                model = %bctx.model,
+                deviation_pct,
+                claimed_total,
+                independent_total,
+                is_estimate,
+                "BILLING: 检出 relay 超额计费（独立计数 vs relay 声明偏差超容差，ADR-038）"
+            );
+        }
+    });
+}
+
+/// 提取 Anthropic JSON 响应顶层 `usage` 的 `(input_tokens, output_tokens)`。
+fn anthropic_claimed_usage(resp_json: &serde_json::Value) -> Option<(u64, u64)> {
+    let u = resp_json.get("usage")?;
+    let input = u.get("input_tokens").and_then(|v| v.as_u64())?;
+    let output = u.get("output_tokens").and_then(|v| v.as_u64())?;
+    Some((input, output))
+}
+
+/// 拼接 Anthropic JSON 响应 `content[]` 中的 text 块为补全全文。
+fn anthropic_completion_text(resp_json: &serde_json::Value) -> String {
+    resp_json
+        .get("content")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|b| {
+                    if b.get("type").and_then(|v| v.as_str()) == Some("text") {
+                        b.get("text").and_then(|v| v.as_str())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("")
+        })
+        .unwrap_or_default()
+}
+
+/// 提取 OpenAI JSON 响应顶层 `usage` 的 `(prompt_tokens, completion_tokens)`。
+fn openai_claimed_usage(resp_json: &serde_json::Value) -> Option<(u64, u64)> {
+    let u = resp_json.get("usage")?;
+    let input = u.get("prompt_tokens").and_then(|v| v.as_u64())?;
+    let output = u.get("completion_tokens").and_then(|v| v.as_u64())?;
+    Some((input, output))
+}
+
+/// 拼接 OpenAI JSON 响应 `choices[].message.content` 为补全全文。
+fn openai_completion_text(resp_json: &serde_json::Value) -> String {
+    resp_json
+        .get("choices")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|c| {
+                    c.get("message")
+                        .and_then(|m| m.get("content"))
+                        .and_then(|v| v.as_str())
+                })
+                .collect::<Vec<_>>()
+                .join("")
+        })
+        .unwrap_or_default()
+}
+
+/// SSE 流式超额计费累计器（ADR-038）：跨 chunk 累计 completion 文本 + relay 声明的 usage，
+/// 流自然结束后用于交叉比对。
+///
+/// - **completion**：所有 `ContentBlockDelta { TextDelta }`（两 SSE parser 统一发此事件）。
+/// - **claimed usage**：Anthropic 的 input 在 `MessageStart.usage.input_tokens`、output 在
+///   `MessageDelta.usage.output_tokens`；OpenAI（include_usage）的 prompt/completion 在末尾
+///   `MessageDelta.usage`（经 `OpenAiSseParser` 归一化，见其 usage-only chunk 处理）。
+#[derive(Default)]
+struct BillingSseAccumulator {
+    completion: String,
+    claimed_input: Option<u64>,
+    claimed_output: Option<u64>,
+}
+
+impl BillingSseAccumulator {
+    fn observe_events(&mut self, events: &[sieve_core::sse::parser::SseEvent]) {
+        use sieve_core::sse::parser::{SseDelta, SseEvent};
+        for ev in events {
+            match ev {
+                SseEvent::MessageStart { message } => {
+                    if let Some(it) = message
+                        .get("usage")
+                        .and_then(|u| u.get("input_tokens"))
+                        .and_then(serde_json::Value::as_u64)
+                    {
+                        self.claimed_input = Some(it);
+                    }
+                }
+                SseEvent::ContentBlockDelta {
+                    delta: SseDelta::TextDelta { text },
+                    ..
+                } => self.completion.push_str(text),
+                SseEvent::MessageDelta { usage: Some(u), .. } => {
+                    // Anthropic: input_tokens/output_tokens；OpenAI: prompt_tokens/completion_tokens。
+                    if let Some(it) = u
+                        .get("input_tokens")
+                        .or_else(|| u.get("prompt_tokens"))
+                        .and_then(serde_json::Value::as_u64)
+                    {
+                        self.claimed_input = Some(it);
+                    }
+                    if let Some(ot) = u
+                        .get("output_tokens")
+                        .or_else(|| u.get("completion_tokens"))
+                        .and_then(serde_json::Value::as_u64)
+                    {
+                        self.claimed_output = Some(ot);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// relay 声明的 `(input, output)`；input/output 任一缺失则 `None`（无法有意义比对）。
+    fn claimed(&self) -> Option<(u64, u64)> {
+        match (self.claimed_input, self.claimed_output) {
+            (Some(i), Some(o)) => Some((i, o)),
+            _ => None,
+        }
+    }
+}
+
+/// 归档脱敏后的出站内容（ADR-037 full 档）。
+///
+/// **fire-and-forget**：`spawn_blocking` 执行 age 加密 + 文件 IO（同步阻塞），失败仅
+/// `warn` 不阻断 forward（审计可靠性问题不得变可用性事故，ADR-007）。`archive` 为 `None`
+/// （非 full 档）时 no-op、零开销。**红线**：`redacted_body` 必须是脱敏后内容（调用点保证）。
+fn archive_redacted_outbound(
+    archive: &Option<Arc<crate::audit_archive::ArchiveWriter>>,
+    redacted_body: &Bytes,
+    protocol: &'static str,
+) {
+    if let Some(aw) = archive {
+        let aw = Arc::clone(aw);
+        let body = redacted_body.clone();
+        tokio::task::spawn_blocking(move || {
+            if let Err(e) = aw.append(&body) {
+                tracing::warn!(error = %e, protocol, "audit archive append 失败");
+            }
+        });
+    }
 }
 
 /// 单 listener 永久 accept loop（ADR-026 §决策 3）。
@@ -1113,6 +1410,8 @@ async fn accept_loop(
     provider_forwarders: Arc<HashMap<String, Arc<Forwarder>>>,
     audit_store: Arc<crate::audit::AuditStore>,
     ipc_server: Option<Arc<sieve_ipc::IpcServer>>,
+    archive: Option<Arc<crate::audit_archive::ArchiveWriter>>,
+    billing: Option<Arc<crate::billing::BillingObserver>>,
     dry_run: bool,
     no_client_policy: crate::cli::NoClientPolicy,
 ) {
@@ -1152,6 +1451,9 @@ async fn accept_loop(
         let ipc_server = ipc_server.clone();
         let ag_cfg = address_guard_config.clone();
         let pf = provider_forwarders.clone();
+        let archive = archive.clone();
+        let billing = billing.clone();
+        let listener_trust = spec.trust;
         let req_ctx = RequestCtx::new(
             caller_info.clone(),
             Arc::clone(&audit_store),
@@ -1173,6 +1475,8 @@ async fn accept_loop(
                 );
                 let ipc = ipc_server.clone();
                 let pf = pf.clone();
+                let archive = archive.clone();
+                let billing = billing.clone();
                 // RequestCtx（caller + audit + listener meta）捕获到闭包
                 let ctx = req_ctx.clone();
                 async move {
@@ -1183,6 +1487,9 @@ async fn accept_loop(
                         ib_filter,
                         dry_run,
                         ipc,
+                        archive,
+                        billing,
+                        listener_trust,
                         ctx,
                         req,
                         no_client_policy,
@@ -1377,6 +1684,9 @@ async fn proxy(
     inbound_filter: InboundFilter,
     dry_run: bool,
     ipc: Option<Arc<sieve_ipc::IpcServer>>,
+    archive: Option<Arc<crate::audit_archive::ArchiveWriter>>,
+    billing: Option<Arc<crate::billing::BillingObserver>>,
+    listener_trust: crate::config::Trust,
     ctx: RequestCtx,
     req: Request<Incoming>,
     no_client_policy: crate::cli::NoClientPolicy,
@@ -1388,6 +1698,9 @@ async fn proxy(
         inbound_filter,
         dry_run,
         ipc,
+        archive,
+        billing,
+        listener_trust,
         ctx,
         req,
         no_client_policy,
@@ -1436,6 +1749,9 @@ async fn proxy_inner(
     inbound_filter: InboundFilter,
     dry_run: bool,
     ipc: Option<Arc<sieve_ipc::IpcServer>>,
+    archive: Option<Arc<crate::audit_archive::ArchiveWriter>>,
+    billing: Option<Arc<crate::billing::BillingObserver>>,
+    listener_trust: crate::config::Trust,
     ctx: RequestCtx,
     req: Request<Incoming>,
     no_client_policy: crate::cli::NoClientPolicy,
@@ -1730,6 +2046,18 @@ async fn proxy_inner(
 
         // 3. 提取文本段 → 逐段扫描
         let texts = anthropic_req.extract_text_content();
+
+        // ADR-038：构造超额计费观测上下文（仅 Relay 上游 + billing 启用时为 Some）。
+        // 输入 token 在请求侧用文本段独立估算（纯本地计数，不落盘原文、不外泄）。
+        let billing_ctx = build_billing_context(
+            &billing,
+            listener_trust,
+            &ctx.listener_provider_id,
+            &anthropic_req.model,
+            crate::billing::Family::Anthropic,
+            &texts,
+        );
+
         let mut all_detections: Vec<sieve_core::Detection> = Vec::new();
 
         for (offset, text) in &texts {
@@ -2135,6 +2463,12 @@ async fn proxy_inner(
             let new_body = Bytes::from(new_body_bytes);
             let new_len = new_body.len();
 
+            // ADR-037 full 档：归档脱敏后的出站内容（fire-and-forget，off hot path）。
+            // 红线：只存脱敏后 new_body——原始 secret 已被 redact_segments 替换为占位符，
+            // 绝不落原始 body。spawn_blocking（age 加密 + 文件 IO 是同步阻塞），失败仅 warn
+            // 不阻断 forward（审计可靠性问题不得变可用性事故，ADR-007）。
+            archive_redacted_outbound(&archive, &new_body, "anthropic");
+
             // 更新 Content-Length header
             let mut new_parts = parts.clone();
             new_parts.headers.insert(
@@ -2168,6 +2502,7 @@ async fn proxy_inner(
                     ctx.listener_protocol,
                     ctx.listener_provider_id.clone(),
                 ),
+                billing_ctx,
             )
             .await;
         }
@@ -2209,6 +2544,7 @@ async fn proxy_inner(
                 ctx.listener_protocol,
                 ctx.listener_provider_id.clone(),
             ),
+            billing_ctx,
         )
         .await;
     }
@@ -2228,6 +2564,9 @@ async fn proxy_inner(
             inbound_filter,
             dry_run,
             ipc,
+            archive,
+            billing,
+            listener_trust,
             parts,
             body_bytes,
             source_agent,
@@ -2272,6 +2611,9 @@ async fn proxy_openai(
     inbound_filter: InboundFilter,
     dry_run: bool,
     ipc: Option<Arc<sieve_ipc::IpcServer>>,
+    archive: Option<Arc<crate::audit_archive::ArchiveWriter>>,
+    billing: Option<Arc<crate::billing::BillingObserver>>,
+    listener_trust: crate::config::Trust,
     parts: http::request::Parts,
     body_bytes: Bytes,
     source_agent: sieve_ipc::protocol::SourceAgent,
@@ -2305,6 +2647,17 @@ async fn proxy_openai(
 
     // 2. 提取文本段 → 逐段扫描
     let texts = openai_req.extract_text_content();
+
+    // ADR-038：构造超额计费观测上下文（仅 Relay 上游 + billing 启用时）。
+    let billing_ctx = build_billing_context(
+        &billing,
+        listener_trust,
+        &listener_provider_id,
+        &openai_req.model,
+        crate::billing::Family::OpenAi,
+        &texts,
+    );
+
     let mut all_detections: Vec<sieve_core::Detection> = Vec::new();
 
     for (offset, text) in &texts {
@@ -2690,6 +3043,10 @@ async fn proxy_openai(
 
         let new_body = bytes::Bytes::from(new_body_bytes);
         let new_len = new_body.len();
+
+        // ADR-037 full 档：归档脱敏后的出站内容（OpenAI 路径，红线只存脱敏后 new_body）。
+        archive_redacted_outbound(&archive, &new_body, "openai");
+
         let mut new_parts = parts.clone();
         new_parts.headers.insert(
             http::header::CONTENT_LENGTH,
@@ -2731,6 +3088,7 @@ async fn proxy_openai(
                 listener_protocol,
                 listener_provider_id.clone(),
             ),
+            billing_ctx,
         )
         .await;
     }
@@ -2766,6 +3124,7 @@ async fn proxy_openai(
             chain_depth,
         },
         RequestCtx::new(caller, audit_store, listener_protocol, listener_provider_id),
+        billing_ctx,
     )
     .await
 }
@@ -2809,6 +3168,7 @@ async fn forward_with_inbound_inspection(
     body_bytes: Bytes,
     meta: MultiAgentMeta,
     ctx: RequestCtx,
+    billing_ctx: Option<crate::billing::BillingContext>,
 ) -> Result<Response<ResponseBody>> {
     // 解构 ctx 供内部使用（避免在 spawn move 时多次 clone Arc）
     let RequestCtx {
@@ -2876,6 +3236,7 @@ async fn forward_with_inbound_inspection(
                 listener_protocol,
                 listener_provider_id.clone(),
             ),
+            billing_ctx,
         )
         .await;
     }
@@ -2893,6 +3254,10 @@ async fn forward_with_inbound_inspection(
         let meta = inbound_meta;
         let mut parser = SseParser::new();
         let mut aggregator = Aggregator::new();
+        // ADR-038：仅 billing 启用（billing_ctx=Some）时累计 SSE usage + completion。
+        let mut billing_acc = billing_ctx
+            .as_ref()
+            .map(|_| BillingSseAccumulator::default());
 
         use http_body_util::BodyStream;
         let mut stream = BodyStream::new(resp_body);
@@ -2919,6 +3284,11 @@ async fn forward_with_inbound_inspection(
                             return;
                         }
                     };
+
+                    // ADR-038：累计本批 SSE usage + completion（Anthropic SSE 观测）。
+                    if let Some(acc) = billing_acc.as_mut() {
+                        acc.observe_events(&events);
+                    }
 
                     // 收集本批 events 的 detections，按 action 分组处理
                     // 修 R8-#2：传入 meta.chain_depth，chain_depth ≥ 2 时 HookMark 升级为 GuiPopup
@@ -3157,6 +3527,10 @@ async fn forward_with_inbound_inspection(
 
         // 流结束（EOF / 提前断流），flush parser 解析残留未闭合 event
         let flushed = parser.flush();
+        // ADR-038：累计 flush 残留 events（流尾 usage / 末段文本可能在此）。
+        if let Some(acc) = billing_acc.as_mut() {
+            acc.observe_events(&flushed);
+        }
         // 修 R8-#2：flush 阶段同样传入 chain_depth，HookMark 升级逻辑一致
         let (blocking, hook_detections, flush_hold_detections) = classify_inbound_detections(
             &flushed,
@@ -3223,6 +3597,13 @@ async fn forward_with_inbound_inspection(
             let blocked_payload = build_sieve_blocked_sse(&flush_hold_detections);
             let _ = tx.send(Ok(hyper::body::Frame::data(blocked_payload))).await;
         }
+
+        // ADR-038：流处理结束 → 超额计费观测（completion + relay usage 已跨 chunk 累计）。
+        // 仅在流自然走到结尾时触发；中途被拦截 return 的流不观测（无完整 usage，可接受缺口）。
+        if let (Some(bctx), Some(acc)) = (billing_ctx, billing_acc) {
+            let claimed = acc.claimed();
+            spawn_billing_observation(Some(bctx), acc.completion, claimed);
+        }
     });
 
     let body_stream = ReceiverStream::new(rx);
@@ -3255,6 +3636,7 @@ async fn forward_with_openai_inbound_inspection(
     body_bytes: Bytes,
     meta: MultiAgentMeta,
     ctx: RequestCtx,
+    billing_ctx: Option<crate::billing::BillingContext>,
 ) -> Result<Response<ResponseBody>> {
     // 解构 ctx 供内部使用
     let RequestCtx {
@@ -3316,6 +3698,7 @@ async fn forward_with_openai_inbound_inspection(
                 listener_protocol,
                 listener_provider_id.clone(),
             ),
+            billing_ctx,
         )
         .await;
     }
@@ -3331,6 +3714,10 @@ async fn forward_with_openai_inbound_inspection(
         let meta = inbound_meta;
         let mut parser = OpenAiSseParser::new();
         let mut aggregator = Aggregator::new();
+        // ADR-038：仅 billing 启用时累计 OpenAI SSE usage + completion。
+        let mut billing_acc = billing_ctx
+            .as_ref()
+            .map(|_| BillingSseAccumulator::default());
 
         use http_body_util::BodyStream;
         let mut stream = BodyStream::new(resp_body);
@@ -3357,6 +3744,11 @@ async fn forward_with_openai_inbound_inspection(
                             return;
                         }
                     };
+
+                    // ADR-038：累计本批 SSE usage + completion（OpenAI SSE 观测）。
+                    if let Some(acc) = billing_acc.as_mut() {
+                        acc.observe_events(&events);
+                    }
 
                     // 修 R8-#2：传入 meta.chain_depth，chain_depth ≥ 2 时 HookMark 升级为 GuiPopup
                     let (blocking, hook_detections, hold_detections) = classify_inbound_detections(
@@ -3574,6 +3966,10 @@ async fn forward_with_openai_inbound_inspection(
 
         // 流结束（EOF / 提前断流），flush parser 解析残留
         let flushed = parser.flush();
+        // ADR-038：累计 flush 残留 events（流尾 usage / 末段文本可能在此）。
+        if let Some(acc) = billing_acc.as_mut() {
+            acc.observe_events(&flushed);
+        }
         // 修 R8-#2：flush 阶段同样传入 chain_depth，HookMark 升级逻辑一致
         let (blocking, hook_detections, flush_hold_detections) = classify_inbound_detections(
             &flushed,
@@ -3634,6 +4030,12 @@ async fn forward_with_openai_inbound_inspection(
             );
             let blocked_payload = build_sieve_blocked_sse(&flush_hold_detections);
             let _ = tx.send(Ok(hyper::body::Frame::data(blocked_payload))).await;
+        }
+
+        // ADR-038：流处理结束 → 超额计费观测（OpenAI SSE）。
+        if let (Some(bctx), Some(acc)) = (billing_ctx, billing_acc) {
+            let claimed = acc.claimed();
+            spawn_billing_observation(Some(bctx), acc.completion, claimed);
         }
     });
 
@@ -3986,6 +4388,7 @@ fn build_sieve_blocked_json_response(
 /// 命中 fail-closed Critical 时把响应 body 替换为 sieve_blocked JSON；否则原样透传。
 ///
 /// 不走 SSE 路径（tokio::spawn + channel tee），直接 await body 收集再决策。
+#[allow(clippy::too_many_arguments)]
 async fn handle_anthropic_json_inbound(
     resp_parts: http::response::Parts,
     resp_body: impl http_body::Body<Data = Bytes, Error = impl std::fmt::Display> + Send + 'static,
@@ -3994,6 +4397,7 @@ async fn handle_anthropic_json_inbound(
     meta: MultiAgentMeta,
     ipc: Option<Arc<sieve_ipc::IpcServer>>,
     ctx: RequestCtx,
+    billing_ctx: Option<crate::billing::BillingContext>,
 ) -> Result<Response<ResponseBody>> {
     // ADR-026 Stage E：listener_provider_id 透传到 record_into_sequence_and_detect，
     // listener_protocol 在 JSON 路径已确定（外层 proxy_inner 已校验），此处无消费者。
@@ -4023,6 +4427,14 @@ async fn handle_anthropic_json_inbound(
             return passthrough_json_response(resp_parts, body_bytes);
         }
     };
+
+    // ADR-038：超额计费观测（Anthropic JSON 路径）。relay 声明的 usage（顶层 `usage`）+
+    // 独立估算的 output（completion 全文）交叉比对，写 usage.db（fire-and-forget，永不上传）。
+    spawn_billing_observation(
+        billing_ctx,
+        anthropic_completion_text(&resp_json),
+        anthropic_claimed_usage(&resp_json),
+    );
 
     // 提取 content[] 中的 tool_use 块
     let content_arr = resp_json.get("content").and_then(|v| v.as_array());
@@ -4140,6 +4552,7 @@ async fn handle_anthropic_json_inbound(
 /// 漏洞修复（lessons.md 2026-04-27 [安全]）：上游返回 `application/json` 时，
 /// 解析 `choices[].message.tool_calls` 提取 function 调用，喂给 InboundFilter。
 /// 命中 fail-closed Critical 时替换响应 body 为 sieve_blocked JSON；否则原样透传。
+#[allow(clippy::too_many_arguments)]
 async fn handle_openai_json_inbound(
     resp_parts: http::response::Parts,
     resp_body: impl http_body::Body<Data = Bytes, Error = impl std::fmt::Display> + Send + 'static,
@@ -4148,6 +4561,7 @@ async fn handle_openai_json_inbound(
     meta: MultiAgentMeta,
     ipc: Option<Arc<sieve_ipc::IpcServer>>,
     ctx: RequestCtx,
+    billing_ctx: Option<crate::billing::BillingContext>,
 ) -> Result<Response<ResponseBody>> {
     // ADR-026 Stage E：listener_provider_id 透传到 record_into_sequence_and_detect，
     // listener_protocol 在 JSON 路径已确定（外层 proxy_inner 已校验），此处无消费者。
@@ -4174,6 +4588,14 @@ async fn handle_openai_json_inbound(
             return passthrough_json_response(resp_parts, body_bytes);
         }
     };
+
+    // ADR-038：超额计费观测（OpenAI JSON 路径，relay usage prompt_tokens/completion_tokens
+    // + 独立估算 output 交叉比对，写 usage.db；永不上传）。
+    spawn_billing_observation(
+        billing_ctx,
+        openai_completion_text(&resp_json),
+        openai_claimed_usage(&resp_json),
+    );
 
     // 遍历 choices[].message.tool_calls[]
     let choices = resp_json.get("choices").and_then(|v| v.as_array());

@@ -7,10 +7,16 @@
 //! ADR-028 新增：
 //! - `decisions`：headless decision CLI（TODO-4）
 //! - `audit`：unix-pipeable 审计查询（TODO-5）
+//!
+//! ADR-037 / ADR-038 新增：
+//! - `audit_keys`：full 档加密审计密钥生命周期（keygen / rotate-key / decrypt）
+//! - `usage`：本地 token 用量与超额计费查询（永不上传）
 
 pub mod audit;
+pub mod audit_keys;
 pub mod decisions;
 pub mod doctor;
 pub mod rules;
 pub mod setup;
 pub mod uninstall;
+pub mod usage;

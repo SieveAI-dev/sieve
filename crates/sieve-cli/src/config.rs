@@ -53,6 +53,28 @@ pub enum Protocol {
     Openai,
 }
 
+/// 上游信任级别（ADR-038 超额计费检测）。
+///
+/// - `Official`：官方直连（`api.anthropic.com` / `api.openai.com`）。relay 无法插手，
+///   上游回报的 `usage` **权威**，直接采纳，不必独立核算。
+/// - `Relay`：经第三方中转站。`usage` 是 relay 完全控制的响应体里的一段 JSON，视为
+///   **未经验证的声明**，开启 `[billing_check]` 时须独立核算 + 交叉比对。
+///
+/// 每个 [`UpstreamListener`] 未显式声明 `trust` 时由
+/// [`UpstreamListener::resolved_trust`] 按 URL host 派生；**无法判定时保守归为
+/// `Relay`**（把可信当不可信只多算一次，把不可信当可信会漏掉欺诈）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Trust {
+    Official,
+    Relay,
+}
+
+/// 内置官方 host 白名单（ADR-038 决策 1，「可配置扩展」MVP 硬编码两 host）。
+/// daemon trust 透传接通前仅被 `resolved_trust` + 单测消费，保留 allow 直到 Inc2 落地。
+#[allow(dead_code)]
+const OFFICIAL_HOSTS: &[&str] = &["api.anthropic.com", "api.openai.com"];
+
 /// 单 listener 上游配置（ADR-026 §决策 1）。
 ///
 /// 一个 sieve daemon 可同时绑定多个 port，每个 port 对应一个上游 LLM endpoint。
@@ -81,6 +103,13 @@ pub struct UpstreamListener {
     #[serde(default)]
     pub protocol: Protocol,
 
+    /// 上游信任级别（ADR-038）。`None`（未显式声明）时由
+    /// [`UpstreamListener::resolved_trust`] 按 URL host 派生：官方 host → `Official`，
+    /// 其余（含无法解析）→ `Relay`（保守 fail-closed）。仅 `Relay` 上游在开启
+    /// `[billing_check]` 时参与独立 token 核算。
+    #[serde(default)]
+    pub trust: Option<Trust>,
+
     /// 该 listener 专属上游代理 URL（覆盖全局 [`Config::proxy`]）。
     /// 形如 `socks5://127.0.0.1:6153` / `http://127.0.0.1:6152`（SPEC-007）。
     #[serde(default)]
@@ -107,6 +136,26 @@ impl UpstreamListener {
                 .map(|a| a.host().to_string())
                 .unwrap_or_else(|| "unknown".to_string()),
             Err(_) => "unknown".to_string(),
+        }
+    }
+
+    /// 规范化信任级别（ADR-038）：显式 `trust` 优先；否则按 URL host 派生——
+    /// 命中 [`OFFICIAL_HOSTS`] → [`Trust::Official`]，其余或无法解析 → [`Trust::Relay`]
+    /// （保守 fail-closed：宁可对官方多算一次，绝不把 relay 误当可信而漏掉欺诈）。
+    ///
+    /// daemon trust 透传接通前仅被单测消费，保留 `#[allow(dead_code)]` 直到 Inc2 落地
+    /// （与 [`UpstreamListener::resolved_provider_id`] 同款 Stage 渐进式接通）。
+    #[allow(dead_code)]
+    pub fn resolved_trust(&self) -> Trust {
+        if let Some(t) = self.trust {
+            return t;
+        }
+        match http::Uri::try_from(&self.url) {
+            Ok(uri) => match uri.authority().map(|a| a.host().to_string()) {
+                Some(host) if OFFICIAL_HOSTS.contains(&host.as_str()) => Trust::Official,
+                _ => Trust::Relay,
+            },
+            Err(_) => Trust::Relay,
         }
     }
 }
@@ -142,6 +191,97 @@ impl Default for UpdateConfig {
             url: None,
             check_interval_hours: 6,
             channel: "stable".to_string(),
+        }
+    }
+}
+
+/// 审计日志档位（ADR-037 决策 1）。
+///
+/// - `Off`：什么都不留。
+/// - `Metadata`（默认）：现状——只写 `audit.db` 元数据（fingerprint + 最小元信息），
+///   **零行为变化**。命名刻意避开既有术语 `decisions`（`~/.sieve/decisions/` 灰名单 +
+///   `sieve decisions` CLI），见 ADR-037。
+/// - `Full`（opt-in）：在 `Metadata` 基础上额外把**脱敏后**内容加密归档（write-only
+///   logging + 哈希链 + 保留期）。默认关闭。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AuditLevel {
+    Off,
+    #[default]
+    Metadata,
+    Full,
+}
+
+/// `full` 档归档段切分粒度（ADR-037 决策 5：保留期按段清理）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ArchiveRotation {
+    #[default]
+    Daily,
+    Weekly,
+    Monthly,
+}
+
+/// 加密审计日志配置（ADR-037 / SPEC-009）。对应 `[audit]` 段。
+///
+/// 整段可选；省略时 `level = metadata`（= 现状，零行为变化）。`full` 档的密钥
+/// 管理见 `sieve audit keygen`，daemon **只持公钥 `recipient`**，无解密能力。
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AuditConfig {
+    /// 日志档位（默认 `metadata`）。
+    pub level: AuditLevel,
+    /// `full` 档加密归档的 age recipient 公钥（`age1...`）。
+    /// `level = full` 时**必填**（[`Config::check_safety_invariants`] fail-fast 校验）；
+    /// daemon 只持此公钥，私钥离线（ADR-037 决策 3 write-only logging）。
+    pub recipient: Option<String>,
+    /// 归档段目录（`None` → `~/.sieve/audit-archive/`）。
+    pub archive_dir: Option<PathBuf>,
+    /// 保留期天数；超期段整段删除（ADR-037 决策 5）。`0` = 永久保留。
+    pub retention_days: u32,
+    /// 是否对归档记录加哈希链防篡改（ADR-037 决策 4，默认开）。
+    pub hash_chain: bool,
+    /// 归档段切分粒度（默认 `daily`）。
+    pub rotation: ArchiveRotation,
+}
+
+impl Default for AuditConfig {
+    fn default() -> Self {
+        Self {
+            level: AuditLevel::Metadata,
+            recipient: None,
+            archive_dir: None,
+            retention_days: 30,
+            hash_chain: true,
+            rotation: ArchiveRotation::Daily,
+        }
+    }
+}
+
+/// 超额计费检测配置（ADR-038 / SPEC-010）。对应 `[billing_check]` 段。
+///
+/// 整段可选；**默认全关**（`enabled = false`），不开启则零行为变化、零新增出站、
+/// 零计算开销。
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct BillingCheckConfig {
+    /// 是否启用超额计费检测（默认 `false`）。仅对 `Relay` 上游生效。
+    pub enabled: bool,
+    /// 偏差容差百分比（默认 `15.0`）。独立计数与 relay 声明偏差超此值则报警。
+    /// 远高于 tokenizer 噪声 ±5~10%、远低于欺诈量级 +50%（ADR-038 决策 2）。
+    pub tolerance_pct: f64,
+    /// 是否允许调官方 `count_tokens` 直连（**默认 `false`**，ADR-038 决策 5 路径 C）。
+    /// 唯一可能触发 Sieve 主动出站的开关；仅用户显式开启才生效，且 UI 须显著警示
+    /// 「会向官方 endpoint 发起一次主动出站」。默认姿态下 PRD §9 #2 一字不破。
+    pub count_tokens_optin: bool,
+}
+
+impl Default for BillingCheckConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            tolerance_pct: 15.0,
+            count_tokens_optin: false,
         }
     }
 }
@@ -263,6 +403,15 @@ pub struct Config {
     /// `channel = "stable"`).
     #[serde(default)]
     pub update: UpdateConfig,
+
+    /// 加密审计日志配置（ADR-037）。`[audit]` 段可选；省略时 `level = metadata`
+    /// （现状，零行为变化）。
+    #[serde(default)]
+    pub audit: AuditConfig,
+
+    /// 超额计费检测配置（ADR-038）。`[billing_check]` 段可选；默认全关。
+    #[serde(default)]
+    pub billing_check: BillingCheckConfig,
 }
 
 fn home_path() -> PathBuf {
@@ -341,6 +490,8 @@ impl Default for Config {
             gui_socket_enabled: default_gui_socket_enabled(),
             audit_db_path: None,
             update: UpdateConfig::default(),
+            audit: AuditConfig::default(),
+            billing_check: BillingCheckConfig::default(),
         }
     }
 }
@@ -384,6 +535,37 @@ impl Config {
                     "duplicate listener port {} in `upstreams`. \
                      Each listener must bind a unique port. See ADR-026.",
                     u.port
+                ));
+            }
+        }
+
+        // ADR-037: `full` 档必须配置 age recipient 公钥，否则归档无处加密。
+        // daemon 只持公钥（write-only logging），缺它则无法初始化 ArchiveWriter。
+        if self.audit.level == AuditLevel::Full {
+            match self.audit.recipient.as_deref() {
+                None | Some("") => {
+                    return Err(
+                        "audit.level = \"full\" requires `audit.recipient` (an age public \
+                         key, e.g. age1...). Run `sieve audit keygen` first. See ADR-037."
+                            .to_string(),
+                    );
+                }
+                Some(r) if !r.starts_with("age1") => {
+                    return Err(format!(
+                        "audit.recipient must be an age public key starting with `age1` \
+                         (got {r:?}). See ADR-037."
+                    ));
+                }
+                _ => {}
+            }
+        }
+
+        // ADR-038: 容差必须是 (0, 100] 的正数百分比，否则比对无意义。
+        if self.billing_check.enabled {
+            let tol = self.billing_check.tolerance_pct;
+            if !(tol > 0.0 && tol <= 100.0) {
+                return Err(format!(
+                    "billing_check.tolerance_pct must be in (0, 100] (got {tol}). See ADR-038."
                 ));
             }
         }
@@ -447,6 +629,9 @@ impl Config {
             // legacy 单 upstream 未声明协议 → Auto：按 path 自适应，不强制错位
             // （ADR-026 §决策 1 向后兼容 + PRD §9 #16/#9 双协议）。
             protocol: Protocol::Auto,
+            // trust 留 None → resolved_trust() 按实际 url host 派生（默认 upstream_url
+            // 指向 api.anthropic.com → Official；用户改成 relay 则派生 Relay，ADR-038）。
+            trust: None,
             proxy: None,
             no_proxy: false,
         }]
@@ -834,6 +1019,7 @@ mod tests {
             url: "https://api.deepseek.com/anthropic".to_string(),
             provider_id: "my-deepseek-relay".to_string(),
             protocol: Protocol::Anthropic,
+            trust: None,
             proxy: None,
             no_proxy: false,
         };
@@ -847,6 +1033,7 @@ mod tests {
             url: "https://api.deepseek.com/anthropic".to_string(),
             provider_id: String::new(),
             protocol: Protocol::Anthropic,
+            trust: None,
             proxy: None,
             no_proxy: false,
         };
@@ -860,6 +1047,7 @@ mod tests {
             url: "not a uri !!!".to_string(),
             provider_id: String::new(),
             protocol: Protocol::Anthropic,
+            trust: None,
             proxy: None,
             no_proxy: false,
         };
@@ -876,6 +1064,7 @@ mod tests {
                     url: "https://api.anthropic.com".to_string(),
                     provider_id: "anthropic".to_string(),
                     protocol: Protocol::Anthropic,
+                    trust: None,
                     proxy: None,
                     no_proxy: false,
                 },
@@ -884,6 +1073,7 @@ mod tests {
                     url: "https://api.deepseek.com/anthropic".to_string(),
                     provider_id: "deepseek".to_string(),
                     protocol: Protocol::Anthropic,
+                    trust: None,
                     proxy: None,
                     no_proxy: false,
                 },
@@ -925,6 +1115,7 @@ mod tests {
                     url: "https://api.anthropic.com".to_string(),
                     provider_id: "anthropic".to_string(),
                     protocol: Protocol::Anthropic,
+                    trust: None,
                     proxy: None,
                     no_proxy: false,
                 },
@@ -933,6 +1124,7 @@ mod tests {
                     url: "https://api.deepseek.com/anthropic".to_string(),
                     provider_id: "deepseek".to_string(),
                     protocol: Protocol::Anthropic,
+                    trust: None,
                     proxy: None,
                     no_proxy: false,
                 },
@@ -941,6 +1133,7 @@ mod tests {
                     url: "https://api.openai.com".to_string(),
                     provider_id: "openai".to_string(),
                     protocol: Protocol::Openai,
+                    trust: None,
                     proxy: None,
                     no_proxy: false,
                 },
@@ -961,5 +1154,211 @@ mod tests {
         "#;
         let result: Result<Config, _> = toml::from_str(toml_str);
         assert!(result.is_err(), "UpstreamListener 应拒绝未知字段");
+    }
+
+    // ── ADR-038 信任分级（Trust）────────────────────────────────────────────
+
+    fn listener(url: &str, trust: Option<Trust>) -> UpstreamListener {
+        UpstreamListener {
+            port: 11453,
+            url: url.to_string(),
+            provider_id: String::new(),
+            protocol: Protocol::Auto,
+            trust,
+            proxy: None,
+            no_proxy: false,
+        }
+    }
+
+    #[test]
+    fn resolved_trust_official_hosts_derive_official() {
+        assert_eq!(
+            listener("https://api.anthropic.com", None).resolved_trust(),
+            Trust::Official
+        );
+        assert_eq!(
+            listener("https://api.openai.com/v1", None).resolved_trust(),
+            Trust::Official
+        );
+    }
+
+    #[test]
+    fn resolved_trust_relay_host_derives_relay() {
+        assert_eq!(
+            listener("https://some-relay.example.com/anthropic", None).resolved_trust(),
+            Trust::Relay
+        );
+    }
+
+    #[test]
+    fn resolved_trust_unparseable_url_is_relay_fail_closed() {
+        // 无法解析 host → 保守归为 Relay（绝不把不可信误当可信）。
+        assert_eq!(
+            listener("not a uri !!!", None).resolved_trust(),
+            Trust::Relay
+        );
+    }
+
+    #[test]
+    fn resolved_trust_explicit_overrides_host_derivation() {
+        // 显式声明优先：即便 host 是官方，显式标 relay 也按 relay（反之亦然）。
+        assert_eq!(
+            listener("https://api.anthropic.com", Some(Trust::Relay)).resolved_trust(),
+            Trust::Relay
+        );
+        assert_eq!(
+            listener("https://shady-relay.io", Some(Trust::Official)).resolved_trust(),
+            Trust::Official
+        );
+    }
+
+    #[test]
+    fn legacy_upstream_maps_to_official_via_host() {
+        // 旧字段默认 upstream_url = api.anthropic.com → resolved_trust 派生 Official。
+        let c = Config::default();
+        let ups = c.resolved_upstreams();
+        assert_eq!(ups.len(), 1);
+        assert_eq!(ups[0].resolved_trust(), Trust::Official);
+    }
+
+    // ── ADR-037 / ADR-038 config schema 默认值与 fail-fast ──────────────────
+
+    #[test]
+    fn audit_and_billing_defaults_are_off_or_status_quo() {
+        let c = Config::default();
+        // ADR-037：默认 metadata（= 现状，零行为变化），full 默认关。
+        assert_eq!(c.audit.level, AuditLevel::Metadata);
+        assert_eq!(c.audit.retention_days, 30);
+        assert!(c.audit.hash_chain);
+        assert_eq!(c.audit.rotation, ArchiveRotation::Daily);
+        assert!(c.audit.recipient.is_none());
+        // ADR-038：默认全关。
+        assert!(!c.billing_check.enabled);
+        assert!(!c.billing_check.count_tokens_optin);
+        assert_eq!(c.billing_check.tolerance_pct, 15.0);
+    }
+
+    #[test]
+    fn audit_full_without_recipient_is_rejected() {
+        let c = Config {
+            audit: AuditConfig {
+                level: AuditLevel::Full,
+                recipient: None,
+                ..AuditConfig::default()
+            },
+            ..Config::default()
+        };
+        let err = c.check_safety_invariants().unwrap_err();
+        assert!(
+            err.contains("audit.recipient"),
+            "full 档缺 recipient 应被拒，实际: {err}"
+        );
+    }
+
+    #[test]
+    fn audit_full_with_non_age_recipient_is_rejected() {
+        let c = Config {
+            audit: AuditConfig {
+                level: AuditLevel::Full,
+                recipient: Some("ssh-ed25519 AAAA...".to_string()),
+                ..AuditConfig::default()
+            },
+            ..Config::default()
+        };
+        let err = c.check_safety_invariants().unwrap_err();
+        assert!(err.contains("age1"), "非 age 公钥应被拒，实际: {err}");
+    }
+
+    #[test]
+    fn audit_full_with_valid_recipient_passes() {
+        let c = Config {
+            audit: AuditConfig {
+                level: AuditLevel::Full,
+                recipient: Some(
+                    "age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p".to_string(),
+                ),
+                ..AuditConfig::default()
+            },
+            ..Config::default()
+        };
+        assert!(c.check_safety_invariants().is_ok());
+    }
+
+    #[test]
+    fn billing_tolerance_out_of_range_is_rejected() {
+        for bad in [0.0, -5.0, 150.0] {
+            let c = Config {
+                billing_check: BillingCheckConfig {
+                    enabled: true,
+                    tolerance_pct: bad,
+                    ..BillingCheckConfig::default()
+                },
+                ..Config::default()
+            };
+            let err = c.check_safety_invariants().unwrap_err();
+            assert!(
+                err.contains("tolerance_pct"),
+                "容差 {bad} 越界应被拒，实际: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn billing_disabled_skips_tolerance_validation() {
+        // 未启用时即便容差越界也不报错（零开销，不校验）。
+        let c = Config {
+            billing_check: BillingCheckConfig {
+                enabled: false,
+                tolerance_pct: 0.0,
+                ..BillingCheckConfig::default()
+            },
+            ..Config::default()
+        };
+        assert!(c.check_safety_invariants().is_ok());
+    }
+
+    #[test]
+    fn audit_and_billing_sections_parse_from_toml() {
+        let toml_str = r#"
+            [audit]
+            level = "full"
+            recipient = "age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p"
+            retention_days = 7
+            hash_chain = true
+            rotation = "weekly"
+
+            [billing_check]
+            enabled = true
+            tolerance_pct = 20.0
+            count_tokens_optin = true
+
+            [[upstream]]
+            port = 11454
+            url = "https://some-relay.example.com/anthropic"
+            trust = "relay"
+        "#;
+        let c: Config = toml::from_str(toml_str).expect("应能解析 [audit]/[billing_check]/trust");
+        assert_eq!(c.audit.level, AuditLevel::Full);
+        assert_eq!(c.audit.rotation, ArchiveRotation::Weekly);
+        assert_eq!(c.audit.retention_days, 7);
+        assert!(c.billing_check.enabled);
+        assert_eq!(c.billing_check.tolerance_pct, 20.0);
+        assert!(c.billing_check.count_tokens_optin);
+        assert_eq!(c.upstreams[0].trust, Some(Trust::Relay));
+        assert_eq!(c.upstreams[0].resolved_trust(), Trust::Relay);
+    }
+
+    #[test]
+    fn audit_rejects_unknown_field() {
+        // [audit] 带 deny_unknown_fields。
+        let toml_str = r#"
+            [audit]
+            level = "metadata"
+            disable_encryption = true
+        "#;
+        assert!(
+            toml::from_str::<Config>(toml_str).is_err(),
+            "[audit] 应拒绝未知字段"
+        );
     }
 }
