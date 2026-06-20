@@ -191,7 +191,10 @@ mod tests {
         let sig_hex = hex::encode(signing.sign(b"original payload").to_bytes());
         let err = verify_signature_with_key(b"tampered payload", &sig_hex, Some(pubkey))
             .expect_err("tampered data must be rejected (fail-closed)");
-        assert!(matches!(err, UpdaterError::Ed25519Failed(_)), "got: {err:?}");
+        assert!(
+            matches!(err, UpdaterError::Ed25519Failed(_)),
+            "got: {err:?}"
+        );
     }
 
     /// 用错误公钥验真签名 → 拒绝（防止换公钥绕过）。
@@ -199,31 +202,46 @@ mod tests {
     fn signature_wrong_key_rejected() {
         use ed25519_dalek::{Signer, SigningKey};
         let signing = SigningKey::from_bytes(&[7u8; 32]);
-        let other_pubkey = SigningKey::from_bytes(&[9u8; 32]).verifying_key().to_bytes();
+        let other_pubkey = SigningKey::from_bytes(&[9u8; 32])
+            .verifying_key()
+            .to_bytes();
         let data = b"rule bundle payload";
         let sig_hex = hex::encode(signing.sign(data).to_bytes());
         let err = verify_signature_with_key(data, &sig_hex, Some(other_pubkey))
             .expect_err("signature under different key must be rejected");
-        assert!(matches!(err, UpdaterError::Ed25519Failed(_)), "got: {err:?}");
+        assert!(
+            matches!(err, UpdaterError::Ed25519Failed(_)),
+            "got: {err:?}"
+        );
     }
 
     /// 真公钥 + 非法 hex 签名 → 拒绝。
     #[test]
     fn signature_bad_hex_rejected_with_real_key() {
         use ed25519_dalek::SigningKey;
-        let pubkey = SigningKey::from_bytes(&[7u8; 32]).verifying_key().to_bytes();
+        let pubkey = SigningKey::from_bytes(&[7u8; 32])
+            .verifying_key()
+            .to_bytes();
         let err = verify_signature_with_key(b"data", "not-valid-hex!!", Some(pubkey))
             .expect_err("invalid signature hex must be rejected");
-        assert!(matches!(err, UpdaterError::Ed25519Failed(_)), "got: {err:?}");
+        assert!(
+            matches!(err, UpdaterError::Ed25519Failed(_)),
+            "got: {err:?}"
+        );
     }
 
     /// 真公钥 + 非 64 字节签名 → 拒绝。
     #[test]
     fn signature_wrong_length_rejected_with_real_key() {
         use ed25519_dalek::SigningKey;
-        let pubkey = SigningKey::from_bytes(&[7u8; 32]).verifying_key().to_bytes();
+        let pubkey = SigningKey::from_bytes(&[7u8; 32])
+            .verifying_key()
+            .to_bytes();
         let err = verify_signature_with_key(b"data", "deadbeef", Some(pubkey))
             .expect_err("non-64-byte signature must be rejected");
-        assert!(matches!(err, UpdaterError::Ed25519Failed(_)), "got: {err:?}");
+        assert!(
+            matches!(err, UpdaterError::Ed25519Failed(_)),
+            "got: {err:?}"
+        );
     }
 }
