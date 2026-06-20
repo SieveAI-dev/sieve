@@ -46,4 +46,11 @@ pub enum UpdaterError {
     /// Downloaded payload exceeded the configured maximum size.
     #[error("response too large: got {size} bytes, max {max} bytes")]
     ResponseTooLarge { size: usize, max: usize },
+
+    /// The manifest `version` string is not a safe single path component
+    /// (path separator / parent ref / empty). Rejected fail-closed before any
+    /// filesystem use, because `version` is server-controlled and the ed25519
+    /// signature is fail-open while the signing trust key is not yet configured.
+    #[error("invalid version string (path-unsafe): {0}")]
+    InvalidVersion(String),
 }

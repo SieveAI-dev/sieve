@@ -38,6 +38,15 @@ pub async fn install_rules(
     version: &str,
     dest_dir: &Path,
 ) -> Result<PathBuf, UpdaterError> {
+    // Step 0: reject a path-unsafe `version` before touching the filesystem.
+    // `version` is interpolated into on-disk paths (`<dest_dir>/<version>.json`,
+    // `.tmp-<version>.json`, `current.json` → `<version>.json`) and originates
+    // from the server-controlled manifest (`manifest.rs` `version: String`, no
+    // validator). The ed25519 signature is fail-open while `TRUSTED_PUBKEY =
+    // None`, so a malicious / MITM manifest with `version = "../../../tmp/evil"`
+    // would otherwise write outside `dest_dir`. Fail-closed here.
+    validate_version_component(version)?;
+
     // Step 1: sha256 integrity check.
     verify_sha256(payload, expected_sha256)?;
 
@@ -77,6 +86,25 @@ pub async fn install_rules(
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
+
+/// Rejects a `version` that is not a safe single path component.
+///
+/// Allowed: non-empty, only ASCII `[A-Za-z0-9._-]`, and no `..` substring. This
+/// admits every real version form (`2026.05.05.1`, `v1.0`, `0.1.0-alpha`) while
+/// rejecting path separators (`/`, `\`), parent refs (`..`), and absolute paths
+/// — i.e. anything that could escape `dest_dir` when interpolated into a path.
+fn validate_version_component(version: &str) -> Result<(), UpdaterError> {
+    let safe = !version.is_empty()
+        && !version.contains("..")
+        && version
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'));
+    if safe {
+        Ok(())
+    } else {
+        Err(UpdaterError::InvalidVersion(version.to_owned()))
+    }
+}
 
 /// zstd frame magic number `0xFD2FB528`, stored little-endian on disk as the
 /// 4 bytes `0x28 0xB5 0x2F 0xFD` (RFC 8878 §3.1.1). A real zstd stream begins
@@ -384,6 +412,57 @@ mod tests {
             serde_json::from_slice(&std::fs::read(dest.join("latest_version.json")).unwrap())
                 .unwrap();
         assert_eq!(lv["version"], "v2.0");
+    }
+
+    /// Path-traversal / path-unsafe `version` must be rejected fail-closed
+    /// before any filesystem work (server-controlled field; sig is fail-open).
+    #[tokio::test]
+    async fn rejects_path_unsafe_version() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dest = tmp.path().join("rules");
+        let payload = zstd_encode(b"{}");
+        let sha = sha256_hex(&payload);
+
+        for bad in [
+            "../../../tmp/evil",
+            "..",
+            "a/b",
+            "a\\b",
+            "",
+            "x/../y",
+            "/abs",
+            "..foo",
+        ] {
+            let err = install_rules(&payload, &sha, "sig", bad, &dest)
+                .await
+                .expect_err("path-unsafe version must be rejected");
+            assert!(
+                matches!(err, UpdaterError::InvalidVersion(_)),
+                "version {bad:?} must be InvalidVersion, got {err:?}"
+            );
+        }
+
+        // A rejected install must not have created dest_dir or written anything.
+        assert!(
+            !dest.exists(),
+            "dest_dir must not be created for a rejected version"
+        );
+    }
+
+    /// Real-world version forms must remain valid (guard must not over-reject).
+    #[test]
+    fn validate_version_accepts_real_versions() {
+        for ok in [
+            "2026.05.05.1",
+            "v1.0",
+            "0.1.0-alpha",
+            "v2.0",
+            "plain.1",
+            "2026.01.01.1",
+        ] {
+            validate_version_component(ok)
+                .unwrap_or_else(|e| panic!("{ok:?} should be valid: {e:?}"));
+        }
     }
 
     /// `read_installed_version` returns None when no metadata file exists.
