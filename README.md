@@ -101,7 +101,7 @@ cargo install sieve                                                  # from crat
 
 **4. Manual (for the paranoid)** — download the signed `.dmg` (GUI) or bare binary from [GitHub Releases](https://github.com/SieveAI-dev/sieve/releases) and verify the cosign signature by hand. See [Verify it yourself](#verify-it-yourself) below and [deployment.md](./docs/guides/deployment.md).
 
-After install, GUI users mount the `.dmg`, drag `Sieve.app` into `/Applications`, and on first launch run `sieve setup`. Linux and Windows are deferred to Phase 2.
+After install, GUI users mount the `.dmg`, drag `SieveGUI.app` into `/Applications`, and on first launch run `sieve setup`. Linux and Windows are deferred to Phase 2.
 
 ### Connect your agent
 
@@ -133,8 +133,8 @@ Verification already happened automatically during install — the installer (an
 cosign verify-blob \
   --certificate-identity-regexp '^https://github.com/SieveAI-dev/sieve/\.github/workflows/release\.yml@refs/tags/v[0-9.]+$' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-  --bundle Sieve-<version>.dmg.sigstore \
-  Sieve-<version>.dmg
+  --bundle SieveGUI-<version>.dmg.sigstore \
+  SieveGUI-<version>.dmg
 # expected output: Verified OK
 ```
 

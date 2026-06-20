@@ -6,7 +6,7 @@
 | 文件 | 装什么 | 用户命令 |
 |------|--------|---------|
 | `sieve.rb`（formula） | CLI/daemon 二进制 `sieve` | `brew install sieve` |
-| `Casks/sieve.rb`（cask） | GUI `Sieve.app` | `brew install --cask sieve` |
+| `Casks/sieve.rb`（cask） | GUI `SieveGUI.app` | `brew install --cask sieve` |
 
 ## 为什么用 Homebrew
 
@@ -41,7 +41,7 @@ formula/cask 当前的 `version` 与 `sha256` 是 **pre-GA 占位**（全零 sha
    与 `sieve-x86_64-apple-darwin` 的真实 sha256，填入对应 `on_arm`/`on_intel` 块；把 `version`
    改为该 release tag（去掉 `v` 前缀）。
 2. **GUI（`Casks/sieve.rb`）**：从 sieve-gui-macos 仓 release 取 `.dmg` 的 sha256
-   （`shasum -a 256 Sieve-<ver>.dmg`），填入 `sha256`；改 `version`。
+   （`shasum -a 256 SieveGUI-<ver>.dmg`），填入 `sha256`；改 `version`。
 3. 把更新后的两个文件复制到 `homebrew-sieve` 仓并提交。
 4. 验证：`brew install --build-from-source ./sieve.rb` 或 `brew audit --strict sieve`。
 

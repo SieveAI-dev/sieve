@@ -82,7 +82,7 @@ cargo install sieve                                                  # crates.io
 
 **4. 手动（给偏执狂）**——从 [GitHub Releases](https://github.com/SieveAI-dev/sieve/releases) 下签名 `.dmg`（GUI）或裸二进制，手动用 cosign 验签。见下方[给偏执狂的完整验证](#给偏执狂的完整验证)与 [deployment.md](./docs/guides/deployment.md)。
 
-安装后，GUI 用户挂载 `.dmg`，将 `Sieve.app` 拖入 `/Applications`，首次启动运行 `sieve setup`。Linux、Windows 推后到 Phase 2。
+安装后，GUI 用户挂载 `.dmg`，将 `SieveGUI.app` 拖入 `/Applications`，首次启动运行 `sieve setup`。Linux、Windows 推后到 Phase 2。
 
 ### 接入你的 agent
 
@@ -112,8 +112,8 @@ sieve doctor
 cosign verify-blob \
   --certificate-identity-regexp '^https://github.com/SieveAI-dev/sieve/\.github/workflows/release\.yml@refs/tags/v[0-9.]+$' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-  --bundle Sieve-<version>.dmg.sigstore \
-  Sieve-<version>.dmg
+  --bundle SieveGUI-<version>.dmg.sigstore \
+  SieveGUI-<version>.dmg
 # 期望输出：Verified OK
 ```
 

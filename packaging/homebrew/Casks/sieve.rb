@@ -11,14 +11,14 @@ cask "sieve" do
   version "0.1.0"
   sha256 "0000000000000000000000000000000000000000000000000000000000000000" # REPLACE: .dmg sha256
 
-  url "https://github.com/SieveAI-dev/sieve-gui-macos/releases/download/v#{version}/Sieve-#{version}.dmg"
-  name "Sieve"
+  url "https://github.com/SieveAI-dev/sieve-gui-macos/releases/download/v#{version}/SieveGUI-#{version}.dmg"
+  name "Sieve GUI"
   desc "Local-only LLM traffic security proxy for crypto developers (GUI)"
   homepage "https://github.com/SieveAI-dev/sieve"
 
   depends_on macos: ">= :ventura"
 
-  app "Sieve.app"
+  app "SieveGUI.app"
 
   zap trash: [
     "~/Library/Caches/sieve",

@@ -49,8 +49,8 @@ cargo install sieve                                                  # crates.io
 
 **GUI 安装后续步骤**（路径 ① cask 或路径 ④ .dmg）：
 
-1. 双击挂载 .dmg，将 Sieve.app 拖入 `/Applications`（cask 已自动放置）
-2. 首次启动 Sieve.app，按引导运行初始化：
+1. 双击挂载 .dmg，将 SieveGUI.app 拖入 `/Applications`（cask 已自动放置）
+2. 首次启动 SieveGUI.app，按引导运行初始化：
    ```bash
    sieve setup
    ```
@@ -128,8 +128,8 @@ Phase 1 仅 macOS：
 cosign verify-blob \
   --certificate-identity-regexp '^https://github.com/SieveAI-dev/sieve/\.github/workflows/release\.yml@refs/tags/v[0-9.]+$' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-  --bundle Sieve-<version>.dmg.sigstore \
-  Sieve-<version>.dmg
+  --bundle SieveGUI-<version>.dmg.sigstore \
+  SieveGUI-<version>.dmg
 
 # 期望输出
 # Verified OK
@@ -147,7 +147,7 @@ cosign verify-blob \
 
 ```bash
 # 用 .dmg SHA-256 查询所有签名记录
-SHA=$(shasum -a 256 Sieve-<version>.dmg | awk '{print $1}')
+SHA=$(shasum -a 256 SieveGUI-<version>.dmg | awk '{print $1}')
 rekor-cli search --sha $SHA
 
 # 或在浏览器搜索
@@ -171,7 +171,7 @@ cd sieve
 
 # 3. 对比 SHA-256
 shasum -a 256 target/repro/sieve-macos-arm64
-shasum -a 256 ../Sieve-<version>.dmg
+shasum -a 256 ../SieveGUI-<version>.dmg
 
 # 期望：两个 SHA-256 完全一致
 ```
