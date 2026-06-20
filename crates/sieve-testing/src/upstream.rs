@@ -229,6 +229,27 @@ pub mod responses {
         json_200(anthropic_json_bytes(text))
     }
 
+    /// Anthropic JSON 响应，**自定义 `usage`**（ADR-038 超额计费检测测试：模拟 relay 虚报
+    /// token 用量——声明值远高于内容实际）。
+    #[must_use]
+    pub fn anthropic_json_response_with_usage(
+        text: &str,
+        input_tokens: u64,
+        output_tokens: u64,
+    ) -> Response<Full<Bytes>> {
+        let json = serde_json::json!({
+            "id": "msg_01",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-sonnet-4-5",
+            "content": [{ "type": "text", "text": text }],
+            "stop_reason": "end_turn",
+            "stop_sequence": serde_json::Value::Null,
+            "usage": { "input_tokens": input_tokens, "output_tokens": output_tokens }
+        });
+        json_200(Bytes::from(json.to_string()))
+    }
+
     /// Anthropic 流式 SSE 响应：每个 delta 一个 `content_block_delta` text_delta，返回裸 bytes。
     ///
     /// 含完整的 `message_start` / `content_block_start` / `content_block_stop` /
@@ -358,6 +379,87 @@ pub mod responses {
         }
         let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();
         openai_sse_raw(&refs)
+    }
+
+    /// Anthropic 流式 SSE，**自定义 usage**（ADR-038 超额计费检测测试）：`message_start` 带
+    /// `input_tokens`、`message_delta` 带 `output_tokens`，模拟 relay 虚报。
+    #[must_use]
+    pub fn anthropic_sse_bytes_with_usage(
+        text: &str,
+        input_tokens: u64,
+        output_tokens: u64,
+    ) -> Bytes {
+        let escaped = json_escape(text);
+        let msg_start = format!(
+            r#"{{"type":"message_start","message":{{"id":"m","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-5","usage":{{"input_tokens":{input_tokens},"output_tokens":1}}}}}}"#
+        );
+        let cb_delta = format!(
+            r#"{{"type":"content_block_delta","index":0,"delta":{{"type":"text_delta","text":"{escaped}"}}}}"#
+        );
+        let msg_delta = format!(
+            r#"{{"type":"message_delta","delta":{{"stop_reason":"end_turn","stop_sequence":null}},"usage":{{"output_tokens":{output_tokens}}}}}"#
+        );
+        let events: Vec<(&str, &str)> = vec![
+            ("message_start", &msg_start),
+            (
+                "content_block_start",
+                r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#,
+            ),
+            ("content_block_delta", &cb_delta),
+            (
+                "content_block_stop",
+                r#"{"type":"content_block_stop","index":0}"#,
+            ),
+            ("message_delta", &msg_delta),
+            ("message_stop", r#"{"type":"message_stop"}"#),
+        ];
+        anthropic_sse_raw(&events)
+    }
+
+    /// OpenAI 流式 SSE，**自定义 usage**（ADR-038）：content chunk + finish chunk + 末尾
+    /// usage chunk（`choices:[]` + `usage:{prompt_tokens, completion_tokens}`，即 include_usage）。
+    #[must_use]
+    pub fn openai_sse_bytes_with_usage(
+        text: &str,
+        prompt_tokens: u64,
+        completion_tokens: u64,
+    ) -> Bytes {
+        let escaped = json_escape(text);
+        let content = format!(
+            r#"{{"id":"x","object":"chat.completion.chunk","created":0,"model":"gpt-4o","choices":[{{"index":0,"delta":{{"content":"{escaped}"}},"finish_reason":null}}]}}"#
+        );
+        let finish = r#"{"id":"x","object":"chat.completion.chunk","created":0,"model":"gpt-4o","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"#.to_owned();
+        let usage = format!(
+            r#"{{"id":"x","object":"chat.completion.chunk","created":0,"model":"gpt-4o","choices":[],"usage":{{"prompt_tokens":{prompt_tokens},"completion_tokens":{completion_tokens},"total_tokens":{}}}}}"#,
+            prompt_tokens + completion_tokens
+        );
+        openai_sse_raw(&[&content, &finish, &usage])
+    }
+
+    /// OpenAI 非流式 JSON 响应，**自定义 usage**（ADR-038），返回完整 `Response<Full<Bytes>>`。
+    #[must_use]
+    pub fn openai_json_response_with_usage(
+        text: &str,
+        prompt_tokens: u64,
+        completion_tokens: u64,
+    ) -> Response<Full<Bytes>> {
+        let json = serde_json::json!({
+            "id": "chatcmpl-01",
+            "object": "chat.completion",
+            "created": 1_700_000_000u64,
+            "model": "gpt-4o",
+            "choices": [{
+                "index": 0,
+                "message": { "role": "assistant", "content": text },
+                "finish_reason": "stop"
+            }],
+            "usage": {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens
+            }
+        });
+        json_200(Bytes::from(json.to_string()))
     }
 
     /// 401 认证错误 JSON 响应（Anthropic 风格 error envelope），返回完整 `Response<Full<Bytes>>`。

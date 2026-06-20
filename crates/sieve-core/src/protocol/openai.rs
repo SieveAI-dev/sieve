@@ -135,6 +135,11 @@ pub struct OpenAIStreamingChunk {
     pub model: String,
     /// 候选输出列表（通常只有 index=0 一条）。
     pub choices: Vec<OpenAIChoiceDelta>,
+    /// token 用量（仅 `stream_options.include_usage=true` 时，在 `choices` 为空的
+    /// 末尾 chunk 出现：`{prompt_tokens, completion_tokens, total_tokens}`）。原始 JSON
+    /// 透传，供 ADR-038 超额计费观测消费；缺省 `None`（绝大多数 chunk 无此字段）。
+    #[serde(default)]
+    pub usage: Option<serde_json::Value>,
 }
 
 /// 流式 chunk 中的单个候选输出。

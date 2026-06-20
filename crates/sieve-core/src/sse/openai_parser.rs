@@ -103,13 +103,23 @@ impl OpenAiSseParser {
             Err(_) => return Vec::new(),
         };
 
-        // Phase 1：只处理 choices[0]
+        let mut events = Vec::new();
+
+        // ADR-038：include_usage 时末尾 chunk（choices 为空）携带 usage → 归一化为
+        // MessageDelta，与 Anthropic SSE 对齐，供超额计费观测消费（否则 OpenAI SSE 拿不到
+        // relay 声明的 usage，四路径覆盖留缺口）。
+        if let Some(usage) = chunk.usage {
+            events.push(SseEvent::MessageDelta {
+                delta: serde_json::json!({}),
+                usage: Some(usage),
+            });
+        }
+
+        // Phase 1：只处理 choices[0]；usage-only chunk（choices 为空）返回上面已累计的 events。
         let choice = match chunk.choices.into_iter().next() {
             Some(c) => c,
-            None => return Vec::new(),
+            None => return events,
         };
-
-        let mut events = Vec::new();
 
         // finish_reason 处理（ADR-018 §finish_reason 处理）
         // 注意：先处理 tool_calls delta（包含 Start/Delta），再发 Stop + MessageStop，
@@ -355,6 +365,29 @@ mod tests {
 
     fn make_data(json: &str) -> Vec<u8> {
         format!("data: {}\n\n", json).into_bytes()
+    }
+
+    // ─── ADR-038: include_usage 末尾 chunk（choices 空）→ MessageDelta 带 usage ──
+    #[test]
+    fn openai_usage_only_chunk_emits_message_delta() {
+        let mut p = OpenAiSseParser::new();
+        let json = r#"{"id":"x","object":"chat.completion.chunk","created":0,"model":"gpt-4o","choices":[],"usage":{"prompt_tokens":12,"completion_tokens":34,"total_tokens":46}}"#;
+        let events = p.feed(&make_data(json)).unwrap();
+        let usage = events
+            .iter()
+            .find_map(|e| match e {
+                SseEvent::MessageDelta { usage: Some(u), .. } => Some(u.clone()),
+                _ => None,
+            })
+            .expect("usage-only chunk 应发 MessageDelta 带 usage");
+        assert_eq!(
+            usage.get("prompt_tokens").and_then(|v| v.as_u64()),
+            Some(12)
+        );
+        assert_eq!(
+            usage.get("completion_tokens").and_then(|v| v.as_u64()),
+            Some(34)
+        );
     }
 
     // ─── Test 1: minimal 单条 data 含 delta.content="hi" ────────────────────
