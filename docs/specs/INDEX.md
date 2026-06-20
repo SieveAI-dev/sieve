@@ -1,6 +1,6 @@
 # SPEC 索引
 
-> 最后更新：2026-06-07
+> 最后更新：2026-06-19
 
 本目录收纳 Sieve daemon 的工程级技术规格（功能落地详细度高于 ADR）。每个 SPEC 一个模块，禁止合并。版本号写在文件第一行 `> Version:` 标注里。
 
@@ -17,6 +17,8 @@
 | SPEC-005 | Sieve daemon ↔ GUI IPC 协议 | v2.0 | Frozen | ADR-013, ADR-014, ADR-016, ADR-019, ADR-021 | v2.0 §5.4 / §5.7 / §6.5 + GUI PRD v1.0 | [SPEC-005-ipc-protocol.md](SPEC-005-ipc-protocol.md) |
 | SPEC-006 | 更新通道 + 装机遥测 manifest 协议 | v0.1 | Draft | ADR-030 | v2.0 §11 / 关联 ADR-003/006/029 | [SPEC-006-update-and-telemetry.md](SPEC-006-update-and-telemetry.md) |
 | SPEC-007 | 上游转发代理支持 | v0.1 | Stable | ADR-033, ADR-018/026/027/030 | v2.0 §6.1 / §9 #2 | [SPEC-007-upstream-proxy.md](SPEC-007-upstream-proxy.md) |
+| SPEC-009 | 加密审计日志（full 档 write-only logging） | v0.1 | Draft | ADR-037, ADR-003/006/007 | v2.0 §9 #2 / §11.2 | [SPEC-009-encrypted-audit-log.md](SPEC-009-encrypted-audit-log.md) |
+| SPEC-010 | 超额计费检测（独立 token 核算 + 信任分级） | v0.1 | Draft | ADR-038, ADR-026/033 | v2.0 §9 #2 / §9 #11 | [SPEC-010-overbilling-detection.md](SPEC-010-overbilling-detection.md) |
 
 ---
 

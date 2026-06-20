@@ -546,6 +546,76 @@ no_proxy = true                    # 显式直连，无视全局 proxy 与 env
 
 > **隐私提示**：经**远程**代理时代理可见 SNI 目标 / 目标 IP（即「你在连 `api.anthropic.com`」），但**不可见** prompt / response / API key。推荐使用**可信本地代理出口**（Shadowrocket / Clash）。
 
+### 3.3.3 ADR-037 加密审计日志配置（`[audit]`）
+
+> 见 [ADR-037](../design/ADR-037-encrypted-audit-log.md) / [SPEC-009](../specs/SPEC-009-encrypted-audit-log.md)（Phase 2 落地）。三档 logging level 控制 daemon 落盘审计行为；`full` 档为 opt-in 加密归档（write-only logging）。
+
+```toml
+[audit]
+level = "metadata"            # off | metadata（默认）| full
+# 以下字段仅 level = "full" 时生效（full 档默认关，须显式 opt-in）
+# recipient = "age1qx…"       # age 公钥（recipient），daemon 仅持公钥、结构上无解密能力
+# archive_dir = "~/.sieve/archive"
+retention_days = 30           # 0 = 永久保留；超期整段密文文件删除
+hash_chain = true             # 防篡改哈希链（历史防改写），full 档必做项
+rotation = "daily"            # 归档段轮换粒度
+```
+
+`[audit]` 字段：
+
+| 字段 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `level` | enum | `"metadata"` | `off`（什么都不留）\| `metadata`（默认，=现状：只写元数据 + 脱敏后片段/哈希，**零行为变化**）\| `full`（**opt-in + 显式警告**，加密归档脱敏后完整内容） |
+| `recipient` | string? | `null` | `full` 档必填：age 公钥（`age1…`），daemon **只持公钥**、只能加密追加、**结构上不具备解密能力**（write-only logging）。`level = "full"` 而缺 `recipient` → 启动 fail-fast |
+| `archive_dir` | path | `"~/.sieve/archive"` | 加密归档段（archive segment）目录，0700 权限 |
+| `retention_days` | u32 | `30` | 保留期；daemon 周期扫描删除超期**整段密文文件**（`full` 档归档上唯一允许的变更），每次清理写一条 `metadata` 审计事件。`0` = 永久保留 |
+| `hash_chain` | bool | `true` | 防篡改哈希链（每条归档记录含 `prev_hash` + 单调递增 `seq`），保证历史不可悄悄改写 / 删除 / 重排。**已裁定为 `full` 档必做项** |
+| `rotation` | enum | `"daily"` | 归档段轮换粒度（如 `daily`），与 `retention_days` 配合做整段删除 |
+
+**红线（ADR-037 决策 2）**：脱敏必须在内存里、在任何字节碰硬盘之前完成。`full` 档归档的**永远是脱敏后内容**（消费出站 `redact_body_bytes()` 返回值 / 入站经替换后内容），脱敏前的明文密钥永不落盘，无论是否加密。
+
+> ⚠ **`full` 档默认关闭，且口令丢失不可恢复（by design）**：私钥（identity）以口令保护（age scrypt），daemon 正常运行**不需要口令**（只用公钥），口令仅在 ①`sieve audit keygen` 生成密钥对 ②`sieve audit decrypt` 审计解密 两个时刻出现。**口令一旦丢失，identity 无法解锁，归档永久不可读，这不是 bug 而是设计使然**；请在生成后立即把私钥移出本机（密码管理器 / 离线介质）并备份口令。审计解密应在另一台 / 离线机器执行（daemon 机器不留 identity）。
+
+### 3.3.4 ADR-038 超额计费检测配置（`[billing_check]` + `[[upstream]].trust`）
+
+> 见 [ADR-038](../design/ADR-038-overbilling-detection.md) / [SPEC-010](../specs/SPEC-010-overbilling-detection.md)（Phase 2 落地）。对经过的 LLM 流量做独立 token 核算，交叉比对中转站（relay）声明的 `usage`，偏差超容差报警（仅 StatusBar 通知，**不阻断流量**）。统计严格本地、**永不上传**（呼应 [SPEC-006 §9.1](../specs/SPEC-006-update-and-telemetry.md)）。
+
+```toml
+[billing_check]
+enabled = false              # 默认关；不开启则零行为变化、零新增出站、零计算开销
+tolerance_pct = 15           # 偏差容差百分比，超过即报警
+count_tokens_optin = false   # 默认关（唯一可能触发 Sieve 主动出站的开关，详见警示）
+
+[[upstream]]
+port = 11453
+url = "https://api.anthropic.com"
+protocol = "anthropic"
+# trust 缺省按 host 派生：api.anthropic.com / api.openai.com → official，其余 → relay
+# trust = "official"         # 可显式覆盖派生结果
+
+[[upstream]]
+port = 11454
+url = "http://127.0.0.1:8080"   # 本地 / 第三方中转站
+protocol = "anthropic"
+trust = "relay"              # 经中转：usage 视为未经验证的声明，独立核算 + 交叉比对
+```
+
+`[billing_check]` 字段：
+
+| 字段 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `enabled` | bool | `false` | 总开关。默认关 → 零行为变化、零新增出站、零计算开销。仅当上游为 `relay` 且 `enabled = true` 时启用核算（`official` 直连不核算，`usage` 权威） |
+| `tolerance_pct` | u8 | `15` | 偏差容差百分比。`偏差 = \|relay_claim − independent_count\| / independent_count`，超过即报警。**默认 15%**（远高于 tokenizer 噪声 ±5~10%、远低于欺诈量级 +50%，兼顾低误报与成本敏感） |
+| `count_tokens_optin` | bool | `false` | **默认 `false`**。开启后 Anthropic 输入侧改用官方 `POST /v1/messages/count_tokens` 直连（绕过 relay）拿权威输入数。**这是本特性唯一可能触发 Sieve 主动出站的开关**——⚠ 开启即向官方 endpoint（`api.anthropic.com`）发起 Sieve 主动（非用户直接触发）出站，请求体为脱敏后内容；默认关时仅用本地近似估算，零新增出站（PRD §9 #2 一字不破） |
+
+`[[upstream]]` 新增 `trust` 字段（ADR-038 决策 1）：
+
+| 段 | 字段 | 类型 | 默认 | 说明 |
+|----|------|------|------|------|
+| `[[upstream]]` | `trust` | enum | host 派生 | `official`（官方直连，`usage` 权威直接采纳）\| `relay`（经中转，`usage` 视为未经验证的声明，独立核算 + 交叉比对）。**缺省按 url host 派生**：host ∈ {`api.anthropic.com`, `api.openai.com`} → `official`，其余 → `relay`；无法判定时**保守默认 `relay`**（fail-closed 倾向：把可信当不可信只多算一次，把不可信当可信会漏掉欺诈）。可显式 `trust = "official"` / `"relay"` 覆盖派生结果 |
+
+> **隐私红线（ADR-038 决策 4，不可放宽）**：token 用量恰是 README 发誓「从不上传」的那个 usage record。统计落本地 SQLite（`~/.sieve/usage.db`，0600，append-only，独立于 `audit.db`，经 `request_id` 关联），**无任何出站上报路径**，只在本地 GUI / CLI 可见。
+
 ### 3.3 完整示例 `config.toml`
 
 ```toml
@@ -589,6 +659,30 @@ interval_hours = 168
 
 [telemetry]
 enabled = false               # 强制 false，写 true 启动失败
+
+# ADR-037 加密审计日志（§3.3.3）：默认 metadata 档 = 现状，零行为变化
+[audit]
+level = "metadata"            # off | metadata（默认）| full
+# full 档（opt-in）字段，默认 metadata 时无效，仅作姿态展示：
+# recipient = "age1qx…"       # age 公钥，开 full 档时必填；口令丢失归档永久不可读
+# archive_dir = "~/.sieve/archive"
+retention_days = 30
+hash_chain = true
+rotation = "daily"
+
+# ADR-038 超额计费检测（§3.3.4）：默认全关，零行为变化、零新增出站
+[billing_check]
+enabled = false               # 默认关
+tolerance_pct = 15            # 偏差容差百分比
+count_tokens_optin = false    # 默认关；唯一可能触发 Sieve 主动出站的开关
+
+# [[upstream]].trust（§3.3.4）：缺省按 host 派生
+# api.anthropic.com / api.openai.com → official，其余 → relay（保守默认）
+# [[upstream]]
+# port = 11453
+# url = "https://api.anthropic.com"
+# protocol = "anthropic"
+# trust = "official"          # 可显式覆盖派生结果
 ```
 
 ---
@@ -992,6 +1086,57 @@ sieve audit show <event-id>
 - `_system`：daemon 系统级事件（control plane / oversize / config reload）
 - `unknown`：兜底值（v2 老记录 migration 默认值 / 测试 fixture）
 - 普通字符串：来自 `sieve.toml [[upstream]] provider_id` 字段
+
+#### 加密审计日志密钥生命周期（ADR-037，2026-06-19 新增）
+
+> 配套 `full` 档加密归档（§3.3.3 `[audit]` 段）。这三个子命令是 `full` 档的密钥生命周期工具——daemon 端只持公钥（write-only logging），解密 / 审计须用持口令的私钥（identity），**应在另一台 / 离线机器执行**。详见 [ADR-037](../design/ADR-037-encrypted-audit-log.md)。
+
+##### `sieve audit keygen`
+
+```
+sieve audit keygen [--out <path>]
+```
+
+生成 age 密钥对：recipient 公钥写入 `config.toml [audit].recipient`；identity 私钥**以口令保护**（age scrypt）写入文件（0600 权限），并强制提示用户把私钥移出本机（密码管理器 / 离线介质），daemon 不留存 identity。
+
+> ⚠ **口令丢失 = 归档永久不可读（by design）**：口令仅保护私钥，daemon 正常运行不需要它。**口令一旦丢失，identity 无法解锁，所有 `full` 档归档永久无法解密**，这不是 bug 而是设计使然。生成后立即备份口令到密码管理器。覆盖已有密钥前需二次确认。
+
+##### `sieve audit rotate-key`
+
+```
+sieve audit rotate-key [--out <path>]
+```
+
+生成新密钥对，新归档段（archive segment）改用新 recipient；**旧段保持用旧 recipient 加密**（审计旧段需对应旧 identity）。段头记录 key id 便于审计时定位。口令丢失同样不可恢复，警示同 `keygen`。
+
+##### `sieve audit decrypt`
+
+```
+sieve audit decrypt --identity <file> [--out <path>]
+```
+
+审计解密：口令解锁 identity → 解密归档段 → 校验哈希链（`prev_hash` + `seq`，检出历史改写 / 删除 / 重排）→ 输出**脱敏后**内容。**应在另一台 / 离线机器执行**（daemon 机器不留 identity）。不走 `audit_db_path` / 只读 SQLite 路径，与 §6.4b 的查询子命令语义独立。
+
+---
+
+### 6.4c sieve usage CLI（ADR-038，2026-06-19 新增）
+
+> 配套超额计费检测（§3.3.4 `[billing_check]` 段）。只读查询本地 `~/.sieve/usage.db`（独立于 `audit.db`，0600，append-only），输出 jsonl 方便接管道工具。**统计严格本地、永不上传**（ADR-038 决策 4 隐私红线，无任何出站上报路径）。详见 [ADR-038](../design/ADR-038-overbilling-detection.md)。
+
+#### `sieve usage query`
+
+```
+sieve usage query [--since DUR] [--provider-id PROVIDER] [--format jsonl|pretty]
+```
+
+按条件查询本地 token 用量核算记录：
+- `--since`：时间范围（`1h` / `30m` / `7d` / `24h`，复用 `sieve audit` 的 duration 解析）
+- `--provider-id`：按 listener 上游标识过滤（同 audit 的 `provider_id` 语义）
+- `--format`：`jsonl`（默认，每行一个 JSON object）/ `pretty`
+
+输出含独立计数 vs relay 声明 `usage` 的比对（仅 `relay` 上游有交叉比对值；`official` 直连采纳上游权威 `usage`）。Anthropic 输入侧在 `count_tokens_optin = false`（默认）时标注为**近似估算**。
+
+> **隐私**：`sieve usage` 仅本地可见，无任何上报路径。token 用量恰是 README 发誓「从不上传」的那个 usage record（呼应 [SPEC-006 §9.1](../specs/SPEC-006-update-and-telemetry.md)）。
 
 ---
 

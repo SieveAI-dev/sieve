@@ -552,6 +552,8 @@ manifest 请求是「绝对禁止 telemetry」反模式的**唯一允许例外**
 | UUIDv4 install-id（可通过 SIEVE_NO_TELEMETRY 关闭） | MAC 地址 / 设备序列号 |
 | 发布通道（stable/beta） | 任何能识别个人或设备的信息 |
 
+> **交叉引用（ADR-038 超额计费检测）**：token 用量统计（`~/.sieve/usage.db`，独立 token 核算对抗不可信 relay）**正是本表右列所列的「使用记录」**，严格归属「禁止上传」范畴——它**仅在本地 GUI / CLI 可见，永不上传**，即便做聚合产品分析也禁止。`[billing_check]` 默认关闭；其唯一可能触发主动出站的开关 `count_tokens_optin`（直连官方 `api.anthropic.com` 的 `count_tokens`）默认关、需用户显式开启，且与「token verifier 联网验证」（§9 行 543 永久禁止的 Sieve 自营云后端校验）严格区分。详见 [ADR-038](../design/ADR-038-overbilling-detection.md) / [SPEC-010](SPEC-010-overbilling-detection.md)。
+
 ### 9.2 与 ADR-006 的关系
 
 ADR-006 的 Tier 1 要求（macOS / Linux sigstore + reproducible build）适用于 `sieve-updater` crate 编译进 `sieve` 主二进制的部分。规则包的 ed25519 签名是 ADR-006 规则分发签名链的客户端验证端。

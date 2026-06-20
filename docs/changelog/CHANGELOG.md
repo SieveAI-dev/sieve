@@ -11,6 +11,26 @@
 
 ## [Unreleased] — 2026-05-07
 
+### Added — 加密审计日志 full 档（write-only logging）（2026-06-19，ADR-037）
+
+- **新增三档 logging level（`off` / `metadata`（默认）/ `full`（opt-in）），扩展现有审计模型而非另起平行模型**。`[audit].level` 默认 `metadata` = 当前已发布行为（`audit.db` 现已在写最小脱敏元信息），零行为变化；`off` 什么都不留，`full` 由用户显式 opt-in 开启。本 ADR 真正的**新增能力是 `full` 档**，且默认关闭、完全可配置。
+- **`full` 档落地 write-only logging（只写不可读的归档）**：归档**只存脱敏后内容**（红线——脱敏先于落盘，绝不写原始流量），用 **age recipient-only 混合加密**——daemon 进程**只持公钥**，运行时只能往里追加、无法解开任何历史归档；解密私钥经 **scrypt** 口令派生离线保护，与 daemon 物理隔离。哈希链（hash chain）防归档被静默改写/删条，叠加保留期（retention）自动清理过期内容。
+- **威胁模型按条兑现**：运行时被攻陷（live malware）也读不出历史归档（daemon 无私钥）；整盘被拷 / `~/.sieve/` 误同步云盘 / 误 `git add` 拿到的都是密文。**口令丢失 = 归档永久不可读，by design**——这是安全属性不是缺陷。
+- 详见 [ADR-037](../design/ADR-037-encrypted-audit-log.md)（关联 ADR-003 完全本地 / ADR-016 脱敏路径 / SPEC-009 工程级详细设计，Phase 2 落地）。
+
+### Added — 超额计费检测（独立 token 核算对抗 relay）（2026-06-19，ADR-038）
+
+- **新增对经过流量的独立 token 核算，交叉比对中转站（relay）声明的 `usage`，偏差超容差报警**——戳穿「relay 把 `usage` 乘 1.5 多收钱」的灰产。目标是**异常检测而非逐 token 精确对账**：乘 1.5 = 多报 50%，远高于 tokenizer 噪声，藏不住。`[billing_check].enabled` 默认 **false**，完全 opt-in、可配置。
+- **上游信任分级 `official` / `relay`**：按 `[[upstream]]` 的 url host **自动派生**（`api.anthropic.com` / `api.openai.com` → `official` 直接采纳 `usage`；其余 → `relay` 视为未经验证的声明、独立核算比对），可显式 `trust` 覆盖；**无法判定时保守按 `relay`**（fail-closed 倾向）。复用 ADR-026 `provider_id` 做审计归因。
+- **独立计数永远优先权威信源、不手搓 tokenizer**：OpenAI 用 **tiktoken**（GPT-4o+ `o200k_base` / 老模型 `cl100k_base`，含 per-message 框架开销，`tiktoken-rs`）；Anthropic 无公开 tokenizer，**默认本地近似估算**（明确标为估算、零新增出站，对抓「乘 1.5」量级够用），调官方 `count_tokens` 直连拿权威输入数为**独立开关 `count_tokens_optin`、默认关**。
+- **容差默认 15%**：偏差超阈值**报警不阻断**（不打断工作流）。`usage.db` 统计**严格本地、永不上传**（呼应 SPEC-006 never upload 隐私承诺 + PRD §9 #2 绝不联网做 verifier）。
+- 详见 [ADR-038](../design/ADR-038-overbilling-detection.md)（关联 ADR-003 / ADR-026 信任分级前提 / SPEC-006 隐私承诺 / SPEC-010 工程级详细设计，Phase 2）。
+
+### Security — write-only logging 抗运行时攻陷 + usage 统计永不上传（2026-06-19，ADR-037 / ADR-038）
+
+- **加密审计 `full` 档以 write-only logging（daemon 只持公钥 + 私钥 scrypt 离线保护 + 哈希链）兑现「运行时被攻陷也读不出历史归档」**：即便 live malware 拿下 daemon 进程，也无私钥解开任何过往归档，从根上避免 `full` 档把本地变成明文流量库（LiteLLM 投毒事件的同构风险）。落盘内容恒为脱敏后副本，原始流量绝不触盘。
+- **超额计费检测的 `usage.db` 统计严格本地留存、永不出网**：核算与比对全程不联网，不破 PRD §9 #2「绝不联网做 verifier」与 SPEC-006「never upload」承诺。
+
 ### Added — 一行自校验安装：curl|bash + Homebrew + cargo install（2026-06-19，ADR-036）
 
 - **新增自校验 `curl|bash` 安装器 `scripts/install.sh`**：一行装 `sieve` CLI/daemon——`set -euo pipefail` + curl `--proto '=https' --tlsv1.2 -fsSL`；下载 release 裸二进制 + 同名 `.sigstore.json`（cosign keyless bundle），**落地前自动校验**（有 cosign 用 sigstore 验签 / 无 cosign 回退对照 `SHA256SUMS` 的 sha256 + 明确警告），**任一校验失败立即退出、不安装（fail-closed）** → 装 `~/.local/bin` → 提示 `sieve setup`。只装 CLI/daemon，**GUI 不走 curl|sh**（继续签名 .dmg / brew cask）。macOS 工作，Linux 预留位。
