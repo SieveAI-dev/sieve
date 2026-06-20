@@ -33,7 +33,47 @@ jobs:
       - name: 安装构建依赖（vectorscan 需要 cmake/ninja/ragel）
         run: |
           brew install cmake ninja pkg-config boost ragel
-      - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+      # ADR-034: 不用 --all-features —— 它会带上 ga_keys gate，占位密钥下 const
+      # assert E0080 会打挂 clippy（gate 的有效性改由下方专门的 ga-keys-gate job
+      # 验证，不应误伤常规 lint）。改为默认 features 全 workspace + 单独覆盖唯一
+      # 的功能 feature sequence_detection（PRD §9 #15 beta）。
+      - name: clippy（默认 features，全 workspace）
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: clippy（sequence_detection beta 路径）
+        run: cargo clippy -p sieve-cli --all-targets --features sequence_detection --locked -- -D warnings
+
+  ga-keys-gate:
+    name: ga_keys 编译期 gate 有效性（ADR-034）
+    # 2026-06-20 就绪度评估盲区闭合：常规 clippy/test 用默认 features 不带 ga_keys
+    # （--all-features 会被占位密钥的 const assert E0080 打挂）。这个专门 job 持续
+    # 验证「占位密钥下 ga_keys 必须编译失败」= ADR-034 编译期兜底没被意外删除，
+    # 保证 fail-open 的验签永不可能进 GA 二进制。
+    # TODO(G2 GA 真公钥): GCP KMS 填入真 ed25519 公钥后，①把本 job 反转为
+    # expect-PASS；②给 release.yml 两步 cargo build 加 --features ga_keys
+    # （否则占位硬兜底被旁路、验签 fail-open 进发布产物，见就绪度评估主线②）。
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - name: 安装构建依赖（macOS）
+        run: |
+          brew install cmake ninja pkg-config boost ragel
+      - name: 占位密钥下 ga_keys 必须编译失败（fail-closed gate）
+        run: |
+          fail=0
+          if cargo build -p sieve-updater --features ga_keys --locked 2>/dev/null; then
+            echo "::error::sieve-updater ga_keys gate 未拒绝占位 TRUSTED_PUBKEY=None（ADR-034 兜底失效）"
+            fail=1
+          fi
+          if cargo build -p sieve-ipc --features ga_keys --locked 2>/dev/null; then
+            echo "::error::sieve-ipc ga_keys gate 未拒绝占位 SIEVE_ORIGIN_PUBLIC_KEY 全零（ADR-034 兜底失效）"
+            fail=1
+          fi
+          if [ "$fail" = "0" ]; then
+            echo "::notice::ga_keys 编译期 gate 有效 —— 占位密钥无法进 GA 二进制（ADR-034）"
+          fi
+          exit $fail
 
   test:
     name: test (macos-14)

@@ -29,6 +29,14 @@ jobs:
   # Tier 1 平台：reproducible build + cosign 签名
   # ADR-006 §2: Tier 1 失败 → release 中止（hard gate）
   # Phase 1 仅 macOS（PRD v1.4 §6.6 + ADR-012）；Linux target 推 Phase 2
+  #
+  # ⚠️ TODO(G2 GA 真公钥 — 2026-06-20 就绪度评估主线②): 下方两步 `cargo build
+  #    --release` 当前【不带】--features ga_keys。占位密钥阶段这是对的（带上会被
+  #    ADR-034 const assert E0080 打挂 release build）。但 GCP KMS 填入真 ed25519
+  #    公钥（signature.rs TRUSTED_PUBKEY / origin_header.rs SIEVE_ORIGIN_PUBLIC_KEY）
+  #    后，两步 build 都【必须】加 --features ga_keys，否则占位硬兜底被旁路、规则
+  #    验签 + X-Sieve-Origin 验签 fail-open 进入 GA 发布产物。同步把 ci.yml 的
+  #    ga-keys-gate job 从 expect-FAIL 反转为 expect-PASS。
   # ─────────────────────────────────────────────────────────────
   reproducible-build:
     name: Reproducible build (${{ matrix.target }})
