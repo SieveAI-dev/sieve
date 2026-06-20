@@ -4380,6 +4380,49 @@ fn build_sieve_blocked_json_response(
         .unwrap_or_else(|_| Response::new(empty_body()))
 }
 
+/// JSON 路径（Anthropic / OpenAI 共用）单条入站 detection 的处置：push 进 `blocking`。
+///
+/// 非流式 JSON 无 keep-alive hold 机制，故 `HoldForDecision`（GuiPopup，含 IN-CR-01
+/// 文本地址替换 / IN-CR-05 签名工具）降级为 fail-closed `Block`；`HookMark` 在
+/// `chain_depth >= 2` 时升级阻断（与 SSE 路径一致）。tool_use 与响应文本两类命中共用，
+/// 消除 handle_anthropic_json_inbound / handle_openai_json_inbound 的重复处置逻辑。
+fn classify_json_inbound_detection(
+    mut d: sieve_core::Detection,
+    dry_run: bool,
+    chain_depth: usize,
+    blocking: &mut Vec<sieve_core::Detection>,
+) {
+    match &d.action {
+        sieve_core::detection::Action::Block => {
+            if d.severity == sieve_core::Severity::Critical
+                && (sieve_rules::critical_lock::is_fail_closed(&d.rule_id) || !dry_run)
+            {
+                blocking.push(d);
+            }
+        }
+        sieve_core::detection::Action::HoldForDecision { .. } => {
+            // JSON 路径 GuiPopup：暂无 keep-alive 机制，fail-closed
+            tracing::warn!(
+                rule = %d.rule_id,
+                "GuiPopup in non-streaming JSON path, fail-closed"
+            );
+            d.action = sieve_core::detection::Action::Block;
+            blocking.push(d);
+        }
+        _ => {
+            // HookMark / MarkOnly / SilentLog / Redact：记录但不阻断
+            // chain_depth ≥ 2 时 HookMark 升级为 GuiPopup（同 SSE 路径）
+            if chain_depth >= 2 && matches!(d.action, sieve_core::detection::Action::HookMark) {
+                tracing::warn!(
+                    rule = %d.rule_id,
+                    "HookMark upgraded to GuiPopup (chain_depth >= 2), fail-closed in JSON path"
+                );
+                blocking.push(d);
+            }
+        }
+    }
+}
+
 /// 处理 Anthropic 非流式 JSON 入站响应的入站检测路径。
 ///
 /// 漏洞修复（lessons.md 2026-04-27 [安全]）：上游返回 `application/json` 时，
@@ -4483,44 +4526,40 @@ async fn handle_anthropic_json_inbound(
                         caller.as_ref(),
                         &listener_provider_id,
                     );
-                    for mut d in hits {
-                        match &d.action {
-                            sieve_core::detection::Action::Block => {
-                                if d.severity == sieve_core::Severity::Critical
-                                    && (sieve_rules::critical_lock::is_fail_closed(&d.rule_id)
-                                        || !dry_run)
-                                {
-                                    all_blocking.push(d);
-                                }
-                            }
-                            sieve_core::detection::Action::HoldForDecision { .. } => {
-                                // JSON 路径 GuiPopup：暂无 keep-alive 机制，fail-closed
-                                tracing::warn!(
-                                    rule = %d.rule_id,
-                                    "GuiPopup in non-streaming JSON path, fail-closed"
-                                );
-                                d.action = sieve_core::detection::Action::Block;
-                                all_blocking.push(d);
-                            }
-                            _ => {
-                                // HookMark / MarkOnly / SilentLog / Redact：记录但不阻断
-                                // chain_depth ≥ 2 时 HookMark 升级为 GuiPopup（同 SSE 路径）
-                                if meta.chain_depth >= 2
-                                    && matches!(d.action, sieve_core::detection::Action::HookMark)
-                                {
-                                    tracing::warn!(
-                                        rule = %d.rule_id,
-                                        "HookMark upgraded to GuiPopup (chain_depth >= 2), fail-closed in JSON path"
-                                    );
-                                    all_blocking.push(d);
-                                }
-                            }
-                        }
+                    for d in hits {
+                        classify_json_inbound_detection(
+                            d,
+                            dry_run,
+                            meta.chain_depth,
+                            &mut all_blocking,
+                        );
                     }
                 }
                 Err(e) => {
                     tracing::warn!(error = %e, "handle_anthropic_json_inbound: on_tool_use_complete error");
                 }
+            }
+        }
+    }
+
+    // 入站文本扫描（IN-GEN-* + IN-CR-01 地址替换）——ADR-025 / PRD §9 #16 四路由对等。
+    // 修复 v1.5.4 同类 P0：observe_event/scan_text 类入站能力此前只挂 SSE，两条 JSON
+    // 路径 by-construction 不扫 assistant 文本，IN-CR-01 地址替换零拦截。
+    let assistant_text = anthropic_completion_text(&resp_json);
+    if !assistant_text.is_empty() {
+        match inbound_filter.scan_assistant_text(&assistant_text) {
+            Ok(hits) => {
+                for d in hits {
+                    classify_json_inbound_detection(
+                        d,
+                        dry_run,
+                        meta.chain_depth,
+                        &mut all_blocking,
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "handle_anthropic_json_inbound: scan_assistant_text error");
             }
         }
     }
@@ -4656,45 +4695,41 @@ async fn handle_openai_json_inbound(
                             caller.as_ref(),
                             &listener_provider_id,
                         );
-                        for mut d in hits {
-                            match &d.action {
-                                sieve_core::detection::Action::Block => {
-                                    if d.severity == sieve_core::Severity::Critical
-                                        && (sieve_rules::critical_lock::is_fail_closed(&d.rule_id)
-                                            || !dry_run)
-                                    {
-                                        all_blocking.push(d);
-                                    }
-                                }
-                                sieve_core::detection::Action::HoldForDecision { .. } => {
-                                    tracing::warn!(
-                                        rule = %d.rule_id,
-                                        "GuiPopup in non-streaming OpenAI JSON path, fail-closed"
-                                    );
-                                    d.action = sieve_core::detection::Action::Block;
-                                    all_blocking.push(d);
-                                }
-                                _ => {
-                                    if meta.chain_depth >= 2
-                                        && matches!(
-                                            d.action,
-                                            sieve_core::detection::Action::HookMark
-                                        )
-                                    {
-                                        tracing::warn!(
-                                            rule = %d.rule_id,
-                                            "HookMark upgraded (chain_depth >= 2), fail-closed in OpenAI JSON path"
-                                        );
-                                        all_blocking.push(d);
-                                    }
-                                }
-                            }
+                        for d in hits {
+                            classify_json_inbound_detection(
+                                d,
+                                dry_run,
+                                meta.chain_depth,
+                                &mut all_blocking,
+                            );
                         }
                     }
                     Err(e) => {
                         tracing::warn!(error = %e, "handle_openai_json_inbound: on_tool_use_complete error");
                     }
                 }
+            }
+        }
+    }
+
+    // 入站文本扫描（IN-GEN-* + IN-CR-01 地址替换）——ADR-025 / PRD §9 #16 四路由对等。
+    // 修复 v1.5.4 同类 P0：observe_event/scan_text 类入站能力此前只挂 SSE，两条 JSON
+    // 路径 by-construction 不扫 assistant 文本，IN-CR-01 地址替换零拦截。
+    let assistant_text = openai_completion_text(&resp_json);
+    if !assistant_text.is_empty() {
+        match inbound_filter.scan_assistant_text(&assistant_text) {
+            Ok(hits) => {
+                for d in hits {
+                    classify_json_inbound_detection(
+                        d,
+                        dry_run,
+                        meta.chain_depth,
+                        &mut all_blocking,
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "handle_openai_json_inbound: scan_assistant_text error");
             }
         }
     }

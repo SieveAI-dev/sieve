@@ -364,7 +364,7 @@ Phase 1 部署形态为 **macOS .dmg 安装包**，包含三件套：Native GUI 
 
 ### 入站检测曾仅覆盖流式 SSE 响应
 
-> **状态**：已在 v2.1 通过 content-type 路由矩阵修复并闭合（见 §12 与 [ADR-025](./ADR-025-content-type-routing-matrix.md)），SSE + JSON 双路径现已完全对等。本节保留作历史说明。
+> **状态**：v2.1 通过 content-type 路由矩阵闭合 **tool_use 类**（见 §12 与 [ADR-025](./ADR-025-content-type-routing-matrix.md)）；**响应文本类（IN-CR-01 地址替换 / IN-GEN-* 文本规则，`observe_event` 类）于 2026-06-20 通过 `InboundFilter::scan_assistant_text` 四路由共享核心补全**（见下「修复方案」步骤 6）。至此 SSE + JSON 双路径对所有入站类别完全对等。本节保留作历史说明。
 
 **历史现状**：早期 `Inbound Filter Pipeline` 的 `forward_with_inbound_inspection` 假定 upstream
 response body 是 `text/event-stream` 字节流，喂给 `SseParser` + `Aggregator` 才能解析
@@ -384,11 +384,21 @@ IN-CR-04 / IN-CR-05 / IN-GEN-* 在非流式路径上未生效。
    （HTTP 200 + `{"type":"error",...,"sieve_blocked":...}`），同时更新 content-length
 4. 容量上限参考既有 SSE channel cap，单 message body 上限 ~8MB
 5. 集成测试 `inbound_block.rs` 加 mock 非流式 upstream case 强制覆盖
+6. **（2026-06-20 补全 `observe_event` 类）** 上述步骤 2 的 v2.1 修复只覆盖了 `content[]`
+   的 **tool_use** 类（`on_tool_use_complete`）；响应**文本**类（`observe_event` /
+   `scan_text`：IN-CR-01 地址替换、IN-GEN-* 文本规则）当时**仍只挂 SSE**，两条 JSON
+   路径 by-construction 不扫 assistant 文本——与 v1.5.4 同型的残留 P0。已抽出
+   `InboundFilter::scan_assistant_text` 作为 SSE `observe_event` 与两条 JSON handler
+   （`handle_anthropic_json_inbound` / `handle_openai_json_inbound`）的**共享文本检测核心**，
+   两条 JSON 路径分别用 `anthropic_completion_text` / `openai_completion_text` 提取
+   assistant 文本喂入；并补四路由 TEXT-trigger 集成测试（`content_type_matrix.rs::
+   *_json_in_cr01_text_substitution`，接线前 RED、接线后 GREEN）。至此 IN-CR-01 在四条
+   content-type 路由真正对等。
 
 **v1.4 双层防御下的分层影响**：
 
 - **Hook 类（IN-CR-02~04、IN-GEN-01~03）**：这些规则由 `sieve-hook` 在 Claude Code PreToolUse 阶段拦截，不依赖 SSE 流处理路径。非流式 JSON 路径对 Hook 类规则**不构成缺口**——即使代理层看不到非流式 body，只要 Claude Code 发起 PreToolUse，sieve-hook 仍会读 pending 文件并拦截。上述修复主要针对 pending 文件写入仍依赖代理检测的场景。
-- **GUI 类（IN-CR-01/05、IN-GEN-04）**：这些规则依赖代理的 SSE 流处理（hold 流 + IPC 通知 GUI）；非流式 JSON 路径的缺口对 GUI 类适用，已由修复方案 1-5 完整闭合。
+- **GUI 类（IN-CR-01/05、IN-GEN-04）**：这些规则依赖代理的 SSE 流处理（hold 流 + IPC 通知 GUI）；非流式 JSON 路径的缺口对 GUI 类适用。**IN-CR-05**（tool_use 类）由 v2.1 修复方案步骤 1-5 闭合；**IN-CR-01**（响应文本地址替换，`observe_event` 类）此前未被步骤 1-5 覆盖，已于 **2026-06-20 通过 `scan_assistant_text` 共享文本核心补全**（步骤 6）。非流式 JSON 无 keep-alive hold，GUI 类 `HoldForDecision` 在 JSON 路径降级为 fail-closed `Block`。
 
 **关联**：[ADR-025 content-type 路由矩阵](./ADR-025-content-type-routing-matrix.md) /
 tasks/lessons.md 「入站检测仅覆盖流式 SSE」
@@ -559,7 +569,8 @@ v2.0/v2.1 在 v1.5 双层防御基础上新增以下能力，合计覆盖 HIPS 1
 | IPC 扩展（单向通知 + 多 GUI broadcast） | v2.0 Phase A | `StatusBarNotify`（SequenceHit / OutboundRedacted / UserRulesLoadFailed / UserRulesReloaded / Generic）；`gui_writers: Vec<Sender>` |
 | 进程上下文反查 | v2.0 Phase B | accept loop 通过 macOS `proc_listpids` + `proc_pidfdinfo` 4-tuple 反查 caller PID/exe，注入 `RequestCtx`（[ADR-023](./ADR-023-process-context-audit.md)） |
 | 行为序列窗口 IN-SEQ-* | v2.0 Phase B（beta）| `ToolUseSequence` 滑动窗口 N=10/TTL=5min；仅 StatusBar 通知不阻断（[ADR-022](./ADR-022-behavior-sequence-window.md)，feature `sequence_detection` 默认 off） |
-| content-type 路由矩阵（JSON 非流式路径） | v2.1 | 修复非流式 `application/json` 入站检测盲区；SSE + JSON 双路径完全对等（[ADR-025](./ADR-025-content-type-routing-matrix.md)） |
+| content-type 路由矩阵（JSON 非流式路径，tool_use 类） | v2.1 | 修复非流式 `application/json` 入站检测盲区（tool_use 类）；SSE + JSON 双路径对 tool_use 对等（[ADR-025](./ADR-025-content-type-routing-matrix.md)） |
+| JSON 路径文本扫描补全（IN-CR-01 地址替换 / IN-GEN-* 文本规则，`observe_event` 类） | 2026-06-20 | `InboundFilter::scan_assistant_text` 四路由共享核心：补全 v2.1 仅覆盖 tool_use 留下的 JSON 文本类缺口（v1.5.4 同型 P0），四路由真正对等（[ADR-025](./ADR-025-content-type-routing-matrix.md)） |
 
 Critical 永不可关、完全本地、不联网 verifier 等 PRD §9 硬约束在 v2.0 改造中**全部保持**。
 

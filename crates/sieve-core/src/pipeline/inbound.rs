@@ -237,6 +237,71 @@ impl InboundFilter {
             })
             .collect()
     }
+
+    /// 扫描一段 assistant 响应文本：IN-GEN-* 文本规则 + IN-CR-01 地址替换检测。
+    ///
+    /// **四路由对等核心**（ADR-025 / PRD §9 #16）：SSE 路径的
+    /// [`StreamingPipelineNode::observe_event`] 与两条非流式 JSON 路径（daemon
+    /// `handle_anthropic_json_inbound` / `handle_openai_json_inbound`）都调本方法，
+    /// 确保 `observe_event` 类入站能力（响应文本扫描 + IN-CR-01 地址替换）在四条
+    /// content-type 路由上行为一致——修复 v1.5.4 同类「只挂 SSE 不挂 JSON」P0。
+    /// 会话状态（`addresses_seen`）与 observe_event 共享同一把锁，故 SSE 与 JSON 的
+    /// 地址替换检测在跨 event / 跨请求语义上一致。
+    ///
+    /// # Errors
+    /// `scan_text` 失败或 session mutex 中毒时返回 [`SieveCoreError`]。
+    pub fn scan_assistant_text(&self, text: &str) -> SieveCoreResult<Vec<Detection>> {
+        let mut hits = Vec::new();
+
+        // 1. 文本扫描（IN-GEN-* 通用规则 + 危险命令检测）
+        hits.extend(
+            self.engine
+                .scan_text(text, ContentSource::InboundAssistantText, 0)?,
+        );
+
+        // 2. IN-CR-01 地址替换检测
+        let addrs = extract_eth_addresses(text);
+        let mut session = self
+            .session
+            .lock()
+            .map_err(|_| SieveCoreError::Forwarder("session mutex poisoned".into()))?;
+
+        for addr in addrs {
+            if let Some(orig) = check_substitution(&session.addresses_seen, &addr) {
+                let fp = fingerprint("IN-CR-01", &format!("{orig}->{addr}"));
+                // R3-#5：按 TOML 配置路由到 HoldForDecision（GUI 弹窗 60s 倒计时），
+                // 而非直接 fail-closed Block，确保 PRD §4.2 场景 B 的人眼对比机会。
+                // fail-closed 语义保留：default_on_timeout=Block（GUI 不响应时仍 block）。
+                // 非流式 JSON 路径无 keep-alive，daemon 侧把 HoldForDecision 降级为
+                // fail-closed Block（handle_*_json_inbound）。
+                hits.push(Detection {
+                    id: Uuid::new_v4(),
+                    rule_id: "IN-CR-01".into(),
+                    severity: Severity::Critical,
+                    action: Action::HoldForDecision {
+                        request_id: Uuid::new_v4(),
+                        timeout_seconds: self.address_guard_config.timeout_seconds,
+                        default_on_timeout: self.address_guard_config.default_on_timeout,
+                    },
+                    source: ContentSource::InboundAssistantText,
+                    span: ContentSpan {
+                        start: 0,
+                        end: addr.len(),
+                    },
+                    evidence_truncated: format!("{orig}->{addr}"),
+                    fingerprint: fp,
+                    source_channel: None,
+                    origin_chain_depth: 0,
+                });
+            }
+            session.addresses_seen.insert(addr);
+        }
+        drop(session);
+
+        // 先做 IN-GEN-06 提级（不可信 channel），再过滤 sieveignore
+        let escalated = self.escalate_gen06_if_untrusted_channel(hits);
+        Ok(self.filter_sieveignore(escalated))
+    }
 }
 
 impl StreamingPipelineNode for InboundFilter {
@@ -245,59 +310,17 @@ impl StreamingPipelineNode for InboundFilter {
     }
 
     fn observe_event(&mut self, event: &SseEvent) -> SieveCoreResult<Vec<Detection>> {
-        let mut hits = Vec::new();
-
+        // SSE 文本 delta → 共享文本检测核心（与两条非流式 JSON 路径同一实现，ADR-025
+        // / PRD §9 #16 四路由对等）。非文本事件无入站文本可扫，返回空命中。
         if let SseEvent::ContentBlockDelta {
             delta: SseDelta::TextDelta { text },
             ..
         } = event
         {
-            // 1. 文本扫描（IN-GEN-* 通用规则 + 危险命令检测）
-            hits.extend(
-                self.engine
-                    .scan_text(text, ContentSource::InboundAssistantText, 0)?,
-            );
-
-            // 2. IN-CR-01 地址替换检测
-            let addrs = extract_eth_addresses(text);
-            let mut session = self
-                .session
-                .lock()
-                .map_err(|_| SieveCoreError::Forwarder("session mutex poisoned".into()))?;
-
-            for addr in addrs {
-                if let Some(orig) = check_substitution(&session.addresses_seen, &addr) {
-                    let fp = fingerprint("IN-CR-01", &format!("{orig}->{addr}"));
-                    // R3-#5 修复：按 TOML 配置路由到 HoldForDecision（GUI 弹窗 60s 倒计时），
-                    // 而非直接 fail-closed Block，确保 PRD §4.2 场景 B 的人眼对比机会。
-                    // fail-closed 语义保留：default_on_timeout=Block（GUI 不响应时仍然 block）。
-                    hits.push(Detection {
-                        id: Uuid::new_v4(),
-                        rule_id: "IN-CR-01".into(),
-                        severity: Severity::Critical,
-                        action: Action::HoldForDecision {
-                            request_id: Uuid::new_v4(),
-                            timeout_seconds: self.address_guard_config.timeout_seconds,
-                            default_on_timeout: self.address_guard_config.default_on_timeout,
-                        },
-                        source: ContentSource::InboundAssistantText,
-                        span: ContentSpan {
-                            start: 0,
-                            end: addr.len(),
-                        },
-                        evidence_truncated: format!("{orig}->{addr}"),
-                        fingerprint: fp,
-                        source_channel: None,
-                        origin_chain_depth: 0,
-                    });
-                }
-                session.addresses_seen.insert(addr);
-            }
+            self.scan_assistant_text(text)
+        } else {
+            Ok(Vec::new())
         }
-
-        // 先做 IN-GEN-06 提级（不可信 channel），再过滤 sieveignore
-        let escalated = self.escalate_gen06_if_untrusted_channel(hits);
-        Ok(self.filter_sieveignore(escalated))
     }
 
     fn on_tool_use_complete(

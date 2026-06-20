@@ -11,6 +11,13 @@
 
 ## [Unreleased] — 2026-05-07
 
+### Security — IN-CR-01 地址替换在两条 JSON 路由 by-construction 不设防（v1.5.4 同型 P0，2026-06-20，ADR-025 / PRD §9 #16）
+
+- **缺口**：IN-CR-01 地址替换走 `InboundFilter::observe_event`（响应文本类），此前只挂 SSE；`handle_anthropic_json_inbound` / `handle_openai_json_inbound` 只调 `on_tool_use_complete`、对 text 块 `continue`，两条非流式 `application/json` 路径**从不扫 assistant 文本** → `stream=false` 时地址替换攻击零拦截（护城河缺口，与 v1.5.4 同型）。`content_type_matrix.rs` 四路由既有测试全用 tool_use payload，JSON 文本路径是无测假绿。
+- **修复**：抽出 `InboundFilter::scan_assistant_text` 作为 SSE `observe_event` 与两条 JSON handler 的共享文本检测核心；JSON 路径用 `anthropic_completion_text` / `openai_completion_text` 提取 assistant 文本喂入，`HoldForDecision` 降级为 fail-closed `Block`；新增 `classify_json_inbound_detection` 消除两 handler 重复处置逻辑。
+- **测试**：四路由 TEXT-trigger 集成测试齐全（JSON 两路由接线前 RED、接线后 GREEN）：`ucsb_attack_1_address_substitution_blocked`（A-SSE）/ `openai_prompt_address_seed_blocks_address_substitution`（O-SSE）/ `content_type_matrix_anthropic_json_in_cr01_text_substitution`（A-JSON）/ `content_type_matrix_openai_json_in_cr01_text_substitution`（O-JSON）。
+- **文档**：`architecture.md §7.5` 修复方案补步骤 6（原 §7.5 把 IN-CR-01 与 IN-CR-05 捆绑宣称"已闭合"，对文本类 IN-CR-01 不准确）。
+
 ### Added — 加密审计日志 full 档（write-only logging）（2026-06-19，ADR-037）
 
 - **新增三档 logging level（`off` / `metadata`（默认）/ `full`（opt-in）），扩展现有审计模型而非另起平行模型**。`[audit].level` 默认 `metadata` = 当前已发布行为（`audit.db` 现已在写最小脱敏元信息），零行为变化；`off` 什么都不留，`full` 由用户显式 opt-in 开启。本 ADR 真正的**新增能力是 `full` 档**，且默认关闭、完全可配置。

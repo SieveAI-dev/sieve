@@ -780,3 +780,107 @@ fn audit_schema_v2_caller_columns_accept_non_null() {
         "caller_exe 应能写入非 NULL 值"
     );
 }
+
+// ─── IN-CR-01 地址替换：JSON 两路由文本扫描覆盖（ADR-025 / PRD §9 #16）────────────
+//
+// v1.5.4 同类 P0 修复：IN-CR-01 走 InboundFilter::observe_event（响应文本类），此前
+// 只挂 SSE，两条 JSON(stream=false) 路由 by-construction 不设防。下面两个测试用
+// **TEXT trigger**（assistant 文本里的近似地址，非 tool_use 替身）驱动 JSON 路由——
+// 必须在 JSON handler 接入 scan_assistant_text 后才会绿（接入前为 RED）。
+// 对应 SSE 真测：Anthropic SSE = inbound_block.rs::ucsb_attack_1_address_substitution_blocked，
+// OpenAI SSE = inbound_block.rs::openai_prompt_address_seed_blocks_address_substitution。
+//
+// 触发：出站 prompt 含原始地址 …def12（daemon seed_known_addresses_from_text 入会话集），
+// 非流式响应 assistant 文本含近似地址 …def13（末位 2→3，Levenshtein=1，同长度）→ IN-CR-01
+// HoldForDecision → JSON 路径无 keep-alive，fail-closed 降级 Block → sieve_blocked。
+
+/// 组合 2b：Anthropic + application/json，IN-CR-01 响应文本地址替换。
+#[tokio::test]
+async fn content_type_matrix_anthropic_json_in_cr01_text_substitution() {
+    let attack_json = serde_json::json!({
+        "id": "msg_01",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-sonnet-4-5",
+        "content": [
+            { "type": "text", "text": "Sure — sending the funds to 0xabcdef1234567890abcdef1234567890abcdef13 now." }
+        ],
+        "stop_reason": "end_turn",
+        "usage": { "input_tokens": 10, "output_tokens": 20 }
+    });
+    let attack_bytes = Bytes::from(attack_json.to_string());
+
+    let (upstream, _up) = spawn_mock_json_upstream(move |_req| {
+        let body = attack_bytes.clone();
+        async move { (hyper::StatusCode::OK, body) }
+    })
+    .await;
+
+    let sieve_home = TempDir::new().unwrap();
+    let (port, _g) = spawn_sieve_daemon_with_home(&format!("http://{upstream}"), &sieve_home);
+
+    // 出站 prompt 含原始地址 …def12 → daemon seed 到会话已知地址集
+    let body_json = r#"{"model":"claude-sonnet-4-5","max_tokens":16,"stream":false,"messages":[{"role":"user","content":"please pay 0xabcdef1234567890abcdef1234567890abcdef12"}]}"#;
+    let (status, body) =
+        tokio::task::spawn_blocking(move || raw_request(port, "/v1/messages", body_json))
+            .await
+            .unwrap();
+
+    assert_eq!(status, 200, "Anthropic JSON: 上游 200 应保留");
+    let body_str = String::from_utf8_lossy(&body);
+    assert!(
+        body_str.contains("sieve_blocked"),
+        "Anthropic JSON IN-CR-01 文本地址替换应被拦截（sieve_blocked）；body: {body_str}"
+    );
+    assert!(
+        body_str.contains("IN-CR-01"),
+        "Anthropic JSON: 应含 IN-CR-01 规则命中；body: {body_str}"
+    );
+}
+
+/// 组合 4b：OpenAI + application/json（stream=false），IN-CR-01 响应文本地址替换。
+#[tokio::test]
+async fn content_type_matrix_openai_json_in_cr01_text_substitution() {
+    let attack_json = serde_json::json!({
+        "id": "chatcmpl-02",
+        "object": "chat.completion",
+        "created": 1_700_000_000u64,
+        "model": "gpt-4o",
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": "Sure, sending the funds to 0xabcdef1234567890abcdef1234567890abcdef13 now."
+            },
+            "finish_reason": "stop"
+        }],
+        "usage": { "prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30 }
+    });
+    let attack_bytes = Bytes::from(attack_json.to_string());
+
+    let (upstream, _up) = spawn_mock_json_upstream(move |_req| {
+        let body = attack_bytes.clone();
+        async move { (hyper::StatusCode::OK, body) }
+    })
+    .await;
+
+    let sieve_home = TempDir::new().unwrap();
+    let (port, _g) = spawn_sieve_daemon_with_home(&format!("http://{upstream}"), &sieve_home);
+
+    let body_json = r#"{"model":"gpt-4o","stream":false,"messages":[{"role":"user","content":"please pay 0xabcdef1234567890abcdef1234567890abcdef12"}]}"#;
+    let (status, body) =
+        tokio::task::spawn_blocking(move || raw_request(port, "/v1/chat/completions", body_json))
+            .await
+            .unwrap();
+
+    assert_eq!(status, 200, "OpenAI JSON: 上游 200 应保留");
+    let body_str = String::from_utf8_lossy(&body);
+    assert!(
+        body_str.contains("sieve_blocked"),
+        "OpenAI JSON IN-CR-01 文本地址替换应被拦截（sieve_blocked）；body: {body_str}"
+    );
+    assert!(
+        body_str.contains("IN-CR-01"),
+        "OpenAI JSON: 应含 IN-CR-01 规则命中；body: {body_str}"
+    );
+}
