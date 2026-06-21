@@ -232,12 +232,14 @@ async fn process_manifest(
     };
 
     // Install: verify sha256 + ed25519 + decompress + atomic write.
+    // Production injects the embedded distribution trust root (ADR-034).
     match install_rules(
         &payload,
         &rules.sha256,
         &rules.signature,
         &rules.version,
         dest_dir,
+        crate::signature::TRUSTED_PUBKEY,
     )
     .await
     {
@@ -330,6 +332,23 @@ mod tests {
         zstd::encode_all(data, 3).expect("zstd encode")
     }
 
+    /// Deterministic test signing key (fixed seed, no rng); its verifying key is
+    /// injected as the trust root so the pre-install in the test below passes the
+    /// real fail-closed signature check. Production uses `TRUSTED_PUBKEY`.
+    fn test_signing_key() -> ed25519_dalek::SigningKey {
+        ed25519_dalek::SigningKey::from_bytes(&[42u8; 32])
+    }
+
+    fn test_trusted_key() -> [u8; 32] {
+        test_signing_key().verifying_key().to_bytes()
+    }
+
+    /// Lowercase-hex 64-byte signature over the raw payload bytes.
+    fn sign_payload(payload: &[u8]) -> String {
+        use ed25519_dalek::Signer;
+        hex::encode(test_signing_key().sign(payload).to_bytes())
+    }
+
     /// process_manifest with rules_dir = None logs a warning but does not panic.
     #[tokio::test]
     async fn process_manifest_no_rules_dir_does_not_panic() {
@@ -355,12 +374,22 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dest = tmp.path().join("rules");
 
-        // Pre-install a version.
+        // Pre-install a version (real signature against the injected test key;
+        // process_manifest then short-circuits at "already up-to-date" so its
+        // production TRUSTED_PUBKEY path is never reached for this version).
         let payload = zstd_encode(b"{}");
         let sha = sha256_hex(&payload);
-        install_rules(&payload, &sha, "sig", "v1.0", &dest)
-            .await
-            .unwrap();
+        let sig = sign_payload(&payload);
+        install_rules(
+            &payload,
+            &sha,
+            &sig,
+            "v1.0",
+            &dest,
+            Some(test_trusted_key()),
+        )
+        .await
+        .unwrap();
 
         // Build a manifest with the same version.  The URL points nowhere; if
         // we attempted a download it would fail and the test would fail.

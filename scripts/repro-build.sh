@@ -7,8 +7,9 @@
 # 的 reproducible-build job：
 #   1. SOURCE_DATE_EPOCH = commit timestamp（消除构建时间污染）
 #   2. RUSTFLAGS --remap-path-prefix（去除开发者本地路径污染）
-#   3. cargo build --release --locked（锁定依赖版本）
-#   4. cargo clean 后二次构建，比对两次 SHA-256 必须一致
+#   3. cargo clean 后第一次 release 构建（锁定依赖；开发机 target/ 可能残留
+#      增量产物，而 CI 是 fresh checkout，故本地 build1 也先 clean 求等价）
+#   4. 再次 cargo clean 后第二次构建，比对两次 SHA-256 必须一致
 #
 # 用法：
 #   ./scripts/repro-build.sh macos-arm64    # aarch64-apple-darwin
@@ -106,7 +107,6 @@ export RUSTFLAGS="--remap-path-prefix=${HOME}=/build --remap-path-prefix=${REPO_
 BIN_PATH="target/${TARGET}/release/sieve"
 OUT_DIR="target/repro"
 OUT_BIN="${OUT_DIR}/sieve-${PLATFORM}"
-mkdir -p "$OUT_DIR"
 
 echo "==> 平台:            $PLATFORM ($TARGET)"
 echo "==> 仓库根:          $REPO_ROOT"
@@ -116,21 +116,27 @@ echo
 # ─────────────────────────────────────────────────────────────
 # 第一次构建
 # ─────────────────────────────────────────────────────────────
-echo "==> [1/2] 第一次构建（cargo build --release --locked）..."
-cargo build --release --locked --target "$TARGET" -p sieve-cli
+echo "==> [1/2] cargo clean 后第一次构建（cargo build --release --locked -j1）..."
+# build1 必须先 cargo clean：开发机 target/ 常有增量产物，增量构建与 clean
+# 构建可能字节不一致，会误报 reproducible FAIL（实为增量 vs clean 差异，
+# 非真不可复现）。CI 是 fresh checkout 故天然 clean，本地补 clean 求等价。
+# -j1 串行编译：fat-LTO 的合并顺序由并行编译完成顺序播种，并行下同源两次干净
+# 构建产出双值 SHA-256（实测根因：lto=off 与 -j1 均收敛、thin/ld_classic 仍双值；
+# codegen-units=1 已排除前端）。串行使合并顺序确定。【硬要求】release.yml 两步
+# 构建必须同样带 -j1（或 CARGO_BUILD_JOBS=1），否则 CI 可复现 gate 会抖动中止 release。
+cargo clean
+cargo build --release --locked -j1 --target "$TARGET" -p sieve-cli
 HASH1="$(shasum -a 256 "$BIN_PATH" | awk '{print $1}')"
-cp "$BIN_PATH" "${OUT_BIN}.build1"
 echo "    build1 SHA-256: $HASH1"
 echo
 
 # ─────────────────────────────────────────────────────────────
 # 清理后第二次构建
 # ─────────────────────────────────────────────────────────────
-echo "==> [2/2] cargo clean 后第二次构建..."
+echo "==> [2/2] cargo clean 后第二次构建（-j1 串行，理由见 build1）..."
 cargo clean
-cargo build --release --locked --target "$TARGET" -p sieve-cli
+cargo build --release --locked -j1 --target "$TARGET" -p sieve-cli
 HASH2="$(shasum -a 256 "$BIN_PATH" | awk '{print $1}')"
-cp "$BIN_PATH" "${OUT_BIN}.build2"
 echo "    build2 SHA-256: $HASH2"
 echo
 
@@ -148,9 +154,11 @@ if [ "$HASH1" != "$HASH2" ]; then
   exit 1
 fi
 
-# 一致时保留单一最终产物，清掉中间副本。
+# 一致时保留单一最终产物。
+# 上一步 cargo clean 已删除 target/（含 OUT_DIR），cp 前必须重建目录，
+# 否则 cp 落空报错（历史 bug：mkdir 只在 build1 前做一次，被 clean 抹掉）。
+mkdir -p "$OUT_DIR"
 cp "$BIN_PATH" "$OUT_BIN"
-rm -f "${OUT_BIN}.build1" "${OUT_BIN}.build2"
 chmod +x "$OUT_BIN"
 
 echo

@@ -18,11 +18,12 @@ use crate::protocol::SourceAgent;
 
 /// Sieve 主代理签发 X-Sieve-Origin header 使用的 Ed25519 公钥（原始 32 字节）。
 ///
-/// 关联 ADR-019 §签名验证。
-///
-/// TODO(ADR-019): GA 前替换为真实密钥文件（`keys/origin_pubkey.ed25519`）。
-/// 当前使用全零占位——`parse_and_verify_origin_header` 在占位阶段不可用于生产。
-pub const SIEVE_ORIGIN_PUBLIC_KEY: &[u8; 32] = &[0u8; 32];
+/// 关联 ADR-019 §签名验证。这是 X-Sieve-Origin 验签的长期信任根：对应私钥签发
+/// header，客户端用本公钥 fail-closed 验证。
+pub const SIEVE_ORIGIN_PUBLIC_KEY: &[u8; 32] = &[
+    0x17, 0xb8, 0xa9, 0xfd, 0x14, 0xa8, 0x50, 0x6e, 0x32, 0xa4, 0xe4, 0x48, 0x74, 0xa1, 0xf5, 0x06,
+    0x81, 0x97, 0xc2, 0x99, 0xff, 0x24, 0xf5, 0xf7, 0xc2, 0xa9, 0x43, 0x56, 0xb2, 0x66, 0x67, 0x1b,
+];
 
 /// ADR-034 GA 编译期密钥 gate。
 ///
@@ -399,14 +400,14 @@ mod tests {
         );
     }
 
-    // 11. ADR-034: 默认/alpha build（无 `ga_keys` feature）下占位公钥保持全零。
-    // `ga_keys` 启用时由文件顶部 const 断言在编译期阻止全零（无法运行时测试）。
+    // 11. ADR-034: 信任根已嵌入真公钥——`SIEVE_ORIGIN_PUBLIC_KEY` 非全零占位，
+    // X-Sieve-Origin 验签 fail-closed 生效。守护：改回全零会让此测试红；`ga_keys`
+    // 启用时文件顶部 const 断言在编译期同样保证非全零。
     #[test]
-    fn ga_keys_gate_inactive_in_default_build() {
-        #[cfg(not(feature = "ga_keys"))]
-        assert_eq!(
+    fn origin_trust_root_is_embedded() {
+        assert_ne!(
             SIEVE_ORIGIN_PUBLIC_KEY, &[0u8; 32],
-            "default/alpha build must keep placeholder all-zeros key"
+            "X-Sieve-Origin trust root must embed a real key, not all-zeros placeholder"
         );
     }
 }

@@ -1,21 +1,21 @@
-//! Signature and digest verification (ADR-030 §5.5 + §待决项 #2).
+//! Signature and digest verification for the rules update channel.
 
 use sha2::{Digest, Sha256};
 
 use crate::error::UpdaterError;
 
-/// Ed25519 trusted public key (32 bytes).
+/// Ed25519 trusted public key (32 bytes) for rules-package verification.
 ///
-/// ADR-030 §待决项 #2: the signing key is not yet finalised. This constant
-/// is intentionally `None` until the ADR-006 follow-up establishes the
-/// sigstore / trusted-key distribution mechanism.
+/// This is the long-lived distribution trust root: the matching private key
+/// signs every rules package and clients verify against this key fail-closed.
 ///
-/// When `None`, `verify_signature` **skips** the check and emits a warning.
-/// It never silently passes — the warning is mandatory.
-///
-/// TODO(ADR-006 follow-up + ADR-030 §待决项 #2): replace with the real 32-byte
-/// ed25519 verifying key once the signing infrastructure is set up.
-pub const TRUSTED_PUBKEY: Option<[u8; 32]> = None;
+/// When `None`, `verify_signature` **skips** the check and emits a warning
+/// (alpha builds without the `ga_keys` feature). It never silently passes —
+/// the warning is mandatory.
+pub const TRUSTED_PUBKEY: Option<[u8; 32]> = Some([
+    0x1a, 0x27, 0x99, 0xc7, 0x65, 0x2e, 0x2e, 0x17, 0x2a, 0x46, 0xdc, 0xe2, 0xa8, 0x29, 0x34, 0x59,
+    0xe1, 0xce, 0x65, 0x1e, 0xfd, 0x5a, 0x80, 0xa6, 0x3a, 0xd1, 0x8d, 0xc0, 0x20, 0xd7, 0x4c, 0x04,
+]);
 
 /// ADR-034 GA 编译期密钥 gate。
 ///
@@ -31,7 +31,7 @@ const _: () = assert!(
 
 /// Verifies an Ed25519 signature over `data`.
 ///
-/// ADR-030 §5.5:
+/// Trust-root behaviour:
 /// - `TRUSTED_PUBKEY = None` → skip + warn (never silent pass).
 /// - Public key present → use `ed25519-dalek` to verify.
 ///
@@ -45,10 +45,10 @@ pub fn verify_signature(data: &[u8], sig_str: &str) -> Result<(), UpdaterError> 
 
 /// 可注入信任公钥的验签实现（生产经 [`verify_signature`] 固定用 [`TRUSTED_PUBKEY`]）。
 ///
-/// 抽出 `trusted_pubkey` 参数仅为让测试能覆盖 `Some(真公钥)` 的 fail-closed 分支：
-/// 该分支要等 GA 经 GCP KMS 填入真公钥后才在生产生效（ADR-034 / ADR-030 §待决项 #2），
-/// 此处提前为其建立回归保护，把 KMS 落地后的验签风险前移消化。生产语义不变。
-fn verify_signature_with_key(
+/// 抽出 `trusted_pubkey` 参数让调用方（[`crate::install::install_rules`]）显式注入信任根，
+/// 生产固定传 [`TRUSTED_PUBKEY`]（已嵌入真公钥，验签 fail-closed 生效），测试以确定性测试
+/// 密钥注入 `Some(测试公钥)` 覆盖 fail-closed 分支。生产语义不变（ADR-034）。
+pub(crate) fn verify_signature_with_key(
     data: &[u8],
     sig_str: &str,
     trusted_pubkey: Option<[u8; 32]>,
@@ -89,7 +89,7 @@ fn verify_signature_with_key(
 
 /// Verifies that `data` has the expected SHA-256 digest.
 ///
-/// ADR-030 §5.5: called after downloading any bundle before applying it.
+/// Called after downloading any bundle before applying it.
 ///
 /// `expected_hex` is a lowercase 64-character hex string.
 ///
@@ -132,43 +132,38 @@ mod tests {
         );
     }
 
-    /// When TRUSTED_PUBKEY is None, verify_signature must return Ok but emit
-    /// a tracing warning — this is not silent pass.
+    /// When the trusted key is `None`, verification must return Ok but emit a
+    /// tracing warning — not a silent pass. Production now pins a real
+    /// `TRUSTED_PUBKEY`, so this skip path is exercised by passing `None`
+    /// explicitly rather than relying on the embedded constant.
     ///
-    /// The tracing warn output is not asserted here (would require a tracing
-    /// subscriber subscriber capture), but the Ok return is verified.
+    /// The warn output is not asserted (would need a tracing subscriber
+    /// capture); the Ok return is.
     #[test]
     fn signature_pubkey_none_skips_and_returns_ok() {
-        // TRUSTED_PUBKEY is None at compile time.
-        assert!(
-            TRUSTED_PUBKEY.is_none(),
-            "test assumes TRUSTED_PUBKEY = None"
-        );
-        let result = verify_signature(b"any data", "deadbeef");
+        let result = verify_signature_with_key(b"any data", "deadbeef", None);
         assert!(
             result.is_ok(),
             "None pubkey must return Ok (with warn): {result:?}"
         );
     }
 
-    /// ADR-034: 默认/alpha build（无 `ga_keys` feature）下占位公钥保持 `None`，
-    /// fail-open skip+warn 契约不变。`ga_keys` 启用时由本文件顶部 const 断言在
-    /// 编译期阻止 `None`（无法运行时测试），故此处仅守护默认契约。
+    /// ADR-034: 信任根已嵌入真公钥——`TRUSTED_PUBKEY = Some(真根)`，验签 fail-closed
+    /// 生效（不再是占位 `None` 的 skip+warn）。守护：改回 `None` 会让此测试红；
+    /// `ga_keys` 启用时文件顶部 const 断言在编译期同样保证非 `None`。
     #[test]
-    fn ga_keys_gate_inactive_in_default_build() {
-        #[cfg(not(feature = "ga_keys"))]
+    fn trust_root_is_embedded() {
         assert!(
-            TRUSTED_PUBKEY.is_none(),
-            "default/alpha build must keep placeholder TRUSTED_PUBKEY = None"
+            TRUSTED_PUBKEY.is_some(),
+            "distribution trust root must embed a real Ed25519 verifying key, not None"
         );
     }
 
-    // ── Some(真公钥) fail-closed 分支回归（ADR-034 / ADR-030 §待决项 #2）─────────
+    // ── Some(真公钥) fail-closed 分支回归（ADR-034）──────────────────────────────
     //
-    // 生产 TRUSTED_PUBKEY 仍是占位 None，故 Some 分支在 alpha 不可达；但 GA 经
-    // GCP KMS 填入真公钥后该分支即生效。这组单测用确定性测试密钥（from_bytes，
-    // 不依赖 rng）注入 verify_signature_with_key 的 Some 分支，提前为「填真公钥后
-    // 验签必须 fail-closed」建立回归保护，把 KMS 落地后的风险前移消化。
+    // 生产 TRUSTED_PUBKEY 已是 Some(真根)，Some 分支即生产路径。这组单测用确定性
+    // 测试密钥（from_bytes，不依赖 rng）注入 verify_signature_with_key 的 Some 分支，
+    // 守护「真公钥下验签必须 fail-closed」。
 
     /// 真公钥 + 正确签名 → 通过。
     #[test]

@@ -5,8 +5,8 @@
 //! 无真网络、无真 manifest 服务、无 TLS 握手依赖。
 //!
 //! 覆盖：
-//! - §14.4 完整闭环 fetch_manifest → download_rules → install_rules（sha256 + 签名 skip + zstd
-//!   解压 + 原子 rename + current.json symlink + latest_version.json）。
+//! - §14.4 完整闭环 fetch_manifest → download_rules → install_rules（sha256 + ed25519 真验签
+//!   （测试信任根注入）+ zstd 解压 + 原子 rename + current.json symlink + latest_version.json）。
 //! - §14.1 install-id 首启生成 / 幂等 / 删后重生（经 `SIEVE_CACHE_DIR` 隔离，P0.1）。
 //! - §14.5 失败模式：sha256 mismatch / 服务不可达 / 坏 zstd / 超大响应——各自精确报错，不 panic。
 //! - §14.6 公钥 None 占位：签名校验被 skip（非静默通过；WARN 由 `verify_signature` 发出）。
@@ -42,6 +42,24 @@ fn zstd_encode(data: &[u8]) -> Vec<u8> {
     zstd::encode_all(data, 3).expect("zstd encode")
 }
 
+/// Deterministic test signing key (fixed seed, no rng). Production never uses
+/// this; the e2e closure injects its verifying key as the trust root so the
+/// real fail-closed signature path is exercised end-to-end.
+fn test_signing_key() -> ed25519_dalek::SigningKey {
+    ed25519_dalek::SigningKey::from_bytes(&[42u8; 32])
+}
+
+fn test_trusted_key() -> [u8; 32] {
+    test_signing_key().verifying_key().to_bytes()
+}
+
+/// Lowercase-hex 64-byte Ed25519 signature over the raw payload bytes — the
+/// exact bytes `install_rules` verifies (pre-decompression download bytes).
+fn sign_payload(payload: &[u8]) -> String {
+    use ed25519_dalek::Signer;
+    hex::encode(test_signing_key().sign(payload).to_bytes())
+}
+
 /// 启动一个 mock manifest+CDN 上游，返回 `(mock, 收到的 manifest query 列表)`。
 ///
 /// - `GET /v1/manifest` → manifest JSON，`rules.url` 自引用本机（用请求 Host 头拼）。
@@ -55,12 +73,16 @@ async fn spawn_manifest_mock(
     let queries: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let q = queries.clone();
     let size = payload.len() as u64;
+    // Real Ed25519 signature over the served payload, so the install closure
+    // exercises true fail-closed verification (test key, not production).
+    let signature = sign_payload(&payload);
     let payload = Arc::new(payload);
 
     let mock = spawn_mock_upstream(move |req: Request<Bytes>| {
         let q = q.clone();
         let payload = payload.clone();
         let sha = sha256.clone();
+        let signature = signature.clone();
         async move {
             let path = req.uri().path().to_owned();
             if path == "/v1/manifest" {
@@ -75,7 +97,7 @@ async fn spawn_manifest_mock(
                     .to_owned();
                 let rules_url = format!("http://{host}/rules/{RULE_VERSION}.json.zst");
                 let body = format!(
-                    r#"{{"schema":1,"rules":{{"version":"{RULE_VERSION}","url":"{rules_url}","sha256":"{sha}","size":{size},"signature":"00"}},"next_check_after_seconds":21600}}"#
+                    r#"{{"schema":1,"rules":{{"version":"{RULE_VERSION}","url":"{rules_url}","sha256":"{sha}","size":{size},"signature":"{signature}"}},"next_check_after_seconds":21600}}"#
                 );
                 Response::builder()
                     .status(200)
@@ -153,7 +175,7 @@ async fn closure_fetch_download_install_atomic() {
         "downloaded bytes must match served payload"
     );
 
-    // 3. install_rules（sha256 ✓ + 签名 skip + zstd 解压 + 原子落盘）
+    // 3. install_rules（sha256 ✓ + ed25519 真验签（测试信任根）+ zstd 解压 + 原子落盘）
     let dest = tempfile::tempdir().unwrap();
     let installed = install_rules(
         &downloaded,
@@ -161,6 +183,7 @@ async fn closure_fetch_download_install_atomic() {
         &rules.signature,
         &rules.version,
         dest.path(),
+        Some(test_trusted_key()),
     )
     .await
     .expect("install_rules must succeed");
@@ -263,7 +286,9 @@ async fn failure_sha256_mismatch() {
     let payload = zstd_encode(b"{}");
     let dest = tempfile::tempdir().unwrap();
     let wrong_sha = "0".repeat(64);
-    let err = install_rules(&payload, &wrong_sha, "00", "v1", dest.path())
+    // sha256 is checked before the signature, so this fails at the digest step;
+    // the signature is never reached (trusted key irrelevant here → None).
+    let err = install_rules(&payload, &wrong_sha, "00", "v1", dest.path(), None)
         .await
         .expect_err("bad sha256 must fail");
     assert!(
@@ -284,9 +309,19 @@ async fn failure_bad_zstd() {
     payload.extend_from_slice(b"this is not a valid zstd stream");
     let sha = sha256_hex(&payload);
     let dest = tempfile::tempdir().unwrap();
-    let err = install_rules(&payload, &sha, "00", "v1", dest.path())
-        .await
-        .expect_err("corrupt zstd must fail");
+    // Valid signature + matching trust root so verification passes and the flow
+    // reaches the decompress step, which is where this test expects the failure.
+    let sig = sign_payload(&payload);
+    let err = install_rules(
+        &payload,
+        &sha,
+        &sig,
+        "v1",
+        dest.path(),
+        Some(test_trusted_key()),
+    )
+    .await
+    .expect_err("corrupt zstd must fail");
     assert!(
         matches!(err, UpdaterError::DecompressFailed(_)),
         "got {err:?}"
@@ -338,15 +373,23 @@ async fn failure_response_too_large() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pubkey_none_skips_signature_check() {
-    // TRUSTED_PUBKEY 占位 None → verify_signature skip+warn。即使签名是非法 hex，
-    // install 仍成功（证明 skip 路径生效；WARN 由 verify_signature 发出，见 §14.6）。
+    // trusted_key = None → verify_signature_with_key skip+warn。即使签名是非法 hex，
+    // install 仍成功（证明 skip 路径生效；WARN 由 verify_signature_with_key 发出，见 §14.6）。
+    // 生产固定注入 TRUSTED_PUBKEY（真根）→ 此 skip 分支不在生产生效；此测试守护 None 语义本身。
     let rule_json = b"{}";
     let payload = zstd_encode(rule_json);
     let sha = sha256_hex(&payload);
     let dest = tempfile::tempdir().unwrap();
-    let installed = install_rules(&payload, &sha, "not-even-valid-hex", "v1", dest.path())
-        .await
-        .expect("None pubkey must skip signature and install successfully");
+    let installed = install_rules(
+        &payload,
+        &sha,
+        "not-even-valid-hex",
+        "v1",
+        dest.path(),
+        None,
+    )
+    .await
+    .expect("None pubkey must skip signature and install successfully");
     assert!(installed.exists());
     assert_eq!(std::fs::read(&installed).unwrap(), rule_json);
 }

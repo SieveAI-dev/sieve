@@ -5,14 +5,15 @@ use std::path::{Path, PathBuf};
 use serde_json::json;
 
 use crate::error::UpdaterError;
-use crate::signature::{verify_sha256, verify_signature};
+use crate::signature::{verify_sha256, verify_signature_with_key};
 
 /// Verifies, decompresses, and atomically installs a rules bundle payload.
 ///
 /// ADR-030 / SPEC-006 §3.3 flow:
 /// 1. `verify_sha256(payload, expected_sha256)` — content integrity check.
-/// 2. `verify_signature(payload, signature)` — ed25519 check (WARN + skip when
-///    `TRUSTED_PUBKEY = None`).
+/// 2. `verify_signature_with_key(payload, signature, trusted_key)` — ed25519
+///    check against the injected trust root (WARN + skip when `trusted_key`
+///    is `None`). Production passes `crate::signature::TRUSTED_PUBKEY`.
 /// 3. zstd decompress → `Vec<u8>` (falls back to raw bytes if zstd magic header
 ///    is absent, so plain-JSON rule files work in testing).
 /// 4. Write to `<dest_dir>/.tmp-<version>.json`.
@@ -22,6 +23,10 @@ use crate::signature::{verify_sha256, verify_signature};
 ///
 /// On failure the temporary file is deleted before returning the error so no
 /// partial state is left on disk.
+///
+/// `trusted_key` is the Ed25519 verifying key the `signature` is checked
+/// against. It is injected (rather than read directly from [`crate::signature::TRUSTED_PUBKEY`])
+/// so callers — production and tests — control the trust root explicitly.
 ///
 /// # Returns
 /// The path of the installed `<version>.json` file.
@@ -37,21 +42,23 @@ pub async fn install_rules(
     signature: &str,
     version: &str,
     dest_dir: &Path,
+    trusted_key: Option<[u8; 32]>,
 ) -> Result<PathBuf, UpdaterError> {
     // Step 0: reject a path-unsafe `version` before touching the filesystem.
     // `version` is interpolated into on-disk paths (`<dest_dir>/<version>.json`,
     // `.tmp-<version>.json`, `current.json` → `<version>.json`) and originates
     // from the server-controlled manifest (`manifest.rs` `version: String`, no
-    // validator). The ed25519 signature is fail-open while `TRUSTED_PUBKEY =
-    // None`, so a malicious / MITM manifest with `version = "../../../tmp/evil"`
-    // would otherwise write outside `dest_dir`. Fail-closed here.
+    // validator). This is validated independently of signature verification so a
+    // malicious / MITM manifest with `version = "../../../tmp/evil"` cannot write
+    // outside `dest_dir` even if the trust root were absent. Fail-closed here.
     validate_version_component(version)?;
 
     // Step 1: sha256 integrity check.
     verify_sha256(payload, expected_sha256)?;
 
-    // Step 2: ed25519 signature check (WARN + skip when TRUSTED_PUBKEY = None).
-    verify_signature(payload, signature)?;
+    // Step 2: ed25519 signature check against the injected trust root
+    // (WARN + skip when trusted_key = None; production injects TRUSTED_PUBKEY).
+    verify_signature_with_key(payload, signature, trusted_key)?;
 
     // Step 3: zstd decompress (fallback to raw if not a zst stream).
     let decompressed = decompress_zstd(payload)?;
@@ -257,6 +264,7 @@ pub async fn read_installed_version(dest_dir: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ed25519_dalek::{Signer, SigningKey};
     use sha2::{Digest, Sha256};
 
     fn sha256_hex(data: &[u8]) -> String {
@@ -269,6 +277,29 @@ mod tests {
         zstd::encode_all(data, 3).expect("zstd encode")
     }
 
+    /// Deterministic test signing key (fixed seed, no rng) so signatures are
+    /// reproducible. Production never uses this; tests inject its verifying key
+    /// as the trust root to exercise the real fail-closed verification path.
+    fn test_signing_key() -> SigningKey {
+        SigningKey::from_bytes(&[42u8; 32])
+    }
+
+    /// Returns the test trust root (verifying key bytes) to pass as
+    /// `install_rules`' `trusted_key`.
+    fn test_trusted_key() -> [u8; 32] {
+        test_signing_key().verifying_key().to_bytes()
+    }
+
+    /// Signs `payload` with the deterministic test key, returning the
+    /// lowercase-hex 64-byte signature `install_rules` expects.
+    ///
+    /// The signed bytes are exactly `payload` — the same bytes
+    /// `install_rules` passes to `verify_signature_with_key` (the raw,
+    /// pre-decompression download bytes).
+    fn sign_payload(payload: &[u8]) -> String {
+        hex::encode(test_signing_key().sign(payload).to_bytes())
+    }
+
     /// Happy-path: zstd payload + correct sha256 + pubkey None (skip sig).
     #[tokio::test]
     async fn happy_path_installs_and_creates_symlink() {
@@ -278,13 +309,16 @@ mod tests {
         let raw_json = br#"{"rules": []}"#;
         let payload = zstd_encode(raw_json);
         let sha = sha256_hex(&payload);
+        // Sign the raw (pre-decompression) payload — exactly what install_rules verifies.
+        let sig = sign_payload(&payload);
 
         let installed = install_rules(
             &payload,
             &sha,
-            "deadbeef", // signature ignored (TRUSTED_PUBKEY = None)
+            &sig,
             "2026.05.05.1",
             &dest,
+            Some(test_trusted_key()),
         )
         .await
         .expect("install must succeed");
@@ -329,9 +363,18 @@ mod tests {
         let payload = zstd_encode(b"some content");
         let wrong_sha = "0".repeat(64);
 
-        let err = install_rules(&payload, &wrong_sha, "sig", "v1", &dest)
-            .await
-            .expect_err("must fail on sha256 mismatch");
+        // sha256 is checked before signature, so this fails at the digest step;
+        // the signature value is irrelevant (verification is never reached).
+        let err = install_rules(
+            &payload,
+            &wrong_sha,
+            "sig",
+            "v1",
+            &dest,
+            Some(test_trusted_key()),
+        )
+        .await
+        .expect_err("must fail on sha256 mismatch");
         assert!(
             matches!(err, UpdaterError::Sha256Mismatch { .. }),
             "wrong variant: {err:?}"
@@ -352,10 +395,18 @@ mod tests {
 
         let payload = br#"{"rules":[]}"#.to_vec();
         let sha = sha256_hex(&payload);
+        let sig = sign_payload(&payload);
 
-        install_rules(&payload, &sha, "sig", "plain.1", &dest)
-            .await
-            .expect("plain JSON fallback must succeed");
+        install_rules(
+            &payload,
+            &sha,
+            &sig,
+            "plain.1",
+            &dest,
+            Some(test_trusted_key()),
+        )
+        .await
+        .expect("plain JSON fallback must succeed");
 
         assert!(dest.join("plain.1.json").exists());
     }
@@ -370,10 +421,20 @@ mod tests {
         let mut payload = ZSTD_MAGIC.to_vec();
         payload.extend_from_slice(&[0xFF; 64]);
         let sha = sha256_hex(&payload);
+        // Valid signature so verification passes and the flow reaches the
+        // decompress step, which is where this test expects the failure.
+        let sig = sign_payload(&payload);
 
-        let err = install_rules(&payload, &sha, "sig", "v-bad", &dest)
-            .await
-            .expect_err("must fail on bad zstd");
+        let err = install_rules(
+            &payload,
+            &sha,
+            &sig,
+            "v-bad",
+            &dest,
+            Some(test_trusted_key()),
+        )
+        .await
+        .expect_err("must fail on bad zstd");
         assert!(
             matches!(err, UpdaterError::DecompressFailed(_)),
             "wrong variant: {err:?}"
@@ -386,19 +447,20 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dest = tmp.path().join("rules");
 
-        let mk = |content: &[u8]| -> (Vec<u8>, String) {
+        let mk = |content: &[u8]| -> (Vec<u8>, String, String) {
             let p = zstd_encode(content);
             let s = sha256_hex(&p);
-            (p, s)
+            let sig = sign_payload(&p);
+            (p, s, sig)
         };
 
-        let (p1, s1) = mk(b"version1");
-        install_rules(&p1, &s1, "sig", "v1.0", &dest)
+        let (p1, s1, sig1) = mk(b"version1");
+        install_rules(&p1, &s1, &sig1, "v1.0", &dest, Some(test_trusted_key()))
             .await
             .expect("first install");
 
-        let (p2, s2) = mk(b"version2");
-        install_rules(&p2, &s2, "sig", "v2.0", &dest)
+        let (p2, s2, sig2) = mk(b"version2");
+        install_rules(&p2, &s2, &sig2, "v2.0", &dest, Some(test_trusted_key()))
             .await
             .expect("second install");
 
@@ -433,7 +495,9 @@ mod tests {
             "/abs",
             "..foo",
         ] {
-            let err = install_rules(&payload, &sha, "sig", bad, &dest)
+            // version is validated first (before sha256 and signature), so this
+            // fails at step 0; the signature value is never reached.
+            let err = install_rules(&payload, &sha, "sig", bad, &dest, Some(test_trusted_key()))
                 .await
                 .expect_err("path-unsafe version must be rejected");
             assert!(
@@ -481,9 +545,17 @@ mod tests {
 
         let payload = zstd_encode(b"{}");
         let sha = sha256_hex(&payload);
-        install_rules(&payload, &sha, "sig", "2026.01.01.1", &dest)
-            .await
-            .unwrap();
+        let sig = sign_payload(&payload);
+        install_rules(
+            &payload,
+            &sha,
+            &sig,
+            "2026.01.01.1",
+            &dest,
+            Some(test_trusted_key()),
+        )
+        .await
+        .unwrap();
 
         let ver = read_installed_version(&dest).await;
         assert_eq!(ver.as_deref(), Some("2026.01.01.1"));
