@@ -47,6 +47,15 @@ pub struct RuleEntry {
     /// 其他 → [`Disposition::StatusBar`]。
     #[serde(default)]
     pub disposition: Option<Disposition>,
+    /// 是否 fail-closed（强制不可关、不可永久白名单、dry-run 仍 enforce；关联 ADR-007）。
+    ///
+    /// `None` 表示规则未显式声明，调用 [`RuleEntry::effective_fail_closed`] 获取按
+    /// severity 推断的值：[`Severity::Critical`] → `true`，其他 → `false`。
+    /// 仅在「非 Critical 严重度但仍需 fail-closed」（如高置信度凭据/注入类）时显式写 `true`。
+    /// 这取代了历史上硬编码在 `critical_lock` 的 fail-closed 规则 ID 名单——
+    /// 判定下沉为规则自身字段，运行时由引擎构建分类注册表（[`crate::critical_lock`]）。
+    #[serde(default)]
+    pub fail_closed: Option<bool>,
     /// 等待 GUI/hook 决策的超时秒数（`None` = 不超时，适用于 AutoRedact / StatusBar）。
     #[serde(default)]
     pub timeout_seconds: Option<u32>,
@@ -66,6 +75,19 @@ impl RuleEntry {
             Severity::Critical => Disposition::GuiPopup,
             _ => Disposition::StatusBar,
         })
+    }
+
+    /// 返回规则是否 fail-closed（关联 ADR-007 §2 / PRD §9 #3 #8）。
+    ///
+    /// 显式写 `fail_closed` 时直接用；未写时按 severity 推断：
+    /// [`Severity::Critical`] → `true`（Critical 在所有版本不可关，PRD §9 #8），其他 → `false`。
+    ///
+    /// fail-closed 语义：命中后强制 Block（即使 dry-run）、不可永久白名单（灰名单拒绝）、
+    /// 强制走人工决策路径。用户规则严重度被 lint 限制在 High 以下，故 `effective_fail_closed`
+    /// 恒为 `false`，无法借此 fail-closed 系统规则。
+    pub fn effective_fail_closed(&self) -> bool {
+        self.fail_closed
+            .unwrap_or(matches!(self.severity, Severity::Critical))
     }
 }
 

@@ -493,6 +493,8 @@ severity = "high"
 action = "warn"
 keywords = ["ignore", "disregard", "忽略"]
 disposition = "gui_popup"
+# 来源不可信时运行时提级 Critical；标记 fail-closed 保持历史行为（不可关 / 不可永久白名单）。
+fail_closed = true
 timeout_seconds = 60
 default_on_timeout = "block"
 

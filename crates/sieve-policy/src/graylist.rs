@@ -325,6 +325,28 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    /// 注册系统 fail-closed 规则 ID 进运行时注册表（替代历史硬编码 FAIL_CLOSED_RULES）。
+    ///
+    /// 生产中由系统规则编译时注册；本单测不加载系统规则，故显式注册被测 ID。
+    fn register_system_critical(id: &str) {
+        use sieve_rules::manifest::{Action, DefaultOnTimeout, RuleEntry, Severity};
+        sieve_rules::critical_lock::register_rules(&[RuleEntry {
+            id: id.into(),
+            severity: Severity::Critical,
+            action: Action::Block,
+            pattern: "x".into(),
+            description: id.into(),
+            entropy_min: None,
+            keywords: vec![],
+            allowlist_regexes: vec![],
+            allowlist_stopwords: vec![],
+            disposition: None,
+            fail_closed: None,
+            timeout_seconds: None,
+            default_on_timeout: DefaultOnTimeout::Block,
+        }]);
+    }
+
     fn make_inputs(rule_id: &str) -> FingerprintInputs {
         FingerprintInputs {
             rule_id: rule_id.into(),
@@ -427,7 +449,8 @@ mod tests {
     #[test]
     fn critical_rule_cannot_be_graylisted() {
         let tmp = TempDir::new().unwrap();
-        // OUT-01 在 FAIL_CLOSED_RULES 中
+        // OUT-01 是系统 fail-closed 规则（运行时注册）
+        register_system_critical("OUT-01");
         let entry = make_entry("OUT-01");
         let err = add_entry(tmp.path(), entry).unwrap_err();
         assert!(

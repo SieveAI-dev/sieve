@@ -70,6 +70,7 @@ fn build_user_engine() -> VectorscanEngine {
             allowlist_regexes: vec![],
             allowlist_stopwords: vec![],
             disposition: None,
+            fail_closed: None,
             timeout_seconds: None,
             default_on_timeout: DefaultOnTimeout::Allow,
         })

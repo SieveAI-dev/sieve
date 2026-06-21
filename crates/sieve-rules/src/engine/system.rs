@@ -151,6 +151,7 @@ mod tests {
             allowlist_regexes: vec![],
             allowlist_stopwords: vec![],
             disposition: None,
+            fail_closed: None,
             timeout_seconds: None,
             default_on_timeout: DefaultOnTimeout::Block,
         }
@@ -158,6 +159,11 @@ mod tests {
 
     fn veng(id: &str, pattern: &str) -> VectorscanEngine {
         VectorscanEngine::compile(vec![rule(id, pattern, Severity::Critical)]).unwrap()
+    }
+
+    /// 指定严重度的单规则引擎（用于区分 fail-closed / 非 fail-closed 系统命中）。
+    fn veng_sev(id: &str, pattern: &str, severity: Severity) -> VectorscanEngine {
+        VectorscanEngine::compile(vec![rule(id, pattern, severity)]).unwrap()
     }
 
     /// 空集 fail-safe：无规则包时 scan 返回空，rule_count = 0，has_rules = false。
@@ -253,12 +259,13 @@ mod tests {
     /// 同时验证空系统层不阻断 user 层：系统空集时 user 规则仍正常评估。
     #[test]
     fn usable_as_layered_system_layer() {
-        let sys = SystemEngine::new(Some(veng("SYS-A", r"system_hit")));
+        // SYS-A 用 High 严重度（非 fail-closed），命中后不短路，继续合并 user 命中。
+        let sys = SystemEngine::new(Some(veng_sev("SYS-A", r"system_hit", Severity::High)));
         let user = VectorscanEngine::compile(vec![rule("MY-RULE", r"user_hit", Severity::Medium)])
             .unwrap();
         let layered = LayeredEngine::new(sys, Some(user));
 
-        // 系统规则命中（SYS-A 非 fail-closed ID）→ 合并 user 命中
+        // 系统规则命中（SYS-A 非 fail-closed）→ 合并 user 命中
         let hits = layered.scan(b"system_hit and user_hit").unwrap();
         assert!(
             hits.iter().any(|h| h.rule_id == "SYS-A"),

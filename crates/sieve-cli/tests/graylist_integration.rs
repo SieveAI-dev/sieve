@@ -16,6 +16,32 @@ use tempfile::TempDir;
 
 // ─── 辅助函数 ─────────────────────────────────────────────────────────────────
 
+/// 注册系统 fail-closed 规则 ID 进运行时注册表（替代历史硬编码 FAIL_CLOSED_RULES 名单）。
+///
+/// 生产中由系统规则编译时注册；本集成测试不加载真实规则文件，故显式注册被测 Critical ID。
+fn register_critical(ids: &[&str]) {
+    use sieve_rules::manifest::{Action, DefaultOnTimeout, RuleEntry, Severity};
+    let rules: Vec<RuleEntry> = ids
+        .iter()
+        .map(|id| RuleEntry {
+            id: (*id).into(),
+            severity: Severity::Critical,
+            action: Action::Block,
+            pattern: "x".into(),
+            description: (*id).into(),
+            entropy_min: None,
+            keywords: vec![],
+            allowlist_regexes: vec![],
+            allowlist_stopwords: vec![],
+            disposition: None,
+            fail_closed: None,
+            timeout_seconds: None,
+            default_on_timeout: DefaultOnTimeout::Block,
+        })
+        .collect();
+    sieve_rules::critical_lock::register_rules(&rules);
+}
+
 fn make_inputs(rule_id: &str) -> FingerprintInputs {
     FingerprintInputs {
         rule_id: rule_id.into(),
@@ -148,6 +174,7 @@ fn fingerprint_consistency_after_write() {
 /// OUT-01 是 fail-closed Critical 规则，add_entry 应返回 CriticalRuleNotGraylistable。
 #[test]
 fn critical_rule_cannot_be_added_to_graylist() {
+    register_critical(&["OUT-01"]);
     let tmp = TempDir::new().unwrap();
     let entry = make_entry("OUT-01");
     let err = add_entry(tmp.path(), entry).unwrap_err();
@@ -163,6 +190,7 @@ fn critical_rule_cannot_be_added_to_graylist() {
 /// IN-CR-05-EVM（签名工具）同样不可灰名单化。
 #[test]
 fn in_cr_05_evm_cannot_be_graylisted() {
+    register_critical(&["IN-CR-05-EVM"]);
     let tmp = TempDir::new().unwrap();
     let entry = make_entry("IN-CR-05-EVM");
     let err = add_entry(tmp.path(), entry).unwrap_err();
@@ -221,6 +249,7 @@ fn allow_remember_true_for_non_critical_rule() {
 /// Critical 规则（在 FAIL_CLOSED_RULES）allow_remember 应为 false。
 #[test]
 fn allow_remember_false_for_critical_rule() {
+    register_critical(&["OUT-01", "IN-CR-05-EVM", "IN-CR-02"]);
     // OUT-01、IN-CR-05-EVM、IN-CR-02 都是 Critical fail-closed 规则
     for rule_id in &["OUT-01", "IN-CR-05-EVM", "IN-CR-02"] {
         assert!(
@@ -233,6 +262,7 @@ fn allow_remember_false_for_critical_rule() {
 /// 多条 detection 时：有任一 Critical 规则 → 整批 allow_remember = false。
 #[test]
 fn allow_remember_false_when_any_critical_in_batch() {
+    register_critical(&["OUT-01"]);
     let rule_ids = ["IN-GEN-04", "OUT-01"]; // 第二条是 Critical
     let any_fail_closed = rule_ids
         .iter()

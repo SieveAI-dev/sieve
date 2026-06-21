@@ -325,6 +325,7 @@ fn layered_engine_with_user_rules_merges_hits() {
         allowlist_regexes: vec![],
         allowlist_stopwords: vec![],
         disposition: Some(Disposition::StatusBar),
+        fail_closed: None,
         timeout_seconds: None,
         default_on_timeout: DefaultOnTimeout::Allow,
     };

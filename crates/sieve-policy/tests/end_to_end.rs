@@ -181,7 +181,22 @@ fn critical_rule_graylist_blocked() {
     let tmp = TempDir::new().unwrap();
     let decisions = tmp.path().join("decisions");
 
-    // OUT-01 在 FAIL_CLOSED_RULES 中
+    // OUT-01 是系统 fail-closed 规则；运行时注册（替代历史硬编码名单）
+    sieve_rules::critical_lock::register_rules(&[sieve_rules::manifest::RuleEntry {
+        id: "OUT-01".into(),
+        severity: sieve_rules::manifest::Severity::Critical,
+        action: sieve_rules::manifest::Action::Block,
+        pattern: "x".into(),
+        description: "OUT-01".into(),
+        entropy_min: None,
+        keywords: vec![],
+        allowlist_regexes: vec![],
+        allowlist_stopwords: vec![],
+        disposition: None,
+        fail_closed: None,
+        timeout_seconds: None,
+        default_on_timeout: sieve_rules::manifest::DefaultOnTimeout::Block,
+    }]);
     let entry = make_graylist_entry("OUT-01");
     let err = add_entry(&decisions, entry).unwrap_err();
     assert!(

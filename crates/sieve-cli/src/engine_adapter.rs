@@ -521,6 +521,7 @@ mod tests {
             allowlist_regexes: vec![],
             allowlist_stopwords: vec![],
             disposition: None,
+            fail_closed: None,
             timeout_seconds: None,
             default_on_timeout: sieve_rules::manifest::DefaultOnTimeout::Block,
         }

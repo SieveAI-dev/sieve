@@ -10,7 +10,6 @@
 //! scratch 分配代价远小于实际扫描代价，在 P99 < 20ms 目标下可接受。
 //! Week 3 如需优化，可改为 `thread_local!` scratch 复用方案（仍无 unsafe）。
 
-use crate::critical_lock::is_fail_closed;
 use crate::error::{SieveRulesError, SieveRulesResult};
 use crate::manifest::RuleEntry;
 use crate::placeholder::is_placeholder;
@@ -99,6 +98,12 @@ pub struct MatchHit {
     pub start: usize,
     /// 命中位置的结束偏移（开区间）。
     pub end: usize,
+    /// 命中规则是否 fail-closed（[`RuleEntry::effective_fail_closed`]）。
+    ///
+    /// 由 [`VectorscanEngine::scan`] 在构造命中时从规则字段填充，使
+    /// [`LayeredEngine`] 合并短路无需查全局名单即可判定「系统 Critical 命中」
+    /// （显式数据流，关联 ADR-007 fail-closed）。用户引擎的命中恒为 `false`。
+    pub fail_closed: bool,
 }
 
 /// 多模式匹配引擎 trait（PRD v2.0 §6.3.1）。
@@ -242,8 +247,10 @@ impl<S: MatchEngine, U: MatchEngine> MatchEngine for LayeredEngine<S, U> {
         // 第一层：系统规则全量扫描
         let mut report = self.system.scan_with_context(req)?;
 
-        // 系统规则命中任意 fail-closed（Critical）规则 → 立即返回（PRD §6.3.1 合并顺序 #1）
-        if report.hits.iter().any(|h| is_fail_closed(&h.rule_id)) {
+        // 系统规则命中任意 fail-closed（Critical）规则 → 立即返回（PRD §6.3.1 合并顺序 #1）。
+        // 用 MatchHit 自带的 fail_closed 标志（VectorscanEngine::scan 从规则字段填充），
+        // 显式数据流，不查全局名单（关联 ADR-007）。
+        if report.hits.iter().any(|h| h.fail_closed) {
             return Ok(report);
         }
 
@@ -312,6 +319,10 @@ impl VectorscanEngine {
 
         let db = BlockDatabase::new(patterns)
             .map_err(|e| SieveRulesError::Engine(format!("compile vectorscan db: {e}")))?;
+
+        // 注册规则分类（fail-closed / hook / gui）进运行时注册表（ADR-007）。
+        // accumulate：出站 / 入站 / 热替换引擎分别注册各自规则，替代历史硬编码 ID 名单。
+        crate::critical_lock::register_rules(&rules);
 
         let rules_map: HashMap<u32, RuleEntry> = rules
             .into_iter()
@@ -407,11 +418,9 @@ impl MatchEngine for VectorscanEngine {
         let mut by_key: HashMap<(String, usize), MatchHit> = HashMap::new();
         scanner
             .scan(input, |id, from, to, _flags| {
-                let rule_id = self
-                    .rules
-                    .get(&id)
-                    .map(|r| r.id.clone())
-                    .unwrap_or_default();
+                let rule = self.rules.get(&id);
+                let rule_id = rule.map(|r| r.id.clone()).unwrap_or_default();
+                let fail_closed = rule.map(|r| r.effective_fail_closed()).unwrap_or(false);
                 let key = (rule_id.clone(), from as usize);
                 by_key
                     .entry(key)
@@ -424,6 +433,7 @@ impl MatchEngine for VectorscanEngine {
                         rule_id,
                         start: from as usize,
                         end: to as usize,
+                        fail_closed,
                     });
                 Scan::Continue
             })
@@ -457,6 +467,7 @@ mod tests {
             allowlist_regexes: vec![],
             allowlist_stopwords: vec![],
             disposition: None,
+            fail_closed: None,
             timeout_seconds: None,
             default_on_timeout: crate::manifest::DefaultOnTimeout::Block,
         }

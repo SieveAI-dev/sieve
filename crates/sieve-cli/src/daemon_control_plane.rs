@@ -1034,6 +1034,22 @@ mod tests {
     /// 关联：ADR-013 §S.7 任务清单第 4 条 / ADR-021 防线二 / PRD §9 #3 #8。
     #[tokio::test]
     async fn set_preset_overrides_rejects_critical_lock_rules() {
+        // IN-CR-05-EVM 是系统 fail-closed 规则；运行时注册（替代历史硬编码名单）。
+        sieve_rules::critical_lock::register_rules(&[sieve_rules::manifest::RuleEntry {
+            id: "IN-CR-05-EVM".into(),
+            severity: sieve_rules::manifest::Severity::Critical,
+            action: sieve_rules::manifest::Action::Block,
+            pattern: "x".into(),
+            description: "IN-CR-05-EVM".into(),
+            entropy_min: None,
+            keywords: vec![],
+            allowlist_regexes: vec![],
+            allowlist_stopwords: vec![],
+            disposition: None,
+            fail_closed: None,
+            timeout_seconds: None,
+            default_on_timeout: sieve_rules::manifest::DefaultOnTimeout::Block,
+        }]);
         // 构造一个临时 audit + ipc + state（仅用于 audit 写入与 broadcast 的副作用，不真正断言）。
         let dir = tempfile::tempdir().unwrap();
         let audit = Arc::new(AuditStore::init(&dir.path().join("audit.db")).expect("audit init"));

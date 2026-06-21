@@ -8,7 +8,6 @@
 //! 入口：[`lint`] 纯函数，返回所有 [`LintViolation`]。
 
 use crate::loader::{RuleDirection, UserRuleEntry, UserRulesFile};
-use sieve_rules::critical_lock::FAIL_CLOSED_RULES;
 use std::collections::HashSet;
 use std::time::Instant;
 
@@ -90,8 +89,9 @@ pub fn lint(file: &UserRulesFile, file_size_bytes: u64) -> Vec<LintViolation> {
     // 收集用户规则 ID（用于重复检测）
     let mut seen_ids: HashSet<String> = HashSet::new();
 
-    // 系统 Critical rule_id 集合
-    let system_critical: HashSet<&str> = FAIL_CLOSED_RULES.iter().copied().collect();
+    // 系统 Critical rule_id 集合（运行时注册表快照，替代历史硬编码 FAIL_CLOSED_RULES 名单）。
+    // 系统规则在 daemon 启动 / 用户规则加载前已编译注册，故此处快照非空。
+    let system_critical: HashSet<String> = sieve_rules::critical_lock::fail_closed_snapshot();
 
     for entry in &file.rules {
         lint_entry(entry, &mut seen_ids, &system_critical, &mut violations);
@@ -104,7 +104,7 @@ pub fn lint(file: &UserRulesFile, file_size_bytes: u64) -> Vec<LintViolation> {
 fn lint_entry(
     entry: &UserRuleEntry,
     seen_ids: &mut HashSet<String>,
-    system_critical: &HashSet<&str>,
+    system_critical: &HashSet<String>,
     violations: &mut Vec<LintViolation>,
 ) {
     // A-1. 禁止 severity=critical / action=block / disposition=hook_terminal
@@ -249,6 +249,7 @@ fn check_pattern_compile_limits(entry: &UserRuleEntry, violations: &mut Vec<Lint
         allowlist_regexes: vec![],
         allowlist_stopwords: entry.allowlist_stopwords.clone(),
         disposition: None,
+        fail_closed: None,
         timeout_seconds: None,
         default_on_timeout: DefaultOnTimeout::Allow,
     };
@@ -320,6 +321,28 @@ mod tests {
             added_at: Utc::now(),
             added_by: "manual".into(),
         }
+    }
+
+    /// 注册一个系统 fail-closed 规则 ID 进运行时注册表（替代历史硬编码 FAIL_CLOSED_RULES）。
+    ///
+    /// 生产中由系统规则编译时注册；lint 单测不加载系统规则，故显式注册被测 ID。
+    fn register_system_critical(id: &str) {
+        use sieve_rules::manifest::{Action, DefaultOnTimeout, RuleEntry, Severity};
+        sieve_rules::critical_lock::register_rules(&[RuleEntry {
+            id: id.into(),
+            severity: Severity::Critical,
+            action: Action::Block,
+            pattern: "x".into(),
+            description: id.into(),
+            entropy_min: None,
+            keywords: vec![],
+            allowlist_regexes: vec![],
+            allowlist_stopwords: vec![],
+            disposition: None,
+            fail_closed: None,
+            timeout_seconds: None,
+            default_on_timeout: DefaultOnTimeout::Block,
+        }]);
     }
 
     #[test]
@@ -408,7 +431,8 @@ mod tests {
 
     #[test]
     fn rejects_system_critical_id_conflict() {
-        // OUT-01 在 FAIL_CLOSED_RULES 中
+        // OUT-01 是系统 fail-closed 规则（运行时注册）
+        register_system_critical("OUT-01");
         let file = make_file(vec![valid_rule("OUT-01")]);
         let v = lint(&file, 100);
         assert!(
@@ -443,6 +467,8 @@ mod tests {
 
     #[test]
     fn rejects_allowlist_targeting_system_critical() {
+        // OUT-01 是系统 fail-closed 规则（运行时注册）
+        register_system_critical("OUT-01");
         let mut r = valid_rule("MY-RULE");
         // OUT-01 是系统 Critical rule_id，不应出现在用户 allowlist 中
         r.allowlist_stopwords = vec!["OUT-01".into()];

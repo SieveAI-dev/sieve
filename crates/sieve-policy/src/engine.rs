@@ -150,6 +150,9 @@ fn to_rule_entry(u: UserRuleEntry) -> RuleEntry {
         allowlist_regexes: vec![],
         allowlist_stopwords: u.allowlist_stopwords,
         disposition,
+        // 用户规则永不可 fail-closed（PRD §9 #14：不能 suppress / 提级系统 Critical）。
+        // 显式 Some(false) 防御：即便 severity 异常也绝不进 fail-closed 注册表。
+        fail_closed: Some(false),
         timeout_seconds: None,
         default_on_timeout: DefaultOnTimeout::Allow,
     }

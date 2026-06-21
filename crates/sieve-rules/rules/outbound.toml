@@ -164,6 +164,8 @@ keywords = ["xoxb", "xoxp", "xoxa", "xoxs"]
 allowlist_regexes = []
 allowlist_stopwords = []
 disposition = "gui_popup"
+# 高置信度凭据格式，虽 severity=high 仍 fail-closed（不可关 / 不可永久白名单 / dry-run 仍 enforce）。
+fail_closed = true
 timeout_seconds = 60
 default_on_timeout = "block"
 
