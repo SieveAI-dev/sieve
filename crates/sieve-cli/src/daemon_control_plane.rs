@@ -147,13 +147,13 @@ pub fn spawn_control_plane_handler(
     state: Arc<RuntimeState>,
     outbound_layered: Arc<
         sieve_rules::engine::LayeredEngine<
-            sieve_rules::engine::VectorscanEngine,
+            sieve_rules::engine::SystemEngine,
             sieve_policy::engine::UserEngine,
         >,
     >,
     inbound_layered: Arc<
         sieve_rules::engine::LayeredEngine<
-            sieve_rules::engine::VectorscanEngine,
+            sieve_rules::engine::SystemEngine,
             sieve_policy::engine::UserEngine,
         >,
     >,
@@ -191,13 +191,13 @@ async fn dispatch_request(
     state: &Arc<RuntimeState>,
     outbound_layered: &Arc<
         sieve_rules::engine::LayeredEngine<
-            sieve_rules::engine::VectorscanEngine,
+            sieve_rules::engine::SystemEngine,
             sieve_policy::engine::UserEngine,
         >,
     >,
     inbound_layered: &Arc<
         sieve_rules::engine::LayeredEngine<
-            sieve_rules::engine::VectorscanEngine,
+            sieve_rules::engine::SystemEngine,
             sieve_policy::engine::UserEngine,
         >,
     >,
@@ -510,13 +510,13 @@ async fn handle_reload_config(
     state: &Arc<RuntimeState>,
     outbound_layered: &Arc<
         sieve_rules::engine::LayeredEngine<
-            sieve_rules::engine::VectorscanEngine,
+            sieve_rules::engine::SystemEngine,
             sieve_policy::engine::UserEngine,
         >,
     >,
     inbound_layered: &Arc<
         sieve_rules::engine::LayeredEngine<
-            sieve_rules::engine::VectorscanEngine,
+            sieve_rules::engine::SystemEngine,
             sieve_policy::engine::UserEngine,
         >,
     >,
@@ -613,13 +613,13 @@ async fn handle_evaluate(
     params: sieve_ipc::EvaluateRequest,
     outbound_layered: &Arc<
         sieve_rules::engine::LayeredEngine<
-            sieve_rules::engine::VectorscanEngine,
+            sieve_rules::engine::SystemEngine,
             sieve_policy::engine::UserEngine,
         >,
     >,
     inbound_layered: &Arc<
         sieve_rules::engine::LayeredEngine<
-            sieve_rules::engine::VectorscanEngine,
+            sieve_rules::engine::SystemEngine,
             sieve_policy::engine::UserEngine,
         >,
     >,
@@ -811,13 +811,13 @@ async fn handle_remove_graylist(
 async fn handle_list_rules(
     outbound_layered: &Arc<
         sieve_rules::engine::LayeredEngine<
-            sieve_rules::engine::VectorscanEngine,
+            sieve_rules::engine::SystemEngine,
             sieve_policy::engine::UserEngine,
         >,
     >,
     inbound_layered: &Arc<
         sieve_rules::engine::LayeredEngine<
-            sieve_rules::engine::VectorscanEngine,
+            sieve_rules::engine::SystemEngine,
             sieve_policy::engine::UserEngine,
         >,
     >,

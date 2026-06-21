@@ -19,6 +19,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use vectorscan_rs::{BlockDatabase, BlockScanner, Flag, Pattern, Scan};
 
+mod system;
+pub use system::SystemEngine;
+
 /// 扫描方向（PRD v2.0 §6.3.1）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
@@ -191,6 +194,32 @@ impl<U: MatchEngine> LayeredEngine<VectorscanEngine, U> {
     /// 用户规则通过 `sieve-policy` 的 `UserEngine` 单独获取。
     pub fn system_rules_snapshot(&self) -> Vec<RuleEntry> {
         self.system.rules_snapshot()
+    }
+}
+
+impl<U: MatchEngine> LayeredEngine<SystemEngine, U> {
+    /// 返回系统规则快照（SPEC-005 §11A `sieve.list_rules` 用）。
+    ///
+    /// 委托给 [`SystemEngine::rules_snapshot`]，无规则包时返回空 `Vec`。
+    /// 当 daemon 持有 `LayeredEngine<SystemEngine, _>` 时取系统规则列表的入口，
+    /// 对称于 `VectorscanEngine` 版。
+    pub fn system_rules_snapshot(&self) -> Vec<RuleEntry> {
+        self.system.rules_snapshot()
+    }
+
+    /// 原子热替换系统规则引擎（reload 链）。
+    ///
+    /// 委托给 [`SystemEngine::swap_system`]：daemon 收到 `sieve.reload_rules` 后
+    /// 用新装的签名包替换系统层，无需重启。`None` 退化为空集 fail-safe。
+    pub fn swap_system(&self, engine: Option<VectorscanEngine>) {
+        self.system.swap_system(engine);
+    }
+
+    /// 系统层当前是否已加载签名规则包。
+    ///
+    /// `false` = 空集 fail-safe（未装包，透传不检测）。
+    pub fn has_system_rules(&self) -> bool {
+        self.system.has_rules()
     }
 }
 

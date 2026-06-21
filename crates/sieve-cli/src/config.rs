@@ -683,6 +683,27 @@ impl Config {
         PathBuf::from("crates/sieve-rules/rules/inbound.toml")
     }
 
+    /// 解析签名规则包路径。
+    ///
+    /// 签名规则包经更新通道下发，由 `sieve-updater` 验签后安装到缓存目录的
+    /// `current.json`（见 `sieve-updater::install::install_rules`）。
+    /// daemon 启动优先从此包加载系统规则；包不存在时降级 dev TOML，
+    /// 再降级空集 fail-safe（引擎可独立构建运行供审计）。
+    ///
+    /// 优先级：`SIEVE_RULES_PACK` env 覆盖（测试 / 自定义部署）> updater 缓存目录的 `current.json`。
+    /// 返回 `None` 仅当缓存目录无法确定（HOME 等环境缺失，极少见），调用方按无包处理。
+    pub fn resolved_rules_pack_path(&self) -> Option<PathBuf> {
+        if let Some(v) = std::env::var_os("SIEVE_RULES_PACK") {
+            let v = PathBuf::from(v);
+            if !v.as_os_str().is_empty() {
+                return Some(v);
+            }
+        }
+        sieve_updater::cache_dir::cache_dir()
+            .ok()
+            .map(|d| d.join("current.json"))
+    }
+
     /// 解析 `.sieveignore` 路径。显式给定时直接用，否则 `<sieve_home>/sieveignore`
     /// （`SIEVE_HOME` env var > `$HOME/.sieve`）。
     pub fn resolved_sieveignore_path(&self) -> PathBuf {

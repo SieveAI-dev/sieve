@@ -24,10 +24,11 @@ pub fn load_inbound_rules(path: &Path) -> SieveRulesResult<Vec<RuleEntry>> {
     load_outbound_rules(path) // schema 同，直接复用
 }
 
-/// 从 JSON 签名规则包 manifest 加载规则（updater 安装的 `~/.sieve/rules/current.json`）。
+/// 从 JSON 签名规则包 manifest 加载规则（updater 安装的 `current.json`）。
 ///
-/// 这是私有签名规则包的加载入口（c 阶段1：引擎运行时加载闭源规则包，关联 SPEC-006）。
-/// 与 [`load_outbound_rules`] 的 TOML 路径并存——TOML 留作公开仓 dev 源 + 编译期嵌入的
+/// 这是签名规则包的运行时加载入口：规则经更新通道下发，由 `sieve-updater::install`
+/// 验签后落盘为 `current.json`。
+/// 与 [`load_outbound_rules`] 的 TOML 路径并存——TOML 留作 dev 源 + 编译期嵌入的
 /// 最小集；JSON [`RulesManifest`] 是签名包的 wire 格式，带 `schema_version` /
 /// `rules_version` / `effective_date` 元数据。[`RuleEntry`] 的 `#[serde(default)]` 字段
 /// 保证 JSON 与 TOML 等价解析（见 `manifest.rs` 双向序列化测试）。

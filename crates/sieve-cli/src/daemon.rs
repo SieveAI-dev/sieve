@@ -750,13 +750,13 @@ pub async fn run(
     audit_store: Arc<crate::audit::AuditStore>,
     outbound_layered: Arc<
         sieve_rules::engine::LayeredEngine<
-            sieve_rules::engine::VectorscanEngine,
+            sieve_rules::engine::SystemEngine,
             sieve_policy::engine::UserEngine,
         >,
     >,
     inbound_layered: Arc<
         sieve_rules::engine::LayeredEngine<
-            sieve_rules::engine::VectorscanEngine,
+            sieve_rules::engine::SystemEngine,
             sieve_policy::engine::UserEngine,
         >,
     >,
@@ -1540,13 +1540,13 @@ pub(crate) fn perform_user_rules_reload(
     user_rules_path: Option<&std::path::Path>,
     outbound_layered: &Arc<
         sieve_rules::engine::LayeredEngine<
-            sieve_rules::engine::VectorscanEngine,
+            sieve_rules::engine::SystemEngine,
             sieve_policy::engine::UserEngine,
         >,
     >,
     inbound_layered: &Arc<
         sieve_rules::engine::LayeredEngine<
-            sieve_rules::engine::VectorscanEngine,
+            sieve_rules::engine::SystemEngine,
             sieve_policy::engine::UserEngine,
         >,
     >,

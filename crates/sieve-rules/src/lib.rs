@@ -20,6 +20,7 @@ pub mod placeholder;
 pub mod wordlist;
 
 pub use engine::{
-    ContentKind, Direction, LayeredEngine, MatchEngine, MatchHit, Protocol, ScanReport, ScanRequest,
+    ContentKind, Direction, LayeredEngine, MatchEngine, MatchHit, Protocol, ScanReport,
+    ScanRequest, SystemEngine,
 };
 pub use error::{SieveRulesError, SieveRulesResult};

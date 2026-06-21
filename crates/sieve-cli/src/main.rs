@@ -38,8 +38,9 @@ use engine_adapter::{InboundAdapter, OutboundAdapter};
 use sieve_core::detection::DefaultOnTimeout;
 use sieve_core::pipeline::inbound::AddressGuardConfig;
 use sieve_core::pipeline::outbound::OutboundFilter;
-use sieve_rules::engine::{LayeredEngine, MatchEngine, VectorscanEngine};
-use sieve_rules::loader::{load_inbound_rules, load_outbound_rules};
+use sieve_rules::engine::{LayeredEngine, MatchEngine, SystemEngine, VectorscanEngine};
+use sieve_rules::loader::{load_inbound_rules, load_outbound_rules, load_rules_from_manifest_json};
+use sieve_rules::manifest::RuleEntry;
 
 /// 入站规则中不送入 vectorscan 编译的占位 pattern 列表（R6-#6）。
 ///
@@ -83,21 +84,15 @@ async fn main() -> Result<()> {
                     .with_context(|| format!("init audit store at {}", audit_path.display()))?,
             );
 
-            // 加载出站规则（fail-closed：加载失败直接退出，不 fallback 到无规则模式，ADR-007）
-            let rules_path = cfg.resolved_rules_path();
-            tracing::info!(path = %rules_path.display(), "loading outbound rules");
-            let rules = load_outbound_rules(&rules_path).with_context(|| {
-                format!(
-                    "failed to load outbound rules from {}; \
-                     set rules_path in sieve.toml or ensure the default path exists",
-                    rules_path.display()
-                )
-            })?;
-            tracing::info!(count = rules.len(), "outbound rules loaded");
+            // 加载出站系统规则：优先签名规则包 current.json → dev TOML → 空集 fail-safe。
+            // 这放宽了旧的「加载失败 exit1」语义（参见 ADR-007 fail-closed）：
+            // 引擎须能在无规则包时独立启动供审计，装了签名包（经更新通道下发）才有检测能力。
+            let pack_path = cfg.resolved_rules_pack_path();
+            let dev_outbound_path = cfg.resolved_rules_path();
+            let rules = load_system_rules(pack_path.as_deref(), &dev_outbound_path, true);
 
-            // 编译出站 vectorscan db（fail-closed）
-            let system_engine = VectorscanEngine::compile(rules.clone())
-                .map_err(|e| anyhow::anyhow!("vectorscan compile: {e}"))?;
+            // 编译出站系统引擎（空集 / 编译失败均降级空集 fail-safe），包成可热替换的 SystemEngine
+            let system_engine = build_system_engine(rules.clone(), "outbound");
 
             // 加载用户规则（PRD §5.5 + §9 #14 fail-safe）
             let user_rules_path = sieve_ipc::paths::sieve_home()
@@ -131,16 +126,10 @@ async fn main() -> Result<()> {
                 Arc::clone(&sieveignore_arc),
             ));
 
-            // 加载入站规则（fail-closed，ADR-007）
-            let inbound_rules_path = cfg.resolved_inbound_rules_path();
-            tracing::info!(path = %inbound_rules_path.display(), "loading inbound rules");
-            let inbound_rules_raw = load_inbound_rules(&inbound_rules_path).with_context(|| {
-                format!(
-                    "failed to load inbound rules from {}; \
-                         set inbound_rules_path in sieve.toml or ensure the default path exists",
-                    inbound_rules_path.display()
-                )
-            })?;
+            // 加载入站系统规则：同出站，优先签名包（按 ID 前缀取入站部分）→ dev TOML → 空集 fail-safe。
+            let dev_inbound_path = cfg.resolved_inbound_rules_path();
+            let inbound_rules_raw =
+                load_system_rules(pack_path.as_deref(), &dev_inbound_path, false);
 
             // 占位规则不传 vectorscan 编译（R6-#6：含 IN-CR-01 + IN-CR-06 两个 placeholder）
             let (placeholder_rules, vectorscan_rules): (Vec<_>, Vec<_>) = inbound_rules_raw
@@ -153,9 +142,8 @@ async fn main() -> Result<()> {
                 "inbound rules partitioned"
             );
 
-            // 编译入站 vectorscan db（独立实例，fail-closed）
-            let inbound_system_engine = VectorscanEngine::compile(vectorscan_rules)
-                .map_err(|e| anyhow::anyhow!("inbound vectorscan compile: {e}"))?;
+            // 编译入站系统引擎（空集 / 编译失败均降级空集 fail-safe），包成可热替换的 SystemEngine
+            let inbound_system_engine = build_system_engine(vectorscan_rules, "inbound");
 
             // 入站用户规则引擎（只编译 direction=inbound/both 的规则，PRD v2.0 §5.5）
             let inbound_user_engine = load_user_engine_fail_safe(
@@ -293,6 +281,113 @@ fn load_sieveignore(path: &Path) -> HashSet<String> {
                 "failed to load .sieveignore; proceeding with empty allowlist"
             );
             HashSet::new()
+        }
+    }
+}
+
+/// 加载某方向的系统规则源。
+///
+/// 优先级：① 签名规则包 `current.json`（updater 经更新通道下发后安装，按 ID 前缀过滤方向）→
+/// ② dev TOML（过渡期；规则后续迁出后此路失效）→ ③ 空集 fail-safe。
+///
+/// 与旧逻辑（加载失败 `exit(1)`，参见 ADR-007 fail-closed）的差异：引擎须能在无规则包时
+/// 独立构建运行供审计，故系统规则加载放宽为 **fail-safe 空集**——无包（正常态）/ 包解析失败 /
+/// dev TOML 解析失败，都降级空集 + 醒目 warn，而非崩溃。注意区分：包**验签**失败由
+/// `sieve-updater::install` 在安装阶段拒绝，daemon 见到的 `current.json` 已通过验签，
+/// 此处只负责解析已信任的包。
+///
+/// `is_outbound = true` 取 `OUT-*` 规则，`false` 取其余（入站 `IN-*`）。
+/// 单一签名包含全部规则，按 ID 前缀拆分到出站 / 入站两个独立引擎（与 dev 双 TOML 等价）。
+fn load_system_rules(
+    pack_path: Option<&Path>,
+    dev_toml_path: &Path,
+    is_outbound: bool,
+) -> Vec<RuleEntry> {
+    let kind = if is_outbound { "outbound" } else { "inbound" };
+
+    // ① 签名规则包（生产路径）
+    if let Some(p) = pack_path {
+        if p.exists() {
+            match load_rules_from_manifest_json(p) {
+                Ok(all) => {
+                    let filtered: Vec<RuleEntry> = all
+                        .into_iter()
+                        .filter(|r| r.id.starts_with("OUT") == is_outbound)
+                        .collect();
+                    tracing::info!(
+                        path = %p.display(),
+                        count = filtered.len(),
+                        kind,
+                        "loaded system rules from signed pack"
+                    );
+                    return filtered;
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        path = %p.display(),
+                        error = %e,
+                        kind,
+                        "signed rules pack present but failed to parse; falling back to dev TOML / empty"
+                    );
+                }
+            }
+        }
+    }
+
+    // ② dev TOML（过渡期，阶段 F 后失效）
+    if dev_toml_path.exists() {
+        let loaded = if is_outbound {
+            load_outbound_rules(dev_toml_path)
+        } else {
+            load_inbound_rules(dev_toml_path)
+        };
+        match loaded {
+            Ok(rules) => {
+                tracing::info!(
+                    path = %dev_toml_path.display(),
+                    count = rules.len(),
+                    kind,
+                    "loaded system rules from dev TOML (no signed pack)"
+                );
+                return rules;
+            }
+            Err(e) => {
+                tracing::warn!(
+                    path = %dev_toml_path.display(),
+                    error = %e,
+                    kind,
+                    "dev TOML present but failed to parse; falling back to empty ruleset"
+                );
+            }
+        }
+    }
+
+    // ③ 空集 fail-safe（无包正常态 / 全部加载源失败）
+    tracing::warn!(
+        kind,
+        "no signed rules pack and no dev TOML for {kind}; starting with EMPTY ruleset \
+         — traffic is NOT inspected (fail-safe passthrough). Install a signed rules pack to enable detection."
+    );
+    Vec::new()
+}
+
+/// 将规则集编译为可热替换的 [`SystemEngine`]。
+///
+/// 空集 → [`SystemEngine::empty`]（`has_rules = false`，透传不检测）。
+/// 非空但 vectorscan 编译失败 → 同样降级空集 fail-safe + ERROR 日志（不因规则问题启动不了）。
+fn build_system_engine(rules: Vec<RuleEntry>, kind: &str) -> SystemEngine {
+    if rules.is_empty() {
+        return SystemEngine::empty();
+    }
+    match VectorscanEngine::compile(rules) {
+        Ok(vse) => SystemEngine::new(Some(vse)),
+        Err(e) => {
+            tracing::error!(
+                kind,
+                error = %e,
+                "system rules failed to compile; starting with EMPTY ruleset (fail-safe passthrough)"
+            );
+            SystemEngine::empty()
         }
     }
 }
