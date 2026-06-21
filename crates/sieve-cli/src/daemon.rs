@@ -1055,8 +1055,37 @@ pub async fn run(
                 interval_secs = interval,
                 "starting updater task (ADR-030)"
             );
+
+            // 系统规则热重载链（c 方向）：updater 装入新签名包 → on_rules_installed 钩子
+            // 经进程内 mpsc 通知 reload listener → perform_rules_reload → swap_system（无需重启）。
+            // 单容量 + try_send：reload 期间的重复信号合并为一次（最终状态一致）。
+            let (reload_sys_tx, mut reload_sys_rx) = tokio::sync::mpsc::channel::<()>(1);
+            let pack_path = cfg.resolved_rules_pack_path();
+            let dev_outbound_path = cfg.resolved_rules_path();
+            let dev_inbound_path = cfg.resolved_inbound_rules_path();
+            let outbound_layered_for_sysreload = Arc::clone(&outbound_layered);
+            let inbound_layered_for_sysreload = Arc::clone(&inbound_layered);
+            let ipc_for_sysreload = ipc_server.clone();
             tokio::spawn(async move {
-                sieve_updater::runner::run(updater_cfg).await;
+                while reload_sys_rx.recv().await.is_some() {
+                    perform_rules_reload(
+                        pack_path.as_deref(),
+                        &dev_outbound_path,
+                        &dev_inbound_path,
+                        &outbound_layered_for_sysreload,
+                        &inbound_layered_for_sysreload,
+                        ipc_for_sysreload.as_ref(),
+                    );
+                }
+            });
+            let on_rules_installed: sieve_updater::runner::RulesInstalledHook =
+                Arc::new(move || {
+                    // try_send：channel 满（已有待处理 reload）时丢弃多余信号，无害。
+                    let _ = reload_sys_tx.try_send(());
+                });
+
+            tokio::spawn(async move {
+                sieve_updater::runner::run(updater_cfg, Some(on_rules_installed)).await;
             });
         }
     }
@@ -1622,6 +1651,66 @@ pub(crate) fn perform_user_rules_reload(
         success,
         rule_count,
         user_rules_errors: err_msg.into_iter().collect(),
+    }
+}
+
+/// 系统规则热重载（updater 装入新签名包后调用，无需重启）。
+///
+/// 从签名包（`current.json`）重新加载出站/入站系统规则，编译后原子 `swap_system` 到
+/// live 引擎；空集 / 编译失败 → swap 为空集 fail-safe（保持引擎可用）。编译时
+/// [`VectorscanEngine::compile`] 同步刷新 fail-closed 运行时注册表（accumulate）。
+/// 与 [`perform_user_rules_reload`] 对称——系统层 `ArcSwap` zero-downtime 热替换。
+pub(crate) fn perform_rules_reload(
+    pack_path: Option<&std::path::Path>,
+    dev_outbound_path: &std::path::Path,
+    dev_inbound_path: &std::path::Path,
+    outbound_layered: &Arc<
+        sieve_rules::engine::LayeredEngine<
+            sieve_rules::engine::SystemEngine,
+            sieve_policy::engine::UserEngine,
+        >,
+    >,
+    inbound_layered: &Arc<
+        sieve_rules::engine::LayeredEngine<
+            sieve_rules::engine::SystemEngine,
+            sieve_policy::engine::UserEngine,
+        >,
+    >,
+    ipc: Option<&Arc<sieve_ipc::IpcServer>>,
+) {
+    let out = crate::reload_system_vectorscan(pack_path, dev_outbound_path, true);
+    let inb = crate::reload_system_vectorscan(pack_path, dev_inbound_path, false);
+    let out_count = out
+        .as_ref()
+        .map(sieve_rules::engine::MatchEngine::rule_count)
+        .unwrap_or(0);
+    let in_count = inb
+        .as_ref()
+        .map(sieve_rules::engine::MatchEngine::rule_count)
+        .unwrap_or(0);
+    let total = out_count + in_count;
+
+    // 原子热替换系统层（已在进行中的 scan 持旧快照，结束后释放）。
+    outbound_layered.swap_system(out);
+    inbound_layered.swap_system(inb);
+
+    tracing::info!(
+        out_count,
+        in_count,
+        "系统规则热重载完成（swap_system，zero-downtime）"
+    );
+
+    if let Some(ipc) = ipc {
+        let notify = sieve_ipc::protocol::StatusBarNotify {
+            notify_id: uuid::Uuid::now_v7(),
+            created_at: chrono::Utc::now(),
+            kind: sieve_ipc::protocol::NotifyKind::Generic,
+            title: format!("规则包已热加载（{total} 条）"),
+            detail: Some("已立即生效，无需重启 daemon".to_owned()),
+            rule_id: None,
+            auto_dismiss_seconds: 5,
+        };
+        ipc.broadcast_status_bar(notify);
     }
 }
 

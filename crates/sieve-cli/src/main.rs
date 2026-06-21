@@ -392,6 +392,39 @@ fn build_system_engine(rules: Vec<RuleEntry>, kind: &str) -> SystemEngine {
     }
 }
 
+/// 为热重载加载某方向系统规则并编译为 `Option<VectorscanEngine>`（供 `swap_system`）。
+///
+/// 复用 [`load_system_rules`] 的加载优先级（签名包 → dev TOML → 空集）；入站方向剔除
+/// placeholder（与启动 partition 一致，IN-CR-01/06 等占位 pattern 不进 vectorscan）。
+/// 空集 / 编译失败 → `None`（`swap_system(None)` = 空集 fail-safe，保持引擎可用）。
+///
+/// 编译成功时 [`VectorscanEngine::compile`] 同步把新规则的 fail-closed/hook/gui 分类
+/// 注册进运行时注册表（accumulate），故热替换后新规则的 fail-closed 判定即刻生效。
+pub(crate) fn reload_system_vectorscan(
+    pack_path: Option<&Path>,
+    dev_path: &Path,
+    is_outbound: bool,
+) -> Option<VectorscanEngine> {
+    let mut rules = load_system_rules(pack_path, dev_path, is_outbound);
+    if !is_outbound {
+        rules.retain(|r| !INBOUND_PLACEHOLDER_PATTERNS.contains(&r.pattern.as_str()));
+    }
+    if rules.is_empty() {
+        return None;
+    }
+    match VectorscanEngine::compile(rules) {
+        Ok(v) => Some(v),
+        Err(e) => {
+            tracing::error!(
+                is_outbound,
+                error = %e,
+                "reload: system rules failed to compile; keeping engine empty (fail-safe)"
+            );
+            None
+        }
+    }
+}
+
 /// 加载并按方向编译用户规则引擎（PRD v2.0 §5.5 / §9 #14 fail-safe）。
 ///
 /// 文件不存在时 `sieve_policy::loader::load_user_rules` 返回空 `UserRulesFile`，
@@ -569,5 +602,49 @@ mod tests {
                 r.pattern
             );
         }
+    }
+
+    /// 阶段 E 热重载：从签名包 current.json 加载，按方向拆分 + 剔除 placeholder，编译可用引擎。
+    #[test]
+    fn reload_system_vectorscan_from_pack() {
+        use sieve_rules::engine::MatchEngine;
+        use std::io::Write;
+
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        // 含一条出站、一条入站、一条入站 placeholder（IN-CR-01）。
+        write!(
+            f,
+            r#"{{"schema_version":1,"rules_version":1,"effective_date":"2026-06-21","rules":[
+                {{"id":"OUT-TESTX","severity":"high","action":"warn","pattern":"out_secret","description":"o"}},
+                {{"id":"IN-CR-TESTX","severity":"critical","action":"block","pattern":"in_danger","description":"i"}},
+                {{"id":"IN-CR-01","severity":"critical","action":"block","pattern":"__ADDRESS_GUARD_PLACEHOLDER__","description":"ph"}}
+            ]}}"#
+        )
+        .unwrap();
+        let pack = f.path();
+        let nodev = std::path::Path::new("/nonexistent/dev.toml");
+
+        // 出站：只取 OUT-*，命中 out_secret，不命中入站 pattern。
+        let out = super::reload_system_vectorscan(Some(pack), nodev, true).expect("出站应有规则");
+        assert_eq!(out.rule_count(), 1);
+        assert!(!out.scan(b"leak out_secret here").unwrap().is_empty());
+        assert!(out.scan(b"in_danger here").unwrap().is_empty());
+
+        // 入站：取 IN-*（含 IN-CR-TESTX），剔除 placeholder IN-CR-01。
+        let inb = super::reload_system_vectorscan(Some(pack), nodev, false).expect("入站应有规则");
+        assert_eq!(
+            inb.rule_count(),
+            1,
+            "placeholder IN-CR-01 应被剔除，仅剩 IN-CR-TESTX"
+        );
+        assert!(!inb.scan(b"in_danger now").unwrap().is_empty());
+        // placeholder 字面量不进 vectorscan，故不命中
+        assert!(inb
+            .scan(b"text __ADDRESS_GUARD_PLACEHOLDER__ text")
+            .unwrap()
+            .is_empty());
+
+        // 无包 + 无 dev TOML → None（空集 fail-safe）。
+        assert!(super::reload_system_vectorscan(None, nodev, true).is_none());
     }
 }

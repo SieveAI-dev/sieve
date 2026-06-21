@@ -25,6 +25,14 @@ pub const DEFAULT_RULES_DIR: &str = "rules";
 /// Maximum accepted rules bundle size: 50 MiB (ADR-030 §5).
 pub const MAX_RULES_SIZE: usize = 50 * 1024 * 1024;
 
+/// Hook invoked after a new rules pack is successfully installed.
+///
+/// The daemon sets this to trigger an in-process hot reload of the system
+/// rules (swap the freshly installed `current.json` into the live engines)
+/// without restarting. Kept as a plain callback so this crate does not depend
+/// on the IPC / engine crates.
+pub type RulesInstalledHook = std::sync::Arc<dyn Fn() + Send + Sync>;
+
 /// Configuration for the update runner task.
 ///
 /// ADR-030 §5.6: constructed by the daemon from `Config::update` + env overrides.
@@ -54,8 +62,11 @@ pub struct UpdaterConfig {
 ///    after 3 exhausted retries the error is logged and the runner waits until
 ///    the next normal interval — it never panics or exits.
 ///
+/// `on_rules_installed` (if set) is invoked once after each successful rules
+/// install, so the daemon can hot-reload the new pack without a restart.
+///
 /// This function never returns (return type `!`).
-pub async fn run(cfg: UpdaterConfig) -> ! {
+pub async fn run(cfg: UpdaterConfig, on_rules_installed: Option<RulesInstalledHook>) -> ! {
     // Resolve the rules staging directory once at startup.
     let rules_dir: Option<PathBuf> = match crate::cache_dir::cache_dir() {
         Ok(cd) => Some(cd.join(DEFAULT_RULES_DIR)),
@@ -101,12 +112,19 @@ pub async fn run(cfg: UpdaterConfig) -> ! {
         first = false;
 
         match run_one_check(&cfg, install_id, rules_dir.as_deref()).await {
-            Ok(server_interval) => {
+            Ok((server_interval, rules_installed)) => {
                 next_interval_secs = server_interval.unwrap_or(cfg.interval_secs);
                 tracing::debug!(
                     next_check_secs = next_interval_secs,
+                    rules_installed,
                     "update check succeeded"
                 );
+                // 新签名规则包已落盘 → 触发 daemon 进程内热重载（无需重启）。
+                if rules_installed {
+                    if let Some(hook) = &on_rules_installed {
+                        hook();
+                    }
+                }
             }
             Err(e) => {
                 tracing::error!(error = %e, "update check failed (all retries exhausted); will retry next cycle");
@@ -125,7 +143,7 @@ async fn run_one_check(
     cfg: &UpdaterConfig,
     install_id: Option<Uuid>,
     rules_dir: Option<&std::path::Path>,
-) -> Result<Option<u64>, UpdaterError> {
+) -> Result<(Option<u64>, bool), UpdaterError> {
     let params = ManifestParams {
         v: cfg.client_version.clone(),
         os: std::env::consts::OS.to_owned(),
@@ -155,8 +173,8 @@ async fn run_one_check(
 
         match fetch_manifest(&cfg.base_url, params.clone(), &proxy).await {
             Ok(manifest) => {
-                process_manifest(&manifest, rules_dir, &proxy).await;
-                return Ok(manifest.next_check_after_seconds);
+                let rules_installed = process_manifest(&manifest, rules_dir, &proxy).await;
+                return Ok((manifest.next_check_after_seconds, rules_installed));
             }
             Err(e) => {
                 last_err = e.to_string();
@@ -178,14 +196,15 @@ async fn run_one_check(
 /// - Skips download when already up-to-date.
 /// - On download failure retries with 1s/4s/16s exponential back-off.
 /// - Install failure is logged but never crashes the daemon.
-/// - After successful install, hot-load is intentionally **not** triggered here;
-///   that is `sieve-rules`' responsibility via `POST /_sieve/v1/rules/refresh`
-///   (see api-reference.md §2.2.5). This function only stages the file to disk.
+///
+/// Returns `true` iff a new rules pack was successfully installed (atomically
+/// staged to `current.json`). The caller ([`run`]) uses this to invoke the
+/// `on_rules_installed` hook so the daemon hot-reloads the pack in-process.
 async fn process_manifest(
     manifest: &crate::manifest::Manifest,
     rules_dir: Option<&std::path::Path>,
     proxy: &sieve_core::forwarder::ProxyConfig,
-) {
+) -> bool {
     if let Some(client) = &manifest.client {
         tracing::info!(
             latest = %client.latest,
@@ -199,19 +218,19 @@ async fn process_manifest(
 
     let Some(rules) = &manifest.rules else {
         tracing::debug!("manifest: no rules update field; skipping");
-        return;
+        return false;
     };
 
     let Some(dest_dir) = rules_dir else {
         tracing::warn!("rules_dir unavailable; skipping rules download");
-        return;
+        return false;
     };
 
     // Check currently installed version.
     let current_version = read_installed_version(dest_dir).await;
     if current_version.as_deref() == Some(rules.version.as_str()) {
         tracing::debug!(version = %rules.version, "rules already up-to-date; skipping download");
-        return;
+        return false;
     }
 
     tracing::info!(
@@ -227,7 +246,7 @@ async fn process_manifest(
         Ok(b) => b,
         Err(e) => {
             tracing::error!(error = %e, version = %rules.version, "rules download failed (all retries exhausted)");
-            return;
+            return false;
         }
     };
 
@@ -245,9 +264,11 @@ async fn process_manifest(
     {
         Ok(path) => {
             tracing::info!(version = %rules.version, path = ?path, "rules installed");
+            true
         }
         Err(e) => {
             tracing::error!(error = %e, version = %rules.version, "rules install failed; keeping existing rules");
+            false
         }
     }
 }
