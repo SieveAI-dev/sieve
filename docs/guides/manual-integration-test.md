@@ -2,7 +2,7 @@
 
 > 上次更新：2026-05-05（增补 §14 sieve-updater 联调,域名落定 sieveai.dev）
 > 范围：unix-style 改造 v2.x 5 项 TODO + sieve-updater 客户端闭环 的用户验证步骤
-> 关联：[ADR-026](../design/ADR-026-port-based-listener-routing.md) / [ADR-028](../design/ADR-028-ipc-protocol-neutralization.md) / 更新通道设计（详见内部记录） / [SPEC-006](../specs/SPEC-006-update-and-telemetry.md) / PROGRESS.md
+> 关联：[ADR-026](../design/ADR-026-port-based-listener-routing.md) / [ADR-028](../design/ADR-028-ipc-protocol-neutralization.md) / [SPEC-006](../specs/SPEC-006-update-and-telemetry.md) / PROGRESS.md
 
 ---
 
@@ -519,7 +519,7 @@ DeepSeek Anthropic 兼容入口 `https://api.deepseek.com/anthropic` 是验证 T
 
 ## 14. sieve-updater 客户端独立闭环（SPEC-006）
 
-> 关联：更新通道设计（详见内部记录） / [SPEC-006](../specs/SPEC-006-update-and-telemetry.md)
+> 关联：[SPEC-006](../specs/SPEC-006-update-and-telemetry.md)
 > **服务端尚未实施**。本节用本地 mock HTTP 服务器验证客户端能完整跑通 manifest → 下载 → 校验 → 原子落盘的闭环。
 
 ### 14.1 install-id 模块（首启幂等 + 删后重生）
@@ -831,7 +831,7 @@ unset SIEVE_NO_UPDATE SIEVE_NO_TELEMETRY     # 默认放开
 
 - [ADR-026 Port-based listener routing](../design/ADR-026-port-based-listener-routing.md)
 - [ADR-028 IPC 协议中性化](../design/ADR-028-ipc-protocol-neutralization.md)
-- 更新通道与 install 统计设计（详见内部记录）
+- [SPEC-006 manifest 协议更新通道与 install 统计设计](../specs/SPEC-006-update-and-telemetry.md)
 - [SPEC-003 sieve setup tool](../specs/SPEC-003-sieve-setup-tool.md) §4.2b doctor multi-listener
 - [SPEC-004 multi-agent setup](../specs/SPEC-004-multi-agent-setup.md) §4.2.6 header vs port routing
 - [SPEC-006 manifest 协议 + sieve-updater 客户端](../specs/SPEC-006-update-and-telemetry.md)

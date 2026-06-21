@@ -4,7 +4,7 @@
 **Accepted**
 > 决策日期：2026-06-11
 > 范围：sieve-updater 规则签名公钥 + sieve-ipc X-Sieve-Origin 公钥的「就位」编译期强制
-> 关联：[ADR-006](./ADR-006-sigstore-reproducible-build.md)（sigstore + 签名分发）/ [ADR-019](./ADR-019-x-sieve-origin-header.md)（X-Sieve-Origin header）/ updater 签名校验（详见内部记录）/ `SECURITY.md`
+> 关联：[ADR-006](./ADR-006-sigstore-reproducible-build.md)（sigstore + 签名分发）/ [ADR-019](./ADR-019-x-sieve-origin-header.md)（X-Sieve-Origin header）/ `SECURITY.md`
 > 来源：2026-06-07 工程状态审查 §5 安全态势（标记「GA 硬阻塞」）
 > 关联 PRD：v2.0 §9 #3（fail-closed）、§9 #6（供应链 pinned deps）
 
@@ -17,7 +17,7 @@
 
 alpha 阶段可接受——规则包仍有同源 SHA-256，X-Sieve-Origin 验签 GA 前可选（ADR-019）。但 `SECURITY.md` 对外承诺「规则包 Ed25519 签名 + fail-closed 验证」。若占位公钥随 GA 二进制发布，CDN / TLS 任一沦陷即可绕过规则签名——**信任根失效**。审查（§5）将其标为「alpha 可接受，GA 硬阻塞」。
 
-真实公钥依赖 [ADR-006](./ADR-006-sigstore-reproducible-build.md) follow-up（签名基建：GCP KMS 等，见 PROGRESS TODO-14）尚未落地，是**运维项**。问题在于：不能靠「人记得 GA 前填公钥」——这正是最容易在发布日遗漏、且后果最严重的一类 checklist 项。需要一个**机器强制**的 gate。
+真实公钥依赖 [ADR-006](./ADR-006-sigstore-reproducible-build.md) follow-up（签名基建：GCP KMS 等）尚未落地，是**运维项**。问题在于：不能靠「人记得 GA 前填公钥」——这正是最容易在发布日遗漏、且后果最严重的一类 checklist 项。需要一个**机器强制**的 gate。
 
 ## 决策
 
@@ -64,7 +64,7 @@ GA release pipeline 须 `cargo build --release --features ga_keys`；占位则 E
 - `SECURITY.md`：注明 GA build 经 `ga_keys` 编译期 gate 强制真实公钥（已完成）
 - [docs/guides/deployment.md](../guides/deployment.md)：reproducible build 章节加 GA build `--features ga_keys` + 验证步骤（已完成）
 - [docs/changelog/CHANGELOG.md](../changelog/CHANGELOG.md) `[Unreleased]` Security 条目（已完成）
-- tasks/PROGRESS.md：TODO-14 关联本 gate 已就位（已完成）
+
 
 ## 相关文档
 - [ADR-006: Sigstore 签名 + Reproducible Build + 透明日志](./ADR-006-sigstore-reproducible-build.md)

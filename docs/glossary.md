@@ -20,10 +20,6 @@ v2.0 PRD §0 启动改造的目标定位。Sieve 自我定位为与 CrowdStrike 
 
 Sieve 核心信任叙事的第四句话：产品不只要求用户信任，而是通过开源核心引擎、sigstore 签名、可复现构建、透明规则更新日志等机制，让用户能够独立验证产品的安全性和诚实性。这是相对于 LiteLLM 供应链事件的反思——Sieve 自己不能成为新的风险源。
 
-### doskey
-
-Sieve 的项目维护者。
-
 ### 完整功能期 / Trial
 
 新用户从首次安装 Sieve 开始的完整功能使用期。期满后进入降级模式。
@@ -250,7 +246,7 @@ Sieve 的 benchmark 数据集构成部分：使用蜜罐式的假数据（假 BI
 
 ### benign 会话回放 / Benign Session Replay
 
-Sieve 的 benchmark 数据集构成部分：doskey 自己日常使用 Claude Code 编程的真实会话录制（50-100 条），用于测试规则的误报率（应 < 0.5% for Critical）。详见 PRD §10.1 Week 4。
+Sieve 的 benchmark 数据集构成部分：维护者日常使用 Claude Code 编程的真实会话录制（50-100 条），用于测试规则的误报率（应 < 0.5% for Critical）。详见 PRD §10.1 Week 4。
 
 ### prompt injection
 
@@ -430,7 +426,7 @@ Sieve 从开始开发到 GA（通用版）发布的目标周期。分为三个 p
 
 ### Phase A dogfood
 
-第一个 8 周，doskey 自己 100% 时间用 Sieve 完成日常工作（Claude Code 编程），收集真实误报，积累 benchmark 数据集。目标：doskey 一周无 P0/P1 bug。详见 PRD §10.1。
+第一个 8 周，使用 Sieve 完成日常工作（Claude Code 编程），收集真实误报，积累 benchmark 数据集。目标：连续一周无 P0/P1 bug。详见 PRD §10.1。
 
 ### Phase B 闭测 / Closed Beta
 
@@ -438,7 +434,7 @@ Sieve 从开始开发到 GA（通用版）发布的目标周期。分为三个 p
 
 ### Phase C 维护 / Maintenance
 
-Week 13 之后的长期维护模式。doskey 每周稳定投入 5-10 小时，每月发布一篇深度内容，规则库每周更新一次，季度发大版本（Phase 2 功能逐项上线）。
+Week 13 之后的长期维护模式。每月发布一篇深度内容，规则库每周更新一次，季度发大版本（Phase 2 功能逐项上线）。
 
 ### hackathon builder
 

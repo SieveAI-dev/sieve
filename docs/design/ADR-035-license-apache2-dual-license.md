@@ -4,18 +4,18 @@
 **Accepted**
 > 决策日期:2026-06-19
 > 范围:仓库代码与文档的正式开源许可证选择 + 生效时点
-> 关联:GA 前私有 + 时点(详见内部记录)/ 阶段性策略(详见内部记录)/ [ADR-006](./ADR-006-sigstore-reproducible-build.md)(签名分发,自证清白叙事)
+> 关联:[ADR-006](./ADR-006-sigstore-reproducible-build.md)(签名分发,自证清白叙事)
 > 关联 PRD:v2.0 §11.3(开源策略,本决策取代其中 "core engine MIT at GA" 表述)
-> 取代关系:**Amends** PRD §11.3 的 "core engine MIT" 表述(license 改 Apache-2.0);**Amends** "private until GA / GA 一次性公开" 时点决策(仓库已提前公开,该时点决策详见内部记录)
+> 取代关系:**Amends** PRD §11.3 的 "core engine MIT" 表述(license 改 Apache-2.0,即刻生效)
 
 ## 背景
 
-仓库现已 **public(GA 前闭测,pre-GA closed beta)**。这与两份历史决策的前提冲突,需要正式裁决:
+仓库现已公开。这与两份历史决策的前提冲突,需要正式裁决:
 
-- **PRD §11.3** 原计划 "core engine MIT at GA"——代码许可证为 MIT,且在 GA 时才公开。
-- **GA 前私有时点决策**(详见内部记录)原计划 "GA 前 repo 完全私有,GA 时一次性公开 + 核心引擎 MIT"。
+- **PRD §11.3** 原计划 "core engine MIT at GA"——代码许可证为 MIT,且在较晚时点才公开。
+- 原计划在更晚时点才公开仓库并采用 MIT 许可。
 
-现实已变:为兑现 Sieve "可验证而非仅信任"(verifiable, not just trusted)的信任叙事——安全产品要让用户能读源码亲自审计,源码已先于 GA 公开。一旦仓库 public,就必须有正式 OSI 认可的许可证,否则:
+现实已变:为兑现 Sieve "可验证而非仅信任"(verifiable, not just trusted)的信任叙事——安全产品要让用户能读源码亲自审计,源码已公开。一旦仓库 public,就必须有正式 OSI 认可的许可证,否则:
 
 - 法律上,无许可证的公开代码默认 "All rights reserved",任何人不得合法使用 / fork / 验证,与公开源码的初衷直接矛盾。
 - GitHub 无法识别许可证徽章,削弱 "开源可审计" 的可信度信号。
@@ -55,20 +55,18 @@
 
 - 切换为 Apache-2.0 后,凡历史文档 / README / 徽章中写 "MIT" 的地方都需同步改为 "Apache-2.0",存在一次性清理成本(本 ADR 仅记录决策,文档清理另行执行,见下)。
 - 文档 NC(非商业)条款意味着不能像完全宽松许可那样被任意商用复用——这是有意取舍,优先保护项目内容商业权益而非最大化复用面。
-- 公开时点从 "GA 一次性公开" 调整为 "提前公开",以可验证信任优先于集中公开(时点取舍,非缺陷)。
+- 以可验证信任优先,源码公开并即刻采用正式许可证(时点取舍,非缺陷)。
 
 ### 需要更新的文档
 
 - 新建本 ADR + [ADR-INDEX](./ADR-INDEX.md) 加行(本次完成)
 - 仓库根 `LICENSE`(Apache-2.0 全文)/ `LICENSE-DOCS`(CC BY-NC-SA 4.0 说明)/ `NOTICE`(归属)——另行落地
-- docs/prd/sieve-prd-v2.0.md §11.3:"core engine MIT" 改为 "Apache-2.0",并引用本 ADR——另行落地
+- PRD §11.3:"core engine MIT" 改为 "Apache-2.0",并引用本 ADR——另行落地
 - [README.md](../../README.md) / [README.zh-CN.md](../../README.zh-CN.md):license 徽章与说明改为 `Apache-2.0` + 文档 CC BY-NC-SA 4.0——另行落地
 - [docs/changelog/CHANGELOG.md](../changelog/CHANGELOG.md):新增 license 决策条目——另行落地
 
 > 本 ADR 仅修改本文件 + ADR-INDEX,其余文档清理在后续任务中执行。
 
 ## 相关文档
-- GA 前私有时点决策(详见内部记录)
-- 阶段性策略(详见内部记录)
 - [ADR-006: Sigstore 签名 + Reproducible Build + 透明日志](./ADR-006-sigstore-reproducible-build.md)
 - PRD v2.0 §11.3 开源策略

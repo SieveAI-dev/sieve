@@ -1074,6 +1074,6 @@ struct ModelPrice {
 - [ADR-025](./ADR-025-content-type-routing-matrix.md) —— content-type 路由矩阵
 - [ADR-037](./ADR-037-encrypted-audit-log.md) —— 加密审计归档（`full` 档 + write-only logging + 哈希链，§14）
 - [ADR-038](./ADR-038-overbilling-detection.md) —— 超额计费检测（独立 token 核算 + 信任分级，§15）
-- 更新通道与 install 统计的设计取舍（详见内部记录）
+- 更新通道与 install 统计的设计取舍（详见 [SPEC-006](../specs/SPEC-006-update-and-telemetry.md)）
 - [SPEC-006](../specs/SPEC-006-update-and-telemetry.md) —— manifest 协议详细规格
 - `docs/api/api-reference.md` —— 待编写

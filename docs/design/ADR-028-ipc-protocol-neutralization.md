@@ -45,7 +45,7 @@ SPEC-005（1750 行 IPC 协议）大量使用 `popup` / `request_decision_cancel
 | 出现第三个语言的 client（除 Rust + Swift 外） | 未出现 |
 | 维护团队规模增长到需要并行多 client 协作 | 未满足 |
 
-当前小团队 + 双语言 + GA 前阶段，拆 crate / 拆仓属于过度设计（YAGNI）。**触发条件发生时再写一个新 ADR 决策升级，本 ADR 不预判。**
+当前双语言 + 早期工程阶段，拆 crate / 拆仓属于过度设计（YAGNI）。**触发条件发生时再写一个新 ADR 决策升级，本 ADR 不预判。**
 
 ---
 

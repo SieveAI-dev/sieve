@@ -6,7 +6,6 @@
 
 > 决策日期：2026-04-26
 > 范围：Sieve 二进制分发、规则更新、CI/CD 整套供应链
-> 关联 PRD：v1.4 §1.2 第 4 句、§9.6、§10.1 Week 1、§11.3
 
 ---
 
@@ -20,7 +19,7 @@
 
 ### 用户视角的信任问题
 
-PRD §1.2 第 4 句（v1.3 新增）把这个问题提到产品定位层面：
+Sieve 的产品定位在可验证性层面明确要求：
 
 > **你不只是相信我们，你能验证我们**：开源核心引擎、sigstore 签名、可复现构建、透明规则更新日志——Sieve 自己被同一套标准审视，绝不成为新的供应链风险。
 
@@ -37,7 +36,7 @@ GitHub / Sigstore / SLSA 已经形成事实标准：
 
 参考实现：
 
-- StepSecurity Harden-Runner（PRD §15.3 已列入必读项目）
+- StepSecurity Harden-Runner
 - Cosign 官方示例
 - Reproducible Builds project（reproducible-builds.org）
 
@@ -89,16 +88,16 @@ CI 矩阵 + 平台分级：
 
 | 平台 Tier | 平台 | sigstore 签名 | reproducible build | 上线时间 |
 |----------|------|--------------|-------------------|---------|
-| **Tier 1** | `macos-latest`（主战场，PRD §10.1 Week 6） | ✅ Week 1 跑通 | ✅ Week 1 双构建比对 SHA-256 | Week 1 |
+| **Tier 1** | `macos-latest`（主战场） | ✅ Week 1 跑通 | ✅ Week 1 双构建比对 SHA-256 | Week 1 |
 | **Tier 1** | `ubuntu-latest`（musl 静态链接） | ✅ Week 1 跑通 | ✅ Week 1 双构建比对 SHA-256 | Week 1 |
-| **Tier 2** | `windows-latest`（次要平台，PRD §10.1 Week 6） | ✅ Week 6 跑通 | ⚠️ Phase 2 攻坚（MSVC 时间戳问题，见下文负面影响） | Week 6 签名 / Phase 2 复现 |
+| **Tier 2** | `windows-latest`（次要平台） | ✅ Week 6 跑通 | ⚠️ Phase 2 攻坚（MSVC 时间戳问题，见下文负面影响） | Week 6 签名 / Phase 2 复现 |
 
 - Tier 1 失败则 release 中止 —— 这是 hard gate；
 - Tier 2 在 Week 6+ 与"Windows 二进制可用"承诺一起上线，签名走通即可发布，reproducible build 在 Phase 2 单独立项攻坚。
 
 ### 3. 透明规则更新日志
 
-每次规则库发布（每周一次，PRD §8.3）：
+每次规则库发布（每周一次）：
 
 | 内容 | 实现 |
 |------|------|
@@ -123,12 +122,12 @@ cat ./rules-v42.changelog.md
 
 ### 4. Week 1 必须跑通 Pipeline
 
-PRD §10.1 Week 1 已修订（v1.3）：**sigstore 签名 pipeline + GitHub Actions reproducible build pipeline 必须 Week 1 跑通**——这是 PRD §1.2 第 4 句的物质基础。
+**sigstore 签名 pipeline + GitHub Actions reproducible build pipeline 必须 Week 1 跑通**——这是可验证性叙事的物质基础。
 
 **完成定义**：
 
 - Week 1 结束前，repo 已有 release workflow，对一个 hello-world 二进制成功执行：cosign sign + rekor 上链 + reproducible build 验证（双构建 SHA-256 一致）；
-- 这条不能拖到 Week 11–12 GA 前才补——**因为它是产品可验证性叙事的物质基础**，不是工程"最后一公里"。
+- 这条不能拖到 GA 前才补——**因为它是产品可验证性叙事的物质基础**，不是工程"最后一公里"。
 
 ### 5. 独立可验证能力
 
@@ -145,7 +144,7 @@ PRD §10.1 Week 1 已修订（v1.3）：**sigstore 签名 pipeline + GitHub Acti
 
 1. **抗供应链攻击**：用户独立验证签名 + 哈希 + 透明日志，攻击者要篡改二进制必须同时控制 GitHub OIDC + Rekor 公链 + 用户本地验证流程，门槛极高；
 2. **可验证反证**：未来若有用户对数据处理方式提出质疑（如声称"Sieve 偷我的 prompt"），开源代码 + 可复现构建 + 抓包验证可提供独立可核验的反证；
-3. **核心差异化能力**：可验证性是产品核心的技术差异化，与 PRD §1.2 第 4 句直接绑定；
+3. **核心差异化能力**：可验证性是产品核心的技术差异化，与"你能验证我们"的产品承诺直接绑定；
 4. **抗内部失误**：若构建环境被意外污染，CI 双构建比对会立即报错——这是对发布流程自身的兜底；
 5. **与 [ADR-003](./ADR-003-local-only-no-cloud-verifier.md) 形成可验证性双支柱**：ADR-003 让用户能验证"不上传"，ADR-006 让用户能验证"二进制就是源码编出来的"。
 
@@ -153,16 +152,12 @@ PRD §10.1 Week 1 已修订（v1.3）：**sigstore 签名 pipeline + GitHub Acti
 
 1. **CI 时间翻倍**：reproducible build 双构建意味着每次 release CI 时间从 ~10 min 翻到 ~25 min；这是合理代价；
 2. **vectorscan 复现复杂度**：vectorscan 是 C++ 项目，编译可复现性比 pure Rust 难度高一个量级；Week 1 必须验证 vectorscan 在 macOS / Linux / Windows 三平台都能复现，否则技术栈选型可能要回炉重来（虽然 [ADR-001](./ADR-001-rust-tech-stack.md) 已锁定，但 ADR-006 是必须解决的硬约束）；
-3. **Windows 复现最难（与 PRD 理想的暂时偏离）**：MSVC 编译有时间戳注入 + 动态链接 CRT，Phase 1 Windows 仅作"二进制 + sigstore 签名可用"承诺，**reproducible build 推到 Phase 2 单独立项**。这是与 PRD §9 第 6 条全平台理想的暂时偏离，**Tier 1（macOS / Linux）的硬约束不动**——核心可验证性主张仍成立（主战场用户可独立复现）。下次 PRD 修订时需在 §9.6 同步加 Tier 1 / Tier 2 标注；
+3. **Windows 复现最难（全平台理想的暂时偏离）**：MSVC 编译有时间戳注入 + 动态链接 CRT，Phase 1 Windows 仅作"二进制 + sigstore 签名可用"承诺，**reproducible build 推到 Phase 2 单独立项**。**Tier 1（macOS / Linux）的硬约束不动**——核心可验证性主张仍成立（主战场用户可独立复现）；
 4. **学习曲线**：cosign + Rekor + SLSA + GitHub OIDC 的串联调试 Week 1 会占用至少 2–3 天；预算内；
 5. **签名密钥轮换**：sigstore 用 OIDC 短期证书，无需密钥轮换；规则签名的 Ed25519 long-lived key 需要轮换计划——Phase 1 不做，假设单 key 在 Phase 1 周期内够用；密钥泄漏的回退方案：发新版本二进制硬编码新公钥 + 强制升级。
 
 ### 需要更新的文档
 
-- PRD-sieve v1.4 §1.2 第 4 句 —— 已对齐"自证清白"叙事
-- PRD-sieve v1.4 §9.6 —— 工程硬约束第 6 条
-- PRD-sieve v1.4 §10.1 Week 1 —— Week 1 sigstore + reproducible build 必须跑通
-- PRD-sieve v1.4 §11.3 —— 开源策略 + 透明更新日志
 - [data-model.md §7](./data-model.md) —— 规则签名文件格式
 - `docs/guides/development.md`（待编写）—— 写明本地复现构建步骤
 - `docs/guides/deployment.md`（待编写）—— 写明用户如何独立验证 sigstore 签名
@@ -172,12 +167,6 @@ PRD §10.1 Week 1 已修订（v1.3）：**sigstore 签名 pipeline + GitHub Acti
 
 ## 相关文档
 
-- PRD-sieve v1.4 §1.2 第 4 句 —— 自证清白核心叙事
-- PRD-sieve v1.4 §9.6 —— 工程硬约束
-- PRD-sieve v1.4 §10.1 Week 1 —— Pipeline 必须 Week 1 跑通
-- PRD-sieve v1.4 §11.3 —— 开源策略
-- PRD-sieve v1.4 §15.3 —— Sigstore + Reproducible Builds 必读项目
 - [ADR-001](./ADR-001-rust-tech-stack.md) —— Rust 技术栈是 reproducible build 的基础
 - [ADR-003](./ADR-003-local-only-no-cloud-verifier.md) —— 可验证性双支柱
-- GA 前 repo 私有策略（详见内部记录）—— GA 之前 sigstore CI 照常跑通，但 Rekor 公开痕迹由 workflow_dispatch 而非 tag 触发；GA 时恢复 tag-based release 并对外提供验证教程
 - [data-model.md §7](./data-model.md) —— 规则签名文件格式

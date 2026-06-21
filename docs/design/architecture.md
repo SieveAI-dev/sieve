@@ -205,7 +205,7 @@ flowchart LR
 
 > updater task 在 `daemon::run` spawn 后台运行，**不在 hot path**，任何 updater 失败不影响 daemon 主流程。详见 [SPEC-006](../specs/SPEC-006-update-and-telemetry.md)。
 
-> **关联决策**：协议适配层设计见 [ADR-018](./ADR-018-openai-protocol-adaptation.md)。用户规则系统 + 三态决策 + 规则引擎抽象见 [ADR-020](./ADR-020-user-rules-system.md) / [ADR-021](./ADR-021-tri-state-decision-and-graylist.md) / [ADR-024](./ADR-024-rules-engine-abstraction.md)（v2.0 Phase A）。行为序列窗口见 [ADR-022](./ADR-022-behavior-sequence-window.md)；进程上下文反查见 [ADR-023](./ADR-023-process-context-audit.md)；content-type 路由矩阵见 [ADR-025](./ADR-025-content-type-routing-matrix.md)（v2.1）；manifest 更新通道（sieve-updater）详见内部记录。
+> **关联决策**：协议适配层设计见 [ADR-018](./ADR-018-openai-protocol-adaptation.md)。用户规则系统 + 三态决策 + 规则引擎抽象见 [ADR-020](./ADR-020-user-rules-system.md) / [ADR-021](./ADR-021-tri-state-decision-and-graylist.md) / [ADR-024](./ADR-024-rules-engine-abstraction.md)（v2.0 Phase A）。行为序列窗口见 [ADR-022](./ADR-022-behavior-sequence-window.md)；进程上下文反查见 [ADR-023](./ADR-023-process-context-audit.md)；content-type 路由矩阵见 [ADR-025](./ADR-025-content-type-routing-matrix.md)（v2.1）；manifest 更新通道（sieve-updater）见 [ADR-030](./ADR-030-update-telemetry-channel.md) / [SPEC-006](../specs/SPEC-006-update-and-telemetry.md)。
 
 > **Native GUI App**（SwiftUI，常驻菜单栏、HIPS 弹窗、Preset 设置面板）在独立仓库 **`sieve-gui-macos`**，不在本 workspace。两仓库的协调契约是 `sieve-ipc` crate 中 IPC 协议版本（`v1` 起），详见 [ADR-012](./ADR-012-native-gui-app-phase1.md) + [ADR-013](./ADR-013-ipc-protocol.md)。
 

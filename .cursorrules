@@ -82,7 +82,7 @@ docs/changelog/CHANGELOG.md
 7. **Critical 拦截 FP 必须 < 0.5%**——公理 12，不可妥协；超过即用户禁用产品
 8. **Critical 在所有版本（包括降级模式）不可关闭**——产品安全承诺，不是用户偏好
 9. **Phase 1 GA 适配三家：Claude Code / OpenClaw / Hermes，UnifiedMessage 真实双协议**——Anthropic Messages API + OpenAI Chat Completions 都跑通；Gemini / Mistral 等其他协议推 Phase 2，真有用户主动要再做
-10. **Week 12 GA 时一次性公开 repo + 代码 + 文档，GA 前完全私有**——见 [ADR-011](./docs/design/ADR-011-private-until-ga.md)；sigstore + reproducible build pipeline GA 前照常跑通（关联 ADR-006）
+10. **GA 时一次性公开 repo + 代码 + 文档**——sigstore + reproducible build pipeline 照常跑通（关联 ADR-006）
 11. **不在 Anthropic API 协议层撒谎**——不伪造 tool_use / stop_reason / id / usage / type；拦截发生时允许截 SSE 流注入 `sieve_blocked` event（Sieve 自报，不是冒充模型）；keep-alive comment 行不算伪造
 12. **不装本地 CA 做 MITM**——Network Extension / 本地 CA 注入 / 系统 proxy 修改推 Phase 3 选购，Phase 1/2 不做
 13. **出站脱敏不打断工作流**——OUT-01~05/12 高频类自动脱敏 + 状态栏 5s 通知，不弹窗；弹窗次数过多用户直接禁用产品

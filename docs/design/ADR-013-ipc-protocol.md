@@ -6,7 +6,6 @@
 
 > 决策日期：2026-04-28
 > 范围：Phase 1 代理进程 ↔ GUI App 及代理进程 ↔ sieve-hook 两条 IPC 通道
-> 关联 PRD：[v1.4 §6.5、§10.1 Week 3 + Week 5](../prd/_archive/sieve-prd-v1.5.md)
 
 ---
 
@@ -170,7 +169,7 @@ Sieve Phase 1 引入了三个需要跨进程通信的组件：
 
 ## Supplement 2026-05-02 — v2.0 GUI 控制面方法扩展
 
-> 触发：sieve-gui-macos PRD v1.0 §6.2 起草（独立仓库 `sieve-gui-macos/docs/prd/sieve-gui-macos-prd-v1.0.md`），需要 GUI 通过 IPC 操控 daemon 的运行时状态（暂停 / preset / 灰名单 / health / 沙箱评估）。
+> 触发：sieve-gui-macos 控制面需求（GUI 通过 IPC 操控 daemon 的运行时状态：暂停 / preset / 灰名单 / health / 沙箱评估）。
 > 范围：在 ADR-013 §1 通道 A（JSON-RPC over Unix socket）现有方法集之上，新增 GUI ↔ daemon 控制面方法。**不修改通道 B（文件锁），不动 §2-§5 任何已落地决策。**
 > 协议版本号保持 `v1`（仅扩展方法，未引入 breaking change）；未来某次方法语义不兼容时再升 v2。
 
@@ -282,7 +281,7 @@ GUI 收到后：(1) 若该 request_id 仍在排队 → 移除；(2) 若弹窗已
 ```
 
 约束：
-- `minutes ∈ [0, 60]`，超过返回 `-32602 invalid_params`。daemon 端硬上限 60（PRD §9 哲学：暂停是临时操作，不允许"无限暂停"事实上等价于关闭产品）。
+- `minutes ∈ [0, 60]`，超过返回 `-32602 invalid_params`。daemon 端硬上限 60（设计哲学：暂停是临时操作，不允许"无限暂停"事实上等价于关闭产品）。
 - 暂停期间 Critical 锁规则的 GuiPopup / HookTerminal / 出站 `OUT-07/09/10` 弹窗 **正常触发**。
 - 调用成功后 daemon 同步广播 `sieve.paused_changed` 给所有连接的 GUI。
 - 审计：写 audit.db `kind=paused_set`，含 `until` / `source=gui`。
@@ -536,12 +535,10 @@ GUI 收到后：(1) 若该 request_id 仍在排队 → 移除；(2) 若弹窗已
 
 ## 相关文档
 
-- [PRD-sieve v1.4 §6.5](../prd/_archive/sieve-prd-v1.5.md) —— IPC 协议选型
 - [ADR-012](./ADR-012-native-gui-app-phase1.md) —— GUI App 独立仓库（IPC 是两仓库协调契约）
 - [ADR-014](./ADR-014-dual-layer-defense.md) —— 双层防御（哪些规则走哪条 IPC 通道）
 - [ADR-015](./ADR-015-sieve-setup-tool.md) —— sieve setup 负责创建 `~/.sieve/` 目录权限
 - [ADR-021](./ADR-021-tri-state-decision-and-graylist.md) —— Critical 锁三道防线（防线二在 `set_preset_overrides` / `decision_response` 两条 IPC 路径）
-- sieve-gui-macos PRD v1.0 §6（独立仓库 `sieve-gui-macos/docs/prd/sieve-gui-macos-prd-v1.0.md`）—— GUI 控制面方法的 UI 触发点
 - [SPEC-002 §10](../specs/SPEC-002-hips-popup-behavior.md) —— 暂停 / preset 切换 / 弹窗取消时的 popup 行为
 - [architecture.md](./architecture.md) —— 整体架构图 IPC 通道
 - [data-model.md](./data-model.md) —— IPC 相关配置字段

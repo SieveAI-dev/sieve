@@ -3,9 +3,8 @@ name: Release
 # Phase 1 仅 macOS（PRD v1.4 §6.6 + ADR-012）；Linux/Windows 推 Phase 2 后才恢复 matrix
 
 on:
-  # ADR-011: Tag-based release 在 Week 12 GA 时启用；GA 前仅用 workflow_dispatch 触发
-  # 以减少 Rekor 透明日志记录 release 节奏（防止对手推断项目进度）
-  # TODO(Week 12 GA): 取消注释以下三行，启用 tag-based release
+  # Tag-based release 暂未启用，当前仅用 workflow_dispatch 手动触发
+  # TODO: 取消注释以下三行以启用 tag-based release
   # push:
   #   tags:
   #     - "v*"

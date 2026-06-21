@@ -7,7 +7,6 @@
 > 决策日期：2026-05-01
 > 范围：Phase A（Week 5-8 ship）；`sieve-rules` crate trait 层 + 新增 `sieve-policy` crate
 > 关联 PRD：v2.0 §6.3、v2.0 §5.5.2.1、v2.0 §9 #3
-> 关联 review：codex review PRD v2.0 §C3 Must #4
 
 ---
 
@@ -24,7 +23,7 @@ fn last_scan_us(&self) -> u64;
 
 这个接口在 v1.5 单一系统规则场景下够用，但 v2.0 引入用户规则（`sieve-policy` crate）后暴露三个根本性问题：
 
-**问题 1：无路由上下文，无法识别生效路径**（codex review Must #4 / §C3）
+**问题 1：无路由上下文，无法识别生效路径**
 
 v1.5.4 P0 修复（CHANGELOG v1.5.4）已证明：daemon 有多条分叉路径（Anthropic SSE / Anthropic JSON / OpenAI SSE / OpenAI stream=false），每条路径对应不同的 content-type 路由和解析逻辑。引擎收到 `&[u8]` 时完全不知道自己在哪条路径上，无法：
 - 区分"入站规则应只看 tool_use_input"还是"出站规则看 request_body"
@@ -41,7 +40,7 @@ v1.5 只有系统规则引擎。v2.0 引入 `sieve-policy` 的用户规则引擎
 
 ### v1 草案 `scan(&[u8])` 接口撤回
 
-v2.0 规划初期曾讨论过"保持 `scan(&[u8])` 不变，在 caller 侧注入上下文"的方案。codex review §C3 明确指出该方案的问题：调用方需要重复注入上下文逻辑，LayeredEngine 的合并顺序无法在 trait 层强制约束。**本 ADR 正式撤回 v1 草案接口，改为 `scan(ScanRequest) -> ScanReport`。**
+v2.0 规划初期曾讨论过"保持 `scan(&[u8])` 不变，在 caller 侧注入上下文"的方案。该方案的问题是：调用方需要重复注入上下文逻辑，LayeredEngine 的合并顺序无法在 trait 层强制约束。**本 ADR 正式撤回 v1 草案接口，改为 `scan(ScanRequest) -> ScanReport`。**
 
 ---
 
@@ -183,7 +182,6 @@ CI 加 `cargo bench --no-default-features --features ci-bench` job，P99 退化 
 - PRD v2.0 §6.3 规则引擎抽象
 - PRD v2.0 §5.5.2.1 用户规则与系统规则并存原则
 - PRD v2.0 §9 #3 fail-closed High-Risk Tool Policy Gate
-- codex review v2.0 §C3 Must #4
 - [CHANGELOG v1.5.4](../changelog/CHANGELOG.md) —— content-type 路由 P0 修复，ScanRequest 上下文字段的直接来源
 - [ADR-007](./ADR-007-fail-closed-critical-actions.md) —— fail-closed 原则（LayeredEngine 不变量的上层依据）
 - [ADR-014](./ADR-014-dual-layer-defense.md) —— 双层防御（LayeredEngine 是代理层规则引擎的合并抽象）

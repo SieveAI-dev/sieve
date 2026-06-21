@@ -162,7 +162,7 @@ open "https://search.sigstore.dev/?hash=$SHA"
 
 ```bash
 # 1. clone 当前 release tag
-git clone https://github.com/SieveAI-dev/sieve.git --branch v0.1.0
+git clone https://github.com/SieveAI-dev/sieve.git --branch v0.1.0-alpha
 cd sieve
 
 # 2. 在干净环境内复构建（脚本待写于 GA 前）
@@ -398,7 +398,7 @@ export HTTPS_PROXY="socks5://127.0.0.1:7891"   # 优先于 ALL_PROXY
 export ALL_PROXY="socks5://127.0.0.1:7891"
 ```
 
-env 同时覆盖 daemon 上游转发与 sieve-updater 出站（manifest / 规则下载），受限网络下更新检查与匿名 install 统计一并可用（详见内部记录）。
+env 同时覆盖 daemon 上游转发与 sieve-updater 出站（manifest / 规则下载），受限网络下更新检查与匿名 install 统计一并可用（详见 [SPEC-006](../specs/SPEC-006-update-and-telemetry.md)）。
 
 ### 6b.4 proxy URL 格式 & 注意事项
 

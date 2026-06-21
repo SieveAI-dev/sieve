@@ -4,7 +4,7 @@
 **Accepted**
 > 决策日期：2026-06-07
 > 范围：sieve daemon 转发上游 LLM 流量 + sieve-updater 出站请求经配置代理出网
-> 关联：[ADR-018](./ADR-018-openai-protocol-adaptation.md)（双协议）/ [ADR-026](./ADR-026-port-based-listener-routing.md)（multi-listener）/ [ADR-027](./ADR-027-network-jail-enforcement.md)（network jail，区分系统代理）/ 更新通道复用机制（详见内部记录）/ [SPEC-007](../specs/SPEC-007-upstream-proxy.md)（工程级详细设计）
+> 关联：[ADR-018](./ADR-018-openai-protocol-adaptation.md)（双协议）/ [ADR-026](./ADR-026-port-based-listener-routing.md)（multi-listener）/ [ADR-027](./ADR-027-network-jail-enforcement.md)（network jail，区分系统代理）/ [SPEC-007](../specs/SPEC-007-upstream-proxy.md)（工程级详细设计）
 > 关联 PRD：v2.0 §6.1、§9 #2、§9 #12
 
 ## 背景
@@ -25,7 +25,7 @@ sieve **主动支持配置的上游代理**，不依赖系统透明代理：
 2. 代理可在**每 upstream** 单独配置（`[[upstream]].proxy`）或显式直连（`no_proxy = true`），并有**全局**（顶层 `proxy`）+ **env**（`HTTPS_PROXY` / `ALL_PROXY`）兜底。
 3. 优先级链（高 → 低）：`upstream.no_proxy`(直连) > `upstream.proxy` > 全局 `proxy` > env(`HTTPS_PROXY` 优先于 `ALL_PROXY`) > 直连。
 4. proxy URL 支持 `user:pass@` 认证；解析失败在启动期 config 校验 fail-fast，不静默忽略。
-5. **updater**（`updates.sieveai.dev` manifest / `cdn.sieveai.dev` 规则正文）复用同一机制；daemon 用全局代理注入（更新通道机制详见内部记录）。
+5. **updater**（`updates.sieveai.dev` manifest / `cdn.sieveai.dev` 规则正文）复用同一机制；daemon 用全局代理注入，更新通道与转发通道共享代理配置。
 6. 代理连接失败（拒绝 / 超时 / 认证失败 / CONNECT 非 200 / SOCKS 握手失败）→ 返回明确错误，**绝不静默回退直连**——避免用户以为走代理实则直连，导致请求失败或在不该直连的网络里泄露目标。
 
 实现：sieve-core 新增 `ProxyConnector`（实现 `tower::Service<Uri>`，按配置建立到 target 的 TCP 流），替换 `Forwarder` 底层的 `HttpConnector`；**TLS 仍由 hyper-rustls 在隧道之上做**——端到端到上游，代理只见密文（不解密、不装 CA、不 MITM）。详见 [SPEC-007](../specs/SPEC-007-upstream-proxy.md)。
@@ -61,4 +61,4 @@ sieve **主动支持配置的上游代理**，不依赖系统透明代理：
 - [ADR-018: OpenAI 协议适配](./ADR-018-openai-protocol-adaptation.md)
 - [ADR-026: Port-based listener routing](./ADR-026-port-based-listener-routing.md)
 - [ADR-027: Network jail enforcement](./ADR-027-network-jail-enforcement.md)
-- 更新通道复用机制（详见内部记录）
+

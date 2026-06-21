@@ -5,7 +5,7 @@
 # - pinned dependencies 是供应链安全承诺的硬约束
 # - Dependabot 只动 patch / minor 升级；major 升级走人工评估
 # - reproducible build 要求 Cargo.lock 入库，Dependabot PR 会更新 lockfile
-# - 一人项目，open-pull-requests-limit 控制在 5 以内避免淹没
+# - open-pull-requests-limit 控制在 5 以内避免淹没
 version: 2
 
 updates:
@@ -32,7 +32,7 @@ updates:
       - dependency-name: "*"
         update-types:
           - "version-update:semver-major"
-    # 关键依赖列入"高风险升级"——任何 PR 都要 doskey 亲自 review
+    # 关键依赖列入"高风险升级"——高风险升级需人工 review
     # （Dependabot 不能直接打这个标，提示由 PR 模板 self-check 触发）
     groups:
       tokio-stack:

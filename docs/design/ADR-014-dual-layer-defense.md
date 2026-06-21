@@ -6,7 +6,6 @@
 
 > 决策日期：2026-04-28
 > 范围：Phase 1 入站检测的拦截实现路径
-> 关联 PRD：[v1.4 §6.7、§9 第 11 条](../prd/_archive/sieve-prd-v1.5.md)
 > 关联 ADR：Partially supersedes [ADR-007](./ADR-007-fail-closed-critical-actions.md) §Week 3 落地范围（截流实现部分）
 
 ---
@@ -20,8 +19,8 @@ ADR-007 §Week 3 落地范围在 SSE 代理层对所有 Critical 命中规则注
 **问题 1：污染 Claude Code 上下文**
 Hook 类规则（IN-CR-02 危险 shell / IN-CR-03 敏感路径 / IN-CR-04 持久化机制）的工具调用参数已经通过 SSE 传给 Claude Code，代理侧截流只能截断"最终执行"，但 Claude Code 的上下文已经包含了这次工具调用意图。下次对话轮次中模型可能继续沿用该意图。
 
-**问题 2：与 PRD v1.4 §9 第 11 条冲突**
-v1.4 新增硬约束："不在 Anthropic API 协议层伪造 tool_use / stop_reason / id / usage"。代理截流时注入的 sieve_blocked event 虽然不伪造模型字段，但在 SSE 流中插入人造事件会改变 Claude Code 收到的消息序列，影响其内部状态机对"对话是否完整"的判断。
+**问题 2：与"不在 Anthropic API 协议层伪造协议字段"约束冲突**
+该硬约束要求："不在 Anthropic API 协议层伪造 tool_use / stop_reason / id / usage"。代理截流时注入的 sieve_blocked event 虽然不伪造模型字段，但在 SSE 流中插入人造事件会改变 Claude Code 收到的消息序列，影响其内部状态机对"对话是否完整"的判断。
 
 ### 两类规则的 UX 哲学差异
 
@@ -39,7 +38,7 @@ v1.4 新增硬约束："不在 Anthropic API 协议层伪造 tool_use / stop_rea
 ### 1. 协议层硬约束（底线，不可放宽）
 
 > **禁止在 SSE 流中伪造 `tool_use` block、`stop_reason`、`id`、`usage` 字段**。
-> 这是产品承诺，不是实现细节。
+> 这是架构承诺，不是实现细节。
 
 允许的 SSE 操作：
 - 截断流（关闭 HTTP response）
@@ -121,7 +120,7 @@ Week 3 落地的 `build_sieve_blocked_sse()` 对 Hook 类规则的调用**必须
 ### 正面影响
 
 1. **上下文不污染**：Hook 类 SSE 原样透传，Claude Code 上下文完整，拦截在 execution 边界而非 message 边界；
-2. **协议层诚实**：完全满足 PRD v1.4 §9 第 11 条"不伪造"约束；
+2. **协议层诚实**：完全满足"不伪造协议字段"约束；
 3. **GUI 体验完整**：GUI 类规则有 120 秒 + 完整可视化 context，用户做决策质量更高；
 4. **fail-closed 在所有路径保持**：双层各自 fail-closed，不存在两层都 fail-open 的漏洞路径。
 
@@ -143,8 +142,6 @@ Week 3 落地的 `build_sieve_blocked_sse()` 对 Hook 类规则的调用**必须
 
 ## 相关文档
 
-- [PRD-sieve v1.4 §6.7](../prd/_archive/sieve-prd-v1.5.md) —— 双层防御架构
-- [PRD-sieve v1.4 §9 第 11 条](../prd/_archive/sieve-prd-v1.5.md) —— "不伪造协议字段"硬约束
 - [ADR-007](./ADR-007-fail-closed-critical-actions.md) —— fail-closed 原则（本 ADR 修改实现路径，不改原则）
 - [ADR-013](./ADR-013-ipc-protocol.md) —— IPC 协议（双通道机制）
 - [ADR-015](./ADR-015-sieve-setup-tool.md) —— sieve setup（hook 注册 onError: block 的载体）

@@ -52,4 +52,4 @@ assignees: doskey
 - [ ] 提议不要求"上传样本到云端" / "联网 verify" / "关闭 Critical 拦截"等违反 PRD §9 的行为
 - [ ] 提议不增加非 Rust 二进制依赖（[ADR-001](../../docs/design/ADR-001-rust-tech-stack.md)）
 
-> 一人项目（PRD §1.4），doskey 会按 Roadmap 节奏评估。Phase 2 功能默认推到 Week 13+ 慢节奏维护期。
+> Phase 2 功能按需求优先级评估，不保证排期。

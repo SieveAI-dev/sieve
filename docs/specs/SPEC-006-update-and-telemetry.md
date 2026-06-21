@@ -2,7 +2,7 @@
 
 > Version: v0.1 — 2026-05-05
 > Status: **Draft**（待 TODO-7~12 代码落地后升 Frozen）
-> 关联 ADR：[ADR-003 amended](../design/ADR-003-local-only-no-cloud-verifier.md)（网络边界修订）/ [ADR-006](../design/ADR-006-sigstore-reproducible-build.md)（签名分发）；更新通道遥测的核心决策详见内部记录
+> 关联 ADR：[ADR-003 amended](../design/ADR-003-local-only-no-cloud-verifier.md)（网络边界修订）/ [ADR-006](../design/ADR-006-sigstore-reproducible-build.md)（签名分发）
 > 关联 PRD：sieve-prd-v2.0.md §9 硬约束 #2
 
 ---
@@ -536,7 +536,7 @@ thiserror = "1"
 
 ### 9.1 与 ADR-003 amended 的关系
 
-ADR-003 原条款「绝对禁止 telemetry 自动上报」经网络边界修订后部分放开（详见内部记录）。修订后：
+ADR-003 原条款「绝对禁止 telemetry 自动上报」经网络边界修订后部分放开。修订后：
 
 - 独立心跳通道：**仍禁止**
 - 更新通道附带匿名 install-id：**允许**（唯一例外，且可通过 `SIEVE_NO_TELEMETRY` 关闭 uid 字段）
@@ -652,7 +652,7 @@ ts (TIMESTAMP) | uid (UUID) | v (TEXT) | os (TEXT) | arch (TEXT) | ch (TEXT) | c
 
 ## 相关文档
 
-- [ADR-003 amended](../design/ADR-003-local-only-no-cloud-verifier.md) — 网络边界修订（唯一允许例外）；更新通道遥测的核心决策详见内部记录
+- [ADR-003 amended](../design/ADR-003-local-only-no-cloud-verifier.md) — 网络边界修订（唯一允许例外）
 - [ADR-006](../design/ADR-006-sigstore-reproducible-build.md) — Sigstore 签名 + Reproducible Build
 - [docs/api/api-reference.md §8](../api/api-reference.md) — manifest 接口 API 参考
 - [docs/design/data-model.md §7](../design/data-model.md) — 服务端日志表 schema

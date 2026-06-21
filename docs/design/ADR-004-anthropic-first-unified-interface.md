@@ -5,8 +5,7 @@
 **已接受**（v1.4 锁定执行）
 
 > 决策日期：2026-04-26
-> 范围：Phase 1（12 周 GA），仅 Claude Code 客户端 + Anthropic Messages API 协议
-> 关联 PRD：[v1.4 §6.1、§9.9](../prd/_archive/sieve-prd-v1.5.md)
+> 范围：Phase 1，仅 Claude Code 客户端 + Anthropic Messages API 协议
 
 ---
 
@@ -21,15 +20,15 @@ Sieve 是 LLM 流量层代理。理论上"完整版"应该支持：
 如果按"完整版"设计 Phase 1，会陷入两个陷阱：
 
 1. **协议抽象过度**：为支持 N 家协议，要做 LCD（最小公倍数）抽象，最终既不能很好支持 Anthropic 也不能很好支持 OpenAI；
-2. **测试覆盖不可能**：12 周时间、资源受限，每多一家协议都需要至少 2 周（适配 + 边界 fuzz + dogfood）。
+2. **测试覆盖不可能**：每多一家协议都需要至少 2 周（适配 + 边界 fuzz + dogfood）。
 
-更关键的是：**P0 用户群的 80% 是 Claude Code 重度用户**（PRD §3.1）。Anthropic Messages API 加 Claude Code 加 SSE，已经覆盖了 P0 用户的全部使用场景。
+更关键的是：**P0 用户群的主体是 Claude Code 重度用户**。Anthropic Messages API 加 Claude Code 加 SSE，已经覆盖了 P0 用户的全部使用场景。
 
 但同时不能完全把架构写死成"只能跑 Anthropic"——如果 Phase 2 要扩到 OpenAI / OpenRouter，整套检测器、配置、审计逻辑应当复用，不该重写。
 
 这是一个典型的"**抽象多了浪费 / 抽象少了重写**"的权衡。
 
-PRD §9.9 的硬约束给出了答案：**"Phase 1 只做 Claude Code，UnifiedMessage 接口预留——公理 7，不为想象用户写代码"**。
+工程硬约束给出了答案：**Phase 1 只做 Claude Code，UnifiedMessage 接口预留——不为想象用户写代码**。
 
 ## 决策
 
@@ -89,7 +88,7 @@ PRD §9.9 的硬约束给出了答案：**"Phase 1 只做 Claude Code，UnifiedM
 - ✅ 有真实活跃用户在 Discord / 邮件主动持续说"我需要 X 才能继续用"；
 - ✅ 闭测用户中出现聚合性的同类需求信号（多人同时提出）。
 
-第二适配器开发预算：约 2–3 周。这把 Phase 2 路线图延后 2–3 周是合理代价。
+第二适配器开发预算约 2–3 周，按真实需求触发而非预设排期。
 
 ---
 
@@ -97,11 +96,11 @@ PRD §9.9 的硬约束给出了答案：**"Phase 1 只做 Claude Code，UnifiedM
 
 ### 正面影响
 
-1. **聚焦**：12 周冲刺资源全部对准 Anthropic + Claude Code，覆盖深度（fuzz、benchmark、dogfood）能做到位；
+1. **聚焦**：Phase 1 资源全部对准 Anthropic + Claude Code，覆盖深度（fuzz、benchmark、dogfood）能做到位；
 2. **Anthropic 协议适配深度**：可以做 Anthropic-specific 优化（如 partial JSON parser 针对 Claude tool_use 块的细节、SSE event 类型 `content_block_delta` 的精确处理），不必为 LCD 抽象妥协；
-3. **测试 / fuzz 范围有界**：SSE 边界 fuzz、tool_use 边界 fuzz 只针对 Anthropic 一种格式，能投入足够时间做 100+ corpus 输入；
+3. **测试 / fuzz 范围有界**：SSE 边界 fuzz、tool_use 边界 fuzz 只针对 Anthropic 一种格式，能投入足够时间做充分的 corpus 覆盖；
 4. **接口预留成本可控**：只在类型签名层面体现"未来可扩展"，没有冗余的 trait + 空实现 + 路由层；
-5. **公理 7 兑现**：不为想象用户写代码——任何"未来可能要做"的事都 push 到 Phase 2 触发器。
+5. **聚焦原则兑现**：不为想象用户写代码——任何"未来可能要做"的事都 push 到 Phase 2 触发器。
 
 ### 负面影响
 
@@ -112,9 +111,6 @@ PRD §9.9 的硬约束给出了答案：**"Phase 1 只做 Claude Code，UnifiedM
 
 ### 需要更新的文档
 
-- [PRD-sieve v1.4 §6.1](../prd/_archive/sieve-prd-v1.5.md) —— Phase 1 单 agent 架构图已对齐"只 Claude Code"
-- [PRD-sieve v1.4 §9.9](../prd/_archive/sieve-prd-v1.5.md) —— 工程硬约束第 9 条已写明此决策
-- [PRD-sieve v1.4 §10.3 Phase C](../prd/_archive/sieve-prd-v1.5.md) —— "第二个用户主动要 OpenClaw / Hermes / MCP 适配时再做"
 - [data-model.md](./data-model.md) §1 —— UnifiedMessage 接口形状已对齐
 - [architecture.md](./architecture.md) §2 —— Protocol Layer 模块职责已对齐
 - `docs/api/api-reference.md`（待编写）—— Phase 1 仅文档化 Anthropic Messages API 适配
@@ -123,9 +119,6 @@ PRD §9.9 的硬约束给出了答案：**"Phase 1 只做 Claude Code，UnifiedM
 
 ## 相关文档
 
-- [PRD-sieve v1.4 §6.1](../prd/_archive/sieve-prd-v1.5.md) —— Phase 1 单 agent 架构
-- [PRD-sieve v1.4 §9.9](../prd/_archive/sieve-prd-v1.5.md) —— "Phase 1 只做 Claude Code"
-- [PRD-sieve v1.4 §10.3](../prd/_archive/sieve-prd-v1.5.md) —— 慢节奏维护期的扩展触发条件
 - [architecture.md](./architecture.md) —— Protocol Layer 与 Phase 2 演进路径
 - [data-model.md](./data-model.md) —— UnifiedMessage 设计与字段说明
 - [ADR-002](./ADR-002-rule-engine-only-phase1.md) —— 同样应用"触发条件而非路线图"原则

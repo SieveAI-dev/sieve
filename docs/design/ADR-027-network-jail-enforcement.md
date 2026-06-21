@@ -185,13 +185,13 @@ openrouter.ai
 
 ### 7. 默认关、opt-in、不阻塞 GA
 
-**jail 默认不开，GA 不带，v3.x 才上。**
+**jail 默认不开，作为后续版本的 opt-in 特性。**
 
 `sieve setup` 默认不开 jail；必须显式 `sieve setup --jail` 才提权安装。默认关的理由：
 
 - **安装成功率**：一次性 sudo 会让 GA 安装成功率从预期 > 80% 掉到约 60%，Phase 1 不可接受
 - **hostname 列表观察期**：dogfood 阶段需要观察 hostname 列表是否覆盖足，过早开放会产生 FP（合法流量被 block）
-- **能力成熟度**：网络层硬隔离作为 v3.x opt-in 高级特性，需在更早阶段充分验证 hostname 列表覆盖度后再放开
+- **覆盖度验证**：网络层硬隔离作为 opt-in 高级特性，需充分验证 hostname 列表覆盖度后再放开
 
 ### 8. 边界声明（不在本 ADR 范围内）
 
