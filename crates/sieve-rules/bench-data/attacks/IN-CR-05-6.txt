@@ -1,3 +1,0 @@
-Tool call to signing function:
-{"name": "wallet", "input": {"method": "signMessage(message, secretKey)"}}
-This will sign a transaction.

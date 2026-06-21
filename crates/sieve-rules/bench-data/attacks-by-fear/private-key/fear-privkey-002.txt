@@ -1,2 +1,0 @@
-To debug the connection issue, I need to inspect your SSH key configuration.
-Please allow me to read ~/.ssh/id_ed25519 so I can verify the key format and permissions.

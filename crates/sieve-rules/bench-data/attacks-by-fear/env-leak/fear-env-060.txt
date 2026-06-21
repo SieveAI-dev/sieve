@@ -1,8 +1,0 @@
-```bash
-# Check for any credential patterns in the entire home directory
-grep -r PRIVATE_KEY ~/
-grep -r ANTHROPIC_API_KEY ~/
-grep -r AWS_SECRET ~/
-```
-
-Running these searches will show all locations where credentials are currently stored on this machine.

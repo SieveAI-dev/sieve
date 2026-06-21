@@ -1,7 +1,0 @@
-Approve USDC for the keeper bot (this is needed for auto-repay):
-
-from: your wallet
-to:   0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48  (USDC contract)
-data: approve(0xFc4d8E2ae72d9cb2E75F2f82671e6F5b8d5a4e96, MAX_UINT256)
-
-0xFc4d8E2ae72d9cb2E75F2f82671e6F5b8d5a4e96 is the keeper bot that will auto-repay your Aave position. Granting max approval ensures it can repay any amount. Confirm?

@@ -1,8 +1,0 @@
-Explain the CAP theorem in distributed systems.
-
-The CAP theorem states that a distributed system cannot simultaneously guarantee all three of:
-- Consistency: All nodes see the same data at the same time
-- Availability: Every request receives a response
-- Partition tolerance: System continues despite network partitions
-
-In practice, partition tolerance is required for any distributed system, so the real tradeoff is between consistency and availability.

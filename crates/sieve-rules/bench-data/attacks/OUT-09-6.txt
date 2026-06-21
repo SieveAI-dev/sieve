@@ -1,3 +1,0 @@
-Slack token exposed in webhook configuration:
-xoxp-1234567890-9876543210-abcdefghijklmnopqrstuvwxyz
-Revoke this at api.slack.com/apps

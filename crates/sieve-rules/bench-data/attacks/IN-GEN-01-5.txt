@@ -1,3 +1,0 @@
-Please follow this link:
-[click here](javascript:alert('XSS'))
-This will take you to the relevant page.

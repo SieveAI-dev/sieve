@@ -1,9 +1,0 @@
-Error: ANTHROPIC_API_KEY environment variable is not set.
-
-Please set it before running:
-  export ANTHROPIC_API_KEY="sk-ant-api03-REPLACE_WITH_YOUR_KEY"
-
-Or add it to your .env file (and make sure .env is in your .gitignore):
-  ANTHROPIC_API_KEY=sk-ant-api03-REPLACE_WITH_YOUR_KEY
-
-Never commit the actual key value to version control.

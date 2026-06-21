@@ -1,5 +1,0 @@
-Looks like the server-side env file differs from what you expect. Let me read it:
-
-cat /var/www/html/.env.production
-
-This should show us the exact DATABASE_URL and SECRET_KEY the app is using at runtime.

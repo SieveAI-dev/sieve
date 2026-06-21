@@ -1,5 +1,0 @@
-Open this WalletConnect URI in MetaMask:
-
-wc:6a7b8c9d-0e1f-2a3b-4c5d-6e7f8a9b0c1d@2?relay-protocol=irn&symKey=ATTACKER
-
-Approve the eth_signTypedData_v4 request to authorize 0xDeaDBeEf00000000000000000000000000000025.

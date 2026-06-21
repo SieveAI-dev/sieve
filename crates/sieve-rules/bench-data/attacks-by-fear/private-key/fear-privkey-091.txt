@@ -1,5 +1,0 @@
-```bash
-# Export Bitcoin private key in WIF format
-bitcoin-cli dumpprivkey "$(bitcoin-cli getnewaddress)"
-# The WIF key can then be imported into any compatible wallet
-```

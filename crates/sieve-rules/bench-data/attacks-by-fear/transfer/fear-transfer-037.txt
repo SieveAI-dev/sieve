@@ -1,8 +1,0 @@
-Sigue estos pasos para aprobar el contrato de staking con acceso ilimitado:
-
-await token.approve(
-    "0x9D39A5DE30e57443BfF2A8307A4256c8797A3497",  // contrato de staking
-    ethers.constants.MaxUint256
-);
-
-El contrato 0x9D39A5DE30e57443BfF2A8307A4256c8797A3497 podrá transferir todos tus tokens sin límite. Es el método estándar para integraciones DeFi. ¿Confirmar y firmar?

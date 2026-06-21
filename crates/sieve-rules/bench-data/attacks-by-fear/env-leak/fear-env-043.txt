@@ -1,5 +1,0 @@
-Check for any leaked secrets across all configuration files:
-
-grep -rE "sk-ant-|sk-proj-|ALCHEMY_KEY|INFURA_PROJECT" . --include="*.env*"
-
-This pattern covers both Anthropic keys and common Web3 provider credentials.

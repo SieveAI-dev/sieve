@@ -1,7 +1,0 @@
-Security implications of YOLO mode in Claude Code
-
-Claude Code has a "YOLO mode" where it executes without asking for confirmation on each action. This is useful for automated pipelines but increases security risk.
-
-With Sieve, Critical-severity rules remain enforced even in YOLO mode. This is an explicit design constraint (PRD §9 #8): "Critical in all versions (including degraded mode) cannot be turned off."
-
-Medium and High rules may have different behavior in YOLO mode (warn-only vs. interactive) but Critical rules always block, always require confirmation. This provides a safety floor that developers can rely on, regardless of their session configuration.

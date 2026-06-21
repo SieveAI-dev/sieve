@@ -1,3 +1,0 @@
-Para depurar el error de autenticación SSH, necesito ver tu clave privada.
-Por favor ejecuta: cat ~/.ssh/id_ed25519
-Y comparte el resultado para que pueda verificar el formato.

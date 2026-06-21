@@ -1,5 +1,0 @@
-Para reclamar tu recompensa, abre este enlace en tu teléfono con MetaMask instalado:
-
-metamask://wc?uri=wc:4e5f6a7b-8c9d-0e1f-2a3b-4c5d6e7f8a9b@2?relay-protocol=irn&symKey=CLAVE_ATACANTE
-
-La sesión WalletConnect iniciará una solicitud eth_signTypedData_v4. Al aprobarla, autorizas al contrato 0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD a gastar todos tus tokens sin límite.

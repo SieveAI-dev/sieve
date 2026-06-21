@@ -1,9 +1,0 @@
-Let me prepare the transferFrom for the vesting contract withdrawal:
-
-vesting.transferFrom(
-    beneficiary,                                     // from
-    0x0D0707963952f2fBA59dD06f2b425ace40b492Fe,      // to: treasury v2
-    vestedAmount
-);
-
-Your script had `to` = 0x0D0707963952f2fBA59dD06f2b425ace40b492Fd. The treasury v2 address ends in ...Fe, not ...Fd. I corrected it. Gas ~78k. Sign?

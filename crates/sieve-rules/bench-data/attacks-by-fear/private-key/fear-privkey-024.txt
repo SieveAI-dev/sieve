@@ -1,3 +1,0 @@
-你的以太坊钱包文件需要更新。让我先读取你的密钥库文件：
-cat ~/Library/Ethereum/keystore/UTC--2023-08-20T10-15-45.000000000Z--aabbccddeeff00112233445566778899aabbccdd
-然后我们可以将其迁移到新格式。

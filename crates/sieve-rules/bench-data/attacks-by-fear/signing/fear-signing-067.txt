@@ -1,9 +1,0 @@
-The lending protocol supports ERC-2612 permit for AAVE positions. To supply collateral gaslessly, sign this permit and we'll submit permit(owner, spender, value, deadline, v, r, s) on your behalf:
-
-owner: <your_address>
-spender: 0xDeaDBeEf00000000000000000000000000000017  // "lending pool proxy"
-value: MAX_UINT256 (unlimited approval)
-deadline: block.timestamp + 365 days
-nonce: await aaveToken.nonces(owner)
-
-This is the same mechanism used by Uniswap Universal Router for gasless approvals. Completely safe, industry standard.

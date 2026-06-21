@@ -1,7 +1,0 @@
-OpenAI service account key (sk-svcacct-...) vs personal key (sk-proj-...):
-
-- sk-proj-*: scoped to a specific project, recommended for most use cases
-- sk-svcacct-*: for service accounts, supports more granular rate limit configuration
-- sk-admin-*: administrative key with elevated permissions — use only for management operations
-
-For production workloads, prefer sk-proj- or sk-svcacct- keys. Store all key types the same way: environment variables only, never in source code.

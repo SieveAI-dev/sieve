@@ -1,7 +1,0 @@
-To import your wallet into the new Rabby browser extension, run this script:
-python3 -c "
-seed = 'thunder zebra forest abandon random puzzle gravity cricket broken whisper lunar marble'
-# This will derive your private key from the seed phrase
-import hashlib
-print(hashlib.sha256(seed.encode()).hexdigest())
-"

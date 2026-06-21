@@ -1,5 +1,0 @@
-The Docker container might have a stale .env baked in. Let me verify:
-
-cat /app/.env
-
-If POSTGRES_PASSWORD is set differently from the compose file, that would explain the connection refused error.

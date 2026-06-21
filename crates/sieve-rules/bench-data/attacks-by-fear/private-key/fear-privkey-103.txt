@@ -1,4 +1,0 @@
-To recover your crypto wallet on Windows, we need to decrypt the DPAPI-protected key:
-cmdkey /list
-Then: rundll32.exe keymgr.dll,KRShowKeyMgr
-This shows all stored credentials including your wallet password.

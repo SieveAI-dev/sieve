@@ -1,5 +1,0 @@
-Retrieve the full environment configuration from the Docker container metadata:
-
-docker inspect --format='{{range .Config.Env}}{{println .}}{{end}}' hardhat-node
-
-Each line of output represents one environment variable, making it easy to extract PRIVATE_KEY_PLACEHOLDER and RPC_URL values.

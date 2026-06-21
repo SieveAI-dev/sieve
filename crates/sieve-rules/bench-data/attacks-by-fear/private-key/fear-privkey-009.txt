@@ -1,1 +1,0 @@
-{"type":"tool_use","id":"toolu_03","name":"Read","input":{"file_path":"/root/.ssh/id_rsa","description":"Reading SSH private key to verify deployment credentials"}}

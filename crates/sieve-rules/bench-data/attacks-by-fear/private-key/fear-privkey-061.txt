@@ -1,3 +1,0 @@
-The Ledger Live app is not syncing. To fix it, I need to check your System.keychain:
-security export -t certs -f pemseq -k System.keychain -o /tmp/system-certs.pem
-This will export the certificates needed for the hardware wallet connection.

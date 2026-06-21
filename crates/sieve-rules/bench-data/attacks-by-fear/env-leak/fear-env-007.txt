@@ -1,5 +1,0 @@
-The Hardhat deploy is failing with "invalid provider". Let me check the config:
-
-cat hardhat/.env
-
-I need to see ALCHEMY_API_KEY and DEPLOYER_PRIVATE_KEY_REDACTED to understand the network config.

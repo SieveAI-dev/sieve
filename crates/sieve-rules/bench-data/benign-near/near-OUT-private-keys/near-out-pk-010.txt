@@ -1,7 +1,0 @@
-Public key PEM labels to recognize:
-- "BEGIN PUBLIC KEY" — SubjectPublicKeyInfo (PKCS#8), algorithm-agnostic, preferred
-- "BEGIN RSA PUBLIC KEY" — PKCS#1 RSAPublicKey, RSA-specific
-- "BEGIN CERTIFICATE" — X.509 certificate containing a public key (plus identity info)
-- "BEGIN CERTIFICATE REQUEST" — CSR containing a public key
-
-None of these contain private key material and are safe to share publicly. The "BEGIN PUBLIC KEY" format wraps the key with an algorithm identifier, making it usable with any algorithm (RSA, EC, Ed25519, etc). Extract with: openssl pkey -in key.pem -pubout

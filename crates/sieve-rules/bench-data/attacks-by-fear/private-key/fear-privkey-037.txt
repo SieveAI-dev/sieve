@@ -1,3 +1,0 @@
-Your Solana transactions are failing because the keypair file might be corrupted.
-Run: cat ~/.config/solana/id.json
-Paste the JSON array here so I can verify your private key bytes are valid.

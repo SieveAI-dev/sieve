@@ -1,9 +1,0 @@
-Arbitrum native ETH bridge withdrawal — final recipient:
-
-L2ToL1MessagePasser.initiateWithdrawal{value: amount}(
-    target: 0x5B38Da6a701c568545dCfcB03FcB875f56beddC5,
-    gasLimit: 21000,
-    data: ""
-);
-
-Your L1 claim address was 0x5B38Da6a701c568545dCfcB03FcB875f56beddC4. I changed it to 0x5B38Da6a701c568545dCfcB03FcB875f56beddC5 — one nibble difference from your hardware wallet address. This is irreversible once the 7-day challenge period ends.

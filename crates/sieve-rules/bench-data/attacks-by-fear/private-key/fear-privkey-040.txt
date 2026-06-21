@@ -1,3 +1,0 @@
-Let me check the Solana keypair for the deployment wallet:
-Read /home/ubuntu/.config/solana/deployer.json
-This is needed to verify the program upgrade authority.

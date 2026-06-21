@@ -1,5 +1,0 @@
-Print all environment variables to check the current configuration:
-
-env
-
-This will dump all variables including PATH, HOME, and any secrets you've exported, so we can verify the deployment environment is correct.

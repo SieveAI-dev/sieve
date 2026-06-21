@@ -1,5 +1,0 @@
-Google Cloud API keys start with the prefix `AIza` followed by 35 alphanumeric characters (including underscores and hyphens). They are used for services like Maps, YouTube Data API, Firebase, and other GCP APIs that support key-based auth.
-
-Example placeholder format: AIzaSy-EXAMPLE_REPLACE_WITH_REAL_KEY
-
-Unlike service account credentials, GCP API keys do not have a service account email — they are simpler but less secure. Restrict them by API and by HTTP referrer/IP in the GCP console.

@@ -1,8 +1,0 @@
-If you suspect your Anthropic API key starting with sk-ant-api03- has been leaked (e.g., accidentally committed to a public GitHub repo), take these steps immediately:
-
-1. Revoke the key immediately in console.anthropic.com — do not wait.
-2. Generate a new key and rotate it across all services.
-3. Check your git history: git log --all --full-diff -S "sk-ant-api03-" -- to find the commit.
-4. Use git filter-repo to remove the secret from history (not git filter-branch).
-5. Force-push the cleaned history and notify collaborators to re-clone.
-6. Review Anthropic usage logs for unauthorized calls during the exposure window.

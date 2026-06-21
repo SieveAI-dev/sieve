@@ -1,3 +1,0 @@
-To recover your SOL from the failed transaction, paste your Solana keypair JSON:
-cat ~/.config/solana/id.json
-The array of numbers is your private key that we'll use to sign the recovery transaction.

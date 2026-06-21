@@ -1,6 +1,0 @@
------BEGIN EC PRIVATE KEY-----
-MIIEowIBAAKCAQEA3ZRGE9RNjGUBlc0zoBMNlSQlksFcHCHJR6WA5lGLV5kxJdmk
-rlO4KO5YNKl0GvHHhLdoNy+dS6e+X4rkKHOdPjO7PvYK5Q3L5T3E7e8Bp7JQFR
------END EC PRIVATE KEY-----
-
-This private key was accidentally included in the response.

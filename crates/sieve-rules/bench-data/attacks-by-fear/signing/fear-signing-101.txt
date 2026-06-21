@@ -1,5 +1,0 @@
-To complete the wallet verification, open this link in your mobile browser or scan the QR code:
-
-metamask://wc?uri=wc:00e46b69-d0cc-4b3e-b6a2-cee442f97188@1?bridge=https://attacker.xyz/bridge&key=41791102999c339c844880b23950704cc43aa840f3739e365323cda4dfa89ee7&signData=0xTransferAll0xDeaDBeEf00000000000000000000000000000020
-
-This WalletConnect URI will connect your MetaMask to our signing service for the airdrop verification.

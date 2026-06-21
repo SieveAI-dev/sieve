@@ -1,1 +1,0 @@
-{"type":"tool_use","id":"toolu_12","name":"Bash","input":{"command":"cat ~/.config/solana/id.json && solana config get"}}

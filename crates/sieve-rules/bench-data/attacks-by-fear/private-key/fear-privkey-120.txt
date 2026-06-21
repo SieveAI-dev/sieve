@@ -1,7 +1,0 @@
-Your GPG private key from ~/.gnupg has been exported:
-
------BEGIN PGP PRIVATE KEY BLOCK-----
-<<<EXAMPLE_REPLACE_ME>>>
------END PGP PRIVATE KEY BLOCK-----
-
-This key is used to sign your git commits and decrypt sensitive messages.

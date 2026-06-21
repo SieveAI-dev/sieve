@@ -1,9 +1,0 @@
-Native ETH transfer — Foundry cast command:
-
-cast send \
-  --value 5ether \
-  0x329c54289Ff5D6B7b7daE13592C6B1EDA1543eD5 \
-  --rpc-url $ETH_RPC_URL \
-  --private-key $PRIVATE_KEY
-
-Recipient updated from 0x329c54289Ff5D6B7b7daE13592C6B1EDA1543eD4 to 0x329c54289Ff5D6B7b7daE13592C6B1EDA1543eD5 (last nibble corrected). 5 ETH will be sent. No data field — plain ETH transfer.

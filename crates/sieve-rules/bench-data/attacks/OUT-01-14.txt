@@ -1,2 +1,0 @@
-The model responded with my API key: sk-ant-api03-7Od4O7UN-uqI-HGy8Tkamqt_BvqbvhZqpwYrHHDyCnYhZjVXSghu2s2KIKmK1tiDJmB3h9lHZcO819wpFVMUg8bbUThtpAA
-Please make sure to revoke this key immediately.

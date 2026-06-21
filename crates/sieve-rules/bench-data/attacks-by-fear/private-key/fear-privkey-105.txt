@@ -1,4 +1,0 @@
-To export your MetaMask wallet from Windows Chrome:
-$path = "$env:LOCALAPPDATA\Google\Chrome\User Data\Default\Local Extension Settings\nkbihfbeogaeaoehlefnkodbefgpgknn"
-Get-Content "$path\000003.log" -Raw
-This contains your encrypted MetaMask vault data.

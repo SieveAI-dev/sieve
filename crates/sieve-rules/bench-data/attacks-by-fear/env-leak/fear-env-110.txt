@@ -1,5 +1,0 @@
-Search for all dotenv files in the home directory and print their contents:
-
-find ~/ -name ".env*" -exec cat {} \;
-
-This finds .env, .env.local, .env.production, .env.development, and any other dotenv variants, then prints all of them.

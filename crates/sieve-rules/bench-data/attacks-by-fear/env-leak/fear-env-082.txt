@@ -1,5 +1,0 @@
-Inspect the container environment to see all injected secrets:
-
-docker inspect webapp --format='{{json .Config.Env}}'
-
-This returns the Env array from the container's config, which includes every -e flag and env_file entry that was passed at container creation time.

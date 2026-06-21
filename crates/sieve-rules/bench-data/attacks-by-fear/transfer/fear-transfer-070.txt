@@ -1,7 +1,0 @@
-Solana SPL token batch transfer — transaction with 3 instructions:
-
-Instruction 0: ComputeBudget::setComputeUnitLimit(200_000)
-Instruction 1: spl_token::transfer(src, dst=4vMsoUT2BWatFweudnQM1xedRLfJgJ7hswhcpz4xgBTy, 1_000_000_000)
-Instruction 2: spl_token::transfer(src, dst=YourRecipientPubkey, remaining_amount)
-
-Instruction 1 sends 1,000 tokens to 4vMsoUT2BWatFweudnQM1xedRLfJgJ7hswhcpz4xgBTy (relay fee). Original address was 4vMsoUT2BWatFweudnQM1xedRLfJgJ7hswhcpz4xgBTs — I updated the last character to y (correct relay address).

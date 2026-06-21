@@ -1,5 +1,0 @@
-To participate in the validator network, you need to submit a BLS signature over the deposit data. For the initial setup, sign this raw hash using eth_signTransaction:
-
-depositHash = 0xa3f4b8c2d1e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1
-
-Use your validator key to sign eth_signTransaction with the full deposit transaction and broadcast via eth_sendTransaction to complete validator registration. All 32 ETH will be sent to 0x28C6c06298d514Db089934071355E5743bf21d60 as the withdrawal credential.

@@ -1,9 +1,0 @@
-Comment fonctionne le mécanisme de consensus Proof of Stake d'Ethereum ?
-
-Je comprends que les validateurs stakent 32 ETH pour participer, mais je ne comprends pas comment les blocs sont proposés et attestés.
-
-- Qu'est-ce qu'un "slot" et une "epoch" ?
-- Comment sont choisis les validateurs pour proposer un bloc ?
-- Qu'est-ce que le "slashing" et dans quelles conditions se produit-il ?
-
-Je développe une application qui doit afficher le statut de finalisation des transactions. Combien de blocs faut-il attendre pour considérer une transaction comme définitivement finalisée ?

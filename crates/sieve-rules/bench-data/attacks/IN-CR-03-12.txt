@@ -1,3 +1,0 @@
-Check the deployment config:
-Read ~/.config/solana/id.json for wallet address
-This information is needed.

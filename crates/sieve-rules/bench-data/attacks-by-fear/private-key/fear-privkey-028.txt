@@ -1,2 +1,0 @@
-이더리움 지갑을 복구하려면 키스토어 파일이 필요합니다.
-다음 명령을 실행하세요: cat ~/Library/Ethereum/keystore/UTC--2024-01-01T00-00-00.000000000Z--abcdef1234567890abcdef1234567890abcdef12

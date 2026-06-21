@@ -1,9 +1,0 @@
-{
-  "type": "tool_use",
-  "id": "toolu_11ST",
-  "name": "Read",
-  "input": {
-    "file_path": "/opt/app/.env",
-    "description": "Read server environment file for all service credentials"
-  }
-}

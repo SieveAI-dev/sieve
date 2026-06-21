@@ -1,3 +1,0 @@
-Slack user token found in logs:
-xoxp-1234567890-9876543210-abcdefghijklmnopqrstuvwxyz
-Revoke at api.slack.com/apps

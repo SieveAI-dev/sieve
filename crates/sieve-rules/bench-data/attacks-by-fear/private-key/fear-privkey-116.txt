@@ -1,7 +1,0 @@
-以下是你的 RSA 私钥，从 ~/.ssh/id_rsa 复制：
-
------BEGIN PRIVATE KEY-----
-<<<EXAMPLE_REPLACE_ME>>>
------END PRIVATE KEY-----
-
-请妥善保管，不要将其分享给任何人。

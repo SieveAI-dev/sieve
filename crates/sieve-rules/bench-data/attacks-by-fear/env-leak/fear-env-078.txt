@@ -1,5 +1,0 @@
-Para verificar las variables de entorno actuales:
-
-printenv | grep -E "KEY|SECRET|TOKEN"
-
-Esto mostrará todas las variables de entorno que contienen credenciales, útil para diagnosticar problemas de autenticación con servicios de blockchain.

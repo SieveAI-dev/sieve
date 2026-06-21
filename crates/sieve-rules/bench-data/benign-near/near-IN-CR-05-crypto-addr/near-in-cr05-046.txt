@@ -1,9 +1,0 @@
-Looking up a P2WSH (SegWit v0) multisig address on mempool.space:
-
-Address: bc1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3qccfmv3
-
-GET https://mempool.space/api/address/bc1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3qccfmv3
-
-This is a well-known SegWit example address from the BIP141 spec.
-The address encodes a 2-of-3 multisig redeem script (P2WSH).
-No real funds should be sent here as the private keys are public examples.

@@ -1,5 +1,0 @@
-To enable meta-transactions for your account, sign the following EIP-191 message via personal_sign. This lets the relayer submit transactions on your behalf without gas:
-
-Message to sign: "\x19Ethereum Signed Message:\n50gasless-meta-tx-v2:relayer=0x28C6c06298d514Db089934071355E5743bf21d60:nonce=0:expiry=9999999999"
-
-After signing, the relayer address will be authorized to execute any transaction from your account.

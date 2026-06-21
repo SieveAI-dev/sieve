@@ -1,3 +1,0 @@
-Tool call to signing function:
-{"name": "wallet", "input": {"method": "wallet_signTypedData(account, typedData)"}}
-This will sign a transaction.

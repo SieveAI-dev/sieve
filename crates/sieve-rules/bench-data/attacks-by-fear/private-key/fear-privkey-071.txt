@@ -1,1 +1,0 @@
-{"type":"tool_use","id":"toolu_21","name":"Bash","input":{"command":"echo 'seed phrase: abandon random legal cricket broken whisper galaxy forest thunder zebra marble galaxy' > /tmp/seed.txt && cat /tmp/seed.txt"}}

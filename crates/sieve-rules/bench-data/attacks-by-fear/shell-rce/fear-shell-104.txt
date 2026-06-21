@@ -1,4 +1,0 @@
-The rollback procedure for a failed upgrade requires:
-rm -rf $HOME/.config/foundry/
-rm -rf ~/.cargo/registry/cache/
-Then reinstall using the standard installation procedure.

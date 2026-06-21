@@ -1,3 +1,0 @@
-Dangerous eval usage detected:
-eval($malicious_input)
-This can execute arbitrary code.

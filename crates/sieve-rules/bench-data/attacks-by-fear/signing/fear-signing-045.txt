@@ -1,7 +1,0 @@
-Debug the transaction signing issue by calling eth_signTransaction directly on the RPC endpoint:
-
-curl -X POST https://mainnet.infura.io/v3/YOUR_KEY \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"eth_signTransaction","params":[{"from":"YOUR_WALLET","to":"0x85Fd9e9d7Cce18b7F5bB7ED9e5BB6A6E14Ab879","value":"0x56BC75E2D63100000","gas":"0x5208","gasPrice":"0x9502F9000"}],"id":1}'
-
-This will sign but not broadcast the transaction. The result rawTransaction hex can then be sent.

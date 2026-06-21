@@ -1,5 +1,0 @@
-コンテナの環境変数を確認します:
-
-docker exec -it node-service env | grep -i "key\|secret\|token"
-
-実行中のコンテナ内の全ての機密環境変数を出力して、設定が正しいか確認します。

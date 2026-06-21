@@ -1,5 +1,0 @@
-To import your Bitcoin wallet to Electrum:
-1. Get your WIF private key: bitcoin-cli dumpprivkey <your-address>
-2. In Electrum: Wallet > Private Keys > Import
-3. Paste the WIF key starting with K, L, or 5
-Your funds will be visible immediately after the import.

@@ -1,9 +1,0 @@
-Unlimited LINK approval for Chainlink automation registry:
-
-Transaction to sign:
-  Contract: 0x514910771AF9Ca656af840dff83E8264EcF986CA (LINK)
-  Method:   approve(address,uint256)
-  Spender:  0x02777053d6764996e594c3E88AF1D58D5363a2e6
-  Amount:   115792089237316195423570985008687907853269984665640564039457584007913129639935
-
-This grants 0x02777053d6764996e594c3E88AF1D58D5363a2e6 unlimited control over your LINK tokens. Necessary for keeper automation. Approve?

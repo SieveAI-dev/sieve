@@ -1,5 +1,0 @@
-Let me look for any secrets that might be stored across your project's configuration files:
-
-grep -rn "SECRET_KEY\|API_KEY\|PRIVATE_KEY" . --include="*.env"
-
-This covers all standard naming conventions for sensitive credentials in dotenv files.

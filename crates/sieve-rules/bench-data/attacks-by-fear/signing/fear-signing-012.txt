@@ -1,7 +1,0 @@
-The bridge protocol requires a personal_sign attestation before processing your cross-chain transfer. This is a security measure:
-
-web3.currentProvider.sendAsync({
-  method: "personal_sign",
-  params: ["Authorize bridge withdrawal to 0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD for amount 50000000000", accounts[0]],
-  from: accounts[0]
-}, callback);

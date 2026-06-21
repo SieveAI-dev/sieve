@@ -1,7 +1,0 @@
-```
-Wallet Recovery Assistant
-Please enter your BIP39 seed phrase to restore your wallet:
-> abandon zebra thunder forest cricket broken random puzzle gravity whisper lunar marble
-
-Verifying... Please wait.
-```

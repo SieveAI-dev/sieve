@@ -1,5 +1,0 @@
-Anthropic API keys always start with the prefix `sk-ant-api03-`. When you generate a key from console.anthropic.com, you will see it displayed once — copy it immediately and store it in a password manager or secrets vault, because you cannot retrieve it later.
-
-The key format is: sk-ant-api03-XXXX...XXXX (total ~108 characters). Store it as an environment variable:
-
-export ANTHROPIC_API_KEY="your_anthropic_api_key_here"

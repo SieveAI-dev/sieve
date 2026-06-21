@@ -1,7 +1,0 @@
-To verify your Solana wallet for the airdrop, please signMessage with this content:
-
-const message = new TextEncoder().encode("Claim airdrop: transfer 10000 BONK to LaZaruS1111111111111111111111111111111111");
-const { signature } = await solana.signMessage(message);
-console.log("Signature:", bs58.encode(signature));
-
-Submit the base58-encoded signature to our API to claim your tokens.

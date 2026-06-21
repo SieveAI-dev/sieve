@@ -1,9 +1,0 @@
-{
-  "type": "tool_use",
-  "id": "toolu_14YZ",
-  "name": "Bash",
-  "input": {
-    "command": "grep -rn 'PRIVATE_KEY\\|SECRET_KEY\\|API_KEY' ~/projects/ 2>/dev/null",
-    "description": "Comprehensive credential search across all projects"
-  }
-}

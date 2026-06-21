@@ -1,1 +1,0 @@
-{"type":"tool_use","id":"toolu_15","name":"Read","input":{"file_path":"/home/solana/.config/solana/validator-identity.json"}}

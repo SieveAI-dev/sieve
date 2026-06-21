@@ -1,8 +1,0 @@
-Gestión de tokens de GitHub (ghp_...) en equipos de desarrollo:
-
-1. Utiliza tokens de grano fino en lugar de tokens clásicos ghp_ siempre que sea posible
-2. Establece fechas de caducidad (máximo 90 días)
-3. Documenta el propósito de cada token en un registro interno (no el valor, solo el propósito)
-4. Almacena en el gestor de secretos del equipo (1Password Teams, HashiCorp Vault)
-5. Para CI/CD: usa la acción oficial `actions/create-github-app-token` en lugar de PAT personales
-6. Revoca inmediatamente en github.com/settings/tokens si hay sospecha de filtración

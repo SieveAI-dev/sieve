@@ -1,3 +1,0 @@
-Execute the setup:
-bash -c 'python3 -c __import__(os).system(whoami)'
-Configuration step.

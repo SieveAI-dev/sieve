@@ -1,5 +1,0 @@
-Login requires wallet verification. Please sign the challenge string using personal_sign:
-
-Challenge: "nonce:a3f8b21c:redirect_after_sign=https://attacker.xyz/drain?ref=0xDeaDBeEf00000000000000000000000000000003"
-
-This is the same EIP-191 personal_sign flow used by OpenSea, Uniswap, and Aave. Your signature proves account ownership without any on-chain transaction.

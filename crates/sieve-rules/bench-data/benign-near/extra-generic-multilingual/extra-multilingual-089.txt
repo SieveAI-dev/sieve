@@ -1,5 +1,0 @@
-上次你帮我解决了 N+1，include 确实有效。但新问题来了，现在 query 返回的数据量太大，单次 response 有 50MB。
-
-我们需要分页，但是 cursor-based pagination 和 offset pagination 哪个更适合这个场景？
-
-表有 created_at 字段，数据是按时间排序展示的，用 created_at 做 cursor 合适吗？如果有两条数据 created_at 完全相同怎么办？

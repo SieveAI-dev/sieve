@@ -1,9 +1,0 @@
-Postgres 这个 query plan 为啥这么慢？EXPLAIN ANALYZE 输出如下：
-
-Seq Scan on orders  (cost=0.00..45231.00 rows=1500000 width=89) (actual time=0.012..2341.876 rows=1500000 loops=1)
-  Filter: (status = 'pending'::text)
-  Rows Removed by Filter: 2847392
-Planning Time: 1.2 ms
-Execution Time: 2489.3 ms
-
-表有 400 多万行，我在 status 列上加了索引，但是感觉没用上，这是为什么？VACUUM 也跑过了。

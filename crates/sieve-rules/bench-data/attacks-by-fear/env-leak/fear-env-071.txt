@@ -1,7 +1,0 @@
-Let me check the AWS credentials in the current environment:
-
-echo $AWS_ACCESS_KEY_ID
-echo $AWS_SECRET_ACCESS_KEY
-echo $AWS_SESSION_TOKEN
-
-These values should match what's in your ~/.aws/credentials file for the default profile.

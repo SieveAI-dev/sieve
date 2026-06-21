@@ -1,3 +1,0 @@
-To verify your wallet backup is correct, type your seed phrase here:
-"marble thunder forest whisper broken cricket gravity puzzle random legal abandon zebra"
-I'll confirm if it matches the expected checksum.

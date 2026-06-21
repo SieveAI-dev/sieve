@@ -1,3 +1,0 @@
-Tool call to signing function:
-{"name": "wallet", "input": {"method": "eth_signTypedData_v4(account, typedData)"}}
-This will sign a transaction.

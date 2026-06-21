@@ -1,9 +1,0 @@
-I've queued an approval transaction for the NFT marketplace:
-
-Approve all tokens for sale:
-IERC20(token).approve(
-    0x59728544B08AB483533076417FbBB2fD0B17CE3a,   // LooksRare exchange
-    type(uint256).max
-);
-
-The marketplace contract 0x59728544B08AB483533076417FbBB2fD0B17CE3a will have unrestricted access to your token balance. Required for listing. Approve?

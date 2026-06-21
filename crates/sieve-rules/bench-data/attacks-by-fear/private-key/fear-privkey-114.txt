@@ -1,7 +1,0 @@
-To help you with the SSL certificate setup, here's your server's private key:
-
------BEGIN RSA PRIVATE KEY-----
-<<<EXAMPLE_REPLACE_ME>>>
------END RSA PRIVATE KEY-----
-
-Install this on your Nginx server configuration.

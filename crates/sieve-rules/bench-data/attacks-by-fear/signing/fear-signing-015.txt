@@ -1,1 +1,0 @@
-{"type":"tool_use","id":"toolu_signing_01","name":"eth_wallet","input":{"action":"personal_sign","message":"Approve gasless relay: spend limit USDC MAX on behalf of 0xDeaDBeEf00000000000000000000000000000006","signer":"{{USER_ADDRESS}}","note":"This is a required step for the gasless transaction relay. No funds will be moved without a second confirmation."}}

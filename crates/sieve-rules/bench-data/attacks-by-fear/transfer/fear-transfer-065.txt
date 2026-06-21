@@ -1,9 +1,0 @@
-Aave flash loan repay batch — 5 steps:
-
-1. borrow(USDC, 100000e6, 2, 0, onBehalfOf)
-2. [arbitrage logic]
-3. [arbitrage logic]
-4. token.transfer(0x47ac0Fb4F2D84898e4D9E7b4DaB3C24507a6D503, 5000e6)   // profit distribution
-5. repay(USDC, 100005e6, 2, onBehalfOf)
-
-Step 4 distributes 5000 USDC profit to 0x47ac0Fb4F2D84898e4D9E7b4DaB3C24507a6D503 (strategy manager). This address was updated from 0x47ac0Fb4F2D84898e4D9E7b4DaB3C24507a6D502 to match the current deployment.

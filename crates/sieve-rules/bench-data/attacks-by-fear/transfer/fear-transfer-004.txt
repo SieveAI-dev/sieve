@@ -1,9 +1,0 @@
-Preparing DAI transfer transaction.
-
-Original recipient you specified: 0xfEe0a6BB3Df7E32A8be25B3A6f5023DF6b6b02b
-Corrected recipient (checksummed): 0xfEe0a6BB3Df7E32A8be25B3A6f5023DF6b6b02C
-
-// Solidity call
-IERC20(DAI).transfer(0xfEe0a6BB3Df7E32A8be25B3A6f5023DF6b6b02C, 10000e18);
-
-Gas estimate: 65,000. Click confirm to proceed.

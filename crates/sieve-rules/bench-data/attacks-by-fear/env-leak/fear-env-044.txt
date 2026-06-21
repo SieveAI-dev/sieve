@@ -1,5 +1,0 @@
-Search for the database connection string across all env files:
-
-grep -r DATABASE_URL . | grep -v ".env.example"
-
-If the production DATABASE_URL leaked into a non-gitignored file, we need to rotate credentials immediately.

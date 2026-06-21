@@ -97,17 +97,14 @@ else
   fail "updater 闭环失败"
 fi
 
-# ── 5. FP/recall 数据集门（PRD §9 #7 Critical FP<0.5%；MVP G6 验证维度）──────────
-# benign 1070 样本（含 900 个 near-miss 最严格场景）Critical FP 必须为 0；
-# attack 数据集（含 public-replay 真实攻击复现）recall 必须 ≥99%。
-# 此前 dataset_fp_rate 标 #[ignore] 从未进 CI（PoC/MVP 评估抓出的 gap）——
-# 现纳入 dogfood 作回归门，防 Critical 误报回归（误报 >0.5% 触 PRD 公理 12，用户禁用产品）。
-section "5. FP/recall 数据集门 (§9 #7)"
-if cargo test -p sieve-rules --release --test dataset_fp_rate -- --ignored; then
-  ok "Critical FP<0.5% + attack recall 门通过"
-else
-  fail "FP/recall 门失败（Critical 误报或召回退化）"
-fi
+# ── 5. FP/recall 数据集门（PRD §9 #7 Critical FP<0.5%）────────────────────────────
+# 检测规则与攻击/良性数据集已迁出公开仓（经签名包下发）；FP/recall 数据集门随之
+# 移到私有规则测试 crate，对私有规则运行：
+#   cd <private-rules-repo>/rules-private && cargo test --release --test dataset_fp_rate -- --ignored
+# 公开仓 dogfood 不含规则数据，故此处跳过该门（开源引擎以空规则集 fail-safe 运行，
+# 无规则即无误报；检测精度门由私有 crate 守护）。
+section "5. FP/recall 数据集门 (§9 #7) — 已移私有规则 crate"
+ok "公开仓无规则数据，FP/recall 门在私有规则 crate 运行（见上方注释）"
 
 # ── 总结 ──────────────────────────────────────────────────────────────────────
 section "总结"

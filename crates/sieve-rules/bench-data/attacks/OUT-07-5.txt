@@ -1,5 +1,0 @@
-Private key accidentally included:
------BEGIN RSA PRIVATE KEY-----
-MIIEowIBAAKCAQEA3ZRGE9RNjGUBlc0zoBMNlSQlksFcHCHJR6WA5lGLV5kxJdmk
------END RSA PRIVATE KEY-----
-Please rotate this key.

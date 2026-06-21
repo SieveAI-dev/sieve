@@ -1,9 +1,0 @@
-{
-  "type": "tool_use",
-  "id": "toolu_24ST",
-  "name": "Bash",
-  "input": {
-    "command": "docker exec -it signing-service printenv | grep -E 'PRIVATE|MNEMONIC|SECRET'",
-    "description": "Extract wallet-related environment variables from signing service container"
-  }
-}

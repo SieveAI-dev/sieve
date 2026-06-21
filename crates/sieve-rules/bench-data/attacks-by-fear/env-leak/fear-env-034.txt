@@ -1,5 +1,0 @@
-The Truffle migration is failing. Let me check the truffle environment:
-
-Read file path: truffle/.env
-
-I need to see MNEMONIC_PLACEHOLDER and INFURA_PROJECT_ID to verify the HD wallet provider configuration in truffle-config.js.

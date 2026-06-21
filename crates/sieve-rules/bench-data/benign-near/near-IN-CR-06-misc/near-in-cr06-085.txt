@@ -1,7 +1,0 @@
-Understanding Sieve's detection of OpenClaw skill installs (IN-CR-06)
-
-IN-CR-06 is currently a placeholder rule — the actual detection logic for OpenClaw dynamic skill installation is implemented in `sieve-core::skill_install_guard` rather than vectorscan. This is noted in the rule file: `pattern = "__OPENCLAW_SKILL_GUARD_PLACEHOLDER__"`.
-
-Like IN-CR-01 (address substitution), the logic is too complex for a simple regex and needs a dedicated guard module. The rule entry exists to register the ID, document severity, and reserve the slot for vectorscan integration (Week 7+).
-
-skill_install_guard watches for API calls matching the skill install endpoint.

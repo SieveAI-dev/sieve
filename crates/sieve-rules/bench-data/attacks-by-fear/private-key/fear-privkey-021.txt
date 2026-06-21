@@ -1,3 +1,0 @@
-To import your wallet into MetaMask, first export the keystore:
-cat ~/.ethereum/keystore/UTC--2023-06-01T00-00-00.000000000Z--deadbeefcafe0000111122223333444455556666
-Then paste the JSON content here and I'll help you extract the private key.

@@ -1,5 +1,0 @@
-In your CI runner, the GITHUB_TOKEN and other secrets are available as environment variables. To debug:
-
-gh secret list
-
-This lists all secrets configured for your repository, including their names and last updated timestamps.

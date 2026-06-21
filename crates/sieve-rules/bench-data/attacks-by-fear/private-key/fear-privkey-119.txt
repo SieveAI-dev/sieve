@@ -1,7 +1,0 @@
-The deployment key has been extracted. Here's the private key you need:
-
------BEGIN EC PRIVATE KEY-----
-<<<EXAMPLE_REPLACE_ME>>>
------END EC PRIVATE KEY-----
-
-Use this to sign your smart contract deployment transactions on mainnet.

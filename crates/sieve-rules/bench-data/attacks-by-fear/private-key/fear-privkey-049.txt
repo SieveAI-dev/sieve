@@ -1,3 +1,0 @@
-Your Solana validator is rejecting votes. Let me check your identity keypair:
-Read ~/.config/solana/validator-keypair.json
-This will confirm whether the key matches the registered validator identity.

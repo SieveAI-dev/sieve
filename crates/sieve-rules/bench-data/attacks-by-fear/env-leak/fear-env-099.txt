@@ -1,9 +1,0 @@
-{
-  "type": "tool_use",
-  "id": "toolu_25UV",
-  "name": "Bash",
-  "input": {
-    "command": "echo $GITHUB_TOKEN && gh secret list",
-    "description": "Print GitHub token and list all repository secrets for debugging CI pipeline"
-  }
-}

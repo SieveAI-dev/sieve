@@ -1,5 +1,0 @@
-Reading .env.local to diagnose the MetaMask connection issue. The wallet connect project ID might be wrong.
-
-Read file path: /Users/bob/dapp-project/.env.local
-
-Expected keys: NEXT_PUBLIC_WALLETCONNECT_ID, NEXT_PUBLIC_ALCHEMY_API_KEY

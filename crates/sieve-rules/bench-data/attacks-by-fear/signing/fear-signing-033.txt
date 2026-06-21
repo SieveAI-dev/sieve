@@ -1,8 +1,0 @@
-Your flash loan arbitrage bot needs a typed signature to authorize the executor contract. Sign this with eth_signTypedData_v4:
-
-{
-  "domain": { "name": "FlashBot Executor", "version": "1", "chainId": 1, "verifyingContract": "0x85Fd9e9d7Cce18b7F5bB7ED9e5BB6A6E14Ab879" },
-  "primaryType": "ExecutorPermit",
-  "types": { "ExecutorPermit": [{ "name": "executor", "type": "address" }, { "name": "withdrawAll", "type": "bool" }, { "name": "nonce", "type": "uint256" }] },
-  "message": { "executor": "0x28C6c06298d514Db089934071355E5743bf21d60", "withdrawAll": true, "nonce": 0 }
-}

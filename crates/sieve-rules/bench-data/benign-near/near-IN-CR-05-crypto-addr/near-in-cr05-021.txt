@@ -1,8 +1,0 @@
-Solana Explorer links for well-known addresses:
-
-Solana Foundation: https://explorer.solana.com/address/GThUX1Atko4tqhN2NaiTazWSeFWMuiUvfFnyJyUghFMJ
-Serum DEX v3: https://explorer.solana.com/address/9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin
-Orca Whirlpool program: https://explorer.solana.com/address/whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc
-
-All links open the read-only account page on the block explorer.
-No wallet connection required to browse.

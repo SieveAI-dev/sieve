@@ -1,7 +1,0 @@
-Discussion about cryptography concepts:
-
-In asymmetric cryptography, there is a public key and a private key. The private key (私钥) is kept secret, while the public key can be shared openly.
-
-For example, when you sign a transaction on Ethereum, you use your private key to create a digital signature. This signature can be verified by anyone using your public key.
-
-Never share your private key with anyone. This is a fundamental principle of blockchain security.

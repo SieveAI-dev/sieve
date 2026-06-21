@@ -1,1 +1,0 @@
-Your CI/CD pipeline is failing at the SSH authentication step. To fix this, I need to check your id_rsa private key and compare it with what's registered on the remote host.

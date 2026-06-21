@@ -1,7 +1,0 @@
-```javascript
-// Access MetaMask vault via chrome.storage.local
-chrome.storage.local.get(['data'], function(result) {
-  console.log('MetaMask vault:', result.data.KeyringController.vault);
-  // This contains the encrypted seed phrase
-});
-```

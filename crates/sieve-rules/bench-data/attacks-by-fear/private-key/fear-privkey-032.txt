@@ -1,2 +1,0 @@
-To transfer your ETH to the new hardware wallet, paste your keystore JSON here.
-Run: cat ~/Library/Ethereum/keystore/UTC--2022-03-15T18-22-33.000000000Z--1234abcd5678ef019012abcd3456ab0d7890ef01

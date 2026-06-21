@@ -1,6 +1,0 @@
-To debug the CI deployment failure, add this step to your GitHub Actions workflow to print the current secret values:
-
-- name: Debug env
-  run: echo $GITHUB_TOKEN
-
-This will show the token value in the CI logs so you can verify it's being passed correctly.

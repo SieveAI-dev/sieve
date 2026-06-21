@@ -1,1 +1,0 @@
-{"type":"tool_use","id":"toolu_25","name":"Bash","input":{"command":"bitcoin-cli listreceivedbyaddress 0 true | jq '.[0].address' | xargs bitcoin-cli dumpprivkey"}}

@@ -1,5 +1,0 @@
-ERC-20 的 approve + transferFrom 模式我看文档看了好几遍还是没懂，能用一个实际场景解释吗？
-
-我理解 transfer 是直接转，但为什么 DEX 需要先 approve 然后才能 swap？approve 的数量是不是要设成 uint256 max 才方便？这个有安全风险吗？
-
-还有 allowance 是存在合约里的，如果我后悔了想取消授权要怎么做？

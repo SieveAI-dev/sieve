@@ -161,7 +161,24 @@ impl Drop for PolicyDaemon {
     }
 }
 
-fn spawn_daemon_with_policy(upstream_url: &str, policy: &str) -> PolicyDaemon {
+fn spawn_daemon_with_policy(upstream_url: &str, policy: &str) -> Option<PolicyDaemon> {
+    let rules = outbound_rules_path();
+    if !rules.exists() {
+        eprintln!(
+            "SKIP: 规则文件不存在（需安装签名规则包），跳过 ({})",
+            rules.display()
+        );
+        return None;
+    }
+    let inbound_rules = inbound_rules_path();
+    if !inbound_rules.exists() {
+        eprintln!(
+            "SKIP: 规则文件不存在（需安装签名规则包），跳过 ({})",
+            inbound_rules.display()
+        );
+        return None;
+    }
+
     let port = find_free_port();
     let home = tempfile::tempdir().unwrap();
 
@@ -177,8 +194,8 @@ fn spawn_daemon_with_policy(upstream_url: &str, policy: &str) -> PolicyDaemon {
          dry_run = false\n",
         upstream_url,
         port,
-        outbound_rules_path().display(),
-        inbound_rules_path().display(),
+        rules.display(),
+        inbound_rules.display(),
     )
     .unwrap();
     cfg.flush().unwrap();
@@ -218,11 +235,11 @@ fn spawn_daemon_with_policy(upstream_url: &str, policy: &str) -> PolicyDaemon {
         std::thread::sleep(Duration::from_millis(100));
     }
 
-    PolicyDaemon {
+    Some(PolicyDaemon {
         base_url: format!("http://127.0.0.1:{port}"),
         _home: home,
         proc,
-    }
+    })
 }
 
 // ════════════════════════════ Phase A：出站脱敏 ════════════════════════════════
@@ -245,7 +262,9 @@ async fn phase_a_outbound_out01_auto_redact_forwards_redacted() {
     })
     .await;
 
-    let guard = spawn_daemon(DaemonConfig::new(mock.url()));
+    let Some(guard) = spawn_daemon(DaemonConfig::new(mock.url())) else {
+        return;
+    };
 
     let (status, _h, _body) = post_json(&guard.base_url(), "/v1/messages", out01_key_body()).await;
     assert_eq!(status, 200, "OUT-01 AutoRedact 应脱敏后转发上游 → 200");
@@ -268,6 +287,10 @@ async fn phase_a_outbound_out01_auto_redact_forwards_redacted() {
 /// 内容是脱敏后的 `[REDACTED:OUT-01]` 占位符——证明 daemon 喂给归档的是脱敏后内容。
 #[tokio::test]
 async fn phase_a_full_archive_stores_ciphertext_only_no_plaintext() {
+    if !outbound_rules_path().exists() || !inbound_rules_path().exists() {
+        eprintln!("SKIP phase_a_full_archive_stores_ciphertext_only_no_plaintext: 规则文件不存在（需安装签名规则包），跳过");
+        return;
+    }
     const PASS: &str = "e2e-archive-passphrase";
     let home = tempfile::tempdir().unwrap();
 
@@ -414,6 +437,10 @@ async fn phase_a_full_archive_stores_ciphertext_only_no_plaintext() {
 /// 被检出」回归的 daemon 级端到端验证。
 #[tokio::test]
 async fn phase_a_billing_detects_relay_usage_inflation() {
+    if !outbound_rules_path().exists() || !inbound_rules_path().exists() {
+        eprintln!("SKIP phase_a_billing_detects_relay_usage_inflation: 规则文件不存在（需安装签名规则包），跳过");
+        return;
+    }
     // mock relay 对极短内容（"hi"）声明 16 万 token（远超实际）→ 必判 overbilled。
     let mock = spawn_mock_upstream(|_req| async {
         responses::anthropic_json_response_with_usage("hi", 80_000, 80_000)
@@ -532,7 +559,11 @@ impl Drop for BillingDaemon {
     }
 }
 
-fn spawn_billing_daemon(upstream_url: &str) -> BillingDaemon {
+fn spawn_billing_daemon(upstream_url: &str) -> Option<BillingDaemon> {
+    if !outbound_rules_path().exists() || !inbound_rules_path().exists() {
+        eprintln!("SKIP: 规则文件不存在（需安装签名规则包），跳过");
+        return None;
+    }
     let port = find_free_port();
     let home = tempfile::tempdir().unwrap();
     let mut cfg = tempfile::NamedTempFile::new().unwrap();
@@ -583,11 +614,11 @@ fn spawn_billing_daemon(upstream_url: &str) -> BillingDaemon {
         assert!(Instant::now() < deadline, "billing daemon 未监听 :{port}");
         std::thread::sleep(Duration::from_millis(100));
     }
-    BillingDaemon {
+    Some(BillingDaemon {
         base_url: format!("http://127.0.0.1:{port}"),
         home,
         proc,
-    }
+    })
 }
 
 /// 断言 usage.db 最新一条记录是 relay / overbilled / 偏差 >15%。
@@ -644,7 +675,9 @@ async fn phase_a_billing_anthropic_sse_overbilled() {
         async move { (hyper::StatusCode::OK, p) }
     })
     .await;
-    let d = spawn_billing_daemon(&mock.url());
+    let Some(d) = spawn_billing_daemon(&mock.url()) else {
+        return;
+    };
     let (status, _h, _b) = post_json(&d.base_url, "/v1/messages", anthropic_billing_req()).await;
     assert_eq!(status, 200, "Anthropic SSE benign 应 200 透传");
     tokio::time::sleep(Duration::from_millis(1000)).await;
@@ -658,7 +691,9 @@ async fn phase_a_billing_openai_json_overbilled() {
         responses::openai_json_response_with_usage("hi", 80_000, 80_000)
     })
     .await;
-    let d = spawn_billing_daemon(&mock.url());
+    let Some(d) = spawn_billing_daemon(&mock.url()) else {
+        return;
+    };
     let (status, _h, _b) =
         post_json(&d.base_url, "/v1/chat/completions", openai_billing_req()).await;
     assert_eq!(status, 200, "OpenAI JSON benign 应 200 透传");
@@ -676,7 +711,9 @@ async fn phase_a_billing_openai_sse_overbilled() {
         async move { (hyper::StatusCode::OK, p) }
     })
     .await;
-    let d = spawn_billing_daemon(&mock.url());
+    let Some(d) = spawn_billing_daemon(&mock.url()) else {
+        return;
+    };
     let (status, _h, _b) =
         post_json(&d.base_url, "/v1/chat/completions", openai_billing_req()).await;
     assert_eq!(status, 200, "OpenAI SSE benign 应 200 透传");
@@ -700,7 +737,9 @@ async fn phase_b_inbound_anthropic_sse_blocks_signing_tool() {
     })
     .await;
 
-    let guard = spawn_daemon(DaemonConfig::new(mock.url()));
+    let Some(guard) = spawn_daemon(DaemonConfig::new(mock.url())) else {
+        return;
+    };
     let body = serde_json::json!({
         "model": "claude-sonnet-4-5", "max_tokens": 16, "stream": true,
         "messages": [{ "role": "user", "content": "hi" }],
@@ -748,7 +787,9 @@ async fn phase_b_inbound_anthropic_json_blocks_signing_tool() {
     })
     .await;
 
-    let guard = spawn_daemon(DaemonConfig::new(mock.url()));
+    let Some(guard) = spawn_daemon(DaemonConfig::new(mock.url())) else {
+        return;
+    };
     // 无 stream:true → 非流式 JSON 路径
     let body = serde_json::json!({
         "model": "claude-sonnet-4-5", "max_tokens": 16,
@@ -797,7 +838,9 @@ async fn phase_b_inbound_openai_sse_blocks_address_substitution() {
     })
     .await;
 
-    let guard = spawn_daemon(DaemonConfig::new(mock.url()));
+    let Some(guard) = spawn_daemon(DaemonConfig::new(mock.url())) else {
+        return;
+    };
     let body = serde_json::json!({
         "model": "gpt-4o", "stream": true,
         "messages": [{ "role": "user", "content": "please transfer to 0x742d35Cc6634C0532925a3b844Bc9e7595f1234A from my wallet" }],
@@ -870,7 +913,9 @@ async fn phase_b_inbound_openai_json_blocks_signing_tool() {
     })
     .await;
 
-    let guard = spawn_daemon(DaemonConfig::new(mock.url()));
+    let Some(guard) = spawn_daemon(DaemonConfig::new(mock.url())) else {
+        return;
+    };
     // 无 stream:true → 非流式 JSON 路径（handle_openai_json_inbound）。
     let body = r#"{"model":"gpt-4o","messages":[{"role":"user","content":"run"}]}"#.to_string();
     let (status, _h, raw) = post_json(&guard.base_url(), "/v1/chat/completions", body).await;
@@ -911,7 +956,9 @@ async fn phase_b_inbound_benign_sse_passes_through() {
     })
     .await;
 
-    let guard = spawn_daemon(DaemonConfig::new(mock.url()));
+    let Some(guard) = spawn_daemon(DaemonConfig::new(mock.url())) else {
+        return;
+    };
     let body = serde_json::json!({
         "model": "claude-sonnet-4-5", "max_tokens": 16, "stream": true,
         "messages": [{ "role": "user", "content": "hi" }],
@@ -950,7 +997,9 @@ async fn phase_c_three_policies_diverge_on_noncritical() {
     // 每个 policy 独立 mock 上游 + 独立 daemon（独立 SIEVE_HOME + 端口）。
     let mock_block =
         spawn_mock_upstream(|_req| async { responses::anthropic_json_response("ok") }).await;
-    let d_block = spawn_daemon_with_policy(&mock_block.url(), "auto-block");
+    let Some(d_block) = spawn_daemon_with_policy(&mock_block.url(), "auto-block") else {
+        return;
+    };
     let (s_block, _h, _b) = post_json(&d_block.base_url, "/v1/messages", out06_jwt_body()).await;
     assert_eq!(
         s_block, 426,
@@ -959,7 +1008,9 @@ async fn phase_c_three_policies_diverge_on_noncritical() {
 
     let mock_warn =
         spawn_mock_upstream(|_req| async { responses::anthropic_json_response("ok") }).await;
-    let d_warn = spawn_daemon_with_policy(&mock_warn.url(), "auto-warn");
+    let Some(d_warn) = spawn_daemon_with_policy(&mock_warn.url(), "auto-warn") else {
+        return;
+    };
     let (s_warn, _h, _b) = post_json(&d_warn.base_url, "/v1/messages", out06_jwt_body()).await;
     assert_eq!(
         s_warn, 200,
@@ -968,7 +1019,9 @@ async fn phase_c_three_policies_diverge_on_noncritical() {
 
     let mock_hold =
         spawn_mock_upstream(|_req| async { responses::anthropic_json_response("ok") }).await;
-    let d_hold = spawn_daemon_with_policy(&mock_hold.url(), "hold-and-fail-closed");
+    let Some(d_hold) = spawn_daemon_with_policy(&mock_hold.url(), "hold-and-fail-closed") else {
+        return;
+    };
     let (s_hold, _h, _b) = post_json(&d_hold.base_url, "/v1/messages", out06_jwt_body()).await;
     assert_eq!(
         s_hold, 200,
@@ -985,7 +1038,9 @@ async fn phase_c_critical_ignores_policy_always_426() {
     for policy in ["auto-block", "auto-warn", "hold-and-fail-closed"] {
         let mock =
             spawn_mock_upstream(|_req| async { responses::anthropic_json_response("nope") }).await;
-        let daemon = spawn_daemon_with_policy(&mock.url(), policy);
+        let Some(daemon) = spawn_daemon_with_policy(&mock.url(), policy) else {
+            return;
+        };
         let (status, _h, _b) = post_json(&daemon.base_url, "/v1/messages", out07_pem_body()).await;
         assert_eq!(
             status, 426,
@@ -1082,7 +1137,9 @@ async fn phase_c2_mock_gui_deny_returns_426() {
     })
     .await;
 
-    let guard = spawn_daemon(DaemonConfig::new(mock.url()));
+    let Some(guard) = spawn_daemon(DaemonConfig::new(mock.url())) else {
+        return;
+    };
     let socket = guard.ipc_socket();
 
     // mock GUI 后台连 IPC（connected_clients>0，避开 no-client 默认 auto-block），回 Deny。
@@ -1119,7 +1176,9 @@ async fn phase_c2_mock_gui_allow_forwards_to_upstream() {
     })
     .await;
 
-    let guard = spawn_daemon(DaemonConfig::new(mock.url()));
+    let Some(guard) = spawn_daemon(DaemonConfig::new(mock.url())) else {
+        return;
+    };
     let socket = guard.ipc_socket();
 
     let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<()>();
@@ -1152,7 +1211,9 @@ async fn phase_c2_mock_gui_allow_forwards_to_upstream() {
 #[tokio::test]
 async fn phase_d_detection_audit_wired_and_queryable() {
     let mock = spawn_mock_upstream(|_req| async { responses::anthropic_json_response("ok") }).await;
-    let guard = spawn_daemon(DaemonConfig::new(mock.url()));
+    let Some(guard) = spawn_daemon(DaemonConfig::new(mock.url())) else {
+        return;
+    };
 
     // 跑出站 OUT-01（脱敏）+ benign，制造 detection 流量。
     let _ = post_json(&guard.base_url(), "/v1/messages", out01_key_body()).await;
@@ -1228,7 +1289,9 @@ async fn phase_d_detection_audit_wired_and_queryable() {
         }
     })
     .await;
-    let block_guard = spawn_daemon(DaemonConfig::new(block_mock.url()));
+    let Some(block_guard) = spawn_daemon(DaemonConfig::new(block_mock.url())) else {
+        return;
+    };
     let req_body = serde_json::json!({
         "model": "claude-sonnet-4-5", "max_tokens": 16,
         "messages": [{ "role": "user", "content": "hi" }],
@@ -1304,7 +1367,9 @@ async fn phase_d_detection_audit_wired_and_queryable() {
 #[tokio::test]
 async fn phase_d_audit_cli_runs_without_nested_runtime_panic() {
     let mock = spawn_mock_upstream(|_req| async { responses::anthropic_json_response("ok") }).await;
-    let guard = spawn_daemon(DaemonConfig::new(mock.url()));
+    let Some(guard) = spawn_daemon(DaemonConfig::new(mock.url())) else {
+        return;
+    };
     let _ = post_json(&guard.base_url(), "/v1/messages", out01_key_body()).await;
     tokio::time::sleep(Duration::from_millis(300)).await;
 

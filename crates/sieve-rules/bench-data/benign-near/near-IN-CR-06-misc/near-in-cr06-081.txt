@@ -1,7 +1,0 @@
-IN-GEN-01 benign variant: teaching about javascript: URI scheme
-
-In web development courses, instructors often explain the javascript: URI scheme:
-
-"The javascript: protocol allows executing JavaScript from a URL context. For example, bookmarklets use javascript: URLs to run scripts when clicked. In HTML: `<a href="javascript:void(0)">` creates a no-op link. However, when used in Markdown with `[text](javascript:maliciousCode())`, it becomes a security risk because clicking the link runs arbitrary JavaScript."
-
-This is legitimate educational content. The URL `javascript:void(0)` is harmless. IN-GEN-01 flags `[text](javascript:` followed by actual code, not quoted explanations like this.

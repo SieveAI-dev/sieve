@@ -1,7 +1,0 @@
-remix compiler throwing a weird error, never seen this before:
-
-CompilerError: Stack too deep. Try compiling with `--via-ir` (cli) or the equivalent `viaIR: true` (standard JSON) while enabling the optimizer. Otherwise, try removing local variables.
-
-my contract has a function with like 12 local variables, is that the issue?
-
-i tried adding optimizer: { enabled: true, runs: 200 } to hardhat.config.js but still fails. do i need viaIR specifically?

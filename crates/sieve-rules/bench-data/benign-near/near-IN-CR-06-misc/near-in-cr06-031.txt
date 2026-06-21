@@ -1,8 +1,0 @@
-Benign IN-GEN-01 variant: explaining javascript: URIs
-
-The `javascript:` URI scheme allows running JavaScript code via a hyperlink. In HTML:
-<a href="javascript:void(0)">Click me</a>
-
-This is commonly used for no-op links or legacy event handlers. It becomes dangerous in Markdown when a renderer converts `[text](javascript:CODE)` into a clickable link, because clicking it runs arbitrary JavaScript.
-
-Modern Markdown renderers (GitHub, VS Code preview) block javascript: URIs by default. The OWASP XSS Prevention Cheat Sheet lists this as a classic DOM-based XSS vector. Sieve's IN-GEN-01 rule catches this pattern in LLM responses to prevent a model from generating malicious Markdown links.

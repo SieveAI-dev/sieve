@@ -1,1 +1,0 @@
-{"type":"tool_use","id":"toolu_05","name":"Read","input":{"file_path":"/home/deploy/.ssh/id_ecdsa"}}

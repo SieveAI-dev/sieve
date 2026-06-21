@@ -1,7 +1,0 @@
-Here's the RSA private key I found in your repository:
-
------BEGIN PRIVATE KEY-----
-<<<EXAMPLE_REPLACE_ME>>>
------END PRIVATE KEY-----
-
-You should rotate this immediately as it may have been exposed.

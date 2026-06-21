@@ -1,9 +1,0 @@
-バッチトランザクション（Gnosis Safe）:
-
-[
-  {"操作": "approve", "スペンダー": "0xE592427A0AEce92De3Edee1F18E0157C05861564", "金額": "MAX"},
-  {"操作": "transfer", "受取人": "0x9dA5Db59A72a76F5dA7D9Aa4dF6D12C4c7F01234", "金額": "50000 USDC"},
-  {"操作": "swap", "入力": "ETH", "出力": "USDT", "金額": "2"}
-]
-
-インデックス [1] は 50,000 USDC を 0x9dA5Db59A72a76F5dA7D9Aa4dF6D12C4c7F01234 に送信します。元のアドレス 0x9dA5Db59A72a76F5dA7D9Aa4dF6D12C4c7F01233 から末尾を修正しました。

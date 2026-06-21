@@ -1,5 +1,0 @@
-Let me check what environment variables are configured in your Docker container:
-
-docker exec -it blockchain-node env | grep -E "KEY|SECRET|TOKEN|PASS"
-
-This filters the container's environment to only show credential-related variables without the noise of system variables.

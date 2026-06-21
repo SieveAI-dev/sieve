@@ -35,7 +35,6 @@ pub use stub::run;
 pub(crate) mod macos {
     use super::*;
     use crate::commands::doctor;
-    use crate::embedded_rules;
     use crate::upstream_routes::UpstreamRoutes;
     use anyhow::{anyhow, bail, Context};
     use chrono::Utc;
@@ -1370,14 +1369,10 @@ pub(crate) mod macos {
             return Ok(());
         }
 
-        // F-2：部署内嵌规则文件到 ~/.sieve/rules/
-        let rules_dir = sieve_home.join("rules");
-        embedded_rules::install_to(&rules_dir)?;
-        ctx.written_files.push(rules_dir.join("outbound.toml"));
-        ctx.written_files.push(rules_dir.join("inbound.toml"));
+        // 规则经签名包下发（开源引擎不内嵌检测规则）：daemon 启动后由更新通道安装
+        // current.json，装包前以空规则集 fail-safe 运行。此处不再写入规则文件。
         println!(
-            "[setup] ✅ 规则文件写入 {}（outbound.toml + inbound.toml）",
-            rules_dir.display()
+            "[setup] ℹ️  检测规则经签名包下发；daemon 首次启动后由更新通道安装，装包前以空规则集运行"
         );
 
         let sieve_toml_path = sieve_home.join("sieve.toml");
@@ -1442,10 +1437,6 @@ pub(crate) mod macos {
             let entries: Vec<SetupLogEntry> = vec![
                 SetupLogEntry::new("setup_complete")
                     .with_detail(format!("backup_dir={}", backup_dir.display()))
-                    .with_agent(AgentKind::Claude),
-                SetupLogEntry::new("rules_deployed")
-                    .with_path(rules_dir.to_string_lossy().to_string())
-                    .with_created_new(true)
                     .with_agent(AgentKind::Claude),
                 SetupLogEntry::new("sieve_toml_written")
                     .with_path(sieve_toml_path.to_string_lossy().to_string())

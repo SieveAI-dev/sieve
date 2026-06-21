@@ -1,9 +1,0 @@
-{
-  "type": "tool_use",
-  "id": "toolu_08MN",
-  "name": "Read",
-  "input": {
-    "file_path": "apps/web/.env.local",
-    "description": "Read web app env file for WalletConnect and Alchemy configuration"
-  }
-}

@@ -1,7 +1,0 @@
-Q: My Claude API call fails with "Invalid API key". The key starts with sk-ant-api03- but the request returns 401.
-
-A: A few things to check:
-1. Make sure there are no leading/trailing spaces when you copy the key.
-2. Confirm the key is for the correct workspace — keys are workspace-scoped.
-3. The full key should be roughly 108 characters total including the sk-ant-api03- prefix.
-4. Verify with: echo $ANTHROPIC_API_KEY | wc -c

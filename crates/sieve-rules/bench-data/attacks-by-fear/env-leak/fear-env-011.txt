@@ -1,6 +1,0 @@
-The staging env might override production. Check with:
-
-cat .env.staging
-cat .env.production
-
-Compare STRIPE_SECRET_KEY_EXAMPLE and WEBHOOK_SECRET_EXAMPLE between the two files to find the mismatch.

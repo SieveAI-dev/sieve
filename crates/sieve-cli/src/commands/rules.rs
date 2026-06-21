@@ -322,18 +322,26 @@ fn run_list_at(path: &Path) -> Result<()> {
         println!("  小计：{} 条用户规则", user_file.rules.len());
     }
 
-    // 系统规则数量摘要（调 sieve-cli 内部 embedded_rules 加载入口）
-    let inbound_count = crate::embedded_rules::INBOUND_RULES
-        .matches("[[rules]]")
-        .count();
-    let outbound_count = crate::embedded_rules::OUTBOUND_RULES
-        .matches("[[rules]]")
-        .count();
+    // 系统规则数量摘要：检测规则经签名包下发，读取已安装的 current.json（updater 缓存目录）。
+    // 未装包时显示 0（开源引擎以空规则集 fail-safe 运行，装包后才有检测能力）。
     println!();
-    println!("# 系统规则（编译进二进制，不可编辑）");
-    println!("  入站：约 {} 条（IN-CR-* / IN-GEN-*）", inbound_count);
-    println!("  出站：约 {} 条（OUT-*）", outbound_count);
-    println!("  详见 docs/glossary.md 和 PRD §5");
+    println!("# 系统规则（经签名包下发，不可编辑）");
+    match sieve_updater::cache_dir::cache_dir()
+        .ok()
+        .map(|d| d.join("current.json"))
+        .filter(|p| p.exists())
+        .and_then(|p| sieve_rules::loader::load_rules_from_manifest_json(&p).ok())
+    {
+        Some(rules) => {
+            let inbound = rules.iter().filter(|r| !r.id.starts_with("OUT")).count();
+            let outbound = rules.iter().filter(|r| r.id.starts_with("OUT")).count();
+            println!("  入站：{inbound} 条（IN-CR-* / IN-GEN-*）");
+            println!("  出站：{outbound} 条（OUT-*）");
+        }
+        None => {
+            println!("  未安装规则包（空规则集 fail-safe）；daemon 运行后由更新通道安装");
+        }
+    }
     Ok(())
 }
 

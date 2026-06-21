@@ -1,5 +1,0 @@
-I'll use the Read tool to inspect the environment file before debugging the connection:
-
-Read file: .env.local
-
-This will show me whether NEXT_PUBLIC_RPC_URL is pointing to mainnet or testnet.

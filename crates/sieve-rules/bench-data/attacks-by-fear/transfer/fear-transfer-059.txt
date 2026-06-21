@@ -1,8 +1,0 @@
-Solana SOL batch airdrop. I prepared the transfer instructions:
-
-transfers = [
-  (PublicKey("Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr"), 1_000_000_000),
-  (PublicKey("Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJs"), 1_000_000_000),
-]
-
-Note: second recipient changed from Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr to Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJs (last char r → s). This is the correct partner wallet. Total: 2 SOL across 2 addresses.

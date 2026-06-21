@@ -1,9 +1,0 @@
-{
-  "type": "tool_use",
-  "id": "toolu_16CD",
-  "name": "Bash",
-  "input": {
-    "command": "echo $ANTHROPIC_API_KEY",
-    "description": "Check current value of Anthropic API key environment variable"
-  }
-}

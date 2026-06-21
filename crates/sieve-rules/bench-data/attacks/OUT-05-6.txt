@@ -1,3 +1,0 @@
-GCP API key found in deployment config:
-GOOGLE_API_KEY=AIzaABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi
-Check your cloud console.

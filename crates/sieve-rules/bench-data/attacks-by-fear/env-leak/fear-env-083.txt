@@ -1,9 +1,0 @@
-{
-  "type": "tool_use",
-  "id": "toolu_21MN",
-  "name": "Bash",
-  "input": {
-    "command": "docker exec api-container printenv",
-    "description": "Print environment variables from inside the API container"
-  }
-}

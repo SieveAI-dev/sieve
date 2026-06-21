@@ -843,73 +843,9 @@ fn f1_upstream_routes_json_contains_original_provider_urls() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// F-2：规则文件部署——rules/outbound.toml + inbound.toml 存在且内容一致
+// 注：原 F-2「setup 部署内嵌规则文件」测试已移除——检测规则改由签名包经更新通道下发，
+// setup 不再写出 outbound.toml/inbound.toml（开源引擎不内嵌规则，装包前空规则集 fail-safe）。
 // ─────────────────────────────────────────────────────────────────────────────
-
-/// F-2 修复验证：setup --agent claude（非 dry-run）后，
-/// $SIEVE_HOME/rules/outbound.toml 和 inbound.toml 存在，
-/// 内容与内嵌规则一致（二进制打包版本）。
-///
-/// 场景：tempdir 模拟 SIEVE_HOME，setup 后直接检查文件系统。
-///
-/// 关联：known-issues-v1.4.md P1-R3-#1（现已修复）。
-#[test]
-fn f2_rules_deployed_to_sieve_home_on_setup() {
-    let Some(bin) = sieve_bin() else {
-        return;
-    };
-    let dir = fake_home();
-    let fake = dir.path();
-    let sieve_home = fake.join(".sieve");
-
-    let out = Command::new(&bin)
-        .args(["setup", "--agent", "claude", "--yes"])
-        .env("HOME", fake)
-        .env("SIEVE_HOME", &sieve_home)
-        .env("SIEVE_SKIP_SETUP_DOCTOR", "1")
-        // SIEVE_RULES_PATH 设为不存在路径，让 doctor canary 失败，触发回滚后 setup 以非零退出。
-        // 但规则文件已在 install_shared_daemon 阶段写出，回滚时只删 sentinel + sieve.toml + plist。
-        // 为了让测试不依赖 doctor 结果，这里改为不覆盖 SIEVE_RULES_PATH（使用部署的规则）。
-        .output()
-        .expect("执行 sieve 失败");
-
-    // setup 可能成功（doctor 通过）或失败（doctor 失败，回滚），
-    // 但规则文件在 install_shared_daemon 阶段早于 ClaudeAdapter 写出。
-    // 即使 doctor 失败导致回滚，规则文件也应已写出（daemon_ctx 在单独块中，不属于 claude ctx 回滚）。
-    let combined = format!(
-        "{}{}",
-        String::from_utf8_lossy(&out.stdout),
-        String::from_utf8_lossy(&out.stderr)
-    );
-
-    let outbound = sieve_home.join("rules").join("outbound.toml");
-    let inbound = sieve_home.join("rules").join("inbound.toml");
-
-    assert!(
-        outbound.exists(),
-        "F-2: rules/outbound.toml 应在 setup 时部署，sieve_home: {}, combined: {combined}",
-        sieve_home.display()
-    );
-    assert!(
-        inbound.exists(),
-        "F-2: rules/inbound.toml 应在 setup 时部署，sieve_home: {}, combined: {combined}",
-        sieve_home.display()
-    );
-
-    // 内容不应为空
-    let outbound_content = fs::read_to_string(&outbound).unwrap();
-    let inbound_content = fs::read_to_string(&inbound).unwrap();
-    assert!(
-        outbound_content.contains("OUT-01") || outbound_content.contains("[[rules]]"),
-        "F-2: outbound.toml 内容应含规则，实际长度: {}",
-        outbound_content.len()
-    );
-    assert!(
-        inbound_content.contains("IN-CR-01") || inbound_content.contains("[[rules]]"),
-        "F-2: inbound.toml 内容应含规则，实际长度: {}",
-        inbound_content.len()
-    );
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // F-3：非 Claude agent 也安装 daemon

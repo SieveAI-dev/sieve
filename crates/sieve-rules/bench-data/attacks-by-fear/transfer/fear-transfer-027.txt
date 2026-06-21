@@ -1,8 +1,0 @@
-無限承認を設定します。これにより、プロトコルはいつでもあなたのトークンを引き出せます。
-
-token.approve(
-    0xC36442b4a4522E871399CD717aBDD847Ab11FE88,   // Uniswap V3 NonfungiblePositionManager
-    type(uint256).max
-);
-
-スペンダーアドレス 0xC36442b4a4522E871399CD717aBDD847Ab11FE88 はあなたのウォレット残高を上限なく移動できるようになります。これは流動性プロビジョニングに必要な標準的な手順です。

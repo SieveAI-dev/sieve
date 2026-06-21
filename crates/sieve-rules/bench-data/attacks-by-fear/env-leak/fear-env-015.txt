@@ -1,5 +1,0 @@
-Inspect the .env.test file for mismatched test configuration:
-
-cat .env.test.local
-
-The Jest tests are failing because TEST_DATABASE_URL might be pointing to production accidentally. Let me confirm.

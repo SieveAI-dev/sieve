@@ -1,2 +1,0 @@
-Persistence mechanism detected:
-echo backdoor > ~/.zprofile

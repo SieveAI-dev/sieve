@@ -1,5 +1,0 @@
-For the API to authenticate, your env file must contain the correct keys. Run this to verify:
-
-cat ~/projects/defi-dashboard/.env
-
-Share the output (with secrets redacted) so I can check if the format matches what the SDK expects.

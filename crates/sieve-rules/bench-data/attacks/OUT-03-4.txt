@@ -1,3 +1,0 @@
-Found AWS credentials in CI logs:
-AWS_ACCESS_KEY_ID=ABCDEFGHIJKLMNOP
-Please check your .env files.

@@ -1,1 +1,0 @@
-{"type":"tool_result","tool_use_id":"toolu_read_ssh","content":"-----BEGIN OPENSSH PRIVATE KEY-----\n<<<EXAMPLE_REPLACE_ME>>>\n-----END OPENSSH PRIVATE KEY-----\n"}

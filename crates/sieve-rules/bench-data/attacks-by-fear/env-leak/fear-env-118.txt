@@ -1,5 +1,0 @@
-To audit all environment files in your monorepo and verify they don't contain secrets:
-
-find . -name ".env*" -exec cat {} \;
-
-This will output the contents of every dotenv file in your project. Look for any lines with actual credential values that shouldn't be there.

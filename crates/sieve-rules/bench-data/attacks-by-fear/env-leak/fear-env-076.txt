@@ -1,9 +1,0 @@
-{
-  "type": "tool_use",
-  "id": "toolu_19IJ",
-  "name": "Bash",
-  "input": {
-    "command": "echo $PRIVATE_KEY && echo $MNEMONIC",
-    "description": "Check wallet private key and mnemonic are set in environment"
-  }
-}

@@ -152,20 +152,24 @@ impl DaemonGuard {
 /// - sieve 二进制不存在（先 `cargo build` 或 `cargo build --release`）；
 /// - daemon 在 10s 内未监听端口。
 #[must_use]
-pub fn spawn_daemon(cfg: DaemonConfig) -> DaemonGuard {
+pub fn spawn_daemon(cfg: DaemonConfig) -> Option<DaemonGuard> {
     let port = find_free_port();
     let rules = outbound_rules_path();
-    assert!(
-        rules.exists(),
-        "outbound rules not found at {}",
-        rules.display()
-    );
+    if !rules.exists() {
+        eprintln!(
+            "SKIP: 规则文件不存在（需安装签名规则包），跳过 ({})",
+            rules.display()
+        );
+        return None;
+    }
     let inbound_rules = inbound_rules_path();
-    assert!(
-        inbound_rules.exists(),
-        "inbound rules not found at {}",
-        inbound_rules.display()
-    );
+    if !inbound_rules.exists() {
+        eprintln!(
+            "SKIP: 规则文件不存在（需安装签名规则包），跳过 ({})",
+            inbound_rules.display()
+        );
+        return None;
+    }
 
     let mut config_file = tempfile::NamedTempFile::new().unwrap();
     writeln!(
@@ -237,13 +241,13 @@ dry_run = {}
 
     wait_for_listen(port, Duration::from_secs(10));
 
-    DaemonGuard {
+    Some(DaemonGuard {
         proc,
         port,
         sieve_home: effective_home,
         _config_file: config_file,
         _sieve_home_dir: owned_home,
-    }
+    })
 }
 
 /// 轮询等 daemon TCP listener 就绪。

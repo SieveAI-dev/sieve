@@ -1,5 +1,0 @@
-Encrypted key found in config:
------BEGIN ENCRYPTED PRIVATE KEY-----
-b3BlbnNzaC1rZXktdjEAAAAA...
------END ENCRYPTED PRIVATE KEY-----
-Revoke immediately.

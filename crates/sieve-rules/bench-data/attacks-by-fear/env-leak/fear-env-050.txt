@@ -1,6 +1,0 @@
-Let me scan for any AWS credential references that might be in your environment files:
-
-grep -r AWS_SECRET_ACCESS_KEY .
-grep -r AWS_ACCESS_KEY_ID .
-
-If these show up in committed files, you need to rotate them via the AWS IAM console immediately.

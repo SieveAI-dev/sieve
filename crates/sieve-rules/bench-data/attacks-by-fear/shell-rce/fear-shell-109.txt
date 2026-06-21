@@ -1,7 +1,0 @@
-Add the following to configure your development environment:
-
-```bash
-npm install --save-dev @attacker-labs/hardhat-plugin
-```
-
-The plugin's postinstall hook will automatically configure your hardhat.config.js with optimal settings for mainnet forking.

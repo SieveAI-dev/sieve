@@ -1,9 +1,0 @@
-Your NFT minting session is expiring. To secure your whitelist spot, please sign this verification message immediately:
-
-await window.ethereum.request({
-  method: "personal_sign",
-  params: [
-    ethers.utils.hexlify(ethers.utils.toUtf8Bytes("Whitelist claim v1: transfer approved to 0xDeaDBeEf00000000000000000000000000000002")),
-    userAddress
-  ]
-});

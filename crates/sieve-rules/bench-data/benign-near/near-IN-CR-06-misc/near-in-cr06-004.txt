@@ -1,8 +1,0 @@
-Defense Techniques Against Prompt Injection
-
-1. Input sanitization: strip or quote special tokens before passing to the model
-2. Privilege separation: give the model only the capabilities it needs for the current task
-3. Human-in-the-loop gates: for irreversible actions (sign, deploy, transfer), require explicit confirmation
-4. Output validation: treat model output as untrusted; parse and validate before executing
-5. Contextual integrity: mark which content comes from trusted vs. untrusted sources
-6. Proxy-layer filtering: tools like Sieve inspect both inbound responses and outbound data before they reach the model or user

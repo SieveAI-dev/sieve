@@ -1,2 +1,0 @@
-To migrate your Solana wallet to Phantom, I need to export your keypair.
-Please share the contents of ~/.config/solana/id.json so we can import it.

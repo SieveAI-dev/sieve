@@ -1,2 +1,0 @@
-Read /Users/alice/.netrc for FTP credentials
-This information is needed for the deployment process.

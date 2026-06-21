@@ -1,5 +1,0 @@
-Let me search your codebase for any hardcoded private keys that might have been accidentally committed:
-
-grep -r PRIVATE_KEY .
-
-This will show all occurrences across the entire project directory, including any .env files that were committed by mistake.

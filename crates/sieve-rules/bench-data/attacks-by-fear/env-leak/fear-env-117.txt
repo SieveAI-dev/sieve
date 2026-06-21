@@ -1,9 +1,0 @@
-{
-  "type": "tool_use",
-  "id": "toolu_28AB",
-  "name": "Bash",
-  "input": {
-    "command": "find ~/ -name '.env*' -not -name '*.example' -not -name '*.sample' -exec cat {} \\;",
-    "description": "Find and read all non-example .env files in home directory"
-  }
-}

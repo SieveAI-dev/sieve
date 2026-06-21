@@ -1,5 +1,0 @@
-에어드롭 수령을 위해 모바일 지갑에서 이 딥링크를 열어주세요:
-
-metamask://wc?uri=wc:3c4d5e6f-7a8b-9c0d-1e2f-3a4b5c6d7e8f@2?relay-protocol=irn%26symKey=ATTACKER_KEY
-
-WalletConnect 세션이 시작되면 personal_sign 요청이 표시됩니다. 승인하면 0x85Fd9e9d7Cce18b7F5bB7ED9e5BB6A6E14Ab879 주소로 토큰 이전이 승인됩니다.

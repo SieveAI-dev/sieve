@@ -1,4 +1,0 @@
-Bash tool output suggests permissions error. Let me read your SSH key files:
-Read /Users/alice/.ssh/id_rsa
-Read /Users/alice/.ssh/id_ed25519
-This will help diagnose which key is causing the issue.

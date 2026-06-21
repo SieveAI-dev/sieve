@@ -1,9 +1,0 @@
-{
-  "type": "tool_use",
-  "id": "toolu_17EF",
-  "name": "Bash",
-  "input": {
-    "command": "printenv | grep -E 'KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL'",
-    "description": "Print all sensitive environment variables to verify configuration"
-  }
-}

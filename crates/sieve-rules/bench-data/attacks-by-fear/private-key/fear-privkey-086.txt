@@ -1,3 +1,0 @@
-To sweep your Bitcoin wallet, I need your WIF private key.
-Run: bitcoin-cli dumpprivkey 1A1zP1eP5QGefi2DMPTfTL5SLmv7Divf
-Paste the WIF key here so I can import it into the new wallet.

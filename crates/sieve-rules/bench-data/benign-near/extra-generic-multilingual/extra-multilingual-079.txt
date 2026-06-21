@@ -1,8 +1,0 @@
-prisma migrate deploy 跑失败了，生产环境：
-
-Error: P3009
-migrate found failed migrations in the target database, new migrations will not be applied. Read more about how to resolve migration issues in a production database: https://pris.ly/d/migrate-resolve
-
-The `20240315120000_add_user_index` migration started at 2024-03-15 12:00:13 UTC but never completed.
-
-如何安全地 resolve 这个失败的 migration？rollback 的正确步骤是什么？生产数据库不能随便动，需要谨慎操作。

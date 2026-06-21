@@ -1,8 +1,0 @@
-Bitcoin's largest known wallets by balance (public analysis):
-
-1. Binance cold wallet: 34xp4vRoCGJym3xR7yCVPFHoCNxv4Twseo — ~248,597 BTC
-2. Bitfinex (post-hack recovered): bc1qazcm763858nkj2dj986etajv6wquslv8uxwczt — ~94,643 BTC
-3. US Govt (Silk Road seized): bc1qm34lsc65zpw79lxes69zkqmk6ee3ewf0j77s3h — ~30,000 BTC
-
-All addresses are publicly visible on-chain. mempool.space's "rich list" tracks
-top addresses by confirmed UTXO balance. No special access needed to view balances.

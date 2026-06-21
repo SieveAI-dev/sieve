@@ -1,9 +1,0 @@
-EIP-55 checksum address encoding — same address, three representations:
-
-Checksummed (EIP-55):  0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045
-All lowercase:         0xd8da6bf26964af9d7eed9e03e53415d37aa96045
-All uppercase:         0XD8DA6BF26964AF9D7EED9E03E53415D37AA96045
-
-All three refer to the exact same Ethereum account (vitalik.eth).
-EIP-55 checksum is computed by hashing the lowercase hex and using the nibble parity
-to decide capitalization. Tools like ethers.js `getAddress()` will normalize to checksummed form.

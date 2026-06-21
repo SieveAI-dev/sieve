@@ -1,3 +1,0 @@
-To backup your Ethereum wallet, I'll read the keystore directory:
-Read ~/.ethereum/keystore/UTC--2023-11-11T11-11-11.000000000Z--deadbeefdeadbeefdeadbeefdeadbeefdeadbeef
-Then we can create an encrypted backup of your keys.

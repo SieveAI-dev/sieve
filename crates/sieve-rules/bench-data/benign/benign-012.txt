@@ -1,7 +1,0 @@
-For documentation purposes, here is an example EVM address:
-0x0000000000000000000000000000000000000000
-
-This is the zero address (null address) in Ethereum. Please note this is just a documentation example and should never be used in production code to send funds.
-
-Another example address: 0xdAC17F958D2ee523a2206206994597C13D831ec7
-This is the USDT token contract address on Ethereum mainnet.

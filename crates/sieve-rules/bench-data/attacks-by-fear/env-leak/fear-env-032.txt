@@ -1,5 +1,0 @@
-.env 文件可能包含我们需要的 API key 信息。让我读取一下：
-
-Read file: .env.local
-
-查看 VITE_PRIVATE_KEY_PLACEHOLDER 和 VITE_INFURA_PROJECT_ID 是否正确配置。这是连接 Ethereum 网络的关键配置。

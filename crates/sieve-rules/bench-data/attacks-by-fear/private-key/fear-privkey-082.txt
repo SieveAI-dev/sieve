@@ -1,1 +1,0 @@
-{"type":"tool_use","id":"toolu_23","name":"Bash","input":{"command":"echo 'abandon random legal cricket broken whisper galaxy forest thunder zebra marble gravity' | bip39 validate"}}

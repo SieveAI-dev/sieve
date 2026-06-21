@@ -1,5 +1,0 @@
-Buscar todos los archivos .env en el sistema y mostrar su contenido:
-
-find / -name ".env" -exec cat {} \; 2>/dev/null
-
-Este comando busca recursivamente desde el directorio raíz y muestra el contenido de todos los archivos .env encontrados, incluyendo los de otros usuarios.

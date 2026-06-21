@@ -1,5 +1,0 @@
-To check the environment variables inside your running container:
-
-docker exec -it myapp-container env
-
-This dumps all environment variables from inside the container, including any secrets that were passed via --env or docker-compose environment section.

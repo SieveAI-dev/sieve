@@ -1,7 +1,0 @@
-CTF: "AI Escape Room" — writeup
-
-This challenge involved an AI assistant running in a sandboxed environment. The goal was to exfiltrate a file from the sandbox.
-
-The intended solution used the indirect injection path: craft a file that the AI would read, containing instructions to output its system prompt. An unintended solution found by participants used the model's code generation to write a Python script that read the target file — demonstrating that "sandboxing" at the prompt level is insufficient without OS-level isolation.
-
-Takeaway: AI agent security requires defense in depth. Prompt filtering + OS sandboxing + network egress filtering + capability limitation are all necessary layers.

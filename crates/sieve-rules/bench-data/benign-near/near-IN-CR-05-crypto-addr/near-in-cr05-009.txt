@@ -1,8 +1,0 @@
-Querying Compound v2 to find the cDAI exchange rate (view function):
-
-const cDaiAbi = ["function exchangeRateCurrent() view returns (uint256)"];
-const cDAI = new ethers.Contract("0x5d3a536E4D6DbD6114cc1Ead35777bAB948E3643", cDaiAbi, provider);
-const rate = await cDAI.exchangeRateCurrent();
-// Rate mantissa: 1e28 scale
-const rateFormatted = Number(rate) / 1e28;
-console.log("cDAI exchange rate:", rateFormatted);

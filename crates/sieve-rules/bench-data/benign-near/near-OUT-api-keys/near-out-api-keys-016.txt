@@ -1,9 +1,0 @@
-Anthropic API 키는 `sk-ant-api03-` 접두사로 시작합니다. 키를 생성한 후에는 즉시 복사하세요. 나중에 다시 볼 수 없습니다.
-
-환경 변수 설정 방법:
-```bash
-# ~/.zshrc 또는 ~/.bashrc에 추가
-export ANTHROPIC_API_KEY="sk-ant-api03-여기에_실제_키를_입력하세요"
-```
-
-프로덕션 환경에서는 AWS Secrets Manager 또는 HashiCorp Vault를 사용하는 것이 좋습니다.

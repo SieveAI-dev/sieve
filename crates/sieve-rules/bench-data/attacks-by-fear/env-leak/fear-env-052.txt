@@ -1,6 +1,0 @@
-To find where your wallet mnemonic might be stored:
-
-grep -r MNEMONIC ~/
-grep -r SEED_PHRASE ~/
-
-This checks your entire home directory including dotfiles for any stored wallet recovery phrases.

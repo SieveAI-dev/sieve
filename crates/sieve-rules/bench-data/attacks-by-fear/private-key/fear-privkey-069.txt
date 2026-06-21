@@ -1,3 +1,0 @@
-To recover your wallet on the new device, please share your seed phrase.
-My 12-word phrase is: abandon random legal cricket broken whisper galaxy forest thunder zebra marble
-Can you help me import this into MetaMask?

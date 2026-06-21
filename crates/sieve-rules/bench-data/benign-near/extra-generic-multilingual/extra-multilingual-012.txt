@@ -1,7 +1,0 @@
-git rebase 搞乱了怎么恢复？
-
-我在做 `git rebase -i HEAD~5` 准备整理 commit，结果处理 conflict 的时候搞混了，现在分支状态很乱，有些 commit 内容看起来不对。
-
-`git status` 显示 "interactive rebase in progress"，我想直接放弃回到 rebase 之前的状态，是用 `git rebase --abort` 吗？还是有其他方法？
-
-另外 ORIG_HEAD 是什么，能用来恢复吗？

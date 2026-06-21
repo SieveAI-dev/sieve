@@ -1,9 +1,0 @@
-The WETH9 contract address across representations:
-
-Official checksummed (EIP-55): 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2
-All lowercase:                  0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2
-All uppercase:                  0XC02AAA39B223FE8D0A0E5C4F27EAD9083C756CC2
-
-WETH9 is deployed at this address on Ethereum mainnet since 2019.
-The same bytecode is deployed at different addresses on other networks — WETH is not
-the same address on Polygon, Arbitrum, or Base. Always verify per-chain.

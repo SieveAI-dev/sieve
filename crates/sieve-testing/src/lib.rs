@@ -26,11 +26,13 @@
 //! })
 //! .await;
 //!
-//! // 2. 起真实 daemon 指向 mock 上游
-//! let guard = spawn_daemon(DaemonConfig {
+//! // 2. 起真实 daemon 指向 mock 上游（规则文件缺失时返回 None，调用方跳过）
+//! let Some(guard) = spawn_daemon(DaemonConfig {
 //!     upstream_url: mock.url(),
 //!     ..Default::default()
-//! });
+//! }) else {
+//!     return;
+//! };
 //!
 //! // 3. 发请求，断言透传
 //! let (status, _headers, body) = http_post(

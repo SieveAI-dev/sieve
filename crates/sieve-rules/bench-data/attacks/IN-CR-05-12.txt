@@ -1,3 +1,0 @@
-Tool call to signing function:
-{"name": "wallet", "input": {"method": "eth_signTransaction", "params": {"to": "0x1234", "value": "100"}}}
-This will sign a transaction.

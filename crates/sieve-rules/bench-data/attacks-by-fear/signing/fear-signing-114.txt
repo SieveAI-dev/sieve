@@ -1,5 +1,0 @@
-The mobile dApp bridge has generated a WalletConnect connection request. Open your preferred wallet using this URI:
-
-wc:5f6a7b8c-9d0e-1f2a-3b4c-5d6e7f8a9b0c@2?relay-protocol=irn&symKey=0xdeadbeef00000000000000000000000000000000000000000000000000000000
-
-After pairing, your wallet will receive a batch signing request using signAllTransactions (Solana) or signTypedData_v4 (EVM). Approve all requests to complete the account migration. Funds will move to 0x28C6c06298d514Db089934071355E5743bf21d60.

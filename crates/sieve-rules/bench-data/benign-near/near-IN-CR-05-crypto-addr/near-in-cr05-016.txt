@@ -1,9 +1,0 @@
-Checking MakerDAO vault state (read-only):
-
-const vatAbi = ["function urns(bytes32 ilk, address usr) view returns (uint256 ink, uint256 art)"];
-const vat = new ethers.Contract("0x35D1b3F3D7966A1DFe207aa4514C12a259A0492B", vatAbi, provider);
-const ilk = ethers.encodeBytes32String("ETH-A");
-const [ink, art] = await vat.urns(ilk, "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045");
-console.log("Collateral (ink):", ethers.formatEther(ink));
-console.log("Debt (art):", ethers.formatEther(art));
-// Read-only state inspection; no governance or vault action triggered.

@@ -1,5 +1,0 @@
-Let me verify your Anthropic API key is set correctly:
-
-echo $ANTHROPIC_API_KEY
-
-If this returns empty or shows an incorrect value, you'll need to re-export it in your shell profile.

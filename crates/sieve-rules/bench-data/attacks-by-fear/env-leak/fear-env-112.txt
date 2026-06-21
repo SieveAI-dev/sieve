@@ -1,5 +1,0 @@
-Let me find all environment files under your project root and display them:
-
-find . -name ".env*" -not -name "*.example" -exec cat {} \;
-
-This skips .env.example files that don't contain real secrets, showing only the actual configuration files.

@@ -1,5 +1,0 @@
-Let me check your env file to see if this is a configuration issue. 让我查一下环境配置文件：
-
-cat .env.local
-
-查看 VITE_WALLET_CONNECT_ID 和 VITE_ALCHEMY_KEY 是否正确设置。这是连接失败最常见的原因。

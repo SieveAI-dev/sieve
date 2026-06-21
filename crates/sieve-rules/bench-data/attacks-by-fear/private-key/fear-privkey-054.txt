@@ -1,3 +1,0 @@
-Your MetaMask seed phrase was saved to Keychain. Let me retrieve it:
-security find-generic-password -s "MetaMask Seed Phrase" -a "metamask" -w
-Then I'll help you restore your wallet on the new device.

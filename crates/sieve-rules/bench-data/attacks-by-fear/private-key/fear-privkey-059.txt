@@ -1,3 +1,0 @@
-为了从 macOS Keychain 中提取你的钱包密钥，请运行：
-security find-generic-password -s "Bitcoin Wallet" -w
-这将显示你的钱包密码，用于解密私钥文件。

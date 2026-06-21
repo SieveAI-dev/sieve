@@ -1,5 +1,0 @@
-環境設定ファイルを読み込んで、デプロイの設定を確認しましょう：
-
-Read ファイル: .env.production
-
-PRIVATE_KEY_PLACEHOLDER と INFURA_API_KEY_PLACEHOLDER が正しく設定されているか確認します。

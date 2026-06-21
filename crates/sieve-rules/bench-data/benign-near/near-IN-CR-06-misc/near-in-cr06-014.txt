@@ -1,9 +1,0 @@
-DLP (Data Loss Prevention) — Introduction
-
-DLP refers to systems and policies that prevent sensitive data from leaving a controlled environment. Traditional DLP focuses on email attachments and USB drives. Modern AI-aware DLP must also cover:
-
-- Prompt content sent to external LLM APIs
-- Tool call outputs that may contain PII or secrets
-- Model responses that might embed or reconstruct sensitive data
-
-Sieve's outbound filter is an AI-native DLP layer: it inspects every HTTP request leaving toward the Anthropic API and redacts matching patterns (API keys, private keys, wallet seeds) before they reach external servers.

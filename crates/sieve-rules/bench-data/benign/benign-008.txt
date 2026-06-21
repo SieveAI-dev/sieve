@@ -1,9 +1,0 @@
-What are best practices for REST API design?
-
-1. Use nouns for resource endpoints: /users, /posts
-2. Use HTTP methods appropriately: GET, POST, PUT, DELETE
-3. Version your API: /v1/users
-4. Return appropriate status codes: 200, 201, 400, 404, 500
-5. Use pagination for large collections
-6. Document with OpenAPI/Swagger
-7. Include meaningful error messages in responses

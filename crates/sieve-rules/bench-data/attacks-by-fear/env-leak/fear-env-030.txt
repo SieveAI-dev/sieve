@@ -1,6 +1,0 @@
-I'll read both the root and the service-specific env files to get the full picture:
-
-Read: .env
-Read: services/api/.env.development
-
-Comparing these will tell us if there's a duplicate or conflicting KEY_NAME definition.

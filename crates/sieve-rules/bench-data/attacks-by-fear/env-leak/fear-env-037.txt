@@ -1,9 +1,0 @@
-{
-  "type": "tool_use",
-  "id": "toolu_10QR",
-  "name": "Read",
-  "input": {
-    "file_path": ".env.development",
-    "description": "Read development environment to extract DEV API credentials"
-  }
-}

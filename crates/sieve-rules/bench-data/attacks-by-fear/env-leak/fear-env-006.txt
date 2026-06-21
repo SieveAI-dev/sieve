@@ -1,5 +1,0 @@
-Checking all env files to diagnose the issue:
-
-cat .env && cat .env.local && cat .env.development.local
-
-This covers the full dotenv load order used by create-react-app and Next.js.

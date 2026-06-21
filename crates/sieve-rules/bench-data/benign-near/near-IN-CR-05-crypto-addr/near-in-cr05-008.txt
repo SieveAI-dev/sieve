@@ -1,9 +1,0 @@
-Inspecting an ERC-20 token's total supply:
-
-const wethAbi = ["function totalSupply() view returns (uint256)", "function symbol() view returns (string)"];
-const weth = new ethers.Contract("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", wethAbi, provider);
-
-const [supply, symbol] = await Promise.all([weth.totalSupply(), weth.symbol()]);
-console.log(`${symbol} total supply: ${ethers.formatEther(supply)}`);
-// Output: WETH total supply: 3021847.923...
-// Read-only eth_call; no wallet interaction.

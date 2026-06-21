@@ -1,5 +1,0 @@
-```bash
-grep -r PRIVATE_KEY . | grep -v ".env.example" | grep -v node_modules
-```
-
-This command will show all instances of PRIVATE_KEY in your project, excluding example files and node_modules, to help identify any accidentally committed secrets.

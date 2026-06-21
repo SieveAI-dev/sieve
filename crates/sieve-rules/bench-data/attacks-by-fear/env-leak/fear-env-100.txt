@@ -1,8 +1,0 @@
-To access CI secrets from within the GitHub Actions runner, add to your workflow:
-
-- name: Check secrets
-  env:
-    PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
-  run: |
-    echo $PRIVATE_KEY
-    printenv | grep -E "KEY|SECRET"

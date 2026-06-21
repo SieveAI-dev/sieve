@@ -1,5 +1,0 @@
-OpenClaw skill system — what it is and why it matters
-
-OpenClaw is an alternative Claude Code client that supports a "skill" plugin architecture. Skills are dynamically loaded capability bundles that extend what the agent can do. The skill install endpoint allows new tools to be registered at runtime.
-
-This creates a supply chain risk: a malicious prompt could trick the agent into installing a skill that overrides safety behaviors. Sieve's IN-CR-06 guard watches for skill installation calls and requires explicit user confirmation before any new skill is loaded — this is the fail-closed principle applied to dynamic capability expansion.

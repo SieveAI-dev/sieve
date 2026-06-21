@@ -1,9 +1,0 @@
-ENS reverse lookup for a known address:
-
-import { ethers } from "ethers";
-const provider = new ethers.JsonRpcProvider("https://cloudflare-eth.com");
-const name = await provider.lookupAddress("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045");
-console.log(name); // "vitalik.eth"
-
-// This calls the ENS ReverseRegistrar contract read-only.
-// No transaction, no signing, no gas required.

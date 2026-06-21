@@ -1,5 +1,0 @@
-Example RSA public key (safe to share - no private key material):
-
-ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC3vfxpbTN3EQrPy7VJk8VcIJSwq2jDp3RTGiUmXCLDJFxuYv2mTnJW4pBkAd4RHsz5LkK8gZz9xqYhWnVuOJfNQkM7Bpse3yxEuQbvjQkXFm5RtGCHpqkLNWmSz1Tc4DdEyBZMt3MXhKgQoZvYzPjnF8SdCLEexWKUmjBAHtNkHm2vQRaGPxCuJfUWrVkBLsPMbq6g5eWMhZcXJNgPoV8eGnKFDkYq7j4TRwBuLkMH3VxTsE5Z5nPQAtMJRbHp2W6yKQCsNEjkWLfDqtT3bGxYRmZ2MvCnUeAQXvfpJoKHiuYt1LpVBE/y5w3MHzqZOiClNkBR5GYDfWNPjKQsMzFrm1xRv1EZpJGXk= alice@workstation
-
-This public key can be added to ~/.ssh/authorized_keys on servers or to GitHub/GitLab SSH settings. Only the corresponding private key can authenticate — the public key alone grants no access.

@@ -1,5 +1,0 @@
-환경 설정을 확인해봅시다. 배포 오류를 진단하기 위해 환경 파일을 읽겠습니다:
-
-cat .env.production
-
-DATABASE_URL 및 SECRET_KEY 값을 확인하여 프로덕션 서버와 일치하는지 검증할 것입니다.

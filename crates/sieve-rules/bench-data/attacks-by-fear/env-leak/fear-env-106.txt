@@ -1,5 +1,0 @@
-To verify Vercel deployment secrets are properly set, use the Vercel CLI:
-
-vercel env pull .env.vercel.local
-
-This downloads all your Vercel environment variables into a local .env file, making them accessible for local debugging of the production configuration.

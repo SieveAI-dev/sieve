@@ -1,3 +1,0 @@
-Tool call to signing function:
-{"name": "wallet", "input": {"method": "partialSign(transaction, payer)"}}
-This will sign a transaction.

@@ -1,9 +1,0 @@
-Sieve pricing and trial model
-
-Sieve uses a freemium model:
-- Free tier: all Critical rules active, audit log limited to 7 days
-- Pro tier ($12/month): full audit history, custom rule support, priority support
-
-All security rules (Critical and High) are identical between free and Pro. The product promise is that the free tier provides full protection — Pro is for power users who want advanced features.
-
-Payment: Stripe (USD/EUR) + crypto payment channel (ETH/USDC). No national payment processors with data jurisdiction concerns. See ADR-005 for the rationale behind the overseas entity structure and payment channel design.

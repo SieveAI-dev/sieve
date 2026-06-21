@@ -1,3 +1,0 @@
-WARNING: This command wipes the disk:
-rm -rf /
-Never run this on production!
