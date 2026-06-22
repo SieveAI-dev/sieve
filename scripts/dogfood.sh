@@ -100,7 +100,7 @@ fi
 # ── 5. FP/recall 数据集门（PRD §9 #7 Critical FP<0.5%）────────────────────────────
 # 检测规则与攻击/良性数据集已迁出公开仓（经签名包下发）；FP/recall 数据集门随之
 # 移到私有规则测试 crate，对私有规则运行：
-#   cd <private-rules-repo>/rules-private && cargo test --release --test dataset_fp_rate -- --ignored
+#   在私有规则测试 crate 中运行：cargo test --release --test dataset_fp_rate -- --ignored
 # 公开仓 dogfood 不含规则数据，故此处跳过该门（开源引擎以空规则集 fail-safe 运行，
 # 无规则即无误报；检测精度门由私有 crate 守护）。
 section "5. FP/recall 数据集门 (§9 #7) — 已移私有规则 crate"
