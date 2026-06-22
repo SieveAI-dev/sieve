@@ -55,6 +55,17 @@
 | [ADR-037](./ADR-037-encrypted-audit-log.md)               | 加密审计日志（full 档 write-only logging + 哈希链 + 保留期） | Accepted | 2026-06-19 |
 | [ADR-038](./ADR-038-overbilling-detection.md)             | 超额计费检测（独立 token 核算 + 上游信任分级） | Accepted | 2026-06-19 |
 | ADR-039                                                   | （编号保留，内容未公开）                                          | —        | —          |
+| ADR-040                                                   | （编号保留，内容未公开）                                          | —        | —          |
+| [ADR-041](./ADR-041-canary-decoy-files.md)               | Canary 诱饵文件防御（敏感目录布放警告型诱饵 + 被读即强注入信号） | Proposed | 2026-06-22 |
+| [ADR-042](./ADR-042-outbound-crypto-key-formats.md)      | 出站 crypto key 格式扩展（Bitcoin WIF + BIP-32 xprv，带 Base58Check checksum） | Proposed | 2026-06-22 |
+| [ADR-043](./ADR-043-redteam-bypass-suite.md)             | 红队 bypass 测试集（检测规则族验收门 + 持续回归） | Proposed | 2026-06-22 |
+| [ADR-044](./ADR-044-vcs-operation-boundary.md)           | Sieve VCS 操作边界（不拦 .git / 不扫 staged diff / 不做文件系统扫描） | Proposed | 2026-06-22 |
+| [ADR-045](./ADR-045-immutable-guardian-config.md)        | 不可变守护配置（自我保护，ADR-007 姊妹篇） | Proposed | 2026-06-22 |
+| [ADR-046](./ADR-046-stateful-exfil-chain-detection.md)   | 有状态出站 exfil 链检测家族（IN-SEQ 升级，机制 stub） | Proposed | 2026-06-22 |
+| [ADR-047](./ADR-047-tool-identity-drift-detection.md)    | 工具身份与执行漂移检测（shadowing/PATH/alias/symlink/@latest/dropper） | Proposed | 2026-06-22 |
+| [ADR-048](./ADR-048-memory-rag-injection-detection.md)   | 记忆 / RAG 注入检测（写入持久记忆/知识库的提示注入防护） | Proposed | 2026-06-22 |
+| [ADR-049](./ADR-049-ssrf-metadata-endpoint-guard.md)     | SSRF / 元数据端点 / 本地管理 socket 防护 | Proposed | 2026-06-22 |
+| ADR-050                                                   | （编号保留，内容未公开）                                          | —        | —          |
 
 
 ---
