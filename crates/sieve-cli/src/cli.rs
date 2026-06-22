@@ -156,6 +156,8 @@ pub enum AgentKind {
     Openclaw,
     /// Hermes（OpenAI Chat Completions 协议；TBD-02 实测后完善配置注入）。
     Hermes,
+    /// Codex CLI（OpenAI；PreToolUse hook 注册在 ~/.codex/hooks.json）。
+    Codex,
 }
 
 impl std::fmt::Display for AgentKind {
@@ -164,6 +166,7 @@ impl std::fmt::Display for AgentKind {
             AgentKind::Claude => write!(f, "claude"),
             AgentKind::Openclaw => write!(f, "openclaw"),
             AgentKind::Hermes => write!(f, "hermes"),
+            AgentKind::Codex => write!(f, "codex"),
         }
     }
 }

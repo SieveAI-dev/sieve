@@ -34,11 +34,11 @@ use crate::{
     error::{rpc_codes, IpcError},
     protocol::{
         CancelReason, DecisionAction, DecisionRequest, DecisionResponse, DefaultOnTimeout,
-        EvaluateRequest, EvaluateResult, HealthRequest, HealthResult, ListGraylistRequest,
-        ListGraylistResult, ListRulesResult, PausedChangedNotify, PresetChangedNotify,
-        PurgeHistoryRequest, PurgeHistoryResult, ReloadConfigRequest, ReloadConfigResult,
-        ReloadUserRules, RemoveGraylistRequest, RemoveGraylistResult,
-        RequestDecisionCanceledNotify, SetPausedRequest, SetPausedResult,
+        EvaluateRequest, EvaluateResult, HealthRequest, HealthResult, JudgeToolCallRequest,
+        JudgeToolCallResult, ListGraylistRequest, ListGraylistResult, ListRulesResult,
+        PausedChangedNotify, PresetChangedNotify, PurgeHistoryRequest, PurgeHistoryResult,
+        ReloadConfigRequest, ReloadConfigResult, ReloadUserRules, RemoveGraylistRequest,
+        RemoveGraylistResult, RequestDecisionCanceledNotify, SetPausedRequest, SetPausedResult,
         SetPresetOverridesRequest, SetPresetOverridesResult, SetPresetRequest, SetPresetResult,
         StatusBarNotify,
     },
@@ -198,6 +198,14 @@ pub enum ControlPlaneRequest {
     PurgeHistory {
         params: PurgeHistoryRequest,
         reply: oneshot::Sender<Result<PurgeHistoryResult, ControlError>>,
+    },
+    /// SPEC-005 §11C `sieve.judge_tool_call`（Since v2.x 向后兼容扩展）。
+    ///
+    /// daemon 侧 handler 可能阻塞等 GUI 弹窗（30–120s），**必须 spawn-per-judge 并发处理**，
+    /// 不可在串行控制面 loop 内联 await，否则阻塞所有其他控制面请求。
+    JudgeToolCall {
+        params: JudgeToolCallRequest,
+        reply: oneshot::Sender<Result<JudgeToolCallResult, ControlError>>,
     },
 }
 
@@ -1052,9 +1060,10 @@ async fn dispatch_message(
             | "sieve.evaluate"
             | "sieve.list_graylist"
             | "sieve.remove_graylist"
-            // v2.0+ 兼容扩展（SPEC-005 §11A §11B）
+            // v2.0+ 兼容扩展（SPEC-005 §11A §11B §11C）
             | "sieve.list_rules"
-            | "sieve.purge_history" => {
+            | "sieve.purge_history"
+            | "sieve.judge_tool_call" => {
                 let Some(id) = id else {
                     warn!(method = %method, "control-plane method requires id; treating as notification dropped");
                     return;
@@ -1429,6 +1438,27 @@ async fn dispatch_control_plane(
                 .await;
             }
             forward_reply::<PurgeHistoryResult>(id, rx, write_tx).await;
+        }
+        // SPEC-005 §11C：sieve.judge_tool_call（Since v2.x 向后兼容扩展）。
+        "sieve.judge_tool_call" => {
+            let p: JudgeToolCallRequest = match require_params(params) {
+                Ok(p) => p,
+                Err(e) => return write_error_response(id, e, write_tx).await,
+            };
+            let (reply, rx) = oneshot::channel();
+            if control_tx
+                .send(ControlPlaneRequest::JudgeToolCall { params: p, reply })
+                .await
+                .is_err()
+            {
+                return write_error_response(
+                    id,
+                    ControlError::internal("daemon control channel closed"),
+                    write_tx,
+                )
+                .await;
+            }
+            forward_reply::<JudgeToolCallResult>(id, rx, write_tx).await;
         }
         other => {
             // 不会到达此分支（外层 match 已穷举）。

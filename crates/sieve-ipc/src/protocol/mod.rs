@@ -43,10 +43,11 @@ pub use notify::{NotifyKind, PausedChangedNotify, PresetChangedNotify, StatusBar
 
 pub use rules::{
     EvaluateContentKind, EvaluateDirection, EvaluateMatch, EvaluateRecommendation, EvaluateRequest,
-    EvaluateResult, GraylistEntrySummary, ListGraylistRequest, ListGraylistResult, ListRulesResult,
-    PresetOverride, RejectedOverride, ReloadConfigRequest, ReloadConfigResult,
-    RemoveGraylistRequest, RemoveGraylistResult, RuleSummary, SetPausedRequest, SetPausedResult,
-    SetPresetOverridesRequest, SetPresetOverridesResult, SetPresetRequest, SetPresetResult,
+    EvaluateResult, GraylistEntrySummary, JudgeToolCallRequest, JudgeToolCallResult,
+    ListGraylistRequest, ListGraylistResult, ListRulesResult, PresetOverride, RejectedOverride,
+    ReloadConfigRequest, ReloadConfigResult, RemoveGraylistRequest, RemoveGraylistResult,
+    RuleSummary, SetPausedRequest, SetPausedResult, SetPresetOverridesRequest,
+    SetPresetOverridesResult, SetPresetRequest, SetPresetResult,
 };
 
 /// JSON-RPC 2.0 envelope（向后兼容路径：`protocol::jsonrpc::Request` 等）。

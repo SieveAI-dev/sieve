@@ -6,20 +6,32 @@
 // 启动时延目标 < 50ms（依赖仅 serde_json + fd-lock + clap，无 tokio / vectorscan）。
 // 关联：SPEC-001（hook 文件协议）、SPEC-002（弹窗行为规范）、ADR-014（双层防御）。
 
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, Read, Write};
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use clap::Parser;
 use uuid::Uuid;
 
 // 从 lib target 引入共享模块，避免重复定义。
+use sieve_hook_lib::codex::{
+    emit_codex_decision, emit_codex_fail_closed, CodexOutput, CodexPreToolUseInput,
+};
+use sieve_hook_lib::codex_ipc;
 use sieve_hook_lib::decision::{write_decision, DecisionOutcome};
 use sieve_hook_lib::error::PendingError;
 use sieve_hook_lib::pending::{read_pending_checked, scan_pending_dir};
 use sieve_hook_lib::protocol;
 
 const STALE_THRESHOLD_SECS: i64 = 600;
+
+/// codex 子命令的内部硬 deadline（秒）。
+///
+/// 超时预算链（严格递减）：codex hook `timeout_sec`（CodexAdapter 显式写大，如 60s）
+/// 大于本 deadline（50s）大于 daemon GUI 弹窗 timeout（本 deadline 再减 ~3s 余量）。
+/// **必须严格小于 codex 的 `timeout_sec`**：codex 到 `timeout_sec` 会强杀 hook，
+/// 被杀 = 无 exit code = fail-OPEN；本 deadline 到点主动 `exit 2`（fail-closed）抢在被杀前。
+const CODEX_INTERNAL_DEADLINE_SECS: u64 = 50;
 
 /// sieve-hook: PreToolUse 安全确认 hook（Phase 1 macOS）。
 #[derive(Parser, Debug)]
@@ -31,7 +43,7 @@ struct Cli {
 
 #[derive(clap::Subcommand, Debug)]
 enum Command {
-    /// 检查 pending 决策请求并请求用户确认。
+    /// 检查 pending 决策请求并请求用户确认（Claude Code PreToolUse hook）。
     Check {
         /// 决策请求 ID（UUID）；未传则读 $SIEVE_REQUEST_ID。
         #[arg(long)]
@@ -41,27 +53,48 @@ enum Command {
         #[arg(long)]
         sieve_home: Option<PathBuf>,
     },
+    /// Codex PreToolUse hook：读 stdin 工具调用 JSON，经 daemon 判危，按 codex 契约输出。
+    ///
+    /// ⚠️ **exit code 语义与 `check` 相反**：codex 下 `exit 1 = fail-OPEN`。本子命令
+    /// 只产 `exit 0`（决策在 stdout）或 `exit 2`（fail-closed，stderr 给原因），**绝不 exit 1**。
+    Codex {
+        /// sieve home 目录；未传则读 $SIEVE_HOME，默认 $HOME/.sieve。
+        #[arg(long)]
+        sieve_home: Option<PathBuf>,
+    },
 }
 
 fn main() {
     let cli = Cli::parse();
-    let Command::Check {
-        request_id,
-        sieve_home,
-    } = cli.command;
 
-    // 解析 sieve_home：flag > env > default。
-    let base = sieve_home
+    let exit_code = match cli.command {
+        Command::Check {
+            request_id,
+            sieve_home,
+        } => run_check_command(request_id, sieve_home),
+        Command::Codex { sieve_home } => run_codex_command(sieve_home),
+    };
+
+    std::process::exit(exit_code);
+}
+
+/// 解析 sieve_home：flag > $SIEVE_HOME > $HOME/.sieve。
+fn resolve_sieve_home(sieve_home: Option<PathBuf>) -> Option<PathBuf> {
+    sieve_home
         .or_else(|| std::env::var("SIEVE_HOME").ok().map(PathBuf::from))
         .or_else(|| {
             std::env::var("HOME")
                 .ok()
                 .map(|h| PathBuf::from(h).join(".sieve"))
         })
-        .unwrap_or_else(|| {
-            eprintln!("sieve-hook: cannot determine sieve home directory ($HOME not set)");
-            std::process::exit(1);
-        });
+}
+
+/// `check` 子命令：Claude Code PreToolUse hook（exit 0=允许，1=拒绝）。
+fn run_check_command(request_id: Option<String>, sieve_home: Option<PathBuf>) -> i32 {
+    let base = resolve_sieve_home(sieve_home).unwrap_or_else(|| {
+        eprintln!("sieve-hook: cannot determine sieve home directory ($HOME not set)");
+        std::process::exit(1);
+    });
 
     // 解析 request_id：优先级 1（flag）> 优先级 2（env）> 优先级 3（启发式扫目录）。
     // 优先级 3 是关键修复：Claude Code settings.json 注册静态命令时无法传 request_id，
@@ -69,7 +102,7 @@ fn main() {
     // 关联：SPEC-001 §4.3（启发式查 pending 目录）。
     let explicit_id = request_id.or_else(|| std::env::var("SIEVE_REQUEST_ID").ok());
 
-    let exit_code = match explicit_id {
+    match explicit_id {
         Some(id_str) => {
             let request_id = match Uuid::parse_str(&id_str) {
                 Ok(id) => id,
@@ -84,9 +117,78 @@ fn main() {
             // 优先级 3：启发式扫目录。
             run_heuristic(&base)
         }
+    }
+}
+
+/// `codex` 子命令：Codex PreToolUse hook。
+///
+/// 读 stdin 的工具调用 JSON → 经极简 IPC client 让 daemon 判危 → 按 codex 契约输出。
+/// **任何错误路径（读失败 / 解析失败 / daemon 不可达 / 超时）一律 `emit_codex_fail_closed`
+/// （exit 2），绝不 exit 1（codex 下 = 放行）。**
+fn run_codex_command(sieve_home: Option<PathBuf>) -> i32 {
+    let base = match resolve_sieve_home(sieve_home) {
+        Some(b) => b,
+        None => {
+            return emit_codex(emit_codex_fail_closed(
+                "cannot determine sieve home ($HOME not set), fail-closed",
+            ));
+        }
     };
 
-    std::process::exit(exit_code);
+    // 内部硬 deadline：到点主动 fail-closed，抢在 codex `timeout_sec` 强杀（=fail-open）之前。
+    let deadline = Instant::now() + Duration::from_secs(CODEX_INTERNAL_DEADLINE_SECS);
+
+    // 读 stdin 全部（codex 的 PreToolUseCommandInput）。
+    let mut buf = String::new();
+    if let Err(e) = io::stdin().read_to_string(&mut buf) {
+        return emit_codex(emit_codex_fail_closed(&format!(
+            "read stdin failed: {e}, fail-closed"
+        )));
+    }
+
+    // 解析 codex PreToolUse JSON（容忍未知/缺失字段；解析失败也 fail-closed，绝不 exit 1）。
+    let input: CodexPreToolUseInput = match serde_json::from_str(&buf) {
+        Ok(v) => v,
+        Err(e) => {
+            return emit_codex(emit_codex_fail_closed(&format!(
+                "parse stdin failed: {e}, fail-closed"
+            )));
+        }
+    };
+
+    // 经 daemon 判危。
+    let verdict = match codex_ipc::judge_tool_call(
+        &base,
+        &input.tool_name,
+        &input.tool_input,
+        &input.tool_use_id,
+        &input.cwd,
+        deadline,
+    ) {
+        Ok(v) => v,
+        Err(e) => {
+            return emit_codex(emit_codex_fail_closed(&format!(
+                "daemon judge failed: {e}, fail-closed"
+            )));
+        }
+    };
+
+    emit_codex(emit_codex_decision(&verdict))
+}
+
+/// 写 codex 输出三元组到 stdout/stderr，返回退出码。
+fn emit_codex(out: CodexOutput) -> i32 {
+    if !out.stdout.is_empty() {
+        let mut so = io::stdout();
+        let _ = so.write_all(out.stdout.as_bytes());
+        let _ = so.flush();
+    }
+    if !out.stderr.is_empty() {
+        let mut se = io::stderr();
+        let _ = se.write_all(out.stderr.as_bytes());
+        let _ = se.flush();
+    }
+    out.exit_code
 }
 
 /// 核心逻辑，返回进程退出码（0 = 允许，1 = 拒绝）。

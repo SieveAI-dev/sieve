@@ -164,7 +164,7 @@ fn detection_rule_ids<'a>(detections: &'a [&sieve_core::Detection]) -> Vec<&'a s
 ///
 /// 关联：PRD v2.0 §9 #3 #8（Critical 不可暂停）、SPEC-002 §9.1（paused 弹窗矩阵）、ADR-028 §3。
 #[allow(clippy::too_many_arguments)]
-async fn gated_request_decision(
+pub(crate) async fn gated_request_decision(
     ipc: &Arc<sieve_ipc::IpcServer>,
     audit: &Arc<crate::audit::AuditStore>,
     caller: &Option<crate::process_context::CallerInfo>,
@@ -993,6 +993,8 @@ pub async fn run(
             runtime_state,
             Arc::clone(&outbound_layered),
             Arc::clone(&inbound_layered),
+            Arc::clone(&inbound_engine),
+            no_client_policy,
         );
     }
 
@@ -4414,7 +4416,7 @@ fn write_hook_pending_to(
 }
 
 /// 把 `sieve_core::Severity` 映射为 `sieve_ipc::Severity`。
-fn map_severity_to_ipc(s: sieve_core::Severity) -> sieve_ipc::Severity {
+pub(crate) fn map_severity_to_ipc(s: sieve_core::Severity) -> sieve_ipc::Severity {
     match s {
         sieve_core::Severity::Critical => sieve_ipc::Severity::Critical,
         sieve_core::Severity::High => sieve_ipc::Severity::High,

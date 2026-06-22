@@ -328,6 +328,12 @@ mod macos {
                     .and_then(|n| n.to_str())
                     .map(|n| n == "settings.json")
                     .unwrap_or(false);
+                let is_codex_hooks_json = info
+                    .path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|n| n == "hooks.json")
+                    .unwrap_or(false);
                 if extension == "json" && is_settings_json {
                     match remove_sieve_entries_from_settings(&info.path) {
                         Ok(()) => {
@@ -336,6 +342,23 @@ mod macos {
                         Err(e) => {
                             // 移除 entries 失败，退回备份恢复
                             eprintln!("[uninstall] ⚠ 移除 entries 失败: {e}，尝试从备份恢复");
+                            if let Some(bd) = backup_dir {
+                                restore_file_from_backup(bd, &info.path)?;
+                            }
+                        }
+                    }
+                } else if extension == "json" && is_codex_hooks_json {
+                    // Codex ~/.codex/hooks.json：精确移除 hooks.PreToolUse 中 sieve 条目，
+                    // 保留第三方（Otty 等）注册的其他事件和条目。
+                    match remove_sieve_entries_from_codex_hooks(&info.path) {
+                        Ok(()) => {
+                            println!(
+                                "[uninstall] ✅ 移除 Codex Sieve hook: {}",
+                                info.path.display()
+                            );
+                        }
+                        Err(e) => {
+                            eprintln!("[uninstall] ⚠ 移除 Codex hook 失败: {e}，尝试从备份恢复");
                             if let Some(bd) = backup_dir {
                                 restore_file_from_backup(bd, &info.path)?;
                             }
@@ -433,6 +456,62 @@ mod macos {
         let json_str = serde_json::to_string_pretty(&v)?;
         fs::write(settings_path, json_str.as_bytes())
             .with_context(|| format!("写入 {} 失败", settings_path.display()))?;
+        Ok(())
+    }
+
+    /// 从 Codex `~/.codex/hooks.json` 中移除 Sieve 注册的 PreToolUse 条目，
+    /// 保留第三方（Otty 等）注册的其他事件和条目。
+    ///
+    /// 匹配条件：`hooks.PreToolUse[].hooks[].command` 同时含 `sieve-hook` 和 `codex`。
+    /// 若移除后 PreToolUse 数组为空，删除该 key；若 hooks 对象为空，删除 hooks key。
+    pub(super) fn remove_sieve_entries_from_codex_hooks(
+        hooks_path: &std::path::Path,
+    ) -> Result<()> {
+        let raw = fs::read_to_string(hooks_path)
+            .with_context(|| format!("读取 {} 失败", hooks_path.display()))?;
+        let mut v: serde_json::Value = serde_json::from_str(&raw)
+            .with_context(|| format!("解析 {} 失败", hooks_path.display()))?;
+
+        if let Some(pre_tool) = v
+            .pointer_mut("/hooks/PreToolUse")
+            .and_then(|a| a.as_array_mut())
+        {
+            pre_tool.retain(|group| {
+                // 保留不含 sieve 命令的条目组。
+                let has_sieve = group
+                    .pointer("/hooks")
+                    .and_then(|h| h.as_array())
+                    .map(|cmds| {
+                        cmds.iter().any(|c| {
+                            c.pointer("/command")
+                                .and_then(|s| s.as_str())
+                                .map(|s| s.contains("sieve-hook") && s.contains("codex"))
+                                .unwrap_or(false)
+                        })
+                    })
+                    .unwrap_or(false);
+                !has_sieve
+            });
+        }
+
+        // PreToolUse 变空 → 移除该 key；hooks 变空 → 移除 hooks key。
+        let pre_tool_empty = v
+            .pointer("/hooks/PreToolUse")
+            .and_then(|a| a.as_array())
+            .map(|a| a.is_empty())
+            .unwrap_or(false);
+        if pre_tool_empty {
+            if let Some(hooks) = v.get_mut("hooks").and_then(|h| h.as_object_mut()) {
+                hooks.remove("PreToolUse");
+                if hooks.is_empty() {
+                    v.as_object_mut().map(|obj| obj.remove("hooks"));
+                }
+            }
+        }
+
+        let json_str = serde_json::to_string_pretty(&v)? + "\n";
+        fs::write(hooks_path, json_str.as_bytes())
+            .with_context(|| format!("写入 {} 失败", hooks_path.display()))?;
         Ok(())
     }
 
@@ -633,6 +712,91 @@ mod tests {
             Some("claude-opus-4-5"),
             "model 字段应保留"
         );
+    }
+
+    // ── Codex hooks.json：精确移除 sieve 条目，保留 Otty 等第三方条目 ──────────
+
+    #[test]
+    fn uninstall_codex_hooks_removes_sieve_keeps_others() {
+        use super::macos::remove_sieve_entries_from_codex_hooks;
+
+        let dir = tempdir().unwrap();
+        let codex_dir = dir.path().join(".codex");
+        fs::create_dir_all(&codex_dir).unwrap();
+        let hooks_json = codex_dir.join("hooks.json");
+
+        // 模拟 setup 后的 hooks.json：Otty 第三方条目 + sieve 条目 + 其他事件。
+        let content = serde_json::json!({
+            "hooks": {
+                "PreToolUse": [
+                    { "hooks": [{ "type": "command", "command": "otty-hook pre" }] },
+                    { "hooks": [{ "type": "command", "command": "/usr/local/bin/sieve-hook codex", "timeout": 60 }] }
+                ],
+                "Stop": [
+                    { "hooks": [{ "type": "command", "command": "otty-hook stop" }] }
+                ]
+            }
+        });
+        fs::write(&hooks_json, serde_json::to_string_pretty(&content).unwrap()).unwrap();
+
+        remove_sieve_entries_from_codex_hooks(&hooks_json).unwrap();
+
+        let result: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&hooks_json).unwrap()).unwrap();
+
+        // PreToolUse 应只剩 Otty 条目（sieve 被移除）。
+        let pre = result
+            .pointer("/hooks/PreToolUse")
+            .and_then(|a| a.as_array())
+            .unwrap();
+        assert_eq!(pre.len(), 1, "PreToolUse 应只剩 1 个 Otty 条目");
+        assert!(
+            pre[0]
+                .pointer("/hooks/0/command")
+                .and_then(|c| c.as_str())
+                .map(|c| c.contains("otty-hook"))
+                .unwrap_or(false),
+            "Otty PreToolUse 条目必须保留"
+        );
+        // Stop 事件完整保留。
+        assert!(
+            result
+                .pointer("/hooks/Stop")
+                .and_then(|a| a.as_array())
+                .map(|a| a.len() == 1)
+                .unwrap_or(false),
+            "Stop 等其他事件必须保留"
+        );
+    }
+
+    #[test]
+    fn uninstall_codex_hooks_removes_empty_pretooluse_key() {
+        use super::macos::remove_sieve_entries_from_codex_hooks;
+
+        let dir = tempdir().unwrap();
+        let codex_dir = dir.path().join(".codex");
+        fs::create_dir_all(&codex_dir).unwrap();
+        let hooks_json = codex_dir.join("hooks.json");
+
+        // 只有 sieve 条目（PreToolUse 唯一条目），移除后 PreToolUse + hooks 应被清空。
+        let content = serde_json::json!({
+            "hooks": {
+                "PreToolUse": [
+                    { "hooks": [{ "type": "command", "command": "/x/sieve-hook codex", "timeout": 60 }] }
+                ]
+            }
+        });
+        fs::write(&hooks_json, serde_json::to_string_pretty(&content).unwrap()).unwrap();
+
+        remove_sieve_entries_from_codex_hooks(&hooks_json).unwrap();
+
+        let result: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&hooks_json).unwrap()).unwrap();
+        assert!(
+            result.pointer("/hooks/PreToolUse").is_none(),
+            "空 PreToolUse 应被移除"
+        );
+        assert!(result.get("hooks").is_none(), "空 hooks 对象应被移除");
     }
 
     // ── R2-#5：toml 文件按 created_new 分流测试 ─────────────────────────────

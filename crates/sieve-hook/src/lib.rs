@@ -1,6 +1,8 @@
 // sieve-hook lib target：供 criterion bench 和集成测试调用核心逻辑。
 // main.rs 通过 use sieve_hook_lib::* 复用这些定义。
 
+pub mod codex;
+pub mod codex_ipc;
 pub mod decision;
 pub mod error;
 pub mod pending;

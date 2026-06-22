@@ -49,6 +49,9 @@ http-body-util = { workspace = true }
 bytes = { workspace = true }
 serde = { workspace = true }
 toml = { workspace = true }
+# toml_edit：CodexAdapter 写 ~/.codex/config.toml 的 [features] hooks=true 时
+# 保留用户其他键和注释（toml 0.8 已传递依赖此版本，license 已过 cargo-deny）。
+toml_edit = "0.22"
 
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"

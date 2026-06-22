@@ -274,3 +274,52 @@ pub struct RemoveGraylistResult {
     pub removed: bool,
     pub audit_event_id: String,
 }
+
+// ── judge_tool_call（SPEC-005 §11C，Since v2.x 向后兼容扩展）────────────────────
+
+/// `sieve.judge_tool_call` 请求参数。
+///
+/// client（如 agent 的 PreToolUse hook）把 agent **即将执行**的结构化工具调用喂给
+/// daemon，daemon 跑入站规则引擎判危、命中 Critical 时走 GUI 弹窗确认，回裁决。
+/// 让不解析上游响应体的 client 也能借 daemon 的规则引擎拿到入站危险工具拦截。
+///
+/// **v2 向后兼容扩展**：加 method 不 bump 协议版本（SPEC-005 §2 白名单管版本号非方法名）；
+/// 不认识此方法的旧 daemon 返 `-32601`，client 据此 fail-closed。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JudgeToolCallRequest {
+    /// 工具名（不同 agent 取值不同，如 codex 的 `exec_command` / `apply_patch`）。
+    pub tool_name: String,
+    /// 工具输入对象（任意结构；daemon 对其全文扫描判危）。
+    pub tool_input: serde_json::Value,
+    /// 对应上游 response 的 tool_use_id（关联键，可空）。
+    #[serde(default)]
+    pub tool_use_id: String,
+    /// 工具执行的工作目录（敏感路径判定用，可空）。
+    #[serde(default)]
+    pub cwd: String,
+    /// 来源 agent（审计 / 规则上下文用）。默认 Unknown。
+    #[serde(default)]
+    pub source_agent: SourceAgent,
+    /// client 愿意等待的最长毫秒数（即 client 内部 deadline）。
+    ///
+    /// daemon 据此 cap GUI 弹窗 timeout（取 `min(规则 timeout, timeout_ms)`），
+    /// 保证在 client 放弃前回裁决；client 端到点仍须自行 fail-closed 兜底。
+    /// `0` / 缺省 → daemon 用规则默认 timeout。
+    #[serde(default)]
+    pub timeout_ms: u32,
+}
+
+/// `sieve.judge_tool_call` 响应。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JudgeToolCallResult {
+    /// 裁决：`"allow"`（放行）| `"deny"`（拒绝）。
+    ///
+    /// 注：`"rewrite"`（改写工具输入做脱敏）为后续扩展，本期只产 allow/deny。
+    pub verdict: String,
+    /// 触发裁决的规则 ID（无命中时为 None）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule_id: Option<String>,
+    /// 给用户的拒绝原因（deny 时填；client 写进面向用户的提示）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}

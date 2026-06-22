@@ -1,11 +1,12 @@
 //! `sieve doctor` 命令实现（ADR-015 / SPEC-003 §doctor / SPEC-004 §6）。
 //!
-//! 5 项检查（Claude Code）：
+//! 6 项检查（Claude Code）：
 //! 1. settings.json 中 ANTHROPIC_BASE_URL 是否为 http://127.0.0.1:11453
 //! 2. hooks.PreToolUse 是否含 sieve-hook check
 //! 3. daemon 是否在 :11453 监听（TCP 连接）
 //! 4. launchd 状态（launchctl list | grep com.sieve.daemon）
 //! 5. canary 本地引擎命中测试（OUT-01 规则 scan，不发真实网络请求）
+//! 6. sieve-hook 二进制是否与 sieve 同目录存在（hook 注册但二进制漏装的缺口）
 //!
 //! `--agent openclaw` / `--agent hermes` 通过 setup::macos 桥接函数调用真实 adapter（R10-#5）。
 //!
@@ -159,7 +160,12 @@ mod macos {
         let agents: Vec<AgentKind> = if let Some(a) = args.agent {
             vec![a]
         } else {
-            vec![AgentKind::Claude, AgentKind::Openclaw, AgentKind::Hermes]
+            vec![
+                AgentKind::Claude,
+                AgentKind::Openclaw,
+                AgentKind::Hermes,
+                AgentKind::Codex,
+            ]
         };
 
         let mut all_passed = true;
@@ -202,6 +208,21 @@ mod macos {
                         }
                     }
                 }
+                AgentKind::Codex => {
+                    // 调用真实 CodexAdapter，先 detect 确认是否安装
+                    match run_codex_doctor(&home) {
+                        RunAdapterResult::NotInstalled => {
+                            println!(
+                                "[doctor] ⚠ Codex 未检测到安装，跳过检查（未找到 ~/.codex/ 或 codex 二进制）"
+                            );
+                        }
+                        RunAdapterResult::Passed => {}
+                        RunAdapterResult::Failed(e) => {
+                            eprintln!("[doctor] Codex 检查失败：{e}");
+                            all_passed = false;
+                        }
+                    }
+                }
             }
         }
 
@@ -233,6 +254,16 @@ mod macos {
     fn run_hermes_doctor(home: &std::path::Path) -> RunAdapterResult {
         use crate::commands::setup::macos::run_hermes_doctor_check;
         match run_hermes_doctor_check(home.to_path_buf()) {
+            None => RunAdapterResult::NotInstalled,
+            Some(Ok(())) => RunAdapterResult::Passed,
+            Some(Err(e)) => RunAdapterResult::Failed(e),
+        }
+    }
+
+    /// 调用 setup::macos::run_codex_doctor_check 桥接函数。
+    fn run_codex_doctor(home: &std::path::Path) -> RunAdapterResult {
+        use crate::commands::setup::macos::run_codex_doctor_check;
+        match run_codex_doctor_check(home.to_path_buf()) {
             None => RunAdapterResult::NotInstalled,
             Some(Ok(())) => RunAdapterResult::Passed,
             Some(Err(e)) => RunAdapterResult::Failed(e),
@@ -307,6 +338,12 @@ mod macos {
         );
         results.push(("canary 规则引擎命中 OUT-01", check5));
 
+        // ── 检查 6: sieve-hook 二进制就位（与 sieve 同目录存在）
+        // 仅查 settings.json 字符串不够——hook 注册了但二进制没装（install.sh 漏装）会静默失效。
+        let check6 = check_hook_binary_present();
+        print_check("sieve-hook 二进制与 sieve 同目录存在", check6);
+        results.push(("sieve-hook 二进制就位", check6));
+
         // ── 汇总（R4-#8 修复）
         println!();
         let failures: Vec<&str> = results
@@ -364,6 +401,19 @@ mod macos {
                         .unwrap_or(false)
                 })
             })
+            .unwrap_or(false)
+    }
+
+    /// 检查 sieve-hook 二进制是否与当前 sieve 二进制同目录存在。
+    ///
+    /// install.sh 把 sieve + sieve-hook 装在同一目录；hook 注册用绝对路径
+    /// （`setup::macos::sieve_hook_bin_path`）。只查 settings.json 字符串不足以发现
+    /// 「hook 注册了但二进制漏装」——本检查补上这个缺口。
+    fn check_hook_binary_present() -> bool {
+        std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(|dir| dir.join("sieve-hook")))
+            .map(|hook| hook.is_file())
             .unwrap_or(false)
     }
 

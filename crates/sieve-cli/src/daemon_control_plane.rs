@@ -25,17 +25,21 @@ use std::time::{Duration, SystemTime};
 use anyhow::Result;
 use arc_swap::ArcSwap;
 use chrono::{DateTime, Utc};
+use sieve_core::pipeline::inbound::InboundEngine;
+use sieve_core::tool_use_aggregator::CompletedToolCall;
+use sieve_core::ContentSource;
 use sieve_ipc::{
     AuditDbSnapshot, BroadcastPlan, ControlError, ControlPlaneRequest, EvaluateMatch,
     EvaluateResult, GraylistEntrySummary, GraylistSnapshot, HealthResult, IpcServer, IpcSnapshot,
-    ListGraylistResult, ListRulesResult, ListenSnapshot, PausedChangedNotify, PresetChangedNotify,
-    PresetOverride, PresetSnapshot, PurgeHistoryResult, RejectedOverride, ReloadConfigResult,
-    RemoveGraylistResult, RuleSummary, RulesSnapshot, SetPausedResult, SetPresetOverridesResult,
-    SetPresetResult,
+    JudgeToolCallRequest, JudgeToolCallResult, ListGraylistResult, ListRulesResult, ListenSnapshot,
+    PausedChangedNotify, PresetChangedNotify, PresetOverride, PresetSnapshot, PurgeHistoryResult,
+    RejectedOverride, ReloadConfigResult, RemoveGraylistResult, RuleSummary, RulesSnapshot,
+    SetPausedResult, SetPresetOverridesResult, SetPresetResult,
 };
 use uuid::Uuid;
 
 use crate::audit::{AuditEvent, AuditStore};
+use crate::cli::NoClientPolicy;
 
 /// daemon 运行时可变状态（control plane 与 hot path 共享）。
 ///
@@ -141,6 +145,7 @@ fn paused_applies_to() -> Vec<String> {
 /// - `audit_store`：审计写入
 /// - `state`：运行时状态（paused / preset / 启动元信息）
 /// - `outbound_layered`/`inbound_layered`：evaluate 沙箱用
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_control_plane_handler(
     ipc: Arc<IpcServer>,
     audit_store: Arc<AuditStore>,
@@ -157,6 +162,9 @@ pub fn spawn_control_plane_handler(
             sieve_policy::engine::UserEngine,
         >,
     >,
+    // judge_tool_call 用：与真实入站路径同款检测引擎 + 无 client 处置策略。
+    inbound_engine: Arc<dyn InboundEngine>,
+    no_client_policy: NoClientPolicy,
 ) {
     let ipc_for_task = Arc::clone(&ipc);
     tokio::spawn(async move {
@@ -177,6 +185,8 @@ pub fn spawn_control_plane_handler(
                 &state,
                 &outbound_layered,
                 &inbound_layered,
+                &inbound_engine,
+                no_client_policy,
             )
             .await;
         }
@@ -184,6 +194,7 @@ pub fn spawn_control_plane_handler(
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn dispatch_request(
     req: ControlPlaneRequest,
     ipc: &Arc<IpcServer>,
@@ -201,6 +212,8 @@ async fn dispatch_request(
             sieve_policy::engine::UserEngine,
         >,
     >,
+    inbound_engine: &Arc<dyn InboundEngine>,
+    no_client_policy: NoClientPolicy,
 ) {
     match req {
         ControlPlaneRequest::SetPaused {
@@ -265,6 +278,20 @@ async fn dispatch_request(
         ControlPlaneRequest::PurgeHistory { params, reply } => {
             let result = handle_purge_history(params, audit, state).await;
             let _ = reply.send(result);
+        }
+        // SPEC-005 §11C：sieve.judge_tool_call（Since v2.x）。
+        // ⚠️ 命中 Critical 时 handle_judge_tool_call 会阻塞等 GUI 弹窗（30–120s）。
+        // 控制面是单 task 串行消费，**必须 spawn-per-judge**，否则一个待确认的工具调用
+        // 会卡死 health / set_paused 等所有其他控制面请求。reply 在 spawn 内回执。
+        ControlPlaneRequest::JudgeToolCall { params, reply } => {
+            let ipc = Arc::clone(ipc);
+            let audit = Arc::clone(audit);
+            let engine = Arc::clone(inbound_engine);
+            tokio::spawn(async move {
+                let result =
+                    handle_judge_tool_call(params, &ipc, &audit, &engine, no_client_policy).await;
+                let _ = reply.send(result);
+            });
         }
     }
 }
@@ -975,6 +1002,133 @@ async fn handle_purge_history(
         purged_at: purged_now,
         rows_deleted,
     })
+}
+
+/// SPEC-005 §11C `sieve.judge_tool_call` handler。
+///
+/// client（agent 的 PreToolUse hook）把即将执行的结构化工具调用喂来，daemon 用
+/// **与真实入站 SSE 路径同款的检测引擎**（[`InboundEngine::check_tool_use`]，扫 tool_name +
+/// 全文扫 tool_input）判危：
+/// - 命中 fail-closed Critical 规则 → 复用 [`crate::daemon::gated_request_decision`]
+///   走 GUI 弹窗确认 + 审计，按用户决策回 allow/deny。
+/// - 无 Critical 命中 → allow（v1 范围：非 Critical 工具检测放行，不为每次工具调用弹窗）。
+///
+/// **fail-closed**：引擎错误 / GUI 拒绝 / 超时（gated_request_decision 对 Critical 按
+/// `default_on_timeout=Block` 强制拒绝）→ deny。client 端到自身 deadline 仍须独立兜底。
+async fn handle_judge_tool_call(
+    params: JudgeToolCallRequest,
+    ipc: &Arc<IpcServer>,
+    audit: &Arc<AuditStore>,
+    inbound_engine: &Arc<dyn InboundEngine>,
+    no_client_policy: NoClientPolicy,
+) -> Result<JudgeToolCallResult, ControlError> {
+    // 1. 构造 CompletedToolCall 喂引擎（与 SSE 入站工具检测同一 trait 方法，行为一致）。
+    let tool = CompletedToolCall {
+        id: params.tool_use_id.clone(),
+        name: params.tool_name.clone(),
+        input: params.tool_input.clone(),
+    };
+    let detections = inbound_engine
+        .check_tool_use(&tool, ContentSource::InboundToolUseInput)
+        .map_err(|e| ControlError::internal(format!("inbound engine scan failed: {e}")))?;
+
+    // 2. 只对 fail-closed Critical 命中强制人工确认（PRD §9 #3 High-Risk Tool Policy Gate）。
+    let critical: Vec<&sieve_core::Detection> = detections
+        .iter()
+        .filter(|d| sieve_rules::critical_lock::is_fail_closed(&d.rule_id))
+        .collect();
+    if critical.is_empty() {
+        return Ok(JudgeToolCallResult {
+            verdict: "allow".to_owned(),
+            rule_id: None,
+            reason: None,
+        });
+    }
+
+    // 3. 组装 DecisionRequest（仅 Critical 命中），复用统一决策链。
+    let primary_rule = critical[0].rule_id.clone();
+    let ipc_detections: Vec<sieve_ipc::DetectionPayload> = critical
+        .iter()
+        .map(|d| sieve_ipc::DetectionPayload {
+            rule_id: d.rule_id.clone(),
+            severity: crate::daemon::map_severity_to_ipc(d.severity),
+            disposition: sieve_ipc::Disposition::GuiPopup,
+            title: format!("危险工具调用：{}（{}）", params.tool_name, d.rule_id),
+            one_line_summary: d.evidence_truncated.clone(),
+            details: serde_json::json!({
+                "tool_name": params.tool_name,
+                "tool_use_id": params.tool_use_id,
+                "cwd": params.cwd,
+            }),
+            recommendation: Some(serde_json::json!({
+                "decision": "deny",
+                "confidence": "high",
+                "reason": "入站危险工具调用，fail-closed",
+            })),
+        })
+        .collect();
+
+    // timeout：client deadline 与默认 120s 取较小，钳在 [5, 120]。
+    let timeout_seconds: u32 = if params.timeout_ms > 0 {
+        (params.timeout_ms / 1000).clamp(5, 120)
+    } else {
+        120
+    };
+
+    let req = sieve_ipc::DecisionRequest {
+        request_id: Uuid::now_v7(),
+        created_at: Utc::now(),
+        timeout_seconds,
+        default_on_timeout: sieve_ipc::DefaultOnTimeout::Block,
+        detections: ipc_detections,
+        source_agent: params.source_agent,
+        origin_chain: Vec::new(),
+        source_channel: None,
+        explicit_chain_depth: None,
+        allow_remember: false,
+    };
+
+    let timeout_dur = Duration::from_secs(u64::from(timeout_seconds).max(1));
+    // caller=None（hook 来源，暂不附 caller 进程上下文）；provider_id=系统级。
+    let outcome = crate::daemon::gated_request_decision(
+        ipc,
+        audit,
+        &None,
+        req,
+        timeout_dur,
+        "inbound",
+        crate::audit::SYSTEM_PROVIDER_ID,
+        no_client_policy,
+    )
+    .await;
+
+    match outcome {
+        Ok(resp) => match resp.decision {
+            sieve_ipc::DecisionAction::Allow | sieve_ipc::DecisionAction::RedactAndAllow => {
+                Ok(JudgeToolCallResult {
+                    verdict: "allow".to_owned(),
+                    rule_id: Some(primary_rule),
+                    reason: None,
+                })
+            }
+            sieve_ipc::DecisionAction::Deny => Ok(JudgeToolCallResult {
+                verdict: "deny".to_owned(),
+                rule_id: Some(primary_rule.clone()),
+                reason: Some(format!("用户拒绝危险工具调用（{primary_rule}）")),
+            }),
+        },
+        Err(e) => {
+            // fail-closed：决策链错误（IPC 故障等）→ deny。
+            tracing::warn!(error = %e, "judge_tool_call decision failed → fail-closed deny");
+            Ok(JudgeToolCallResult {
+                verdict: "deny".to_owned(),
+                rule_id: Some(primary_rule.clone()),
+                reason: Some(format!(
+                    "daemon 决策失败，fail-closed 拒绝（{primary_rule}）"
+                )),
+            })
+        }
+    }
 }
 
 // ─────────────────────────── helpers ───────────────────────────────

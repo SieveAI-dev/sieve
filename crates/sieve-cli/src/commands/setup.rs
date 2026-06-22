@@ -405,9 +405,12 @@ pub(crate) mod macos {
 
         fn apply(&self, ctx: &mut SetupContext) -> Result<()> {
             let (existing_settings, settings_existed_before) = self.read_existing_settings()?;
+            // hook 命令用绝对路径（current_exe 同目录的 sieve-hook），避免依赖 PATH。
+            // contains("sieve-hook") 的幂等/卸载判断对绝对路径天然兼容，无需改 doctor/uninstall。
+            let hook_cmd = format!("{} check", sieve_hook_bin_path());
             let hook_entry = serde_json::json!({
                 "matcher": ".*",
-                "hooks": [{"type": "command", "command": "sieve-hook check"}]
+                "hooks": [{"type": "command", "command": hook_cmd}]
             });
             // F-3：daemon 共享安装（sieve.toml + 规则 + plist + launchd）已在 run() 主流程
             // 的 install_shared_daemon() 中完成，此处只做 Claude 特有：settings.json + hook 注入。
@@ -1309,6 +1312,460 @@ pub(crate) mod macos {
         }
     }
 
+    // ──────────────────────────────── CodexAdapter ─────────────────────────
+
+    /// Codex CLI 适配器：把 `sieve-hook codex` 注册为 Codex 的 PreToolUse hook。
+    ///
+    /// ## Codex hook 配置模型（codex-cli 0.137.0 实测）
+    ///
+    /// 与 Claude / OpenClaw / Hermes 不同，Codex 的 hook 配置是**两层**：
+    ///
+    /// 1. **hook 命令定义在独立文件 `~/.codex/hooks.json`**（JSON，不在 config.toml）。
+    ///    schema：`{ "hooks": { "<EventName>": [ { "hooks": [ { "type": "command",
+    ///    "command": "<abs>/sieve-hook codex", "timeout": 60 } ] } ] } }`。
+    ///    每个事件名映射到一个数组（matcher 分组），每组含一个 `hooks` 子数组。
+    ///    第三方工具可能已往同一文件注册其他事件（如 `SessionStart` / `Stop`），
+    ///    因此本 adapter **读-合并-写回**，只往 `hooks.PreToolUse` 数组追加 sieve 自己的条目，
+    ///    保留所有已有条目，绝不整文件覆盖。
+    ///
+    /// 2. **总开关在 `~/.codex/config.toml` 的 `[features] hooks = true`**。
+    ///    本 adapter 用 `toml_edit` 保留其他键和注释地把该项设为 true。
+    ///
+    /// ## trust（一次性）
+    ///
+    /// Codex 首次见到新 hook 需用户在 codex 内 `/hooks` 选中后按 `t` 信任
+    /// （trusted_hash 由 codex 自己算，setup 无法预计算）。apply 结束打印 onboarding 引导。
+    /// 同路径二进制原地替换（sieve 升级）不会让用户重新信任。
+    ///
+    /// ## timeout 预算链
+    ///
+    /// hooks.json 条目 `timeout = 60`（秒）。这必须 **大于** `sieve-hook` 内部的
+    /// `CODEX_INTERNAL_DEADLINE_SECS = 50`：sieve-hook 到 50s 主动 fail-closed，
+    /// 抢在 codex 到 60s 强杀 hook（强杀 = 放行）之前。
+    pub struct CodexAdapter {
+        home_path: PathBuf,
+        hooks_json_path: PathBuf,
+        config_toml_path: PathBuf,
+        /// hook 命令的 timeout（秒）；必须 > sieve-hook 内部 deadline。
+        hook_timeout_secs: u64,
+    }
+
+    impl CodexAdapter {
+        pub fn new(home_path: PathBuf) -> Self {
+            let codex_dir = home_path.join(".codex");
+            Self {
+                hooks_json_path: codex_dir.join("hooks.json"),
+                config_toml_path: codex_dir.join("config.toml"),
+                hook_timeout_secs: 60,
+                home_path,
+            }
+        }
+
+        /// `sieve-hook codex` 的绝对命令（与 sieve 同目录的 sieve-hook 二进制 + `codex` 子命令）。
+        fn hook_command(&self) -> String {
+            format!("{} codex", sieve_hook_bin_path())
+        }
+
+        /// 判断 codex 是否安装：`~/.codex/` 目录存在 或 `which codex` 成功。
+        fn codex_present(&self) -> bool {
+            self.home_path.join(".codex").is_dir()
+                || Command::new("which")
+                    .arg("codex")
+                    .output()
+                    .map(|o| o.status.success())
+                    .unwrap_or(false)
+        }
+
+        /// 读取现有 hooks.json，返回 (解析后的 Value, 文件是否已存在)。
+        ///
+        /// 文件不存在时返回空骨架 `{}`；存在但解析失败时返回 Err（abort，不覆盖用户文件）。
+        fn read_hooks_json(&self) -> Result<(Value, bool)> {
+            let existed = self.hooks_json_path.exists();
+            if !existed {
+                return Ok((serde_json::json!({}), false));
+            }
+            let raw = fs::read_to_string(&self.hooks_json_path)
+                .with_context(|| format!("读取 {} 失败", self.hooks_json_path.display()))?;
+            // 容忍空文件（codex 首次创建可能留空）→ 视作空骨架。
+            if raw.trim().is_empty() {
+                return Ok((serde_json::json!({}), true));
+            }
+            let v: Value = serde_json::from_str(&raw).map_err(|e| {
+                anyhow!(
+                    "无法解析 {}：{}。\n\
+                     请用 JSON 校验工具修复后重试。setup 已 abort，未做任何改动。",
+                    self.hooks_json_path.display(),
+                    e
+                )
+            })?;
+            Ok((v, true))
+        }
+
+        /// 判断 hooks.PreToolUse 数组里是否已有命中 `sieve-hook ... codex` 的条目（幂等键）。
+        ///
+        /// 匹配条件：组内任一 `hooks[].command` 同时含 `sieve-hook` 和 ` codex`。
+        /// 用 substring 而非全等，让升级换路径/换 timeout 后仍判为"已存在"，避免重复追加。
+        fn pretooluse_has_sieve(pretooluse: &[Value]) -> bool {
+            pretooluse.iter().any(|group| {
+                group
+                    .pointer("/hooks")
+                    .and_then(|h| h.as_array())
+                    .map(|cmds| {
+                        cmds.iter().any(|c| {
+                            c.pointer("/command")
+                                .and_then(|s| s.as_str())
+                                .map(|s| s.contains("sieve-hook") && s.contains("codex"))
+                                .unwrap_or(false)
+                        })
+                    })
+                    .unwrap_or(false)
+            })
+        }
+
+        /// 构造要追加的 sieve PreToolUse 条目。
+        fn sieve_pretooluse_entry(&self) -> Value {
+            serde_json::json!({
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": self.hook_command(),
+                        "timeout": self.hook_timeout_secs,
+                    }
+                ]
+            })
+        }
+
+        /// 把 sieve 条目合并进 hooks.json 的 Value（保留所有已有条目）。
+        ///
+        /// 返回 true 表示发生了改动（需写回），false 表示已存在（幂等跳过）。
+        /// 该函数纯粹操作内存中的 `Value`，便于单测。
+        fn merge_into_hooks_json(&self, root: &mut Value) -> bool {
+            // 确保 root 是 object。
+            if !root.is_object() {
+                *root = serde_json::json!({});
+            }
+            let obj = root.as_object_mut().expect("root 已被规整为 object");
+            // 确保 hooks 是 object。
+            let hooks = obj.entry("hooks").or_insert_with(|| serde_json::json!({}));
+            if !hooks.is_object() {
+                *hooks = serde_json::json!({});
+            }
+            let hooks_obj = hooks.as_object_mut().expect("hooks 已被规整为 object");
+            // 确保 PreToolUse 是 array。
+            let pretooluse = hooks_obj
+                .entry("PreToolUse")
+                .or_insert_with(|| serde_json::json!([]));
+            if !pretooluse.is_array() {
+                *pretooluse = serde_json::json!([]);
+            }
+            let groups = pretooluse
+                .as_array_mut()
+                .expect("PreToolUse 已被规整为 array");
+            if Self::pretooluse_has_sieve(groups) {
+                return false;
+            }
+            groups.push(self.sieve_pretooluse_entry());
+            true
+        }
+
+        /// 确保 config.toml 的 `[features] hooks = true`（用 toml_edit 保留其他键和注释）。
+        ///
+        /// 返回 (新内容, 文件是否已存在, 是否实际改动)。
+        /// 已是 true 时不改动（幂等）。
+        fn ensure_features_hooks_enabled(&self) -> Result<(String, bool, bool)> {
+            use toml_edit::{value, DocumentMut, Item, Table};
+
+            let existed = self.config_toml_path.exists();
+            let raw = if existed {
+                fs::read_to_string(&self.config_toml_path)
+                    .with_context(|| format!("读取 {} 失败", self.config_toml_path.display()))?
+            } else {
+                String::new()
+            };
+            let mut doc: DocumentMut = raw.parse().map_err(|e| {
+                anyhow!(
+                    "无法解析 {}：{}。\n\
+                     请修复 TOML 语法后重试。setup 已 abort，未做任何改动。",
+                    self.config_toml_path.display(),
+                    e
+                )
+            })?;
+
+            // 已是 true 则幂等跳过。
+            let already = doc
+                .get("features")
+                .and_then(|f| f.as_table())
+                .and_then(|t| t.get("hooks"))
+                .and_then(|h| h.as_bool())
+                .unwrap_or(false);
+            if already {
+                return Ok((doc.to_string(), existed, false));
+            }
+
+            // 确保 [features] 表存在（保留已有键/注释）。
+            if doc.get("features").and_then(|f| f.as_table()).is_none() {
+                let mut t = Table::new();
+                t.set_implicit(false);
+                doc["features"] = Item::Table(t);
+            }
+            doc["features"]["hooks"] = value(true);
+            Ok((doc.to_string(), existed, true))
+        }
+
+        /// 备份单个文件到 ctx.backup_dir（去掉 HOME 前缀做相对路径）。
+        fn backup_file(&self, ctx: &SetupContext, path: &Path) -> Result<()> {
+            let home = std::env::var("HOME").unwrap_or_default();
+            let rel = path.strip_prefix(&home).unwrap_or(path);
+            let backup_dest = ctx.backup_dir.join(rel);
+            if let Some(parent) = backup_dest.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::copy(path, &backup_dest)
+                .with_context(|| format!("备份 {} 失败", path.display()))?;
+            Ok(())
+        }
+    }
+
+    impl AgentAdapter for CodexAdapter {
+        fn kind(&self) -> AgentKind {
+            AgentKind::Codex
+        }
+
+        fn detect(&self) -> Result<AgentDetection> {
+            let installed = self.codex_present();
+            let config_path = if self.hooks_json_path.exists() {
+                Some(self.hooks_json_path.clone())
+            } else if self.config_toml_path.exists() {
+                Some(self.config_toml_path.clone())
+            } else {
+                None
+            };
+            if !installed {
+                eprintln!(
+                    "未找到 Codex 安装（~/.codex/ 目录和 codex 二进制均未找到）。\n\
+                     跳过 Codex 配置。如已安装，请先运行 codex 确认路径后重试。"
+                );
+            }
+            Ok(AgentDetection {
+                installed,
+                config_path,
+                daemon_running: None,
+                todo_notes: vec![],
+            })
+        }
+
+        fn dry_run_diff(&self) -> Result<String> {
+            let detection = self.detect()?;
+            let cmd = self.hook_command();
+
+            // hooks.json 现状预览
+            let (root, hooks_existed) = self
+                .read_hooks_json()
+                .unwrap_or((serde_json::json!({}), false));
+            let already_registered = root
+                .pointer("/hooks/PreToolUse")
+                .and_then(|a| a.as_array())
+                .map(|groups| Self::pretooluse_has_sieve(groups))
+                .unwrap_or(false);
+            let hooks_line = if already_registered {
+                format!("hooks.PreToolUse 已含 `{}` 条目（幂等，跳过）", cmd)
+            } else if hooks_existed {
+                format!(
+                    "往 hooks.PreToolUse 追加条目：{{ command = \"{}\", timeout = {} }}（保留已有条目）",
+                    cmd, self.hook_timeout_secs
+                )
+            } else {
+                format!(
+                    "新建 {}，写入 hooks.PreToolUse 条目：{{ command = \"{}\", timeout = {} }}",
+                    self.hooks_json_path.display(),
+                    cmd,
+                    self.hook_timeout_secs
+                )
+            };
+
+            // config.toml features.hooks 现状预览
+            let features_line = match self.ensure_features_hooks_enabled() {
+                Ok((_, _, false)) => "[features] hooks 已为 true（幂等，跳过）".to_string(),
+                Ok((_, true, true)) => {
+                    "[features] hooks 设为 true（保留 config.toml 其他键和注释）".to_string()
+                }
+                Ok((_, false, true)) => format!(
+                    "新建 {}，写入 [features] hooks = true",
+                    self.config_toml_path.display()
+                ),
+                Err(e) => format!("config.toml 预览失败：{e}"),
+            };
+
+            Ok(format!(
+                "[codex] 检测到：{}\n\
+                 [codex] hooks 文件：{}（JSON）\n\
+                 [codex] 将修改：{}\n\
+                 [codex] 总开关：{}（{}）\n\
+                 [codex] trust：apply 后需在 codex 内 `/hooks` 选中 sieve 条目按 `t` 一次性授权",
+                if detection.installed {
+                    "已安装"
+                } else {
+                    "未找到"
+                },
+                self.hooks_json_path.display(),
+                hooks_line,
+                self.config_toml_path.display(),
+                features_line,
+            ))
+        }
+
+        fn apply(&self, ctx: &mut SetupContext) -> Result<()> {
+            let codex_dir = self.home_path.join(".codex");
+            fs::create_dir_all(&codex_dir)
+                .with_context(|| format!("创建 {} 失败", codex_dir.display()))?;
+
+            // ── ① hooks.json：读-合并-写回 ──────────────────────────────────
+            let (mut root, hooks_existed) = self.read_hooks_json()?;
+            if hooks_existed {
+                self.backup_file(ctx, &self.hooks_json_path)?;
+            }
+            let hooks_changed = self.merge_into_hooks_json(&mut root);
+            if hooks_changed {
+                let pretty = serde_json::to_string_pretty(&root)? + "\n";
+                fs::write(&self.hooks_json_path, pretty.as_bytes())
+                    .with_context(|| format!("写入 {} 失败", self.hooks_json_path.display()))?;
+                ctx.written_files.push(self.hooks_json_path.clone());
+                println!(
+                    "[setup] ✅ Codex hooks.PreToolUse 已注册 `{}`（timeout={}s）",
+                    self.hook_command(),
+                    self.hook_timeout_secs
+                );
+                ctx.append_log_entry(
+                    &SetupLogEntry::new("config_modified")
+                        .with_path(self.hooks_json_path.to_string_lossy().to_string())
+                        .with_detail(
+                            "hooks.PreToolUse: appended sieve-hook codex entry".to_string(),
+                        )
+                        .with_created_new(!hooks_existed)
+                        .with_agent(AgentKind::Codex),
+                )?;
+            } else {
+                println!("[setup] Codex hooks.PreToolUse 已含 sieve 条目（幂等，跳过）");
+            }
+
+            // ── ② config.toml：[features] hooks = true ──────────────────────
+            let (new_toml, config_existed, config_changed) =
+                self.ensure_features_hooks_enabled()?;
+            if config_changed {
+                if config_existed {
+                    self.backup_file(ctx, &self.config_toml_path)?;
+                }
+                fs::write(&self.config_toml_path, new_toml.as_bytes())
+                    .with_context(|| format!("写入 {} 失败", self.config_toml_path.display()))?;
+                ctx.written_files.push(self.config_toml_path.clone());
+                println!("[setup] ✅ Codex config.toml [features] hooks = true");
+                ctx.append_log_entry(
+                    &SetupLogEntry::new("config_modified")
+                        .with_path(self.config_toml_path.to_string_lossy().to_string())
+                        .with_detail("[features].hooks = true".to_string())
+                        .with_created_new(!config_existed)
+                        .with_agent(AgentKind::Codex),
+                )?;
+            } else {
+                println!("[setup] Codex config.toml [features] hooks 已为 true（幂等，跳过）");
+            }
+
+            // ── ③ setup_complete entry（供 uninstall 定位本次 backup_dir）─────
+            ctx.append_log_entry(
+                &SetupLogEntry::new("setup_complete")
+                    .with_detail(format!("backup_dir={}", ctx.backup_dir.display()))
+                    .with_agent(AgentKind::Codex),
+            )?;
+
+            // ── ④ trust onboarding 引导（诚实告知一次性授权步骤）───────────────
+            println!();
+            println!("[codex] ⚠ 还差一步：Codex 需要你信任这个新 hook（一次性）。");
+            println!("        1. 启动 codex");
+            println!("        2. 输入 `/hooks`");
+            println!(
+                "        3. 选中 sieve-hook 条目（command 含 `sieve-hook codex`）后按 `t` 授权"
+            );
+            println!("        之后 sieve 升级（原地替换同路径二进制）不会让你重新信任。");
+            Ok(())
+        }
+
+        fn doctor_check(&self) -> Result<DoctorReport> {
+            let mut checks: Vec<(String, bool)> = Vec::new();
+
+            // 1. hooks.json 含 sieve PreToolUse 条目
+            let hook_registered = self
+                .read_hooks_json()
+                .ok()
+                .and_then(|(root, _)| {
+                    root.pointer("/hooks/PreToolUse")
+                        .and_then(|a| a.as_array())
+                        .map(|groups| Self::pretooluse_has_sieve(groups))
+                })
+                .unwrap_or(false);
+            print_codex_check("hooks.PreToolUse 含 sieve-hook codex 条目", hook_registered);
+            checks.push(("hooks.PreToolUse 注册".to_string(), hook_registered));
+
+            // 2. config.toml [features] hooks = true
+            let features_on = self
+                .ensure_features_hooks_enabled()
+                .map(|(_, _, changed)| !changed) // !changed 表示已是 true
+                .unwrap_or(false);
+            print_codex_check("config.toml [features] hooks = true", features_on);
+            checks.push(("features.hooks 开关".to_string(), features_on));
+
+            // 3. sieve-hook 二进制就位（与 sieve 同目录）
+            let hook_bin_ok = std::env::current_exe()
+                .ok()
+                .and_then(|exe| exe.parent().map(|dir| dir.join("sieve-hook")))
+                .map(|hook| hook.is_file())
+                .unwrap_or(false);
+            print_codex_check("sieve-hook 二进制与 sieve 同目录存在", hook_bin_ok);
+            checks.push(("sieve-hook 二进制就位".to_string(), hook_bin_ok));
+
+            // 4. trust 状态无法可靠读取（trusted_hash 由 codex 内部算）→ 提示
+            println!(
+                "[doctor] ⚠ Codex trust：无法自动读取信任状态，\
+                 请确认已在 codex `/hooks` 中选中 sieve 条目按 `t` 信任"
+            );
+
+            let report = DoctorReport::from_checks(AgentKind::Codex, checks);
+            if report.all_passed {
+                Ok(report)
+            } else {
+                let failed: Vec<&str> = report
+                    .checks
+                    .iter()
+                    .filter_map(|(l, ok)| if *ok { None } else { Some(l.as_str()) })
+                    .collect();
+                Err(anyhow!(
+                    "Codex 配置不完整（{}）；请重新运行 sieve setup --agent codex",
+                    failed.join("、")
+                ))
+            }
+        }
+    }
+
+    /// Codex doctor 单项打印（与 doctor.rs 的 print_check 同风格）。
+    fn print_codex_check(label: &str, ok: bool) {
+        let icon = if ok { "✅" } else { "❌" };
+        println!("[doctor] {} Codex：{}", icon, label);
+    }
+
+    /// Codex adapter 的 detect + doctor_check 桥接函数（供 doctor.rs 复用）。
+    ///
+    /// 返回值：`None` = 未安装（跳过），`Some(Ok)` = 通过，`Some(Err)` = 失败。
+    pub fn run_codex_doctor_check(home_path: std::path::PathBuf) -> Option<anyhow::Result<()>> {
+        let adapter = CodexAdapter::new(home_path);
+        let detection = match adapter.detect() {
+            Ok(d) => d,
+            Err(e) => return Some(Err(e)),
+        };
+        if !detection.installed {
+            return None;
+        }
+        Some(adapter.doctor_check().map(|_| ()))
+    }
+
     // ──────────────────────────────── detect_all_agents ────────────────────
 
     /// 自动检测系统已安装的所有 agent（SPEC-004 §3）。
@@ -1323,6 +1780,7 @@ pub(crate) mod macos {
             )?),
             Box::new(OpenClawAdapter::new(home_path.to_path_buf())),
             Box::new(HermesAdapter::new(home_path.to_path_buf())),
+            Box::new(CodexAdapter::new(home_path.to_path_buf())),
         ];
         let mut detected = Vec::new();
         for adapter in all_adapters {
@@ -1517,6 +1975,7 @@ pub(crate) mod macos {
                     }
                     AgentKind::Openclaw => Box::new(OpenClawAdapter::new(home_path.clone())),
                     AgentKind::Hermes => Box::new(HermesAdapter::new(home_path.clone())),
+                    AgentKind::Codex => Box::new(CodexAdapter::new(home_path.clone())),
                 };
                 adapters.push(adapter);
             }
@@ -1611,6 +2070,7 @@ pub(crate) mod macos {
                 }
                 AgentKind::Openclaw => Box::new(OpenClawAdapter::new(home_path.clone())),
                 AgentKind::Hermes => Box::new(HermesAdapter::new(home_path.clone())),
+                AgentKind::Codex => Box::new(CodexAdapter::new(home_path.clone())),
             };
             println!("\n[sieve setup] 正在验证 {} 安装…", kind);
             match adapter.doctor_check() {
@@ -1753,6 +2213,19 @@ pub(crate) mod macos {
     }
 
     // ──────────────────────────────── 工具函数 ──────────────────────────────
+
+    /// 返回与当前 `sieve` 二进制同目录的 `sieve-hook` 绝对路径（如 `/usr/local/bin/sieve-hook`）。
+    ///
+    /// 把 hook 注册写成绝对路径而非裸名 `sieve-hook`，避免依赖 PATH——
+    /// install.sh 把 sieve + sieve-hook 装在同一目录（SPEC-003）。
+    /// `current_exe()` 失败时回退裸名 `"sieve-hook"`（依赖 PATH，向后兼容）。
+    pub(super) fn sieve_hook_bin_path() -> String {
+        std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(|dir| dir.join("sieve-hook")))
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "sieve-hook".to_string())
+    }
 
     /// 构建 launchd plist 内容（使用当前 sieve 二进制路径 + 绝对路径 --config）。
     ///
@@ -2042,6 +2515,187 @@ launchd_plist_path = "{launchd_plist}"
             }
 
             assert!(!new_file.exists(), "无备份的新建文件在 rollback 后应被删除");
+        }
+    }
+
+    // ── 内部测试：CodexAdapter hooks.json 合并 / 幂等 / config.toml 保留 ──────────
+    #[cfg(test)]
+    mod tests_codex {
+        use super::*;
+        use tempfile::tempdir;
+
+        /// 统计 hooks.PreToolUse 数组里命中 sieve-hook codex 命令的条目数。
+        fn count_sieve_entries(root: &Value) -> usize {
+            root.pointer("/hooks/PreToolUse")
+                .and_then(|a| a.as_array())
+                .map(|groups| {
+                    groups
+                        .iter()
+                        .filter(|group| {
+                            group
+                                .pointer("/hooks")
+                                .and_then(|h| h.as_array())
+                                .map(|cmds| {
+                                    cmds.iter().any(|c| {
+                                        c.pointer("/command")
+                                            .and_then(|s| s.as_str())
+                                            .map(|s| {
+                                                s.contains("sieve-hook") && s.contains("codex")
+                                            })
+                                            .unwrap_or(false)
+                                    })
+                                })
+                                .unwrap_or(false)
+                        })
+                        .count()
+                })
+                .unwrap_or(0)
+        }
+
+        // 测试 #1：合并保留第三方已有条目，且追加 sieve 自己的条目。
+        #[test]
+        fn merge_preserves_existing_third_party_entries() {
+            let dir = tempdir().unwrap();
+            let adapter = CodexAdapter::new(dir.path().to_path_buf());
+
+            // 模拟 Otty 等第三方已注册的 hooks.json（含 PreToolUse + 其他事件）。
+            let mut root = serde_json::json!({
+                "hooks": {
+                    "PreToolUse": [
+                        { "hooks": [ { "type": "command", "command": "otty-hook pre" } ] }
+                    ],
+                    "SessionStart": [
+                        { "hooks": [ { "type": "command", "command": "otty-hook session" } ] }
+                    ]
+                }
+            });
+
+            let changed = adapter.merge_into_hooks_json(&mut root);
+            assert!(changed, "首次合并应发生改动");
+
+            // sieve 条目追加成功（1 个）。
+            assert_eq!(count_sieve_entries(&root), 1, "应追加 1 个 sieve 条目");
+
+            // 第三方 PreToolUse 条目仍在（otty-hook pre）。
+            let pre = root
+                .pointer("/hooks/PreToolUse")
+                .unwrap()
+                .as_array()
+                .unwrap();
+            assert_eq!(pre.len(), 2, "PreToolUse 应有 2 条（otty + sieve）");
+            assert!(
+                pre.iter().any(|g| g
+                    .pointer("/hooks/0/command")
+                    .and_then(|c| c.as_str())
+                    .map(|s| s.contains("otty-hook"))
+                    .unwrap_or(false)),
+                "Otty PreToolUse 条目必须保留"
+            );
+
+            // 其他事件（SessionStart）完整保留。
+            assert!(
+                root.pointer("/hooks/SessionStart")
+                    .and_then(|a| a.as_array())
+                    .map(|a| a.len() == 1)
+                    .unwrap_or(false),
+                "SessionStart 等其他事件必须原样保留"
+            );
+
+            // sieve 条目的 timeout = 60。
+            let sieve_group = pre
+                .iter()
+                .find(|g| {
+                    g.pointer("/hooks/0/command")
+                        .and_then(|c| c.as_str())
+                        .map(|s| s.contains("sieve-hook"))
+                        .unwrap_or(false)
+                })
+                .unwrap();
+            assert_eq!(
+                sieve_group
+                    .pointer("/hooks/0/timeout")
+                    .and_then(|t| t.as_u64()),
+                Some(60),
+                "sieve 条目 timeout 必须为 60（> sieve-hook 内部 50s deadline）"
+            );
+        }
+
+        // 测试 #2：幂等——重复合并不产生重复条目。
+        #[test]
+        fn merge_is_idempotent_no_duplicate() {
+            let dir = tempdir().unwrap();
+            let adapter = CodexAdapter::new(dir.path().to_path_buf());
+
+            let mut root = serde_json::json!({});
+            let first = adapter.merge_into_hooks_json(&mut root);
+            assert!(first, "首次合并应改动");
+            assert_eq!(count_sieve_entries(&root), 1);
+
+            // 第二次合并：已存在 → 无改动，不重复追加。
+            let second = adapter.merge_into_hooks_json(&mut root);
+            assert!(!second, "第二次合并应判为幂等无改动");
+            assert_eq!(count_sieve_entries(&root), 1, "重复合并不得产生重复条目");
+
+            // 第三次依旧幂等。
+            let third = adapter.merge_into_hooks_json(&mut root);
+            assert!(!third);
+            assert_eq!(count_sieve_entries(&root), 1);
+        }
+
+        // 测试 #3：空骨架合并出正确 schema（hooks.PreToolUse 数组 + command + timeout）。
+        #[test]
+        fn merge_into_empty_creates_correct_schema() {
+            let dir = tempdir().unwrap();
+            let adapter = CodexAdapter::new(dir.path().to_path_buf());
+
+            let mut root = serde_json::json!({});
+            adapter.merge_into_hooks_json(&mut root);
+
+            let cmd = root
+                .pointer("/hooks/PreToolUse/0/hooks/0/command")
+                .and_then(|c| c.as_str())
+                .unwrap();
+            assert!(cmd.contains("sieve-hook"), "command 应含 sieve-hook：{cmd}");
+            assert!(cmd.ends_with(" codex"), "command 应以 ` codex` 结尾：{cmd}");
+            assert_eq!(
+                root.pointer("/hooks/PreToolUse/0/hooks/0/type")
+                    .and_then(|t| t.as_str()),
+                Some("command")
+            );
+        }
+
+        // 测试 #4：config.toml [features] hooks=true 保留其他键和注释。
+        #[test]
+        fn ensure_features_hooks_preserves_other_keys_and_comments() {
+            let dir = tempdir().unwrap();
+            let codex_dir = dir.path().join(".codex");
+            std::fs::create_dir_all(&codex_dir).unwrap();
+            let config_toml = codex_dir.join("config.toml");
+            // 用户已有内容：含注释 + 其他键 + 已有 [features] 表但无 hooks。
+            std::fs::write(
+                &config_toml,
+                "# user comment top\nmodel = \"o1\"\n\n[features]\n# nested comment\nweb_search = true\n",
+            )
+            .unwrap();
+
+            let adapter = CodexAdapter::new(dir.path().to_path_buf());
+            let (new_toml, existed, changed) = adapter.ensure_features_hooks_enabled().unwrap();
+            assert!(existed, "config.toml 已存在");
+            assert!(changed, "首次写入 hooks=true 应改动");
+
+            assert!(new_toml.contains("# user comment top"), "顶部注释必须保留");
+            assert!(new_toml.contains("model = \"o1\""), "其他键 model 必须保留");
+            assert!(new_toml.contains("# nested comment"), "表内注释必须保留");
+            assert!(
+                new_toml.contains("web_search = true"),
+                "其他 features 键必须保留"
+            );
+            assert!(new_toml.contains("hooks = true"), "必须写入 hooks = true");
+
+            // 幂等：把新内容写回后再调一次，应判为无改动。
+            std::fs::write(&config_toml, new_toml.as_bytes()).unwrap();
+            let (_, _, changed2) = adapter.ensure_features_hooks_enabled().unwrap();
+            assert!(!changed2, "hooks 已为 true 时应幂等无改动");
         }
     }
 }
