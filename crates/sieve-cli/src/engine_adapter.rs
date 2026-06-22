@@ -398,6 +398,15 @@ impl<E: MatchEngine + Send + Sync + 'static> OutboundEngine for OutboundAdapter<
                 }
             }
 
+            // OUT-12/13 Base58Check second-pass（ADR-042）：vectorscan 粗 pattern（前缀+字符集
+            // +长度）命中后，仅 Base58Check 校验和通过的候选才产 Detection；校验和失败者视为
+            // 误报丢弃。与 BIP39（OUT-09 second-pass）的 checksum 差异化打法同构（PRD §9 #4）。
+            if matches!(hit.rule_id.as_str(), "OUT-12" | "OUT-13")
+                && !sieve_rules::base58check::verify_base58check(matched_text)
+            {
+                continue;
+            }
+
             let severity = rule
                 .map(|r| map_severity(r.severity))
                 .unwrap_or(Severity::Critical);
@@ -604,6 +613,68 @@ mod tests {
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].span.start, 104); // 100 + 4
         assert_eq!(hits[0].span.end, 109); // 100 + 9
+    }
+
+    // ── ADR-042：OUT-12/13 Base58Check second-pass ────────────────────────────
+
+    /// OUT-12 WIF：合法 WIF（校验和通过）被检出并走 Redact；
+    /// pattern 命中但校验和错误的伪样本不产 Detection（差异化降 FP）。
+    #[test]
+    fn out12_wif_checksum_second_pass() {
+        let mut rule = make_rule(
+            "OUT-12",
+            r"[5KL][1-9A-HJ-NP-Za-km-z]{50,51}",
+            RulesSeverity::Critical,
+            RulesAction::Block,
+        );
+        rule.disposition = Some(sieve_rules::manifest::Disposition::AutoRedact);
+        let engine = VectorscanEngine::compile(vec![rule.clone()]).unwrap();
+        let adapter = OutboundAdapter::new(Arc::new(engine), vec![rule]);
+
+        // 合法 WIF（Bitcoin wiki 标准向量）→ 校验和通过 → Redact
+        let valid = "key: 5HueCGU8rMjxEXxiPuD5BDku4MkFqeZyd4dZ1jvhTVqvbTLvyTJ done";
+        let hits = adapter
+            .scan_text(valid, ContentSource::OutboundUserText, 0)
+            .unwrap();
+        assert_eq!(hits.len(), 1, "合法 WIF 应被检出");
+        assert_eq!(hits[0].rule_id, "OUT-12");
+        assert!(matches!(hits[0].action, Action::Redact { .. }));
+
+        // 伪 WIF：pattern 命中（5 开头 + Base58）但末字符篡改使校验和错误 → 不产 Detection
+        let fake = "key: 5HueCGU8rMjxEXxiPuD5BDku4MkFqeZyd4dZ1jvhTVqvbTLvyTK done";
+        let hits = adapter
+            .scan_text(fake, ContentSource::OutboundUserText, 0)
+            .unwrap();
+        assert!(hits.is_empty(), "校验和错误的伪 WIF 不应被检出（降 FP）");
+    }
+
+    /// OUT-13 xprv：合法 BIP-32 扩展私钥被检出并走 Redact；伪样本不产 Detection。
+    #[test]
+    fn out13_xprv_checksum_second_pass() {
+        let mut rule = make_rule(
+            "OUT-13",
+            r"(?:xprv|yprv|zprv|tprv)[1-9A-HJ-NP-Za-km-z]{107}",
+            RulesSeverity::Critical,
+            RulesAction::Block,
+        );
+        rule.disposition = Some(sieve_rules::manifest::Disposition::AutoRedact);
+        let engine = VectorscanEngine::compile(vec![rule.clone()]).unwrap();
+        let adapter = OutboundAdapter::new(Arc::new(engine), vec![rule]);
+
+        let valid = "seed xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD2nW2nRk4stbPy6cq3jPPqjiChkVvvNKmPGJxWUtg6LnF5kejMRNNU3TGtRBeJgk33yuGBxrMPHi end";
+        let hits = adapter
+            .scan_text(valid, ContentSource::OutboundUserText, 0)
+            .unwrap();
+        assert_eq!(hits.len(), 1, "合法 xprv 应被检出");
+        assert_eq!(hits[0].rule_id, "OUT-13");
+        assert!(matches!(hits[0].action, Action::Redact { .. }));
+
+        // 伪 xprv：末字符篡改破坏校验和 → 不产 Detection
+        let fake = "seed xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD2nW2nRk4stbPy6cq3jPPqjiChkVvvNKmPGJxWUtg6LnF5kejMRNNU3TGtRBeJgk33yuGBxrMPHa end";
+        let hits = adapter
+            .scan_text(fake, ContentSource::OutboundUserText, 0)
+            .unwrap();
+        assert!(hits.is_empty(), "校验和错误的伪 xprv 不应被检出");
     }
 
     // ── 修 #2 回归：disposition 优先于 enforce_action ──────────────────────────

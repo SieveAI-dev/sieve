@@ -9,7 +9,24 @@
 
 ---
 
-## [Unreleased] — 2026-05-07
+## [Unreleased] — 2026-06-22
+
+### Added — 出站 crypto key 格式扩展：Bitcoin WIF + BIP-32 扩展私钥（2026-06-22，ADR-042）
+
+- **新增 OUT-12（Bitcoin WIF）+ OUT-13（BIP-32 扩展私钥 xprv 家族）出站脱敏格式族**，二者均为 Base58Check 编码。沿用 BIP39（PRD §9 #4）的差异化打法：vectorscan 粗筛前缀/字符集/长度产候选，`engine_adapter` second-pass 做 **Base58Check 校验和验证**（尾 4 字节双 SHA-256），仅校验和通过的候选才动作——把误报压到约 1/2³²，词表/前缀命中但校验和错误的形似串放行。处置 `auto_redact`（自动改写 body + 状态栏通知，不弹窗）。
+- 新增 `sieve-rules::base58check::verify_base58check`（纯本地算术，无网络 IO）；具体格式定义随签名规则包分发。四路由（Anthropic/OpenAI × SSE/JSON）出站对等改写。详见 [ADR-042](../design/ADR-042-outbound-crypto-key-formats.md)。
+
+### Added — Canary 诱饵文件防御（2026-06-22，ADR-041）
+
+- **新增 IN-CR-CANARY 诱饵触发线**：`sieve setup` 在敏感凭据/钱包目录（`~/.ssh` / `~/.aws` / `~/.ethereum/keystore` / `~/.config/solana` 等已存在者）布放字典序最先的「警告型」诱饵文件（内容为注入告警明文 + 唯一 magic 标识，**非假密钥**）。工具调用读到诱饵（`check_tool_use` 扫 `tool.input`）即命中 → Critical 阻断 + 人工确认；正常工作流极少主动遍历这些目录，命中即强提示注入信号。`sieve doctor` 新增诱饵自检（本地引擎 scan，不发网络）；`sieve uninstall` 按 setup.log 回滚。详见 [ADR-041](../design/ADR-041-canary-decoy-files.md)。
+
+### Added — 红队 bypass 测试集（检测规则族验收门 + 持续回归）（2026-06-22，ADR-043）
+
+- **新增常态化红队 bypass 测试集**（`verifier/redteam.sh` + `sieve verify redteam` CLI + `tests/redteam_{inbound,outbound}.rs` + dogfood.sh 红队门）：把已知 bypass 手法固化为可执行回归基线。覆盖入站地址替换（IN-CR-01）× 四路由（M-1~M-4）、危险 shell（变量间接 / 子 shell / eval+base64）、出站密钥真伪（BIP39/WIF/xprv 真校验和拦、假放行）。红队集只驱动样本 + 断言期望处置，不新增检测规则；签名规则包缺失时优雅 SKIP（不误红）。是 ADR-025 四路由不变量在对抗样本下的延伸守护。详见 [ADR-043](../design/ADR-043-redteam-bypass-suite.md)。
+
+### Added — 不可变守护配置回归基线（2026-06-22，ADR-045）
+
+- **新增 ADR-045 集中回归测试**（`sieve-policy/tests/adr_045_immutable_guardian.rs`）：把「守护配置对 agent 不可变」锁成一处不变量基线——配置层 `deny_unknown_fields` / `check_safety_invariants`、求值层 fail-closed 强制 Block（与 `dry_run` 正交）、用户规则 lint（A-1/A-4/A-5/A-6 拒绝提权 / 影射系统 Critical / allowlist 豁免 / 入站改写）、文件层 no-follow symlink、合并层用户规则永不 fail-closed。追认既有分散防御为整体架构承诺（ADR-007 姊妹篇），补端到端回归免疫。详见 [ADR-045](../design/ADR-045-immutable-guardian-config.md)。
 
 ### Security — IN-CR-01 地址替换在两条 JSON 路由 by-construction 不设防（v1.5.4 同型 P0，2026-06-20，ADR-025 / PRD §9 #16）
 

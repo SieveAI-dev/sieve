@@ -106,6 +106,18 @@ fi
 section "5. FP/recall 数据集门 (§9 #7) — 已移私有规则 crate"
 ok "公开仓无规则数据，FP/recall 门在私有规则 crate 运行（见上方注释）"
 
+# ── 6. 红队 bypass 门（ADR-043）────────────────────────────────────────────────
+# 已知攻击手法的回归基线（非完备性证明）：入站地址替换 / 危险 shell × 四路由，
+# 出站 BIP39 / WIF / xprv 脱敏。红队集只驱动样本 + 断言期望处置，不新增检测规则；
+# 规则包缺失时测试优雅 SKIP（公开仓无签名规则包），不误红。衔接第 5 节 FP/recall 门：
+# 第 5 节守统计性 FP/recall 阈值（私有 crate），本节守离散 bypass 形态回归（公开仓）。
+section "6. 红队 bypass 门 (ADR-043)"
+if cargo test -p sieve-cli --test redteam_inbound --test redteam_outbound --locked; then
+  ok "红队 bypass 回归基线通过（规则缺失时优雅 SKIP，不误红）"
+else
+  fail "红队 bypass 回归基线失败"
+fi
+
 # ── 总结 ──────────────────────────────────────────────────────────────────────
 section "总结"
 if [[ "$FAILED" -eq 0 ]]; then

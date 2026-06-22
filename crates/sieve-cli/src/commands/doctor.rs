@@ -145,6 +145,64 @@ mod macos {
         PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".sieve")
     }
 
+    /// 按 4 级优先级解析**入站**规则路径（ADR-041 canary 自检用）。
+    ///
+    /// 与 [`resolve_rules_path`]（出站）对称，但解析 `inbound_rules_path` 字段
+    /// 与 `rules/inbound.toml` 文件：
+    /// 1. `SIEVE_INBOUND_RULES_PATH` env var（显式覆盖，dev/CI 用）
+    /// 2. `$SIEVE_HOME/sieve.toml`（或 `~/.sieve/sieve.toml`）的 `inbound_rules_path` 字段
+    /// 3. `$SIEVE_HOME/rules/inbound.toml`
+    /// 4. `$HOME/.sieve/rules/inbound.toml`（最终 fallback）
+    ///
+    /// # Errors
+    ///
+    /// 所有候选路径均未找到有效文件时返回 `Err`（canary 自检据此优雅降级，不 fail）。
+    fn resolve_inbound_rules_path() -> Result<PathBuf> {
+        if let Ok(val) = std::env::var("SIEVE_INBOUND_RULES_PATH") {
+            if !val.is_empty() {
+                return Ok(PathBuf::from(val));
+            }
+        }
+
+        let sieve_home = resolve_sieve_home();
+        let toml_path = sieve_home.join("sieve.toml");
+        if toml_path.exists() {
+            if let Ok(raw) = std::fs::read_to_string(&toml_path) {
+                if let Ok(table) = raw.parse::<toml::Table>() {
+                    if let Some(toml::Value::String(p)) = table.get("inbound_rules_path") {
+                        if !p.is_empty() {
+                            return Ok(PathBuf::from(p));
+                        }
+                    }
+                }
+            }
+        }
+
+        let sieve_home_rules = sieve_home.join("rules").join("inbound.toml");
+        let home_rules = PathBuf::from(std::env::var("HOME").unwrap_or_default())
+            .join(".sieve")
+            .join("rules")
+            .join("inbound.toml");
+
+        if sieve_home_rules.exists() {
+            return Ok(sieve_home_rules);
+        }
+        if home_rules.exists() {
+            return Ok(home_rules);
+        }
+
+        Err(anyhow::anyhow!(
+            "入站规则文件未找到（canary 自检需要）；候选：\n\
+             1. SIEVE_INBOUND_RULES_PATH（未设置或为空）\n\
+             2. {toml} 的 inbound_rules_path 字段\n\
+             3. {sieve_home_rules}\n\
+             4. {home_rules}",
+            toml = toml_path.display(),
+            sieve_home_rules = sieve_home_rules.display(),
+            home_rules = home_rules.display(),
+        ))
+    }
+
     /// 运行 `sieve doctor`。关联 ADR-015 / SPEC-003 §doctor / SPEC-004 §6 / R10-#5。
     ///
     /// - `args.agent` 指定时只检查该 agent
@@ -225,6 +283,12 @@ mod macos {
                 }
             }
         }
+
+        // ── canary 诱饵自检（ADR-041 步骤 5；与具体 agent 无关，只跑一次）
+        //
+        // 优雅降级：诱饵缺失 / 规则包未安装均只打印诊断，**不**翻转 all_passed。
+        // 诱饵是纵深防御补充，不是主防线；规则包随更新通道分发，本地可能尚未安装。
+        report_canary_selfcheck(&home);
 
         if all_passed {
             Ok(())
@@ -533,6 +597,107 @@ mod macos {
         };
 
         hits.iter().any(|h| h.rule_id == "OUT-01")
+    }
+
+    /// Canary 诱饵自检（ADR-041 步骤 5）。
+    ///
+    /// 两部分，**全部本地完成、不发任何网络请求**（沿用检查 5 的「本地 scan canary
+    /// token」范式）：
+    ///
+    /// 1. **布放体检**：诱饵文件是否在当前已存在的凭据 / 钱包目录里（复用 setup 的
+    ///    [`canary_deploy_status`](crate::commands::setup::macos::canary_deploy_status)）。
+    /// 2. **规则命中体检**：直接调本地 sieve-rules 引擎对固定 magic 串
+    ///    [`CANARY_MAGIC`](crate::commands::setup::macos::CANARY_MAGIC) 做**入站**扫描，
+    ///    断言命中 `IN-CR-CANARY`。
+    ///
+    /// **优雅降级**：诱饵缺失（用户删了 / 没跑 setup）或规则包未安装（签名规则包随
+    /// 更新通道分发，本地可能尚未到位）均只打印诊断，**不让 doctor fail**——诱饵是
+    /// 纵深防御补充，主防线（危险工具 gate）不依赖它。
+    fn report_canary_selfcheck(home: &std::path::Path) {
+        use crate::commands::setup::macos::{canary_deploy_status, CANARY_MAGIC};
+
+        println!();
+        println!("=== canary 诱饵自检（ADR-041）===");
+
+        // ── ① 布放体检 ──────────────────────────────────────────────────────
+        let (existing_dirs, deployed, missing) = canary_deploy_status(home);
+        if existing_dirs == 0 {
+            println!(
+                "  ⚠ 未发现凭据 / 钱包目录（~/.ssh、~/.aws、~/.ethereum/keystore、\
+                 ~/.config/solana 均不存在）——无处布放，跳过布放体检"
+            );
+        } else if missing == 0 {
+            println!("  ✅ 诱饵已布放：{deployed}/{existing_dirs} 个已存在的敏感目录均就位");
+        } else {
+            println!(
+                "  ⚠ 诱饵部分缺失：{deployed}/{existing_dirs} 已布放，{missing} 个目录缺诱饵\
+                 （运行 `sieve setup` 补齐；删除诱饵不影响其他检测）"
+            );
+        }
+
+        // ── ② 规则命中体检（本地 inbound 引擎 scan magic 串，不发网络）─────────
+        match check_canary_rule_hits() {
+            CanaryRuleCheck::Hit => {
+                println!("  ✅ 本地入站规则引擎命中 IN-CR-CANARY（magic「{CANARY_MAGIC}」）");
+            }
+            CanaryRuleCheck::RulesAbsent(why) => {
+                println!(
+                    "  ⚠ 入站规则包未安装，跳过 IN-CR-CANARY 命中体检（优雅降级，不计失败）：{why}"
+                );
+            }
+            CanaryRuleCheck::NoHit => {
+                println!(
+                    "  ⚠ 入站规则已加载但未命中 IN-CR-CANARY——规则包可能不含 canary 规则\
+                     或版本过旧（优雅降级，不计失败）"
+                );
+            }
+        }
+    }
+
+    /// canary 规则命中体检的三态结果。
+    enum CanaryRuleCheck {
+        /// 命中 IN-CR-CANARY。
+        Hit,
+        /// 规则文件 / 引擎不可用（规则包未安装等）——优雅降级。
+        RulesAbsent(String),
+        /// 规则已加载但未命中 IN-CR-CANARY——优雅降级。
+        NoHit,
+    }
+
+    /// 直接调本地 sieve-rules 入站引擎对 magic 串 scan，判定是否命中 IN-CR-CANARY。
+    ///
+    /// 不发任何网络请求（ADR-041 §硬约束「绝不联网做 verifier」）。规则路径经
+    /// [`resolve_inbound_rules_path`] 4 级解析；任一环节不可用返回 `RulesAbsent`。
+    fn check_canary_rule_hits() -> CanaryRuleCheck {
+        use crate::commands::setup::macos::CANARY_MAGIC;
+        use sieve_rules::engine::{MatchEngine as _, VectorscanEngine};
+        use sieve_rules::loader::load_inbound_rules;
+
+        let rules_path = match resolve_inbound_rules_path() {
+            Ok(p) => p,
+            Err(e) => return CanaryRuleCheck::RulesAbsent(e.to_string()),
+        };
+
+        let rules = match load_inbound_rules(&rules_path) {
+            Ok(r) => r,
+            Err(e) => {
+                return CanaryRuleCheck::RulesAbsent(format!(
+                    "加载 {} 失败：{e}",
+                    rules_path.display()
+                ))
+            }
+        };
+
+        let engine = match VectorscanEngine::compile(rules) {
+            Ok(e) => e,
+            Err(e) => return CanaryRuleCheck::RulesAbsent(format!("规则编译失败：{e}")),
+        };
+
+        match engine.scan(CANARY_MAGIC.as_bytes()) {
+            Ok(hits) if hits.iter().any(|h| h.rule_id == "IN-CR-CANARY") => CanaryRuleCheck::Hit,
+            Ok(_) => CanaryRuleCheck::NoHit,
+            Err(e) => CanaryRuleCheck::RulesAbsent(format!("scan 失败：{e}")),
+        }
     }
 }
 

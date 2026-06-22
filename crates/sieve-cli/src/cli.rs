@@ -88,6 +88,32 @@ pub enum Command {
     ///
     /// 读 `~/.sieve/usage.db`（严格本地、永不上传），列出独立核算结果与 relay 偏差。
     Usage(UsageArgs),
+
+    /// 红队 bypass 测试集 headless 驱动（ADR-043）。
+    ///
+    /// 驱动已知攻击手法的回归基线测试（地址替换 / 危险 shell / 出站密钥脱敏），
+    /// 按类别汇总通过/失败，退出码供 CI 判定。全程 hermetic（无 GUI、无网络）。
+    /// 规则包缺失时优雅 SKIP，退出码仍为 0。**红队集是回归基线，非完备性证明。**
+    Verify(VerifyArgs),
+}
+
+/// `sieve verify` 参数（ADR-043）。
+#[derive(clap::Args, Debug)]
+pub struct VerifyArgs {
+    /// 子命令。
+    #[command(subcommand)]
+    pub command: VerifyCommand,
+}
+
+/// `sieve verify` 子命令枚举。
+#[derive(Debug, Subcommand)]
+pub enum VerifyCommand {
+    /// 跑红队 bypass 回归基线（入站四路由 + 出站密钥脱敏）。
+    Redteam {
+        /// 用 `cargo nextest run` 代替 `cargo test`（CI 默认走 nextest profile）。
+        #[arg(long)]
+        nextest: bool,
+    },
 }
 
 /// `sieve usage` 参数（ADR-038 / SPEC-010）。

@@ -9,6 +9,7 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 #![warn(missing_docs)]
 
+pub mod base58check;
 pub mod bip39;
 pub mod critical_lock;
 pub mod ed25519;

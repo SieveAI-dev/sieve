@@ -20,3 +20,4 @@ pub mod rules;
 pub mod setup;
 pub mod uninstall;
 pub mod usage;
+pub mod verify;

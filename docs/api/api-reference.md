@@ -737,11 +737,11 @@ sieve setup
 
 | Disposition | 适用规则 | 出站/入站 | 代理 HTTP 行为 | 备注 |
 |-------------|---------|---------|----------------|------|
-| **AutoRedact** | OUT-01~05/12 | 出站 | `200 OK` + 改写后的请求 body 转发上游；上游响应**直通**，**不返 426** | 自动脱敏，不打断用户流程（PRD §9 第 13 条） |
+| **AutoRedact** | OUT-01~05/12/13 | 出站 | `200 OK` + 改写后的请求 body 转发上游；上游响应**直通**，**不返 426** | 自动脱敏，不打断用户流程（PRD §9 第 13 条）；OUT-12/13（WIF/xprv）经 Base58Check second-pass 校验和验证后脱敏 |
 | **AutoRedact** | OUT-06/08 | 出站 | 同上 | ETH/Solana entropy 边界模糊，脱敏继续 |
 | **GuiPopup**（出站） | OUT-07/09/10 | 出站 | hold 请求；GUI 弹窗；用户允许 → `200 OK` + 原文/脱敏后转发；用户拒绝 → `426 Upgrade Required` + `sieve_blocked` JSON | 高确定性助记词/私钥，Sieve 差异化点 |
 | **HookTerminal** | IN-CR-02/03/04，IN-GEN-01~03 | 入站 | `200 OK`（SSE **原样透传**）+ 写 `~/.sieve/pending/<id>.json`；HTTP 层无变化 | sieve-hook 在 PreToolUse 阶段拦截，Claude Code 自行报告拒绝 |
-| **GuiPopup**（入站） | IN-CR-01/05，IN-GEN-04 | 入站 | `200 OK`（SSE hold）+ 每 25s `: keep-alive\n\n` comment；用户允许 → 继续流；用户拒绝/超时 → 注入 `sieve_blocked` event + EOF | 代理 hold 住 SSE 流等 GUI 决策（最长 120s） |
+| **GuiPopup**（入站） | IN-CR-01/05/CANARY，IN-GEN-04 | 入站 | `200 OK`（SSE hold）+ 每 25s `: keep-alive\n\n` comment；用户允许 → 继续流；用户拒绝/超时 → 注入 `sieve_blocked` event + EOF | 代理 hold 住 SSE 流等 GUI 决策（最长 120s）；IN-CR-CANARY = 诱饵文件被读触发（ADR-041） |
 | **StatusBar** | OUT-11，IN-GEN-05 | 出/入站 | 透传（`200 OK`，不修改流）+ IPC `sieve.event_notify` 菜单栏通知 | 不打断用户，低优先级通知 |
 
 **说明**：

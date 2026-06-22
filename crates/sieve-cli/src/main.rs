@@ -8,6 +8,7 @@
 //! - `sieve uninstall [--agent <name>] [--all] [--dry-run] [--yes]`：回滚 setup 改动（仅 macOS）
 //! - `sieve decisions watch|show|resolve`：headless decision CLI（ADR-028 TODO-4）
 //! - `sieve audit tail|query|show`：unix-pipeable 审计日志查询（ADR-028 TODO-5）
+//! - `sieve verify redteam`：红队 bypass 回归基线 headless 驱动（ADR-043）
 
 // unsafe_code 在生产代码中禁止（等效 forbid），测试代码通过 #[allow(unsafe_code)] 豁免
 // 以支持 Rust 1.80+ 的 std::env::set_var 必须用 unsafe {} 的要求。
@@ -231,6 +232,13 @@ async fn main() -> Result<()> {
         }
         Command::Usage(args) => {
             commands::usage::run(args).await?;
+        }
+        Command::Verify(args) => {
+            // ADR-043：红队 bypass 失败时返回非零 exit code，CI 据此判定。
+            if let Err(e) = commands::verify::run(args) {
+                eprintln!("sieve verify: {e}");
+                std::process::exit(1);
+            }
         }
     }
 
