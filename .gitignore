@@ -160,6 +160,9 @@ node_modules/
 .npm/
 .pnpm-debug.log
 
+# 浏览器自动化工具产物（playwright MCP 会话快照 / 日志，反复重生）
+.playwright-mcp/
+
 # Python（如未来加 benchmark / 数据处理脚本）
 __pycache__/
 *.py[cod]
