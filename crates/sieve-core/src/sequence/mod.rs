@@ -14,7 +14,7 @@ pub mod detector;
 pub mod feature;
 
 pub use detector::{detect_kill_chains, SequenceHit};
-pub use feature::{extract_record, PathCategory, ToolClass};
+pub use feature::{extract_record, PathCategory, SecretConfidence, ToolClass};
 
 /// 滑动窗口配置。
 #[derive(Debug, Clone)]
@@ -37,7 +37,7 @@ impl Default for SequenceConfig {
 /// 单次工具调用的结构化特征（PRD §5.7.1）。
 ///
 /// 不存原始 input：用预定义枚举 + 布尔特征替代，便于隐私 + ML 升级路径。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ToolUseRecord {
     /// Unix epoch 毫秒时间戳；调用方赋值，`record()` 在值为 0 时自动填充。
     pub timestamp_ms: u64,
@@ -55,6 +55,20 @@ pub struct ToolUseRecord {
     pub cleanup_mech: bool,
     /// input 中是否含敏感文件 hint（.env / id_rsa 等）。
     pub sensitive_file_hint: bool,
+    /// secret 识别置信度（None/Heuristic/ChecksumConfirmed），见 [`SecretConfidence`]。
+    pub secret_confidence: SecretConfidence,
+    /// 是否含打包动作（tar / zip / 7z 等）——exfil 前中转压缩。
+    pub archive_mech: bool,
+    /// 是否含编码 / 加密动作（base64 / openssl enc / gpg 等）——绕 DLP 的 exfil 前兆。
+    pub encode_mech: bool,
+    /// 是否含剪贴板写入动作（pbcopy / xclip 等）——secret 脱离流量视野的隐蔽通道。
+    pub clipboard_mech: bool,
+    /// 是否写入 / 发布到公共产物路径（dist/build/ 或 npm publish 等）。
+    pub public_artifact_target: bool,
+    /// 是否接触生产数据库 / 凭据（psql / pg_dump / DATABASE_URL 等）。
+    pub prod_data_hint: bool,
+    /// 来源 actor（source_channel / agent id），用于跨 agent 链判定；调用方填。
+    pub actor: Option<String>,
     /// 此次单次检测命中的规则 ID（可能为空）。用于序列规则跨触发关联。
     pub rule_hits: Vec<String>,
 }
@@ -147,6 +161,13 @@ mod tests {
             persistence_mech: false,
             cleanup_mech: false,
             sensitive_file_hint: false,
+            secret_confidence: SecretConfidence::None,
+            archive_mech: false,
+            encode_mech: false,
+            clipboard_mech: false,
+            public_artifact_target: false,
+            prod_data_hint: false,
+            actor: None,
             rule_hits: vec![],
         }
     }

@@ -1,12 +1,19 @@
 //! 行为序列 kill chain 检测（PRD v2.0 §5.7.2）。
 //!
-//! 3 条规则全部 severity = High，**仅 StatusBar 通知**（PRD §9 #15 不引入 Block 路径）：
+//! 8 条规则全部 severity = High，**仅 StatusBar 通知**（PRD §9 #15 不引入 Block 路径）：
 //!
 //! - IN-SEQ-01-RECON-EXFIL: FileRead+SensitiveSecret 之后 network_egress
 //! - IN-SEQ-02-CLEANUP-AFTER-ATTACK: Shell+network_egress 之后 cleanup_mech
 //! - IN-SEQ-03-PERSISTENCE-CHAIN: 3 次 persistence_mech=true 跨不同 tool_name 调用
+//! - IN-SEQ-04-ARCHIVE-EXFIL: secret 之后打包再外发（ChecksumConfirmed 高置信短路跳过打包步）
+//! - IN-SEQ-05-ENCODE-EXFIL: secret 之后编码/加密再外发或入剪贴板（双条件防 FP）
+//! - IN-SEQ-06-CROSS-AGENT-SECRET: 读 secret 者 actor 与外发者 actor 不同（跨 agent 拆分）
+//! - IN-SEQ-07-CLIPBOARD-SECRET: secret 之后写入剪贴板
+//! - IN-SEQ-08-PUBLIC-ARTIFACT: secret 之后写入/发布到公共产物路径
+//!
+//! 升级为 Block 路径需满足 ADR-022 三条件（4 周 ≥50 样本 + FP<0.5% + 新 ADR）。
 
-use super::feature::{PathCategory, ToolClass};
+use super::feature::{PathCategory, SecretConfidence, ToolClass};
 use super::{ToolUseRecord, ToolUseSequence};
 
 /// 序列检测命中（PRD §5.7.2）。
@@ -36,6 +43,21 @@ pub fn detect_kill_chains(seq: &ToolUseSequence) -> Vec<SequenceHit> {
         hits.push(h);
     }
     if let Some(h) = detect_persistence_chain(&records) {
+        hits.push(h);
+    }
+    if let Some(h) = detect_archive_exfil(&records) {
+        hits.push(h);
+    }
+    if let Some(h) = detect_encode_exfil(&records) {
+        hits.push(h);
+    }
+    if let Some(h) = detect_cross_agent_secret(&records) {
+        hits.push(h);
+    }
+    if let Some(h) = detect_clipboard_secret(&records) {
+        hits.push(h);
+    }
+    if let Some(h) = detect_public_artifact_flow(&records) {
         hits.push(h);
     }
 
@@ -112,10 +134,160 @@ fn detect_persistence_chain(records: &[&ToolUseRecord]) -> Option<SequenceHit> {
     })
 }
 
+/// IN-SEQ-04: secret_confidence≥Heuristic 之后打包（archive_mech）再外发（network_egress）。
+///
+/// `ChecksumConfirmed` 高置信 secret 短路：跳过中间打包步，secret 之后直接外发即触发。
+/// 意图：捕获「读敏感凭证 → 打包中转 → 上传」链（中间打包步会打断 IN-SEQ-01 的直接关联）。
+/// 打包与外发可落在同一 record（如 `tar czf - … | curl`）。
+fn detect_archive_exfil(records: &[&ToolUseRecord]) -> Option<SequenceHit> {
+    // 高置信短路：ChecksumConfirmed secret 之后出现 network_egress（打包步可缺省）
+    if let Some(secret_idx) = records
+        .iter()
+        .position(|r| r.secret_confidence == SecretConfidence::ChecksumConfirmed)
+    {
+        if let Some(exfil_idx) = records
+            .iter()
+            .enumerate()
+            .skip(secret_idx + 1)
+            .find(|(_, r)| r.network_egress)
+            .map(|(i, _)| i)
+        {
+            return Some(SequenceHit {
+                rule_id: "IN-SEQ-04-ARCHIVE-EXFIL".into(),
+                description: "读高置信 secret 后外发（kill chain，checksum 已确认）".into(),
+                triggering_indices: vec![secret_idx, exfil_idx],
+            });
+        }
+    }
+    // Heuristic 完整链：secret → archive_mech → network_egress
+    let secret_idx = records
+        .iter()
+        .position(|r| r.secret_confidence >= SecretConfidence::Heuristic)?;
+    let archive_idx = records
+        .iter()
+        .enumerate()
+        .skip(secret_idx + 1)
+        .find(|(_, r)| r.archive_mech)
+        .map(|(i, _)| i)?;
+    let exfil_idx = records
+        .iter()
+        .enumerate()
+        .skip(archive_idx) // 含 archive record 自身（打包与外发同步）
+        .find(|(_, r)| r.network_egress)
+        .map(|(i, _)| i)?;
+    let mut indices = vec![secret_idx, archive_idx, exfil_idx];
+    indices.dedup();
+    Some(SequenceHit {
+        rule_id: "IN-SEQ-04-ARCHIVE-EXFIL".into(),
+        description: "读 secret 后打包外发（kill chain）".into(),
+        triggering_indices: indices,
+    })
+}
+
+/// IN-SEQ-05: secret_confidence≥Heuristic 之后编码/加密（encode_mech）再外发或入剪贴板。
+///
+/// 双条件（secret + encode）防误报：单独编码（base64 等日常操作）不触发。
+/// 编码与外发可落在同一 record（如 `base64 .env | curl --data-binary @- …`）。
+fn detect_encode_exfil(records: &[&ToolUseRecord]) -> Option<SequenceHit> {
+    let secret_idx = records
+        .iter()
+        .position(|r| r.secret_confidence >= SecretConfidence::Heuristic)?;
+    let encode_idx = records
+        .iter()
+        .enumerate()
+        .skip(secret_idx + 1)
+        .find(|(_, r)| r.encode_mech)
+        .map(|(i, _)| i)?;
+    let exfil_idx = records
+        .iter()
+        .enumerate()
+        .skip(encode_idx) // 含 encode record 自身（编码与外发同步）
+        .find(|(_, r)| r.network_egress || r.clipboard_mech)
+        .map(|(i, _)| i)?;
+    let mut indices = vec![secret_idx, encode_idx, exfil_idx];
+    indices.dedup();
+    Some(SequenceHit {
+        rule_id: "IN-SEQ-05-ENCODE-EXFIL".into(),
+        description: "读 secret 后编码/加密再外发（kill chain）".into(),
+        triggering_indices: indices,
+    })
+}
+
+/// IN-SEQ-06: 读 secret 的 record（actor=A）之后，外发 record（actor=B）且 B≠A。
+///
+/// 跨 agent 拆分外泄：单 agent 视角各步合法。actor 缺失时保守不触发（防单 agent 误报）。
+fn detect_cross_agent_secret(records: &[&ToolUseRecord]) -> Option<SequenceHit> {
+    for (secret_idx, sr) in records.iter().enumerate() {
+        if sr.secret_confidence < SecretConfidence::Heuristic {
+            continue;
+        }
+        let actor_a = match &sr.actor {
+            Some(a) => a,
+            None => continue,
+        };
+        if let Some((exfil_idx, _)) = records
+            .iter()
+            .enumerate()
+            .skip(secret_idx + 1)
+            .find(|(_, r)| r.network_egress && matches!(&r.actor, Some(b) if b != actor_a))
+        {
+            return Some(SequenceHit {
+                rule_id: "IN-SEQ-06-CROSS-AGENT-SECRET".into(),
+                description: "跨 agent 拆分外泄（读 secret 者 ≠ 外发者，kill chain）".into(),
+                triggering_indices: vec![secret_idx, exfil_idx],
+            });
+        }
+    }
+    None
+}
+
+/// IN-SEQ-07: secret_confidence≥Heuristic 之后写入剪贴板（clipboard_mech）。
+///
+/// secret 进剪贴板后脱离流量视野，是隐蔽外泄通道（只能告警进入剪贴板，无法跟踪后续）。
+/// secret 与 clipboard 可落在同一 record（如 `pbcopy < mnemonic.txt`）。
+fn detect_clipboard_secret(records: &[&ToolUseRecord]) -> Option<SequenceHit> {
+    let secret_idx = records
+        .iter()
+        .position(|r| r.secret_confidence >= SecretConfidence::Heuristic)?;
+    let clip_idx = records
+        .iter()
+        .enumerate()
+        .skip(secret_idx) // 含 secret record 自身（读取与复制同步）
+        .find(|(_, r)| r.clipboard_mech)
+        .map(|(i, _)| i)?;
+    let mut indices = vec![secret_idx, clip_idx];
+    indices.dedup();
+    Some(SequenceHit {
+        rule_id: "IN-SEQ-07-CLIPBOARD-SECRET".into(),
+        description: "读 secret 后写入剪贴板（kill chain）".into(),
+        triggering_indices: indices,
+    })
+}
+
+/// IN-SEQ-08: secret_confidence≥Heuristic 之后写入/发布到公共产物路径（public_artifact_target）。
+///
+/// secret 被写进会公开发布的 build 产物或直接发布（npm publish / gh release 等）。
+fn detect_public_artifact_flow(records: &[&ToolUseRecord]) -> Option<SequenceHit> {
+    let secret_idx = records
+        .iter()
+        .position(|r| r.secret_confidence >= SecretConfidence::Heuristic)?;
+    let artifact_idx = records
+        .iter()
+        .enumerate()
+        .skip(secret_idx + 1)
+        .find(|(_, r)| r.public_artifact_target)
+        .map(|(i, _)| i)?;
+    Some(SequenceHit {
+        rule_id: "IN-SEQ-08-PUBLIC-ARTIFACT".into(),
+        description: "读 secret 后写入/发布公共产物（kill chain）".into(),
+        triggering_indices: vec![secret_idx, artifact_idx],
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sequence::feature::{PathCategory, ToolClass};
+    use crate::sequence::feature::{PathCategory, SecretConfidence, ToolClass};
     use crate::sequence::{ToolUseRecord, ToolUseSequence};
 
     fn make_record(
@@ -134,8 +306,7 @@ mod tests {
             network_egress,
             persistence_mech,
             cleanup_mech,
-            sensitive_file_hint: false,
-            rule_hits: vec![],
+            ..Default::default()
         }
     }
 
@@ -325,5 +496,244 @@ mod tests {
         assert!(hits
             .iter()
             .any(|h| h.rule_id == "IN-SEQ-02-CLEANUP-AFTER-ATTACK"));
+    }
+
+    // ---- IN-SEQ-04~08 出站 exfil 链家族 ----
+
+    #[test]
+    fn in_seq_04_archive_exfil_positive() {
+        // Read(secret Heuristic) → tar(archive) → curl(network)
+        let mut seq = ToolUseSequence::default();
+        seq.record(ToolUseRecord {
+            timestamp_ms: 1_000,
+            tool_class: ToolClass::FileRead,
+            path_category: Some(PathCategory::SensitiveSecret),
+            secret_confidence: SecretConfidence::Heuristic,
+            ..Default::default()
+        });
+        seq.record(ToolUseRecord {
+            timestamp_ms: 2_000,
+            tool_class: ToolClass::Shell,
+            archive_mech: true,
+            ..Default::default()
+        });
+        seq.record(ToolUseRecord {
+            timestamp_ms: 3_000,
+            tool_class: ToolClass::Shell,
+            network_egress: true,
+            ..Default::default()
+        });
+        let hits = detect_kill_chains(&seq);
+        assert!(
+            hits.iter().any(|h| h.rule_id == "IN-SEQ-04-ARCHIVE-EXFIL"),
+            "secret→archive→network should trigger IN-SEQ-04"
+        );
+    }
+
+    #[test]
+    fn in_seq_04_checksum_shortcut_no_archive() {
+        // ChecksumConfirmed secret → curl（无 archive 中间步）→ 高置信短路触发
+        let mut seq = ToolUseSequence::default();
+        seq.record(ToolUseRecord {
+            timestamp_ms: 1_000,
+            tool_class: ToolClass::FileRead,
+            secret_confidence: SecretConfidence::ChecksumConfirmed,
+            ..Default::default()
+        });
+        seq.record(ToolUseRecord {
+            timestamp_ms: 2_000,
+            tool_class: ToolClass::Shell,
+            network_egress: true,
+            ..Default::default()
+        });
+        let hits = detect_kill_chains(&seq);
+        assert!(
+            hits.iter().any(|h| h.rule_id == "IN-SEQ-04-ARCHIVE-EXFIL"),
+            "ChecksumConfirmed secret→network should short-circuit IN-SEQ-04"
+        );
+    }
+
+    #[test]
+    fn in_seq_04_no_secret_no_hit() {
+        // tar + curl 但无 secret 上下文 → 不触发（防 FP）
+        let mut seq = ToolUseSequence::default();
+        seq.record(ToolUseRecord {
+            timestamp_ms: 1_000,
+            tool_class: ToolClass::Shell,
+            archive_mech: true,
+            ..Default::default()
+        });
+        seq.record(ToolUseRecord {
+            timestamp_ms: 2_000,
+            tool_class: ToolClass::Shell,
+            network_egress: true,
+            ..Default::default()
+        });
+        let hits = detect_kill_chains(&seq);
+        assert!(
+            !hits.iter().any(|h| h.rule_id == "IN-SEQ-04-ARCHIVE-EXFIL"),
+            "no secret context should not trigger IN-SEQ-04"
+        );
+    }
+
+    #[test]
+    fn in_seq_05_encode_exfil_combined_record() {
+        // Read(secret) → base64|curl（encode + network 同一 record）
+        let mut seq = ToolUseSequence::default();
+        seq.record(ToolUseRecord {
+            timestamp_ms: 1_000,
+            tool_class: ToolClass::FileRead,
+            secret_confidence: SecretConfidence::Heuristic,
+            ..Default::default()
+        });
+        seq.record(ToolUseRecord {
+            timestamp_ms: 2_000,
+            tool_class: ToolClass::Shell,
+            encode_mech: true,
+            network_egress: true,
+            ..Default::default()
+        });
+        let hits = detect_kill_chains(&seq);
+        assert!(
+            hits.iter().any(|h| h.rule_id == "IN-SEQ-05-ENCODE-EXFIL"),
+            "secret→(encode+network) should trigger IN-SEQ-05"
+        );
+    }
+
+    #[test]
+    fn in_seq_05_encode_alone_no_hit() {
+        // 单独 base64（无 secret）→ 不触发（双条件防 FP）
+        let mut seq = ToolUseSequence::default();
+        seq.record(ToolUseRecord {
+            timestamp_ms: 1_000,
+            tool_class: ToolClass::Shell,
+            encode_mech: true,
+            network_egress: true,
+            ..Default::default()
+        });
+        let hits = detect_kill_chains(&seq);
+        assert!(
+            !hits.iter().any(|h| h.rule_id == "IN-SEQ-05-ENCODE-EXFIL"),
+            "encode without secret should not trigger IN-SEQ-05"
+        );
+    }
+
+    #[test]
+    fn in_seq_06_cross_agent_positive() {
+        // actor=A 读 secret → actor=B 外发 → 触发
+        let mut seq = ToolUseSequence::default();
+        seq.record(ToolUseRecord {
+            timestamp_ms: 1_000,
+            tool_class: ToolClass::FileRead,
+            secret_confidence: SecretConfidence::Heuristic,
+            actor: Some("agent-a".to_string()),
+            ..Default::default()
+        });
+        seq.record(ToolUseRecord {
+            timestamp_ms: 2_000,
+            tool_class: ToolClass::Shell,
+            network_egress: true,
+            actor: Some("agent-b".to_string()),
+            ..Default::default()
+        });
+        let hits = detect_kill_chains(&seq);
+        assert!(
+            hits.iter().any(|h| h.rule_id == "IN-SEQ-06-CROSS-AGENT-SECRET"),
+            "A reads secret, B exfils → IN-SEQ-06"
+        );
+    }
+
+    #[test]
+    fn in_seq_06_actor_missing_no_hit() {
+        // actor 缺失 → 保守不触发
+        let mut seq = ToolUseSequence::default();
+        seq.record(ToolUseRecord {
+            timestamp_ms: 1_000,
+            tool_class: ToolClass::FileRead,
+            secret_confidence: SecretConfidence::Heuristic,
+            ..Default::default()
+        });
+        seq.record(ToolUseRecord {
+            timestamp_ms: 2_000,
+            tool_class: ToolClass::Shell,
+            network_egress: true,
+            ..Default::default()
+        });
+        let hits = detect_kill_chains(&seq);
+        assert!(
+            !hits.iter().any(|h| h.rule_id == "IN-SEQ-06-CROSS-AGENT-SECRET"),
+            "missing actor should not trigger IN-SEQ-06"
+        );
+    }
+
+    #[test]
+    fn in_seq_06_same_actor_no_hit() {
+        // 同 actor → 不触发（非跨 agent）
+        let mut seq = ToolUseSequence::default();
+        seq.record(ToolUseRecord {
+            timestamp_ms: 1_000,
+            tool_class: ToolClass::FileRead,
+            secret_confidence: SecretConfidence::Heuristic,
+            actor: Some("agent-a".to_string()),
+            ..Default::default()
+        });
+        seq.record(ToolUseRecord {
+            timestamp_ms: 2_000,
+            tool_class: ToolClass::Shell,
+            network_egress: true,
+            actor: Some("agent-a".to_string()),
+            ..Default::default()
+        });
+        let hits = detect_kill_chains(&seq);
+        assert!(
+            !hits.iter().any(|h| h.rule_id == "IN-SEQ-06-CROSS-AGENT-SECRET"),
+            "same actor should not trigger IN-SEQ-06"
+        );
+    }
+
+    #[test]
+    fn in_seq_07_clipboard_positive() {
+        // Read(secret) → pbcopy
+        let mut seq = ToolUseSequence::default();
+        seq.record(ToolUseRecord {
+            timestamp_ms: 1_000,
+            tool_class: ToolClass::FileRead,
+            secret_confidence: SecretConfidence::Heuristic,
+            ..Default::default()
+        });
+        seq.record(ToolUseRecord {
+            timestamp_ms: 2_000,
+            tool_class: ToolClass::Shell,
+            clipboard_mech: true,
+            ..Default::default()
+        });
+        let hits = detect_kill_chains(&seq);
+        assert!(
+            hits.iter().any(|h| h.rule_id == "IN-SEQ-07-CLIPBOARD-SECRET"),
+            "secret→clipboard should trigger IN-SEQ-07"
+        );
+    }
+
+    #[test]
+    fn in_seq_08_public_artifact_positive() {
+        // Read(secret) → Write(dist/ public artifact)
+        let mut seq = ToolUseSequence::default();
+        seq.record(ToolUseRecord {
+            timestamp_ms: 1_000,
+            tool_class: ToolClass::FileRead,
+            secret_confidence: SecretConfidence::Heuristic,
+            ..Default::default()
+        });
+        seq.record(ToolUseRecord {
+            timestamp_ms: 2_000,
+            tool_class: ToolClass::FileWrite,
+            public_artifact_target: true,
+            ..Default::default()
+        });
+        let hits = detect_kill_chains(&seq);
+        assert!(
+            hits.iter().any(|h| h.rule_id == "IN-SEQ-08-PUBLIC-ARTIFACT"),
+            "secret→public artifact should trigger IN-SEQ-08"
+        );
     }
 }

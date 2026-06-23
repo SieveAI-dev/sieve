@@ -32,6 +32,17 @@
   - **config 向后兼容**：`[billing_check]` / `[audit]` 配置段在任何特性组合下均可正常反序列化（结构体始终编译，仅功能代码受特性门控），新增永久回归测试守护。
 - **`sieve verify redteam` 子命令移出主二进制**：红队 bypass 回归是开发 / CI 工具，不再占用终端用户的 `sieve` 命令树。`verifier/redteam.sh` 改为直接 `cargo test -p sieve-cli --test redteam_inbound --test redteam_outbound`（红队测试本体与四路由覆盖不变）。
 - 默认构建（`cargo build -p sieve-cli`）不再编入 `tiktoken-rs` / `age`，二进制更精简；默认 + 全特性 `clippy -D warnings` 均干净。
+### Added — 出站 exfil 链检测家族：IN-SEQ-04~08（2026-06-23，ADR-046）
+
+- **行为序列检测从 3 条固定 kill chain 扩展为出站 exfil 链家族**，新增 5 条链型（默认随 `sequence_detection` feature 关闭，全 severity=High / 仅 StatusBar 通知 / 不引入新 Block 路径，完全继承 ADR-022 保守起步约束）：
+  - `IN-SEQ-04-ARCHIVE-EXFIL`：读 secret → 打包（tar/zip/gzip 等）→ 外发；高置信 secret（checksum 确认）跳过打包中间步直接触发
+  - `IN-SEQ-05-ENCODE-EXFIL`：读 secret → 编码/加密（base64/openssl/gpg 等）→ 外发或入剪贴板（双条件防 FP，单独编码不触发）
+  - `IN-SEQ-06-CROSS-AGENT-SECRET`：读 secret 者与外发者非同一 actor（跨 agent 拆分）
+  - `IN-SEQ-07-CLIPBOARD-SECRET`：读 secret → 写入剪贴板（pbcopy/xclip 等）
+  - `IN-SEQ-08-PUBLIC-ARTIFACT`：读 secret → 写入/发布公共产物（`dist/`/`build/` 路径或 npm publish / gh release upload 等）
+- 复用 ADR-022 既有滑动窗口与会话隔离，`ToolUseRecord` 新增 `SecretConfidence`（None/Heuristic/ChecksumConfirmed 三级，命中 OUT-* 脱敏规则即升维高置信）+ archive/encode/clipboard/public_artifact/prod_data 特征布尔 + actor。命中走 IPC StatusBar 通知 + audit `kind: sequence_hit` 写入；具体触发关键词随签名规则包分发。
+- **四路由对等（ADR-025 / PRD §9 #16）**：IN-SEQ-04/05/07/08 各在 Anthropic SSE/JSON + OpenAI SSE/JSON 四路由有 e2e 攻击序列测试（`crates/sieve-cli/tests/sequence_window_e2e.rs`，feature 启用时真机 daemon 验证）。
+- **已知限制**：`IN-SEQ-06`（跨 agent）受序列窗口每请求作用域所限——窗口随请求重置、单响应内 actor 恒定，故 live 代理路径暂不可关联触发；链逻辑已实现并由 `sequence/detector.rs` 单测守护，待窗口跨请求/会话持久化（另立 ADR）后启用。详见 [ADR-046](../design/ADR-046-stateful-exfil-chain-detection.md)。
 
 ### Added — 出站 crypto key 格式扩展：Bitcoin WIF + BIP-32 扩展私钥（2026-06-22，ADR-042）
 
