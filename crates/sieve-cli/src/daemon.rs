@@ -1951,22 +1951,19 @@ async fn proxy_inner(
     //
     // 即便请求带 X-Sieve-Provider header（已在前面 routing 选择 forwarder），listener
     // 协议依然是硬约束——header routing 不能 override（PRD §9 #3 fail-closed 一致性）。
-    if path == "/v1/messages" && ctx.listener_protocol == crate::config::Protocol::Openai {
+    // A3：用 endpoint 路由解析器（仅按 path 取标准路径的隐含 provider，listener_protocol=Auto）
+    // 判错位——path 隐含协议与 listener 显式声明冲突即 fail-closed 400（行为同旧硬编码）。
+    let path_intrinsic = resolve_endpoint_route(&path, crate::config::Protocol::Auto);
+    if matches!(
+        (path_intrinsic, ctx.listener_protocol),
+        (Some(EndpointRoute::Anthropic), crate::config::Protocol::Openai)
+            | (Some(EndpointRoute::OpenAi), crate::config::Protocol::Anthropic)
+    ) {
         tracing::warn!(
             path = %path,
             listener_protocol = ?ctx.listener_protocol,
             provider_id = %ctx.listener_provider_id,
-            "ADR-026 protocol mismatch: openai listener received anthropic /v1/messages, rejecting"
-        );
-        return Ok(build_protocol_mismatch_400(&path, ctx.listener_protocol));
-    }
-    if path == "/v1/chat/completions" && ctx.listener_protocol == crate::config::Protocol::Anthropic
-    {
-        tracing::warn!(
-            path = %path,
-            listener_protocol = ?ctx.listener_protocol,
-            provider_id = %ctx.listener_provider_id,
-            "ADR-026 protocol mismatch: anthropic listener received openai /v1/chat/completions, rejecting"
+            "ADR-026 protocol mismatch: path 隐含协议与 listener 声明冲突, rejecting"
         );
         return Ok(build_protocol_mismatch_400(&path, ctx.listener_protocol));
     }
@@ -2007,8 +2004,13 @@ async fn proxy_inner(
     //
     // 关联：sieve_core::skill_install_guard、PRD v1.5 §4.6、ADR-016。
 
-    let is_messages_post = method == http::Method::POST && path == "/v1/messages";
-    let is_chat_completions_post = method == http::Method::POST && path == "/v1/chat/completions";
+    // A3：用 endpoint 路由解析器（含 listener protocol，支持「异路径中转站」）确定出站分派；
+    // 标准路径按 path、非标准路径按 listener 显式声明的 protocol（配置驱动，零代码改动）。
+    let endpoint_route = resolve_endpoint_route(&path, ctx.listener_protocol);
+    let is_messages_post =
+        method == http::Method::POST && endpoint_route == Some(EndpointRoute::Anthropic);
+    let is_chat_completions_post =
+        method == http::Method::POST && endpoint_route == Some(EndpointRoute::OpenAi);
     let is_skill_post = method == http::Method::POST
         && sieve_core::skill_install_guard::is_skill_install_path(&path);
 
@@ -4851,6 +4853,36 @@ fn build_500_internal_response(reason: &str) -> Response<ResponseBody> {
         .unwrap_or_else(|_| Response::new(empty_body()))
 }
 
+/// A3 Endpoint 路由：把请求 path 解析为出站 provider 路由（决定 codec 选择 + 出站扫描分派）。
+///
+/// 替换散落在 proxy_inner 里的 `path == "/v1/messages"` 硬编码。规则：
+/// 1. 已知标准路径优先：`/v1/messages` → Anthropic，`/v1/chat/completions` → OpenAi
+///    （向后兼容 + `Auto` listener 自适应）。
+/// 2. 非标准路径 → 按 listener 显式声明的 `protocol` 路由：这让「接 OpenAI 兼容但路径不同
+///    的中转站」只需把该 listener 的 `protocol` 配成 `openai`（**配置驱动，零代码改动**）。
+/// 3. 非标准路径 + 未声明协议（`Auto`）→ `None`：不识别为 LLM endpoint，保持流式透传（无 DoS）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EndpointRoute {
+    Anthropic,
+    OpenAi,
+}
+
+fn resolve_endpoint_route(
+    path: &str,
+    listener_protocol: crate::config::Protocol,
+) -> Option<EndpointRoute> {
+    use crate::config::Protocol;
+    match path {
+        "/v1/messages" => Some(EndpointRoute::Anthropic),
+        "/v1/chat/completions" => Some(EndpointRoute::OpenAi),
+        _ => match listener_protocol {
+            Protocol::Anthropic => Some(EndpointRoute::Anthropic),
+            Protocol::Openai => Some(EndpointRoute::OpenAi),
+            Protocol::Auto => None,
+        },
+    }
+}
+
 fn build_protocol_mismatch_400(
     path: &str,
     listener_protocol: crate::config::Protocol,
@@ -5071,6 +5103,37 @@ mod tests {
         assert!(!is_json_media_type("application/jsonl"));
         assert!(!is_json_media_type("application/json-seq"));
         assert!(!is_json_media_type(""));
+    }
+
+    /// A3：endpoint 路由解析——标准路径优先 + 非标准路径按 listener protocol（异路径中转站）。
+    #[test]
+    fn resolve_endpoint_route_standard_and_custom_paths() {
+        use crate::config::Protocol;
+        // 标准路径：path 优先，与 listener protocol 无关。
+        assert_eq!(
+            resolve_endpoint_route("/v1/messages", Protocol::Auto),
+            Some(EndpointRoute::Anthropic)
+        );
+        assert_eq!(
+            resolve_endpoint_route("/v1/chat/completions", Protocol::Auto),
+            Some(EndpointRoute::OpenAi)
+        );
+        assert_eq!(
+            resolve_endpoint_route("/v1/messages", Protocol::Openai),
+            Some(EndpointRoute::Anthropic)
+        );
+        // 非标准路径（异路径中转站）：按 listener 显式声明的 protocol 路由——配置驱动、零代码改动。
+        assert_eq!(
+            resolve_endpoint_route("/v1/custom/chat", Protocol::Openai),
+            Some(EndpointRoute::OpenAi)
+        );
+        assert_eq!(
+            resolve_endpoint_route("/relay/anthropic", Protocol::Anthropic),
+            Some(EndpointRoute::Anthropic)
+        );
+        // 非标准路径 + 未声明协议（Auto）→ None（不识别为 LLM endpoint，流式透传）。
+        assert_eq!(resolve_endpoint_route("/v1/custom/chat", Protocol::Auto), None);
+        assert_eq!(resolve_endpoint_route("/health", Protocol::Auto), None);
     }
 
     /// 构造最小化的 HookMark Detection，用于测试 write_hook_pending_to。
