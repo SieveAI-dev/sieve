@@ -30,6 +30,15 @@ sequence_detection = ["sieve-core/sequence_detection"]
 # 占位（TRUSTED_PUBKEY=None / SIEVE_ORIGIN_PUBLIC_KEY 全零）则编译失败。
 # alpha build（default）不启用，行为不变。
 ga_keys = ["sieve-updater/ga_keys", "sieve-ipc/ga_keys"]
+# 本地用量/计费核算（可选特性，默认关）：`sieve usage` 子命令 + daemon 端
+# 独立 token 核算 / relay 偏差观测。仅本地，永不上传。关闭时整条 billing 路径
+# 与 tiktoken-rs 依赖一并从构建中擦除。
+usage = ["dep:tiktoken-rs"]
+# 加密审计档案（可选特性，默认关）：`sieve audit keygen/rotate-key/decrypt`
+# 子命令 + daemon 端 full 档加密归档写入（age + 哈希链）。关闭时这些 CLI 子命令
+# 与 age/sha2/base64 依赖一并擦除；audit.level=full 优雅降级为 metadata 档。
+# tail/query/show 三个纯 SQLite 查询子命令不受影响，始终可用。
+audit-crypto = ["dep:age", "dep:sha2", "dep:base64"]
 
 [dependencies]
 sieve-core = { path = "../sieve-core" }
@@ -65,10 +74,12 @@ serde_yaml = "0.9"
 lru = "0.16"
 regex = "1"
 arc-swap = { workspace = true }
-tiktoken-rs = { version = "0.12", default-features = false }
-age = "0.11"
-sha2 = "0.10"
-base64 = "0.22"
+# 用量/计费核算专用，挂到 `usage` feature（默认不编译）。
+tiktoken-rs = { version = "0.12", default-features = false, optional = true }
+# 加密审计档案专用，挂到 `audit-crypto` feature（默认不编译）。
+age = { version = "0.11", optional = true }
+sha2 = { version = "0.10", optional = true }
+base64 = { version = "0.22", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = "0.2"

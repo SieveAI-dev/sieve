@@ -334,11 +334,15 @@ async fn run_async(args: AuditArgs) -> Result<()> {
             .await
         }
         AuditCommand::Show { id } => run_show(id).await,
-        // ADR-037 full 档密钥生命周期 —— 委托 audit_keys（写+加密路径，与本只读模块分离）。
+        // full 档密钥生命周期（加密审计档案，可选特性）—— 委托 audit_keys
+        //（写+加密路径，与本只读模块分离）。
+        #[cfg(feature = "audit-crypto")]
         AuditCommand::Keygen { out, force } => {
             crate::commands::audit_keys::keygen(out, force, false)
         }
+        #[cfg(feature = "audit-crypto")]
         AuditCommand::RotateKey { out } => crate::commands::audit_keys::keygen(out, false, true),
+        #[cfg(feature = "audit-crypto")]
         AuditCommand::Decrypt { identity, segment } => {
             crate::commands::audit_keys::decrypt(identity, segment)
         }

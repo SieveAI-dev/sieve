@@ -1048,6 +1048,11 @@ daemon 在无 client 接 IPC 时的兜底策略：
 
 Unix-pipeable 审计日志查询 CLI——直接读 `~/.sieve/audit.db`（不通过 IPC），输出 jsonl 方便接管道工具。详见 [ADR-028](../design/ADR-028-ipc-protocol-neutralization.md)。
 
+> **可选特性边界**：`audit tail` / `audit query` / `audit show`（只读查询）**始终可用**，无需任何 feature。
+> 加密档案密钥生命周期子命令（`audit keygen` / `audit rotate-key` / `audit decrypt`，见下文）属**可选特性 `audit-crypto`**，
+> 默认二进制不含；需以 `--features audit-crypto` 编译才会出现（依赖 `age` / `sha2` / `base64` 仅启用时编译）。
+> 未编入时，配置 `[audit].level = "full"` 优雅降级为 `metadata` 档。
+
 #### `sieve audit tail`
 
 ```
@@ -1087,8 +1092,9 @@ sieve audit show <event-id>
 - `unknown`：兜底值（v2 老记录 migration 默认值 / 测试 fixture）
 - 普通字符串：来自 `sieve.toml [[upstream]] provider_id` 字段
 
-#### 加密审计日志密钥生命周期（ADR-037，2026-06-19 新增）
+#### 加密审计日志密钥生命周期（可选特性 `audit-crypto`，2026-06-19 新增）
 
+> **可选特性子命令**：以下三个子命令属可选特性 `audit-crypto`，默认二进制**不含**，需 `--features audit-crypto` 编译才可用（依赖 `age` / `sha2` / `base64` 仅启用时编译）。
 > 配套 `full` 档加密归档（§3.3.3 `[audit]` 段）。这三个子命令是 `full` 档的密钥生命周期工具——daemon 端只持公钥（write-only logging），解密 / 审计须用持口令的私钥（identity），**应在另一台 / 离线机器执行**。详见 [ADR-037](../design/ADR-037-encrypted-audit-log.md)。
 
 ##### `sieve audit keygen`
@@ -1119,9 +1125,10 @@ sieve audit decrypt --identity <file> [--out <path>]
 
 ---
 
-### 6.4c sieve usage CLI（ADR-038，2026-06-19 新增）
+### 6.4c sieve usage CLI（可选特性 `usage`，2026-06-19 新增）
 
-> 配套超额计费检测（§3.3.4 `[billing_check]` 段）。只读查询本地 `~/.sieve/usage.db`（独立于 `audit.db`，0600，append-only），输出 jsonl 方便接管道工具。**统计严格本地、永不上传**（ADR-038 决策 4 隐私红线，无任何出站上报路径）。详见 [ADR-038](../design/ADR-038-overbilling-detection.md)。
+> **可选特性子命令**：`sieve usage` 属可选特性 `usage`，默认二进制**不含**，需 `--features usage` 编译才可用（依赖 `tiktoken-rs` 仅启用时编译）。
+> 只读查询本地 `~/.sieve/usage.db`（独立于 `audit.db`，0600，append-only），输出 jsonl 方便接管道工具。**统计严格本地、永不上传**，无任何出站上报路径。
 
 #### `sieve usage query`
 

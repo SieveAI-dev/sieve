@@ -84,39 +84,15 @@ pub enum Command {
     /// 直接读 `~/.sieve/audit.db` SQLite，输出 jsonl 格式方便接 jq / fluentd。
     Audit(AuditArgs),
 
-    /// 本地 token 用量与超额计费检测查询（ADR-038）。
+    /// 本地 token 用量与超额计费检测查询（本地用量/计费核算，可选特性）。
     ///
     /// 读 `~/.sieve/usage.db`（严格本地、永不上传），列出独立核算结果与 relay 偏差。
+    #[cfg(feature = "usage")]
     Usage(UsageArgs),
-
-    /// 红队 bypass 测试集 headless 驱动（ADR-043）。
-    ///
-    /// 驱动已知攻击手法的回归基线测试（地址替换 / 危险 shell / 出站密钥脱敏），
-    /// 按类别汇总通过/失败，退出码供 CI 判定。全程 hermetic（无 GUI、无网络）。
-    /// 规则包缺失时优雅 SKIP，退出码仍为 0。**红队集是回归基线，非完备性证明。**
-    Verify(VerifyArgs),
 }
 
-/// `sieve verify` 参数（ADR-043）。
-#[derive(clap::Args, Debug)]
-pub struct VerifyArgs {
-    /// 子命令。
-    #[command(subcommand)]
-    pub command: VerifyCommand,
-}
-
-/// `sieve verify` 子命令枚举。
-#[derive(Debug, Subcommand)]
-pub enum VerifyCommand {
-    /// 跑红队 bypass 回归基线（入站四路由 + 出站密钥脱敏）。
-    Redteam {
-        /// 用 `cargo nextest run` 代替 `cargo test`（CI 默认走 nextest profile）。
-        #[arg(long)]
-        nextest: bool,
-    },
-}
-
-/// `sieve usage` 参数（ADR-038 / SPEC-010）。
+/// `sieve usage` 参数（本地用量/计费核算，可选特性）。
+#[cfg(feature = "usage")]
 #[derive(clap::Args, Debug)]
 pub struct UsageArgs {
     /// 子命令；省略时等价 `list`。
@@ -125,6 +101,7 @@ pub struct UsageArgs {
 }
 
 /// `sieve usage` 子命令。
+#[cfg(feature = "usage")]
 #[derive(Debug, Subcommand)]
 pub enum UsageCommand {
     /// 列出最近的用量记录（默认 20 条）。
@@ -399,12 +376,13 @@ pub enum AuditCommand {
         id: i64,
     },
 
-    /// 生成 full 档加密审计的 age 密钥对（ADR-037 决策 5）。
+    /// 生成 full 档加密审计的 age 密钥对（加密审计档案，可选特性）。
     ///
     /// 公钥（recipient）打印到 stdout，由用户粘贴进 `config.toml [audit].recipient`；
     /// 口令保护后的私钥写 0600 文件，**用户须移出本机**（密码管理器/离线介质）。
     /// 口令经环境变量 `SIEVE_AUDIT_PASSPHRASE` 提供（不回显）。
     /// **口令丢失 = 归档永久不可读（by design）。**
+    #[cfg(feature = "audit-crypto")]
     Keygen {
         /// 口令保护的私钥输出路径（默认 `~/.sieve/audit-identity.age`）。
         #[arg(long)]
@@ -416,6 +394,7 @@ pub enum AuditCommand {
     },
 
     /// 轮换 full 档密钥对（生成新对；**旧归档段仍需对应的旧私钥解密**）。
+    #[cfg(feature = "audit-crypto")]
     RotateKey {
         /// 新私钥输出路径（默认 `~/.sieve/audit-identity-rotated.age`）。
         #[arg(long)]
@@ -425,6 +404,7 @@ pub enum AuditCommand {
     /// 解密并校验 full 档归档段（审计用，**应在离线/另一台机器执行**）。
     ///
     /// 用口令（`SIEVE_AUDIT_PASSPHRASE`）解锁私钥，逐条校验哈希链 + 解密，输出脱敏后内容。
+    #[cfg(feature = "audit-crypto")]
     Decrypt {
         /// 口令保护的私钥文件路径（keygen 产出）。
         #[arg(long)]
