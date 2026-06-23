@@ -9,7 +9,12 @@
 
 ---
 
-## [Unreleased] — 2026-06-22
+## [Unreleased] — 2026-06-23
+
+### Added — content-type 四路由覆盖 CI 门禁 + 路由判定加固（2026-06-23，ADR-025）
+
+- **新增 `scripts/check_routing_coverage.sh` + CI job `check-routing-matrix`**：永久化 v1.5.4 P0 教训（ADR-025）——机械守护「入站检测必须覆盖 M-1~M-4 全部 content-type 路由」。源码侧静态校验四条路由 handler 都接入站检测钩子（两条非流式 JSON handler 必调 `on_tool_use_complete` + `scan_assistant_text`，共享 SSE 分类器 `classify_inbound_detections` 调 `observe_event` + `on_tool_use_complete`），叠加四路由端到端测试锚点检查。任一路由摘除钩子或测试缺失即 CI 失败、PR 阻断。比扫测试体 rule_id 更稳健：直击「JSON handler 漏挂入站钩子」的 bug 形状，且对历史 per-rule 测试欠债不误报。
+- **入站响应 transport 路由判定加固**：`Content-Type` 判定由裸 `starts_with("application/json")` 改为稳健 media-type 匹配 `is_json_media_type`——大小写不敏感（RFC 9110 §8.3.1）、容忍 `; charset=…` 参数与前导空格、精确匹配 media-type token（不再把 `application/jsonl` 误判为 JSON）。修掉非规范大小写 `Application/JSON` 被误当作 SSE、从而绕过 JSON 路径入站检测的边角风险。四路由集成测试（content_type_matrix / inbound_block / redteam_inbound）行为不变。
 
 ### Added — 出站 crypto key 格式扩展：Bitcoin WIF + BIP-32 扩展私钥（2026-06-22，ADR-042）
 

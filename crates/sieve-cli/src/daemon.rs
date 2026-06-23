@@ -3310,7 +3310,7 @@ async fn forward_with_inbound_inspection(
         .headers
         .get(http::header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
-        .map(|ct| ct.starts_with("application/json"))
+        .map(is_json_media_type)
         .unwrap_or(false);
 
     if is_json_response {
@@ -3772,7 +3772,7 @@ async fn forward_with_openai_inbound_inspection(
         .headers
         .get(http::header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
-        .map(|ct| ct.starts_with("application/json"))
+        .map(is_json_media_type)
         .unwrap_or(false);
 
     if is_json_response {
@@ -5187,6 +5187,20 @@ fn build_cap_detection(rule_id: &str, fingerprint_key: &str) -> sieve_core::Dete
     }
 }
 
+/// 判定上游响应的 `Content-Type` 是否为 JSON（非流式），用于入站检测的 transport 路由。
+///
+/// 比裸 `starts_with("application/json")` 更稳健（守护 ADR-025 四路由不变量）：媒体类型按
+/// RFC 9110 §8.3.1 大小写不敏感，容忍前导空格与 `; charset=…` 参数，且精确匹配 media-type
+/// token（不会把 `application/jsonl` / `application/json-seq` 误判为 JSON）。非规范大小写的
+/// `Application/JSON` 不再被误当作 SSE 而绕过 JSON 路径入站检测。
+fn is_json_media_type(content_type: &str) -> bool {
+    content_type
+        .split(';')
+        .next()
+        .map(str::trim)
+        .is_some_and(|mt| mt.eq_ignore_ascii_case("application/json"))
+}
+
 /// 把脱敏后的文本段列表写回 [`AnthropicRequest`] 并返回新 request。
 ///
 /// `original_texts` 是 `extract_text_content()` 返回的原始段列表；
@@ -5410,6 +5424,26 @@ mod tests {
     use sieve_core::detection::{Action, ContentSource, Detection, Severity};
     use sieve_core::protocol::unified_message::ContentSpan;
     use uuid::Uuid;
+
+    /// A0.1：content-type 路由判定的稳健性（守护 ADR-025 四路由不变量）。
+    #[test]
+    fn is_json_media_type_matches_canonical_and_variants() {
+        // 命中 JSON（非流式）→ 走 handle_*_json_inbound
+        assert!(is_json_media_type("application/json"));
+        assert!(is_json_media_type("application/json; charset=utf-8"));
+        assert!(is_json_media_type("application/json;charset=utf-8"));
+        // 大小写不敏感：旧 starts_with 会把 Application/JSON 误判为 SSE 而绕过 JSON 入站检测
+        assert!(is_json_media_type("Application/JSON"));
+        assert!(is_json_media_type("APPLICATION/JSON; CHARSET=UTF-8"));
+        assert!(is_json_media_type("  application/json  "));
+        // 不命中 JSON → 走 SSE 路径
+        assert!(!is_json_media_type("text/event-stream"));
+        assert!(!is_json_media_type("text/event-stream; charset=utf-8"));
+        // 精确 media-type token：不被 starts_with 误匹配
+        assert!(!is_json_media_type("application/jsonl"));
+        assert!(!is_json_media_type("application/json-seq"));
+        assert!(!is_json_media_type(""));
+    }
 
     /// 构造最小化的 HookMark Detection，用于测试 write_hook_pending_to。
     fn make_hook_detection() -> Detection {
