@@ -35,6 +35,7 @@ use sieve_core::pipeline::inbound::{InboundEngine, InboundFilter};
 use sieve_core::pipeline::outbound::OutboundFilter;
 use sieve_core::pipeline::outbound_redact::{redact_segments, RedactHit};
 use sieve_core::pipeline::streaming::StreamingPipelineNode as _;
+use sieve_core::protocol::ProviderCodec as _;
 use sieve_core::sse::parser::SseParser;
 use sieve_core::tool_use_aggregator::Aggregator;
 use sieve_core::Forwarder;
@@ -2245,18 +2246,17 @@ async fn proxy_inner(
             return Ok(build_500_internal_response("messages body not collected"));
         };
 
-        // 2. 解析 AnthropicRequest；解析失败则直接透传（上游会返回 400）
-        let anthropic_req: sieve_core::protocol::anthropic::AnthropicRequest =
-            match serde_json::from_slice(&body_bytes) {
-                Ok(r) => r,
-                Err(e) => {
-                    tracing::debug!("non-anthropic body, passing through: {e}");
-                    return forward_raw(forwarder, parts, body_bytes).await;
-                }
-            };
+        // 2. 经 AnthropicCodec 解码请求（A1 ProviderCodec）；解析失败则直接透传（上游返回 400）
+        let decoded = match sieve_core::protocol::AnthropicCodec.decode_request(&body_bytes) {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::debug!("non-anthropic body, passing through: {e}");
+                return forward_raw(forwarder, parts, body_bytes).await;
+            }
+        };
 
         // 3. 提取文本段 → 逐段扫描
-        let texts = anthropic_req.extract_text_content();
+        let texts = decoded.extract_text_content();
 
         // ADR-038：构造超额计费观测上下文（仅 Relay 上游 + billing 启用时为 Some）。
         // 输入 token 在请求侧用文本段独立估算（纯本地计数，不落盘原文、不外泄）。
@@ -2264,7 +2264,7 @@ async fn proxy_inner(
             &billing,
             listener_trust,
             &ctx.listener_provider_id,
-            &anthropic_req.model,
+            decoded.model(),
             billing_facade::Family::Anthropic,
             &texts,
         );
@@ -2659,12 +2659,8 @@ async fn proxy_inner(
                 });
             }
 
-            // 把替换后文本写回 AnthropicRequest，然后重新序列化
-            let new_body_bytes =
-                apply_redacted_texts_to_request(&anthropic_req, &texts, &seg_result.texts)
-                    .and_then(|req| {
-                        serde_json::to_vec(&req).map_err(|e| anyhow!("re-serialize json: {e}"))
-                    })?;
+            // 经 codec 把脱敏后文本写回并重序列化（A1 ProviderCodec）
+            let new_body_bytes = decoded.apply_redacted_texts(&texts, &seg_result.texts)?;
 
             // 验证脱敏后 JSON 仍然合法（关键回归断言）
             if serde_json::from_slice::<serde_json::Value>(&new_body_bytes).is_err() {
@@ -2846,25 +2842,24 @@ async fn proxy_openai(
     };
     use std::time::SystemTime;
 
-    // 1. 解析 OpenAIRequest；解析失败 → 透传
-    let openai_req: sieve_core::protocol::openai::OpenAIRequest =
-        match serde_json::from_slice(&body_bytes) {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::debug!("non-openai body on /v1/chat/completions, passing through: {e}");
-                return forward_raw(forwarder, parts, body_bytes).await;
-            }
-        };
+    // 1. 经 OpenAiCodec 解码请求（A1 ProviderCodec）；解析失败 → 透传
+    let decoded = match sieve_core::protocol::OpenAiCodec.decode_request(&body_bytes) {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::debug!("non-openai body on /v1/chat/completions, passing through: {e}");
+            return forward_raw(forwarder, parts, body_bytes).await;
+        }
+    };
 
     // 2. 提取文本段 → 逐段扫描
-    let texts = openai_req.extract_text_content();
+    let texts = decoded.extract_text_content();
 
     // ADR-038：构造超额计费观测上下文（仅 Relay 上游 + billing 启用时）。
     let billing_ctx = build_billing_context(
         &billing,
         listener_trust,
         &listener_provider_id,
-        &openai_req.model,
+        decoded.model(),
         billing_facade::Family::OpenAi,
         &texts,
     );
@@ -3239,11 +3234,7 @@ async fn proxy_openai(
             });
         }
 
-        let new_body_bytes =
-            apply_redacted_texts_to_openai_request(&openai_req, &texts, &seg_result.texts)
-                .and_then(|req| {
-                    serde_json::to_vec(&req).map_err(|e| anyhow!("re-serialize openai json: {e}"))
-                })?;
+        let new_body_bytes = decoded.apply_redacted_texts(&texts, &seg_result.texts)?;
 
         // 验证脱敏后 JSON 仍然合法
         if serde_json::from_slice::<serde_json::Value>(&new_body_bytes).is_err() {
@@ -5321,220 +5312,6 @@ fn is_json_media_type(content_type: &str) -> bool {
         .is_some_and(|mt| mt.eq_ignore_ascii_case("application/json"))
 }
 
-/// 把脱敏后的文本段列表写回 [`AnthropicRequest`] 并返回新 request。
-///
-/// `original_texts` 是 `extract_text_content()` 返回的原始段列表；
-/// `redacted_texts` 是 `redact_segments()` 返回的替换后文本列表（顺序对应）。
-///
-/// 实现逻辑：遍历 messages，对每个文本 content 按 segment 索引匹配并替换。
-///
-/// # Errors
-/// 如果 `redacted_texts` 长度与 `original_texts` 不一致，返回错误。
-///
-/// 关联：PRD v1.4 §6.1（AutoRedact 路径），修 #1（AutoRedact 偏移修复）。
-fn apply_redacted_texts_to_request(
-    req: &sieve_core::protocol::anthropic::AnthropicRequest,
-    original_texts: &[(usize, String)],
-    redacted_texts: &[String],
-) -> Result<sieve_core::protocol::anthropic::AnthropicRequest> {
-    if original_texts.len() != redacted_texts.len() {
-        return Err(anyhow!(
-            "redacted_texts 长度 {} 与 original_texts 长度 {} 不一致",
-            redacted_texts.len(),
-            original_texts.len()
-        ));
-    }
-
-    // 用计数器追踪当前处理到第几个 segment（与 extract_text_content 遍历顺序一致）
-    let mut seg_idx = 0usize;
-
-    let mut new_messages: Vec<sieve_core::protocol::anthropic::AnthropicMessage> = Vec::new();
-    for msg in &req.messages {
-        let new_content = match &msg.content {
-            serde_json::Value::String(_) => {
-                // String 类型：一个 segment
-                let replacement = redacted_texts
-                    .get(seg_idx)
-                    .cloned()
-                    .unwrap_or_else(|| msg.content.as_str().unwrap_or("").to_string());
-                seg_idx += 1;
-                serde_json::Value::String(replacement)
-            }
-            serde_json::Value::Array(blocks) => {
-                let mut new_blocks = Vec::with_capacity(blocks.len());
-                for block in blocks {
-                    if let Some(block_obj) = block.as_object() {
-                        if block_obj.get("type").and_then(|v| v.as_str()) == Some("text")
-                            && block_obj.get("text").and_then(|v| v.as_str()).is_some()
-                        {
-                            let replacement =
-                                redacted_texts.get(seg_idx).cloned().unwrap_or_else(|| {
-                                    block_obj
-                                        .get("text")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("")
-                                        .to_string()
-                                });
-                            seg_idx += 1;
-                            let mut new_obj = block_obj.clone();
-                            new_obj
-                                .insert("text".to_string(), serde_json::Value::String(replacement));
-                            new_blocks.push(serde_json::Value::Object(new_obj));
-                            continue;
-                        }
-                    }
-                    new_blocks.push(block.clone());
-                }
-                serde_json::Value::Array(new_blocks)
-            }
-            other => other.clone(),
-        };
-        new_messages.push(sieve_core::protocol::anthropic::AnthropicMessage {
-            role: msg.role.clone(),
-            content: new_content,
-        });
-    }
-
-    // 处理 system prompt（与 extract_text_content 遍历顺序一致）
-    let new_system = if let Some(system) = &req.system {
-        if system.as_str().is_some() {
-            let replacement = redacted_texts
-                .get(seg_idx)
-                .cloned()
-                .unwrap_or_else(|| system.as_str().unwrap_or("").to_string());
-            seg_idx += 1;
-            Some(serde_json::Value::String(replacement))
-        } else if let Some(blocks) = system.as_array() {
-            let mut new_blocks = Vec::with_capacity(blocks.len());
-            for block in blocks {
-                if block.get("text").and_then(|v| v.as_str()).is_some() {
-                    let replacement = redacted_texts.get(seg_idx).cloned().unwrap_or_else(|| {
-                        block
-                            .get("text")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string()
-                    });
-                    seg_idx += 1;
-                    let mut new_obj = block.as_object().cloned().unwrap_or_default();
-                    new_obj.insert("text".to_string(), serde_json::Value::String(replacement));
-                    new_blocks.push(serde_json::Value::Object(new_obj));
-                } else {
-                    new_blocks.push(block.clone());
-                }
-            }
-            Some(serde_json::Value::Array(new_blocks))
-        } else {
-            Some(system.clone())
-        }
-    } else {
-        None
-    };
-
-    let _ = seg_idx; // 消除 unused variable 警告
-
-    Ok(sieve_core::protocol::anthropic::AnthropicRequest {
-        model: req.model.clone(),
-        max_tokens: req.max_tokens,
-        messages: new_messages,
-        stream: req.stream,
-        system: new_system,
-        tools: req.tools.clone(),
-        tool_choice: req.tool_choice.clone(),
-        extra: req.extra.clone(),
-    })
-}
-
-/// 把脱敏后的文本段列表写回 [`OpenAIRequest`] 并返回新 request（修 A2-#1）。
-///
-/// OpenAI `message.content` 有两种形式：
-/// - `string`：对应一个 segment
-/// - `array of content parts`：每个 `{"type":"text","text":"..."}` 对应一个 segment；
-///   `image_url` 等非文本 part 原样保留（不计入 segment 计数）
-///
-/// `original_texts` 与 `redacted_texts` 必须顺序对应；长度不一致时返回错误。
-///
-/// 关联：PRD v1.4 §6.1（AutoRedact），ADR-018（OpenAI 协议适配）。
-fn apply_redacted_texts_to_openai_request(
-    req: &sieve_core::protocol::openai::OpenAIRequest,
-    original_texts: &[(usize, String)],
-    redacted_texts: &[String],
-) -> Result<sieve_core::protocol::openai::OpenAIRequest> {
-    if original_texts.len() != redacted_texts.len() {
-        return Err(anyhow!(
-            "redacted_texts 长度 {} 与 original_texts 长度 {} 不一致",
-            redacted_texts.len(),
-            original_texts.len()
-        ));
-    }
-
-    let mut seg_idx = 0usize;
-    let mut new_messages: Vec<sieve_core::protocol::openai::OpenAIMessage> = Vec::new();
-
-    for msg in &req.messages {
-        let new_content = match &msg.content {
-            Some(serde_json::Value::String(_)) => {
-                let replacement = redacted_texts.get(seg_idx).cloned().unwrap_or_else(|| {
-                    msg.content
-                        .as_ref()
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string()
-                });
-                seg_idx += 1;
-                Some(serde_json::Value::String(replacement))
-            }
-            Some(serde_json::Value::Array(parts)) => {
-                let mut new_parts = Vec::with_capacity(parts.len());
-                for part in parts {
-                    if let Some(obj) = part.as_object() {
-                        if obj.get("type").and_then(|v| v.as_str()) == Some("text")
-                            && obj.get("text").and_then(|v| v.as_str()).is_some()
-                        {
-                            let replacement =
-                                redacted_texts.get(seg_idx).cloned().unwrap_or_else(|| {
-                                    obj.get("text")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("")
-                                        .to_string()
-                                });
-                            seg_idx += 1;
-                            let mut new_obj = obj.clone();
-                            new_obj
-                                .insert("text".to_string(), serde_json::Value::String(replacement));
-                            new_parts.push(serde_json::Value::Object(new_obj));
-                            continue;
-                        }
-                    }
-                    // image_url 等非 text part 原样保留，不消耗 segment index
-                    new_parts.push(part.clone());
-                }
-                Some(serde_json::Value::Array(new_parts))
-            }
-            other => other.clone(),
-        };
-        new_messages.push(sieve_core::protocol::openai::OpenAIMessage {
-            role: msg.role.clone(),
-            content: new_content,
-            name: msg.name.clone(),
-            tool_calls: msg.tool_calls.clone(),
-            tool_call_id: msg.tool_call_id.clone(),
-            extra: msg.extra.clone(),
-        });
-    }
-
-    let _ = seg_idx; // 消除 unused variable 警告
-
-    Ok(sieve_core::protocol::openai::OpenAIRequest {
-        model: req.model.clone(),
-        messages: new_messages,
-        stream: req.stream,
-        tools: req.tools.clone(),
-        max_tokens: req.max_tokens,
-        temperature: req.temperature,
-        extra: req.extra.clone(),
-    })
-}
 
 // ─── 单元测试：Hook pending fail-closed ──────────────────────────────────────
 
@@ -5636,98 +5413,6 @@ mod tests {
         );
     }
 
-    // ── A2-#1：apply_redacted_texts_to_openai_request 单元测试 ──────────────────
-
-    /// 验证 string content 的 secret 被正确替换（修 A2-#1）。
-    ///
-    /// 构造含 `sk-ant-api03-` token 的 OpenAI 请求，
-    /// 验证 apply_redacted_texts_to_openai_request 将其替换为 `[REDACTED:OUT-01]`。
-    #[test]
-    fn openai_redact_string_content() {
-        use sieve_core::protocol::openai::OpenAIRequest;
-
-        let raw_token = "sk-ant-api03-AABBCCDD1234";
-        let json = format!(
-            r#"{{"model":"gpt-4","messages":[{{"role":"user","content":"my key is {raw_token}"}}]}}"#
-        );
-        let req: OpenAIRequest = serde_json::from_str(&json).unwrap();
-        let texts = req.extract_text_content();
-        assert_eq!(texts.len(), 1);
-
-        // 模拟 redact_segments 的输出：将 token 替换为占位符
-        let redacted = vec![format!("my key is [REDACTED:OUT-01]")];
-
-        let new_req = apply_redacted_texts_to_openai_request(&req, &texts, &redacted)
-            .expect("should succeed");
-        let new_json = serde_json::to_string(&new_req).unwrap();
-
-        // 转发 body 中不应包含原始 token
-        assert!(
-            !new_json.contains(raw_token),
-            "脱敏后 body 不应包含原始 token，但得到: {new_json}"
-        );
-        assert!(
-            new_json.contains("[REDACTED:OUT-01]"),
-            "脱敏后 body 应包含占位符，但得到: {new_json}"
-        );
-    }
-
-    /// 验证 array-of-content-parts 格式的 secret 被正确替换（修 A2-#1）。
-    #[test]
-    fn openai_redact_array_content_parts() {
-        use sieve_core::protocol::openai::OpenAIRequest;
-
-        let raw_token = "sk-ant-api03-XXYZZY9876";
-        let json = format!(
-            r#"{{
-                "model": "gpt-4",
-                "messages": [{{
-                    "role": "user",
-                    "content": [
-                        {{"type": "text", "text": "key={raw_token}"}},
-                        {{"type": "image_url", "image_url": {{"url": "https://example.com/img.png"}}}}
-                    ]
-                }}]
-            }}"#
-        );
-        let req: OpenAIRequest = serde_json::from_str(&json).unwrap();
-        let texts = req.extract_text_content();
-        // 只有 text part 计入 segment，image_url part 不计
-        assert_eq!(texts.len(), 1, "只有 text part 应计为 segment");
-
-        let redacted = vec![format!("key=[REDACTED:OUT-01]")];
-        let new_req = apply_redacted_texts_to_openai_request(&req, &texts, &redacted)
-            .expect("should succeed");
-        let new_json = serde_json::to_string(&new_req).unwrap();
-
-        assert!(
-            !new_json.contains(raw_token),
-            "脱敏后 body 不应包含原始 token"
-        );
-        assert!(
-            new_json.contains("[REDACTED:OUT-01]"),
-            "脱敏后 body 应包含占位符"
-        );
-        // image_url part 应原样保留
-        assert!(
-            new_json.contains("image_url"),
-            "image_url part 应原样保留，但得到: {new_json}"
-        );
-    }
-
-    /// 长度不一致时返回错误，不允许 silent fail（修 A2-#1 健壮性）。
-    #[test]
-    fn openai_redact_mismatched_lengths_returns_error() {
-        use sieve_core::protocol::openai::OpenAIRequest;
-
-        let json = r#"{"model":"gpt-4","messages":[{"role":"user","content":"hello"}]}"#;
-        let req: OpenAIRequest = serde_json::from_str(json).unwrap();
-        let texts = req.extract_text_content();
-        let bad_redacted: Vec<String> = vec![]; // 长度不一致
-
-        let result = apply_redacted_texts_to_openai_request(&req, &texts, &bad_redacted);
-        assert!(result.is_err(), "长度不一致时应返回错误，得到: {result:?}");
-    }
 
     // ── A2-#2：set_source_channel 已通过 InboundFilter 公开接口间接验证 ────────────
     //

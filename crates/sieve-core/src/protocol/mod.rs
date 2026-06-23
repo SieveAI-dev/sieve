@@ -5,9 +5,11 @@
 //! - [`unified_message`]：Sieve 内部统一消息表示
 
 pub mod anthropic;
+pub mod codec;
 pub mod openai;
 pub mod unified_message;
 
+pub use codec::{AnthropicCodec, DecodedRequest, OpenAiCodec, ProviderCodec};
 pub use openai::{
     OpenAIDelta, OpenAIFunctionCall, OpenAIFunctionCallDelta, OpenAIFunctionDef, OpenAIMessage,
     OpenAIRequest, OpenAIStreamingChunk, OpenAITool, OpenAIToolCall, OpenAIToolCallDelta,
