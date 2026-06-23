@@ -13,8 +13,16 @@
 
 ### Added — content-type 四路由覆盖 CI 门禁 + 路由判定加固（2026-06-23，ADR-025）
 
-- **新增 `scripts/check_routing_coverage.sh` + CI job `check-routing-matrix`**：永久化 v1.5.4 P0 教训（ADR-025）——机械守护「入站检测必须覆盖 M-1~M-4 全部 content-type 路由」。源码侧静态校验四条路由 handler 都接入站检测钩子（两条非流式 JSON handler 必调 `on_tool_use_complete` + `scan_assistant_text`，共享 SSE 分类器 `classify_inbound_detections` 调 `observe_event` + `on_tool_use_complete`），叠加四路由端到端测试锚点检查。任一路由摘除钩子或测试缺失即 CI 失败、PR 阻断。比扫测试体 rule_id 更稳健：直击「JSON handler 漏挂入站钩子」的 bug 形状，且对历史 per-rule 测试欠债不误报。
+- **新增 `scripts/check_routing_coverage.sh` + CI job `check-routing-matrix`**：永久化 v1.5.4 P0 教训（ADR-025）——机械守护「入站检测必须覆盖 M-1~M-4 全部 content-type 路由」。源码侧静态校验四条路由都接入站检测钩子（非流式 JSON 两路由经 codec 驱动的统一 `handle_json_inbound` 调 `on_tool_use_complete` + `scan_assistant_text`，共享 SSE 分类器 `classify_inbound_detections` 调 `observe_event` + `on_tool_use_complete`，两条 `forward_*` 各自派发到 SSE 分类器与 JSON handler），叠加四路由端到端测试锚点检查。任一路由摘除钩子或测试缺失即 CI 失败、PR 阻断。比扫测试体 rule_id 更稳健：直击「JSON handler 漏挂入站钩子」的 bug 形状，且对历史 per-rule 测试欠债不误报。
 - **入站响应 transport 路由判定加固**：`Content-Type` 判定由裸 `starts_with("application/json")` 改为稳健 media-type 匹配 `is_json_media_type`——大小写不敏感（RFC 9110 §8.3.1）、容忍 `; charset=…` 参数与前导空格、精确匹配 media-type token（不再把 `application/jsonl` 误判为 JSON）。修掉非规范大小写 `Application/JSON` 被误当作 SSE、从而绕过 JSON 路径入站检测的边角风险。四路由集成测试（content_type_matrix / inbound_block / redteam_inbound）行为不变。
+
+### Changed — 网关上游分层重构：ProviderCodec / 入站 JSON 路由收敛 / Endpoint 路由表（2026-06-23，行为等价）
+
+把「上游会变的差异」全部收进一圈可替换的边缘，检测核心只面对统一中间表示——新增一个上游 = 写一个 codec + 路由表加一行，不碰 daemon、不碰检测核心。**纯结构重构，检测结论 / 脱敏输出 / 转发字节逐字节不变**，由 golden 字节基线（出站脱敏 + benign × Anthropic/OpenAI）+ 四路由矩阵 + 出入站红队回归共同证明。
+
+- **ProviderCodec 层**（`sieve-core/protocol/codec.rs`）：新增 `ProviderCodec` trait + `AnthropicCodec` / `OpenAiCodec`，把出站待检文本提取与脱敏写回（原散在 daemon 的 `apply_redacted_*`）收编为 provider 专属解码，逻辑一字不动地搬迁。
+- **入站 JSON 路由收敛**：原先 Anthropic / OpenAI 两条非流式 `application/json` 入站各写一遍的 serde 解析与处置，收敛为 codec 驱动的单一 `handle_json_inbound`，消除重复；四路由覆盖不变量的 CI 门禁同步改为守护这条统一 handler（见上「四路由覆盖 CI 门禁」条）。
+- **Endpoint 路由表**：`resolve_endpoint_route(path, listener_protocol)` + `EndpointRoute` 替换 daemon 里散落的 `if path == "/v1/messages"` / `"/v1/chat/completions"` 硬编码分派；标准路径优先、非标准路径按 listener 声明的协议归属——接一个「路径不同但协议兼容的上游」只需改配置、不改代码。
 
 ### Changed — CLI 瘦身：可选特性门隔离 + 红队 verify 移出主二进制（2026-06-23）
 
