@@ -1387,65 +1387,6 @@ fn spawn_billing_observation(
 ) {
 }
 
-/// 提取 Anthropic JSON 响应顶层 `usage` 的 `(input_tokens, output_tokens)`。
-///
-/// 仅 `usage` 特性的计费观测调用；关闭时透传给 stub 后被忽略（标 allow 免 dead_code）。
-#[cfg_attr(not(feature = "usage"), allow(dead_code))]
-fn anthropic_claimed_usage(resp_json: &serde_json::Value) -> Option<(u64, u64)> {
-    let u = resp_json.get("usage")?;
-    let input = u.get("input_tokens").and_then(|v| v.as_u64())?;
-    let output = u.get("output_tokens").and_then(|v| v.as_u64())?;
-    Some((input, output))
-}
-
-/// 拼接 Anthropic JSON 响应 `content[]` 中的 text 块为补全全文。
-fn anthropic_completion_text(resp_json: &serde_json::Value) -> String {
-    resp_json
-        .get("content")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|b| {
-                    if b.get("type").and_then(|v| v.as_str()) == Some("text") {
-                        b.get("text").and_then(|v| v.as_str())
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("")
-        })
-        .unwrap_or_default()
-}
-
-/// 提取 OpenAI JSON 响应顶层 `usage` 的 `(prompt_tokens, completion_tokens)`。
-///
-/// 仅 `usage` 特性的计费观测调用；关闭时透传给 stub 后被忽略（标 allow 免 dead_code）。
-#[cfg_attr(not(feature = "usage"), allow(dead_code))]
-fn openai_claimed_usage(resp_json: &serde_json::Value) -> Option<(u64, u64)> {
-    let u = resp_json.get("usage")?;
-    let input = u.get("prompt_tokens").and_then(|v| v.as_u64())?;
-    let output = u.get("completion_tokens").and_then(|v| v.as_u64())?;
-    Some((input, output))
-}
-
-/// 拼接 OpenAI JSON 响应 `choices[].message.content` 为补全全文。
-fn openai_completion_text(resp_json: &serde_json::Value) -> String {
-    resp_json
-        .get("choices")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|c| {
-                    c.get("message")
-                        .and_then(|m| m.get("content"))
-                        .and_then(|v| v.as_str())
-                })
-                .collect::<Vec<_>>()
-                .join("")
-        })
-        .unwrap_or_default()
-}
 
 /// SSE 流式超额计费累计器（ADR-038）：跨 chunk 累计 completion 文本 + relay 声明的 usage，
 /// 流自然结束后用于交叉比对。
@@ -3425,7 +3366,8 @@ async fn forward_with_inbound_inspection(
         .unwrap_or(false);
 
     if is_json_response {
-        return handle_anthropic_json_inbound(
+        return handle_json_inbound(
+            &sieve_core::protocol::AnthropicCodec,
             resp_parts,
             resp_body,
             inbound_filter,
@@ -3887,7 +3829,8 @@ async fn forward_with_openai_inbound_inspection(
         .unwrap_or(false);
 
     if is_json_response {
-        return handle_openai_json_inbound(
+        return handle_json_inbound(
+            &sieve_core::protocol::OpenAiCodec,
             resp_parts,
             resp_body,
             inbound_filter,
@@ -4625,16 +4568,17 @@ fn classify_json_inbound_detection(
     }
 }
 
-/// 处理 Anthropic 非流式 JSON 入站响应的入站检测路径。
+
+/// 处理非流式 JSON 入站响应的统一入站检测路径（A2 Transport：四路由收敛到 codec 驱动）。
 ///
-/// 漏洞修复（lessons.md 2026-04-27 [安全]）：上游返回 `application/json` 时，
-/// 收集完整 body，解析 `content[]` 中的 `tool_use` 块，
-/// 喂给 `InboundFilter::on_tool_use_complete`。
-/// 命中 fail-closed Critical 时把响应 body 替换为 sieve_blocked JSON；否则原样透传。
-///
-/// 不走 SSE 路径（tokio::spawn + channel tee），直接 await body 收集再决策。
+/// `codec` 提供 provider 专属响应解码（completion_text / claimed_usage / extract_tool_calls /
+/// json_route_tags）；编排逻辑（body 收集 / 计费观测 / tool_use 检测 + 序列窗口 / 文本扫描 /
+/// 拦截审计 / sieve_blocked 注入）provider 无关，消除 Anthropic / OpenAI 两条 JSON handler 的重复。
+/// 命中 fail-closed Critical 时把响应 body 替换为 sieve_blocked JSON；否则原样透传。不走 SSE 路径
+/// （直接 await body 收集再决策）。GuiPopup→Block 降级由 classify_json_inbound_detection 保留。
 #[allow(clippy::too_many_arguments)]
-async fn handle_anthropic_json_inbound(
+async fn handle_json_inbound(
+    codec: &dyn sieve_core::protocol::ProviderCodec,
     resp_parts: http::response::Parts,
     resp_body: impl http_body::Body<Data = Bytes, Error = impl std::fmt::Display> + Send + 'static,
     mut inbound_filter: InboundFilter,
@@ -4644,8 +4588,8 @@ async fn handle_anthropic_json_inbound(
     ctx: RequestCtx,
     billing_ctx: BillingCtxHandle,
 ) -> Result<Response<ResponseBody>> {
-    // ADR-026 Stage E：listener_provider_id 透传到 record_into_sequence_and_detect，
-    // listener_protocol 在 JSON 路径已确定（外层 proxy_inner 已校验），此处无消费者。
+    // ADR-026 Stage E：listener_provider_id 透传到 record_into_sequence_and_detect；
+    // listener_protocol 在 JSON 路径已由外层校验，此处无消费者。
     let RequestCtx {
         caller,
         audit: audit_store,
@@ -4653,304 +4597,91 @@ async fn handle_anthropic_json_inbound(
         listener_provider_id,
     } = ctx;
     use http_body_util::BodyExt as _;
+    let (record_tag, audit_tag) = codec.json_route_tags();
 
-    // 收集完整 body（非流式 JSON 响应通常很小，不存在 DoS 风险，上游负责 content-length 校验）
+    // 收集完整 body（非流式 JSON 通常很小，上游负责 content-length 校验）。
     let body_bytes = match resp_body.collect().await {
         Ok(collected) => collected.to_bytes(),
         Err(e) => {
-            tracing::warn!("handle_anthropic_json_inbound: collect body error: {e}");
+            tracing::warn!("handle_json_inbound({audit_tag}): collect body error: {e}");
             return Ok(build_sieve_blocked_json_response(&[]));
         }
     };
 
-    // 解析响应 JSON（宽松解析，只取 content 数组）
+    // 宽松解析响应 JSON；无法解析则原样透传（不拦截非 JSON 内容）。
     let resp_json: serde_json::Value = match serde_json::from_slice(&body_bytes) {
         Ok(v) => v,
         Err(e) => {
-            // 无法解析 JSON，原样透传（不拦截非 JSON 内容）
-            tracing::debug!("handle_anthropic_json_inbound: non-JSON body, passthrough: {e}");
+            tracing::debug!("handle_json_inbound({audit_tag}): non-JSON body, passthrough: {e}");
             return passthrough_json_response(resp_parts, body_bytes);
         }
     };
 
-    // ADR-038：超额计费观测（Anthropic JSON 路径）。relay 声明的 usage（顶层 `usage`）+
-    // 独立估算的 output（completion 全文）交叉比对，写 usage.db（fire-and-forget，永不上传）。
+    // ADR-038：超额计费观测（relay 声明 usage + 独立估算 output 交叉比对，写 usage.db，永不上传）。
     spawn_billing_observation(
         billing_ctx,
-        anthropic_completion_text(&resp_json),
-        anthropic_claimed_usage(&resp_json),
+        codec.completion_text(&resp_json),
+        codec.claimed_usage(&resp_json),
     );
 
-    // 提取 content[] 中的 tool_use 块
-    let content_arr = resp_json.get("content").and_then(|v| v.as_array());
     let mut all_blocking: Vec<sieve_core::Detection> = Vec::new();
 
-    if let Some(content) = content_arr {
-        for block in content {
-            let obj = match block.as_object() {
-                Some(o) => o,
-                None => continue,
-            };
-            if obj.get("type").and_then(|v| v.as_str()) != Some("tool_use") {
-                continue;
+    // 工具调用检测（codec 按 provider schema 提取 tool_use / tool_calls）。
+    for completed in codec.extract_tool_calls(&resp_json) {
+        match inbound_filter.on_tool_use_complete(&completed) {
+            Ok(hits) => {
+                // PRD §5.7.4 双路径不变量：JSON 路径接入序列窗口。
+                record_into_sequence_and_detect(
+                    &inbound_filter,
+                    &completed,
+                    &hits,
+                    record_tag,
+                    &ipc,
+                    &audit_store,
+                    caller.as_ref(),
+                    &listener_provider_id,
+                );
+                for d in hits {
+                    classify_json_inbound_detection(d, dry_run, meta.chain_depth, &mut all_blocking);
+                }
             }
-            let tool_id = obj
-                .get("id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("unknown")
-                .to_string();
-            let tool_name = obj
-                .get("name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let tool_input = obj
-                .get("input")
-                .cloned()
-                .unwrap_or(serde_json::Value::Object(Default::default()));
-
-            let completed = sieve_core::CompletedToolCall {
-                id: tool_id,
-                name: tool_name,
-                input: tool_input,
-            };
-
-            match inbound_filter.on_tool_use_complete(&completed) {
-                Ok(hits) => {
-                    // PRD §5.7.4 双路径不变量：Anthropic JSON 路径接入序列窗口
-                    record_into_sequence_and_detect(
-                        &inbound_filter,
-                        &completed,
-                        &hits,
-                        "anthropic-json",
-                        &ipc,
-                        &audit_store,
-                        caller.as_ref(),
-                        &listener_provider_id,
-                    );
-                    for d in hits {
-                        classify_json_inbound_detection(
-                            d,
-                            dry_run,
-                            meta.chain_depth,
-                            &mut all_blocking,
-                        );
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "handle_anthropic_json_inbound: on_tool_use_complete error");
-                }
+            Err(e) => {
+                tracing::warn!(error = %e, "handle_json_inbound({audit_tag}): on_tool_use_complete error");
             }
         }
     }
 
     // 入站文本扫描（IN-GEN-* + IN-CR-01 地址替换）——ADR-025 / PRD §9 #16 四路由对等。
-    // 修复 v1.5.4 同类 P0：observe_event/scan_text 类入站能力此前只挂 SSE，两条 JSON
-    // 路径 by-construction 不扫 assistant 文本，IN-CR-01 地址替换零拦截。
-    let assistant_text = anthropic_completion_text(&resp_json);
+    let assistant_text = codec.completion_text(&resp_json);
     if !assistant_text.is_empty() {
         match inbound_filter.scan_assistant_text(&assistant_text) {
             Ok(hits) => {
                 for d in hits {
-                    classify_json_inbound_detection(
-                        d,
-                        dry_run,
-                        meta.chain_depth,
-                        &mut all_blocking,
-                    );
+                    classify_json_inbound_detection(d, dry_run, meta.chain_depth, &mut all_blocking);
                 }
             }
             Err(e) => {
-                tracing::warn!(error = %e, "handle_anthropic_json_inbound: scan_assistant_text error");
+                tracing::warn!(error = %e, "handle_json_inbound({audit_tag}): scan_assistant_text error");
             }
         }
     }
 
     if !all_blocking.is_empty() {
-        tracing::warn!(
-            count = all_blocking.len(),
-            "INBOUND BLOCKED (anthropic json)"
-        );
+        tracing::warn!(count = all_blocking.len(), tag = audit_tag, "INBOUND BLOCKED (json)");
         for d in &all_blocking {
-            tracing::warn!(rule = %d.rule_id, "anthropic json inbound detection");
+            tracing::warn!(rule = %d.rule_id, tag = audit_tag, "json inbound detection");
         }
         spawn_inbound_blocked_audit(
             &audit_store,
             &listener_provider_id,
             &caller,
             &all_blocking,
-            "anthropic_json",
+            audit_tag,
         );
         return Ok(build_sieve_blocked_json_response(&all_blocking));
     }
 
-    // 无拦截：原样透传（重建含原 headers 的响应）
-    passthrough_json_response(resp_parts, body_bytes)
-}
-
-/// 处理 OpenAI 非流式 JSON 入站响应的入站检测路径。
-///
-/// 漏洞修复（lessons.md 2026-04-27 [安全]）：上游返回 `application/json` 时，
-/// 解析 `choices[].message.tool_calls` 提取 function 调用，喂给 InboundFilter。
-/// 命中 fail-closed Critical 时替换响应 body 为 sieve_blocked JSON；否则原样透传。
-#[allow(clippy::too_many_arguments)]
-async fn handle_openai_json_inbound(
-    resp_parts: http::response::Parts,
-    resp_body: impl http_body::Body<Data = Bytes, Error = impl std::fmt::Display> + Send + 'static,
-    mut inbound_filter: InboundFilter,
-    dry_run: bool,
-    meta: MultiAgentMeta,
-    ipc: Option<Arc<sieve_ipc::IpcServer>>,
-    ctx: RequestCtx,
-    billing_ctx: BillingCtxHandle,
-) -> Result<Response<ResponseBody>> {
-    // ADR-026 Stage E：listener_provider_id 透传到 record_into_sequence_and_detect，
-    // listener_protocol 在 JSON 路径已确定（外层 proxy_inner 已校验），此处无消费者。
-    let RequestCtx {
-        caller,
-        audit: audit_store,
-        listener_protocol: _,
-        listener_provider_id,
-    } = ctx;
-    use http_body_util::BodyExt as _;
-
-    let body_bytes = match resp_body.collect().await {
-        Ok(collected) => collected.to_bytes(),
-        Err(e) => {
-            tracing::warn!("handle_openai_json_inbound: collect body error: {e}");
-            return Ok(build_sieve_blocked_json_response(&[]));
-        }
-    };
-
-    let resp_json: serde_json::Value = match serde_json::from_slice(&body_bytes) {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::debug!("handle_openai_json_inbound: non-JSON body, passthrough: {e}");
-            return passthrough_json_response(resp_parts, body_bytes);
-        }
-    };
-
-    // ADR-038：超额计费观测（OpenAI JSON 路径，relay usage prompt_tokens/completion_tokens
-    // + 独立估算 output 交叉比对，写 usage.db；永不上传）。
-    spawn_billing_observation(
-        billing_ctx,
-        openai_completion_text(&resp_json),
-        openai_claimed_usage(&resp_json),
-    );
-
-    // 遍历 choices[].message.tool_calls[]
-    let choices = resp_json.get("choices").and_then(|v| v.as_array());
-    let mut all_blocking: Vec<sieve_core::Detection> = Vec::new();
-
-    if let Some(choices) = choices {
-        for choice in choices {
-            let message = match choice.get("message") {
-                Some(m) => m,
-                None => continue,
-            };
-            let tool_calls = match message.get("tool_calls").and_then(|v| v.as_array()) {
-                Some(tc) => tc,
-                None => continue,
-            };
-            for tc in tool_calls {
-                let obj = match tc.as_object() {
-                    Some(o) => o,
-                    None => continue,
-                };
-                let tc_id = obj
-                    .get("id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown")
-                    .to_string();
-                let func = match obj.get("function").and_then(|v| v.as_object()) {
-                    Some(f) => f,
-                    None => continue,
-                };
-                let func_name = func
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let arguments_str = func
-                    .get("arguments")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("{}");
-                let input: serde_json::Value = serde_json::from_str(arguments_str)
-                    .unwrap_or(serde_json::Value::Object(Default::default()));
-
-                let completed = sieve_core::CompletedToolCall {
-                    id: tc_id,
-                    name: func_name,
-                    input,
-                };
-
-                match inbound_filter.on_tool_use_complete(&completed) {
-                    Ok(hits) => {
-                        // PRD §5.7.4 双路径不变量：OpenAI JSON 路径接入序列窗口
-                        record_into_sequence_and_detect(
-                            &inbound_filter,
-                            &completed,
-                            &hits,
-                            "openai-json",
-                            &ipc,
-                            &audit_store,
-                            caller.as_ref(),
-                            &listener_provider_id,
-                        );
-                        for d in hits {
-                            classify_json_inbound_detection(
-                                d,
-                                dry_run,
-                                meta.chain_depth,
-                                &mut all_blocking,
-                            );
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!(error = %e, "handle_openai_json_inbound: on_tool_use_complete error");
-                    }
-                }
-            }
-        }
-    }
-
-    // 入站文本扫描（IN-GEN-* + IN-CR-01 地址替换）——ADR-025 / PRD §9 #16 四路由对等。
-    // 修复 v1.5.4 同类 P0：observe_event/scan_text 类入站能力此前只挂 SSE，两条 JSON
-    // 路径 by-construction 不扫 assistant 文本，IN-CR-01 地址替换零拦截。
-    let assistant_text = openai_completion_text(&resp_json);
-    if !assistant_text.is_empty() {
-        match inbound_filter.scan_assistant_text(&assistant_text) {
-            Ok(hits) => {
-                for d in hits {
-                    classify_json_inbound_detection(
-                        d,
-                        dry_run,
-                        meta.chain_depth,
-                        &mut all_blocking,
-                    );
-                }
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "handle_openai_json_inbound: scan_assistant_text error");
-            }
-        }
-    }
-
-    if !all_blocking.is_empty() {
-        tracing::warn!(count = all_blocking.len(), "INBOUND BLOCKED (openai json)");
-        for d in &all_blocking {
-            tracing::warn!(rule = %d.rule_id, "openai json inbound detection");
-        }
-        spawn_inbound_blocked_audit(
-            &audit_store,
-            &listener_provider_id,
-            &caller,
-            &all_blocking,
-            "openai_json",
-        );
-        return Ok(build_sieve_blocked_json_response(&all_blocking));
-    }
-
+    // 无拦截：原样透传（重建含原 headers 的响应）。
     passthrough_json_response(resp_parts, body_bytes)
 }
 

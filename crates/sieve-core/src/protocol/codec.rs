@@ -9,6 +9,7 @@ use crate::error::{SieveCoreError, SieveCoreResult};
 use crate::protocol::anthropic::{AnthropicMessage, AnthropicRequest};
 use crate::protocol::openai::{OpenAIMessage, OpenAIRequest};
 use crate::protocol::unified_message::UpstreamProvider;
+use crate::tool_use_aggregator::CompletedToolCall;
 
 /// 出站 codec：每家上游一个 impl，把 provider schema ↔ 统一操作隔离。
 pub trait ProviderCodec: Send + Sync {
@@ -21,6 +22,20 @@ pub trait ProviderCodec: Send + Sync {
     /// body 不是该 provider 合法请求 schema 时返回 [`SieveCoreError::Protocol`]，
     /// 调用方据此回退到原样转发（让上游自行返 4xx）。
     fn decode_request(&self, body: &[u8]) -> SieveCoreResult<DecodedRequest>;
+
+    // ── A2 入站响应侧（非流式 JSON 解码；SSE 路径走 SseParse trait，本就 provider 无关）──
+
+    /// 从非流式 JSON 响应拼接 assistant 补全全文（入站文本扫描 + 计费 output 计数）。
+    fn completion_text(&self, resp_json: &serde_json::Value) -> String;
+
+    /// 从非流式 JSON 响应顶层 `usage` 提取 relay 声明的 `(input, output)` tokens（计费观测）。
+    fn claimed_usage(&self, resp_json: &serde_json::Value) -> Option<(u64, u64)>;
+
+    /// 从非流式 JSON 响应提取已完成的工具调用列表（入站 tool_use 检测）。
+    fn extract_tool_calls(&self, resp_json: &serde_json::Value) -> Vec<CompletedToolCall>;
+
+    /// 入站 JSON 路由标签：`(序列窗口 tag, 审计 provider tag)`，供日志 / 审计归因。
+    fn json_route_tags(&self) -> (&'static str, &'static str);
 }
 
 /// 已解码的出站请求（provider 无关接口）。持有具体 schema，只暴露统一操作。
@@ -100,6 +115,66 @@ impl ProviderCodec for AnthropicCodec {
             .map(DecodedRequest::Anthropic)
             .map_err(|e| SieveCoreError::Protocol(format!("anthropic request: {e}")))
     }
+
+    fn completion_text(&self, resp_json: &serde_json::Value) -> String {
+        resp_json
+            .get("content")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|b| {
+                        if b.get("type").and_then(|v| v.as_str()) == Some("text") {
+                            b.get("text").and_then(|v| v.as_str())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("")
+            })
+            .unwrap_or_default()
+    }
+
+    fn claimed_usage(&self, resp_json: &serde_json::Value) -> Option<(u64, u64)> {
+        let u = resp_json.get("usage")?;
+        let input = u.get("input_tokens").and_then(serde_json::Value::as_u64)?;
+        let output = u.get("output_tokens").and_then(serde_json::Value::as_u64)?;
+        Some((input, output))
+    }
+
+    fn extract_tool_calls(&self, resp_json: &serde_json::Value) -> Vec<CompletedToolCall> {
+        let mut out = Vec::new();
+        let Some(content) = resp_json.get("content").and_then(|v| v.as_array()) else {
+            return out;
+        };
+        for block in content {
+            let Some(obj) = block.as_object() else { continue };
+            if obj.get("type").and_then(|v| v.as_str()) != Some("tool_use") {
+                continue;
+            }
+            out.push(CompletedToolCall {
+                id: obj
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string(),
+                name: obj
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                input: obj
+                    .get("input")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Object(Default::default())),
+            });
+        }
+        out
+    }
+
+    fn json_route_tags(&self) -> (&'static str, &'static str) {
+        ("anthropic-json", "anthropic_json")
+    }
 }
 
 /// OpenAI Chat Completions 出站 codec。
@@ -115,6 +190,74 @@ impl ProviderCodec for OpenAiCodec {
         serde_json::from_slice::<OpenAIRequest>(body)
             .map(DecodedRequest::OpenAi)
             .map_err(|e| SieveCoreError::Protocol(format!("openai request: {e}")))
+    }
+
+    fn completion_text(&self, resp_json: &serde_json::Value) -> String {
+        resp_json
+            .get("choices")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|c| {
+                        c.get("message")
+                            .and_then(|m| m.get("content"))
+                            .and_then(|v| v.as_str())
+                    })
+                    .collect::<Vec<_>>()
+                    .join("")
+            })
+            .unwrap_or_default()
+    }
+
+    fn claimed_usage(&self, resp_json: &serde_json::Value) -> Option<(u64, u64)> {
+        let u = resp_json.get("usage")?;
+        let input = u.get("prompt_tokens").and_then(serde_json::Value::as_u64)?;
+        let output = u.get("completion_tokens").and_then(serde_json::Value::as_u64)?;
+        Some((input, output))
+    }
+
+    fn extract_tool_calls(&self, resp_json: &serde_json::Value) -> Vec<CompletedToolCall> {
+        let mut out = Vec::new();
+        let Some(choices) = resp_json.get("choices").and_then(|v| v.as_array()) else {
+            return out;
+        };
+        for choice in choices {
+            let Some(message) = choice.get("message") else {
+                continue;
+            };
+            let Some(tool_calls) = message.get("tool_calls").and_then(|v| v.as_array()) else {
+                continue;
+            };
+            for tc in tool_calls {
+                let Some(obj) = tc.as_object() else { continue };
+                let Some(func) = obj.get("function").and_then(|v| v.as_object()) else {
+                    continue;
+                };
+                let arguments_str = func
+                    .get("arguments")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("{}");
+                out.push(CompletedToolCall {
+                    id: obj
+                        .get("id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown")
+                        .to_string(),
+                    name: func
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    input: serde_json::from_str(arguments_str)
+                        .unwrap_or(serde_json::Value::Object(Default::default())),
+                });
+            }
+        }
+        out
+    }
+
+    fn json_route_tags(&self) -> (&'static str, &'static str) {
+        ("openai-json", "openai_json")
     }
 }
 
