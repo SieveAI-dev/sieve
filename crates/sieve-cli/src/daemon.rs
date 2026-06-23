@@ -47,6 +47,51 @@ use tokio_stream::wrappers::ReceiverStream;
 use crate::config::Config;
 use crate::upstream_routes::UpstreamRoutes;
 
+// ── 本地用量/计费核算 facade（可选特性 `usage`）─────────────────────────────
+//
+// billing（独立 token 核算 / relay 偏差观测）默认不编译。为避免在 daemon 请求
+// 路径上撒满 `#[cfg]`，这里用 facade 统一类型名：`usage` 开时是真 billing 类型，
+// 关时退化为占位空类型。请求 handler 的签名与类型引用两态都可命名，billing 句柄
+// 始终为 `None`，仅真正调用 billing 业务方法的函数体内部按 feature 分支。
+mod billing_facade {
+    #[cfg(feature = "usage")]
+    pub(super) use crate::billing::{BillingContext, BillingObserver, Family};
+
+    // 占位类型：`usage` 关时使 daemon 类型引用仍可命名（值永远不被构造）。
+    #[cfg(not(feature = "usage"))]
+    #[derive(Clone, Copy)]
+    pub(super) enum Family {
+        Anthropic,
+        OpenAi,
+    }
+    #[cfg(not(feature = "usage"))]
+    pub(super) enum BillingObserver {}
+    #[cfg(not(feature = "usage"))]
+    pub(super) enum BillingContext {}
+}
+
+/// 计费观测器句柄：`usage` 开时为真观测器，关时恒为 `None`（占位，永不构造）。
+type BillingObserverHandle = Option<std::sync::Arc<billing_facade::BillingObserver>>;
+/// 每请求计费上下文句柄：`usage` 开时为真上下文，关时恒为 `None`（占位）。
+type BillingCtxHandle = Option<billing_facade::BillingContext>;
+
+// ── 加密审计档案 facade（可选特性 `audit-crypto`）────────────────────────────
+//
+// 加密归档写入（age + 哈希链）默认不编译。同 billing：用 facade 统一类型名，请求
+// 路径签名两态可命名，归档句柄关时恒为 `None`，仅真正写归档的函数体内部按 feature
+// 分支。`audit.level = full` 在特性关时优雅降级为不归档（warn 一句，当 metadata 处理）。
+mod archive_facade {
+    #[cfg(feature = "audit-crypto")]
+    pub(super) use crate::audit_archive::ArchiveWriter;
+
+    // 占位类型：`audit-crypto` 关时使 daemon 类型引用仍可命名（值永远不被构造）。
+    #[cfg(not(feature = "audit-crypto"))]
+    pub(super) enum ArchiveWriter {}
+}
+
+/// 加密归档写入器句柄：`audit-crypto` 开时为真写入器，关时恒为 `None`（占位）。
+type ArchiveWriterHandle = Option<std::sync::Arc<archive_facade::ArchiveWriter>>;
+
 // ── v2.0：请求上下文（PRD v2.0 §5.6 / §5.6.1）──────────────────────────────
 
 /// 每请求上下文：caller 进程信息 + audit 存储句柄 + listener 元信息（PRD v2.0 §5.6 / §5.6.1；ADR-026）。
@@ -1143,12 +1188,13 @@ pub async fn run(
     Ok(())
 }
 
-/// 构造 `full` 档加密审计归档写入器（ADR-037）。
+/// 构造 `full` 档加密审计归档写入器（加密审计档案，可选特性）。
 ///
 /// 仅 `audit.level = full` 时返回 `Some`；否则 `None`（`off` / `metadata` 不归档）。
 /// recipient 不可解析时返回 `Err`（fail-fast；config 校验已查 `age1` 前缀格式）。
-/// 启动时执行一次保留期清理（超期段删除，ADR-037 决策 5）；清理失败仅 warn 不阻断。
-fn build_archive_writer(cfg: &Config) -> Result<Option<Arc<crate::audit_archive::ArchiveWriter>>> {
+/// 启动时执行一次保留期清理（超期段删除）；清理失败仅 warn 不阻断。
+#[cfg(feature = "audit-crypto")]
+fn build_archive_writer(cfg: &Config) -> Result<ArchiveWriterHandle> {
     use crate::config::AuditLevel;
     if cfg.audit.level != AuditLevel::Full {
         return Ok(None);
@@ -1185,11 +1231,29 @@ fn build_archive_writer(cfg: &Config) -> Result<Option<Arc<crate::audit_archive:
     Ok(Some(Arc::new(writer)))
 }
 
-/// 构造超额计费观测器（ADR-038）。仅 `[billing_check].enabled` 时返回 `Some`。
+/// stub：`audit-crypto` 特性关时不构造加密归档写入器，恒返回 `None`。
+///
+/// 若 config 设 `audit.level = full` 但二进制未编入 audit-crypto 特性，warn 一句后
+/// 优雅降级为不归档（当 metadata 处理）。**绝不 panic/crash**——审计可靠性问题不得
+/// 变可用性事故。tail/query/show 等纯 SQLite 审计查询不受影响，始终可用。
+#[cfg(not(feature = "audit-crypto"))]
+fn build_archive_writer(cfg: &Config) -> Result<ArchiveWriterHandle> {
+    use crate::config::AuditLevel;
+    if cfg.audit.level == AuditLevel::Full {
+        tracing::warn!(
+            "config 设 audit.level = full 但本二进制未编入 `audit-crypto` 特性，\
+             已降级为 metadata 档（不写加密归档）；元数据审计与 tail/query/show 仍正常"
+        );
+    }
+    Ok(None)
+}
+
+/// 构造超额计费观测器（本地用量/计费核算）。仅 `[billing_check].enabled` 时返回 `Some`。
 ///
 /// usage 记录落本地 `~/.sieve/usage.db`（严格本地、永不上传）。`TokenEstimator::new`
 /// 加载 bundled BPE 词表（开销大），故启动一次性构造、`Arc` 透传到响应观测点。
-fn build_billing_observer(cfg: &Config) -> Result<Option<Arc<crate::billing::BillingObserver>>> {
+#[cfg(feature = "usage")]
+fn build_billing_observer(cfg: &Config) -> Result<BillingObserverHandle> {
     if !cfg.billing_check.enabled {
         return Ok(None);
     }
@@ -1206,20 +1270,33 @@ fn build_billing_observer(cfg: &Config) -> Result<Option<Arc<crate::billing::Bil
     Ok(Some(Arc::new(observer)))
 }
 
+/// stub：`usage` 特性关时计费观测器恒为 `None`。
+///
+/// 若用户 config 启用了 `[billing_check].enabled = true` 但二进制未编入 usage 特性，
+/// warn 一句后降级为不观测（不影响安全检测，计费监督非安全拦截）。
+#[cfg(not(feature = "usage"))]
+fn build_billing_observer(cfg: &Config) -> Result<BillingObserverHandle> {
+    if cfg.billing_check.enabled {
+        tracing::warn!("config 启用了 billing_check 但本二进制未编入 `usage` 特性，已降级为不观测");
+    }
+    Ok(None)
+}
+
 /// 构造每请求超额计费观测上下文（ADR-038）。
 ///
 /// 仅 `billing` 为 `Some`（`[billing_check].enabled`）**且** `trust == Relay`（中转，
 /// `usage` 不可信）时返回 `Some`；`Official` 直连 `usage` 权威、不核算。输入 token 用
 /// 请求文本段独立估算（纯本地，不外泄）。`texts` 为 `extract_text_content()` 的 `(offset,
 /// text)` 段列表。
+#[cfg(feature = "usage")]
 fn build_billing_context(
-    billing: &Option<Arc<crate::billing::BillingObserver>>,
+    billing: &BillingObserverHandle,
     trust: crate::config::Trust,
     provider_id: &str,
     model: &str,
-    family: crate::billing::Family,
+    family: billing_facade::Family,
     texts: &[(usize, String)],
-) -> Option<crate::billing::BillingContext> {
+) -> BillingCtxHandle {
     let observer = billing.as_ref()?;
     if trust != crate::config::Trust::Relay {
         return None;
@@ -1237,14 +1314,28 @@ fn build_billing_context(
     })
 }
 
+/// stub：`usage` 特性关时计费上下文恒为 `None`（`billing` 句柄本就恒 `None`）。
+#[cfg(not(feature = "usage"))]
+fn build_billing_context(
+    _billing: &BillingObserverHandle,
+    _trust: crate::config::Trust,
+    _provider_id: &str,
+    _model: &str,
+    _family: billing_facade::Family,
+    _texts: &[(usize, String)],
+) -> BillingCtxHandle {
+    None
+}
+
 /// 在响应观测点 spawn 超额计费核算（ADR-038，fire-and-forget）。
 ///
 /// `billing_ctx` 为 `None`（非 Relay / 未启用）时 no-op。`completion` 为补全全文（独立
 /// output 计数）；`claimed` 为 relay 声明的 `(input, output)` tokens（`None` = 无声明）。
 /// 写 `usage.db`（严格本地、永不上传）；检出超额时 `warn`（`sieve usage --overbilled-only`
 /// 可查）。**不阻断响应**（计费监督，非安全拦截）。
+#[cfg(feature = "usage")]
 fn spawn_billing_observation(
-    billing_ctx: Option<crate::billing::BillingContext>,
+    billing_ctx: BillingCtxHandle,
     completion: String,
     claimed: Option<(u64, u64)>,
 ) {
@@ -1280,13 +1371,25 @@ fn spawn_billing_observation(
                 claimed_total,
                 independent_total,
                 is_estimate,
-                "BILLING: 检出 relay 超额计费（独立计数 vs relay 声明偏差超容差，ADR-038）"
+                "BILLING: 检出 relay 超额计费（独立计数 vs relay 声明偏差超容差，本地用量/计费核算）"
             );
         }
     });
 }
 
+/// stub：`usage` 特性关时计费观测为 no-op（`billing_ctx` 句柄本就恒 `None`）。
+#[cfg(not(feature = "usage"))]
+fn spawn_billing_observation(
+    _billing_ctx: BillingCtxHandle,
+    _completion: String,
+    _claimed: Option<(u64, u64)>,
+) {
+}
+
 /// 提取 Anthropic JSON 响应顶层 `usage` 的 `(input_tokens, output_tokens)`。
+///
+/// 仅 `usage` 特性的计费观测调用；关闭时透传给 stub 后被忽略（标 allow 免 dead_code）。
+#[cfg_attr(not(feature = "usage"), allow(dead_code))]
 fn anthropic_claimed_usage(resp_json: &serde_json::Value) -> Option<(u64, u64)> {
     let u = resp_json.get("usage")?;
     let input = u.get("input_tokens").and_then(|v| v.as_u64())?;
@@ -1315,6 +1418,9 @@ fn anthropic_completion_text(resp_json: &serde_json::Value) -> String {
 }
 
 /// 提取 OpenAI JSON 响应顶层 `usage` 的 `(prompt_tokens, completion_tokens)`。
+///
+/// 仅 `usage` 特性的计费观测调用；关闭时透传给 stub 后被忽略（标 allow 免 dead_code）。
+#[cfg_attr(not(feature = "usage"), allow(dead_code))]
 fn openai_claimed_usage(resp_json: &serde_json::Value) -> Option<(u64, u64)> {
     let u = resp_json.get("usage")?;
     let input = u.get("prompt_tokens").and_then(|v| v.as_u64())?;
@@ -1347,6 +1453,9 @@ fn openai_completion_text(resp_json: &serde_json::Value) -> String {
 /// - **claimed usage**：Anthropic 的 input 在 `MessageStart.usage.input_tokens`、output 在
 ///   `MessageDelta.usage.output_tokens`；OpenAI（include_usage）的 prompt/completion 在末尾
 ///   `MessageDelta.usage`（经 `OpenAiSseParser` 归一化，见其 usage-only chunk 处理）。
+///
+/// 仅 `usage` 特性使用；关闭时整条 SSE billing 路径恒走 None 分支，标 allow 免 dead_code。
+#[cfg_attr(not(feature = "usage"), allow(dead_code))]
 #[derive(Default)]
 struct BillingSseAccumulator {
     completion: String,
@@ -1354,6 +1463,7 @@ struct BillingSseAccumulator {
     claimed_output: Option<u64>,
 }
 
+#[cfg_attr(not(feature = "usage"), allow(dead_code))]
 impl BillingSseAccumulator {
     fn observe_events(&mut self, events: &[sieve_core::sse::parser::SseEvent]) {
         use sieve_core::sse::parser::{SseDelta, SseEvent};
@@ -1403,13 +1513,14 @@ impl BillingSseAccumulator {
     }
 }
 
-/// 归档脱敏后的出站内容（ADR-037 full 档）。
+/// 归档脱敏后的出站内容（加密审计档案 full 档，可选特性）。
 ///
 /// **fire-and-forget**：`spawn_blocking` 执行 age 加密 + 文件 IO（同步阻塞），失败仅
-/// `warn` 不阻断 forward（审计可靠性问题不得变可用性事故，ADR-007）。`archive` 为 `None`
+/// `warn` 不阻断 forward（审计可靠性问题不得变可用性事故）。`archive` 为 `None`
 /// （非 full 档）时 no-op、零开销。**红线**：`redacted_body` 必须是脱敏后内容（调用点保证）。
+#[cfg(feature = "audit-crypto")]
 fn archive_redacted_outbound(
-    archive: &Option<Arc<crate::audit_archive::ArchiveWriter>>,
+    archive: &ArchiveWriterHandle,
     redacted_body: &Bytes,
     protocol: &'static str,
 ) {
@@ -1422,6 +1533,15 @@ fn archive_redacted_outbound(
             }
         });
     }
+}
+
+/// stub：`audit-crypto` 特性关时不写加密归档（`archive` 句柄本就恒 `None`）。no-op。
+#[cfg(not(feature = "audit-crypto"))]
+fn archive_redacted_outbound(
+    _archive: &ArchiveWriterHandle,
+    _redacted_body: &Bytes,
+    _protocol: &'static str,
+) {
 }
 
 /// 单 listener 永久 accept loop（ADR-026 §决策 3）。
@@ -1441,8 +1561,8 @@ async fn accept_loop(
     provider_forwarders: Arc<HashMap<String, Arc<Forwarder>>>,
     audit_store: Arc<crate::audit::AuditStore>,
     ipc_server: Option<Arc<sieve_ipc::IpcServer>>,
-    archive: Option<Arc<crate::audit_archive::ArchiveWriter>>,
-    billing: Option<Arc<crate::billing::BillingObserver>>,
+    archive: ArchiveWriterHandle,
+    billing: BillingObserverHandle,
     dry_run: bool,
     no_client_policy: crate::cli::NoClientPolicy,
 ) {
@@ -1775,8 +1895,8 @@ async fn proxy(
     inbound_filter: InboundFilter,
     dry_run: bool,
     ipc: Option<Arc<sieve_ipc::IpcServer>>,
-    archive: Option<Arc<crate::audit_archive::ArchiveWriter>>,
-    billing: Option<Arc<crate::billing::BillingObserver>>,
+    archive: ArchiveWriterHandle,
+    billing: BillingObserverHandle,
     listener_trust: crate::config::Trust,
     ctx: RequestCtx,
     req: Request<Incoming>,
@@ -1840,8 +1960,8 @@ async fn proxy_inner(
     inbound_filter: InboundFilter,
     dry_run: bool,
     ipc: Option<Arc<sieve_ipc::IpcServer>>,
-    archive: Option<Arc<crate::audit_archive::ArchiveWriter>>,
-    billing: Option<Arc<crate::billing::BillingObserver>>,
+    archive: ArchiveWriterHandle,
+    billing: BillingObserverHandle,
     listener_trust: crate::config::Trust,
     ctx: RequestCtx,
     req: Request<Incoming>,
@@ -2145,7 +2265,7 @@ async fn proxy_inner(
             listener_trust,
             &ctx.listener_provider_id,
             &anthropic_req.model,
-            crate::billing::Family::Anthropic,
+            billing_facade::Family::Anthropic,
             &texts,
         );
 
@@ -2702,8 +2822,8 @@ async fn proxy_openai(
     inbound_filter: InboundFilter,
     dry_run: bool,
     ipc: Option<Arc<sieve_ipc::IpcServer>>,
-    archive: Option<Arc<crate::audit_archive::ArchiveWriter>>,
-    billing: Option<Arc<crate::billing::BillingObserver>>,
+    archive: ArchiveWriterHandle,
+    billing: BillingObserverHandle,
     listener_trust: crate::config::Trust,
     parts: http::request::Parts,
     body_bytes: Bytes,
@@ -2745,7 +2865,7 @@ async fn proxy_openai(
         listener_trust,
         &listener_provider_id,
         &openai_req.model,
-        crate::billing::Family::OpenAi,
+        billing_facade::Family::OpenAi,
         &texts,
     );
 
@@ -3259,7 +3379,7 @@ async fn forward_with_inbound_inspection(
     body_bytes: Bytes,
     meta: MultiAgentMeta,
     ctx: RequestCtx,
-    billing_ctx: Option<crate::billing::BillingContext>,
+    billing_ctx: BillingCtxHandle,
 ) -> Result<Response<ResponseBody>> {
     // 解构 ctx 供内部使用（避免在 spawn move 时多次 clone Arc）
     let RequestCtx {
@@ -3727,7 +3847,7 @@ async fn forward_with_openai_inbound_inspection(
     body_bytes: Bytes,
     meta: MultiAgentMeta,
     ctx: RequestCtx,
-    billing_ctx: Option<crate::billing::BillingContext>,
+    billing_ctx: BillingCtxHandle,
 ) -> Result<Response<ResponseBody>> {
     // 解构 ctx 供内部使用
     let RequestCtx {
@@ -4531,7 +4651,7 @@ async fn handle_anthropic_json_inbound(
     meta: MultiAgentMeta,
     ipc: Option<Arc<sieve_ipc::IpcServer>>,
     ctx: RequestCtx,
-    billing_ctx: Option<crate::billing::BillingContext>,
+    billing_ctx: BillingCtxHandle,
 ) -> Result<Response<ResponseBody>> {
     // ADR-026 Stage E：listener_provider_id 透传到 record_into_sequence_and_detect，
     // listener_protocol 在 JSON 路径已确定（外层 proxy_inner 已校验），此处无消费者。
@@ -4691,7 +4811,7 @@ async fn handle_openai_json_inbound(
     meta: MultiAgentMeta,
     ipc: Option<Arc<sieve_ipc::IpcServer>>,
     ctx: RequestCtx,
-    billing_ctx: Option<crate::billing::BillingContext>,
+    billing_ctx: BillingCtxHandle,
 ) -> Result<Response<ResponseBody>> {
     // ADR-026 Stage E：listener_provider_id 透传到 record_into_sequence_and_detect，
     // listener_protocol 在 JSON 路径已确定（外层 proxy_inner 已校验），此处无消费者。

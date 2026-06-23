@@ -1,17 +1,15 @@
 #!/usr/bin/env bash
-# ADR-043 红队 bypass 测试集编排入口。
+# 红队 bypass 测试集编排入口。
 #
-# 编排：构建 sieve 二进制 → 调 `sieve verify redteam` headless 驱动红队回归基线
-# （入站地址替换 / 危险 shell × 四路由 + 出站 BIP39 / WIF / xprv 脱敏）→ 退出码反映结果。
+# 编排：直接驱动 `cargo test` 跑红队回归基线 test target → 退出码反映结果
+# （入站地址替换 / 危险 shell × 四路由 + 出站 BIP39 / WIF / xprv 脱敏）。
 #
 # **红队集是已知攻击手法的回归基线，不是检测能力的完备性证明。**
 # 全程 hermetic：无真 API、无网络、无 GUI（红队测试以 mock 上游 + 真 daemon 跑，
 # SIEVE_NO_UPDATE=1 / SIEVE_NO_TELEMETRY=1）。规则包缺失时优雅 SKIP，退出码仍为 0。
 #
 # 用法:
-#   verifier/redteam.sh             # 构建 + 跑红队回归基线
-#   verifier/redteam.sh --fast      # 跳过构建（用已存在的二进制）
-#   verifier/redteam.sh --no-build  # 同 --fast
+#   verifier/redteam.sh             # 跑红队回归基线（cargo test 自动编译所需 test target）
 #   verifier/redteam.sh --nextest   # 用 cargo nextest run 代替 cargo test（CI profile）
 #
 # 退出码: 0 全过（含 SKIP）/ 非 0 有失败。CI 直接用退出码判定。
@@ -30,12 +28,10 @@ if ! command -v cargo >/dev/null 2>&1; then
   fi
 fi
 
-DO_BUILD=1
-NEXTEST_FLAG=""
+USE_NEXTEST=0
 for arg in "$@"; do
   case "$arg" in
-    --fast | --no-build) DO_BUILD=0 ;;
-    --nextest) NEXTEST_FLAG="--nextest" ;;
+    --nextest) USE_NEXTEST=1 ;;
     *) echo "未知参数: $arg" >&2; exit 2 ;;
   esac
 done
@@ -50,30 +46,21 @@ section() { echo; echo "${BOLD}=== $* ===${RST}"; }
 ok() { echo "${GREEN}✓ $*${RST}"; }
 fail() { echo "${RED}✗ $*${RST}"; }
 
-# ── 1. 构建 sieve 二进制（verify redteam 子命令所需）─────────────────────────────
-if [[ "$DO_BUILD" -eq 1 ]]; then
-  section "1. 构建 sieve 二进制"
-  if cargo build -p sieve-cli --locked; then
-    ok "sieve 二进制就绪"
-  else
-    fail "构建失败"
-    exit 1
-  fi
+# ── 跑红队回归基线 ─────────────────────────────────────────────────────────────
+# 直接驱动 cargo test 的两个红队 test target（沿用 dogfood.sh 的做法）：
+# cargo test 会按需编译所需 test target，无需先单独 build 主二进制。
+# 规则包缺失时测试自身优雅 SKIP，退出码仍为 0（公开仓无签名规则包时不误红）。
+section "红队 bypass 回归基线"
+echo "注：规则包缺失时红队测试优雅 SKIP（公开仓无签名规则包），退出码仍为 0。"
+echo
+
+if [[ "$USE_NEXTEST" -eq 1 ]]; then
+  REDTEAM_CMD=(cargo nextest run -p sieve-cli --test redteam_inbound --test redteam_outbound --locked)
 else
-  section "1. 跳过构建（--fast）"
-  if [[ ! -x target/release/sieve && ! -x target/debug/sieve ]]; then
-    fail "无现成二进制，--fast 不可用（先去掉 --fast 跑一次构建）"
-    exit 1
-  fi
-  ok "复用已存在二进制"
+  REDTEAM_CMD=(cargo test -p sieve-cli --test redteam_inbound --test redteam_outbound --locked)
 fi
 
-# ── 2. 跑红队回归基线（sieve verify redteam）──────────────────────────────────
-section "2. 红队 bypass 回归基线 (ADR-043)"
-SIEVE_BIN="target/debug/sieve"
-[[ -x target/release/sieve ]] && SIEVE_BIN="target/release/sieve"
-
-if "$SIEVE_BIN" verify redteam ${NEXTEST_FLAG:+$NEXTEST_FLAG}; then
+if "${REDTEAM_CMD[@]}"; then
   echo
   ok "红队 bypass 回归基线全过（规则缺失时优雅 SKIP，不误红）"
   exit 0

@@ -9,7 +9,16 @@
 
 ---
 
-## [Unreleased] — 2026-06-22
+## [Unreleased] — 2026-06-23
+
+### Changed — CLI 瘦身：可选特性门隔离 + 红队 verify 移出主二进制（2026-06-23）
+
+- **新增 `usage` / `audit-crypto` 两个可选特性（默认关），默认 `sieve` 二进制收窄到核心能力面**（start / decisions / rules / `audit tail·query·show` / setup·doctor·uninstall / version）：
+  - `usage`（默认关）：`sieve usage` 子命令 + daemon 端用量核算观测路径，连同 `tiktoken-rs` 依赖仅在启用时编译。
+  - `audit-crypto`（默认关）：`sieve audit keygen/rotate-key/decrypt` 子命令 + daemon 端 `full` 档加密归档写入，连同 `age` / `sha2` / `base64` 依赖仅在启用时编译。`audit tail/query/show` 三个纯 SQLite 查询子命令不受影响、始终可用；`audit.level = full` 在未编入 `audit-crypto` 时优雅降级为 `metadata` 档（warn 一句，绝不 panic）。
+  - **config 向后兼容**：`[billing_check]` / `[audit]` 配置段在任何特性组合下均可正常反序列化（结构体始终编译，仅功能代码受特性门控），新增永久回归测试守护。
+- **`sieve verify redteam` 子命令移出主二进制**：红队 bypass 回归是开发 / CI 工具，不再占用终端用户的 `sieve` 命令树。`verifier/redteam.sh` 改为直接 `cargo test -p sieve-cli --test redteam_inbound --test redteam_outbound`（红队测试本体与四路由覆盖不变）。
+- 默认构建（`cargo build -p sieve-cli`）不再编入 `tiktoken-rs` / `age`，二进制更精简；默认 + 全特性 `clippy -D warnings` 均干净。
 
 ### Added — 出站 crypto key 格式扩展：Bitcoin WIF + BIP-32 扩展私钥（2026-06-22，ADR-042）
 

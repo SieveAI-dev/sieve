@@ -814,6 +814,37 @@ mod tests {
         );
     }
 
+    /// 特性门回归守护：`usage` / `audit-crypto` 可选特性关闭时（默认构建），含
+    /// `[billing_check]` 段与 `audit.level = "full"` 的 config 仍必须能反序列化 +
+    /// 通过安全校验（config 结构体始终编译，仅功能代码按 feature 分支）。
+    ///
+    /// 防回归：若误把 `BillingCheckConfig` / `AuditConfig` 整体 gate 掉，含这两段的
+    /// 用户 config 会因未知字段反序列化失败——本测试在两种 feature 下都会跑到，守护它。
+    #[test]
+    fn optional_feature_config_sections_always_deserialize() {
+        let toml_str = r#"
+            upstream_url = "https://api.anthropic.com"
+            port = 12001
+
+            [billing_check]
+            enabled = true
+            tolerance_pct = 12.5
+
+            [audit]
+            level = "full"
+            recipient = "age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqsexample"
+        "#;
+        let c: Config = toml::from_str(toml_str).expect(
+            "含 [billing_check] + audit.level=full 的 config 必须能反序列化（结构体不 gate）",
+        );
+        assert!(c.billing_check.enabled);
+        assert_eq!(c.audit.level, AuditLevel::Full);
+        // 配了合法 age recipient 的 full 档 config 必须通过安全校验（加载成功，
+        // 运行期由 build_archive_writer 在特性关时优雅降级，不在此拒绝）。
+        c.check_safety_invariants()
+            .expect("配了 age recipient 的 full 档 config 必须通过安全校验");
+    }
+
     #[test]
     fn parse_dry_run_and_rules_path() {
         let toml_str = r#"

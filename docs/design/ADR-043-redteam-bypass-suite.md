@@ -10,6 +10,21 @@
 
 ---
 
+## 后续变更说明（2026-06-23，CLI 瘦身）
+
+红队驱动**不再作为主二进制子命令**：原 `sieve verify redteam` CLI 子命令（连同 `crates/sieve-cli/src/commands/verify.rs`、`Command::Verify` 变体）已从 `sieve` 二进制移除——红队是 CI / 开发期工具，不属用户运行时面，留在主二进制只是冗余壳（测试本就经 `cargo test` 直跑）。
+
+`verifier/redteam.sh` 改为**直接驱动 `cargo test`**（沿用 `dogfood.sh` 的做法）：
+
+```bash
+cargo test -p sieve-cli --test redteam_inbound --test redteam_outbound --locked
+# --nextest 时换 cargo nextest run，其余编排（PATH 处理 / 退出码 / 色彩输出）不变
+```
+
+下文「决策」「实现计划」中所有提到 `sieve verify redteam` CLI 子命令 / 架构图里的 `CLI 子命令`节点，均以本说明为准：链路从「redteam.sh → sieve verify redteam → cargo test」简化为「redteam.sh → cargo test」。红队测试本体（`tests/redteam_inbound.rs` / `redteam_outbound.rs`）、退出码语义、规则缺失时优雅 SKIP 的行为**均不变**。
+
+---
+
 ## 背景
 
 ### 检测规则只测「正例命中」是远远不够的
