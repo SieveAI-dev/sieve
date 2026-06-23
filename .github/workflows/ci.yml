@@ -94,6 +94,17 @@ jobs:
       - name: doctests（nextest 不覆盖 doctest）
         run: cargo test --workspace --locked --doc
 
+  check-routing-matrix:
+    name: 四路由覆盖门禁（ADR-025）
+    # v1.5.4 P0 教训永久化：入站检测必须覆盖 4 条 content-type 路由（M-1~M-4）。
+    # 纯源码 + 测试静态扫描，无需构建，直接拦截「JSON handler 摘掉入站钩子」的回归形状。
+    # 与 deny / fuzz-quick 同理：平台无关的静态门禁不强制走 macOS runner。
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 四路由入站钩子接线 + 端到端测试锚点检查
+        run: bash scripts/check_routing_coverage.sh
+
   dogfood:
     name: dogfood hermetic (macos-14)
     # 完全 hermetic：无真 ANTHROPIC_API_KEY、无真网络、无真 GUI，零 secret。
