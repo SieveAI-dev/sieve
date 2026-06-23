@@ -2,7 +2,6 @@
 
 > Version: v1.0 — 2026-04-28
 > Status: Stable
-> 关联 ADR：ADR-013（IPC 协议）、ADR-014（双层防御）
 > 关联 PRD：v2.0 §6.5、§6.7（v1.4 引入）
 
 ---

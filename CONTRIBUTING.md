@@ -131,7 +131,7 @@ If you have a suspicious prompt, response, or tool-call that Sieve should catch 
 
 By contributing, you agree that your contributions are licensed under the project's **inbound = outbound** terms:
 
-- **Code** contributions are accepted under the **Apache License 2.0** (the project's code license; see [`LICENSE`](./LICENSE) and ADR-035).
+- **Code** contributions are accepted under the **Apache License 2.0** (the project's code license; see [`LICENSE`](./LICENSE)).
 - **Documentation** contributions (everything under `docs/`, plus `README*` / `CLAUDE.md` and other non-source Markdown) are accepted under **CC BY-NC-SA 4.0**.
 
 If you are contributing on behalf of an employer, make sure you have the right to do so under these terms.

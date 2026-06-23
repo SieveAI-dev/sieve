@@ -2,7 +2,6 @@
 
 > Version: v1.0 — 2026-04-28
 > Status: Stable
-> 关联 ADR：ADR-015（sieve setup 自动配置工具）
 > 关联 PRD：v2.0 §6.6、§10.1 Week 5（v1.4 引入）
 
 ---
@@ -264,7 +263,7 @@ test key: sk-ant-test-XXXXXXXXXXXXXXXXXXXXXXXXXXXX（固定字符串，不是真
 期望响应：包含 [REDACTED] 替换后的内容
 ```
 
-### 4.2b Multi-listener 体检（ADR-026）
+### 4.2b Multi-listener 体检
 
 **触发条件**：仅当 `~/.sieve/sieve.toml` 中 `[[upstream]]` 数组元素数量 > 1 时执行；单 listener 配置跳过此检查（避免冗余）。
 
@@ -274,8 +273,8 @@ test key: sk-ant-test-XXXXXXXXXXXXXXXXXXXXXXXXXXXX（固定字符串，不是真
 
 | 状态 | 条件 | 输出 |
 |------|------|------|
-| 通过 | 所有 listener 端口均可达 | `✅ ADR-026 multi-listener 全部端口可达（N 个 listener）` |
-| 失败 | 任一端口不可达 | `❌ ADR-026 multi-listener 全部端口可达（N 个 listener）` + 失败端口列表 |
+| 通过 | 所有 listener 端口均可达 | `✅ multi-listener 全部端口可达（N 个 listener）` |
+| 失败 | 任一端口不可达 | `❌ multi-listener 全部端口可达（N 个 listener）` + 失败端口列表 |
 
 **实现位置**：`crates/sieve-cli/src/commands/doctor.rs::check_all_listeners_from_config`（已落地，本节仅文档化）。
 
@@ -291,7 +290,7 @@ test key: sk-ant-test-XXXXXXXXXXXXXXXXXXXXXXXXXXXX（固定字符串，不是真
   ✅ settings.json: ANTHROPIC_BASE_URL = http://127.0.0.1:11453
   ✅ settings.json: hooks.PreToolUse 含 sieve-hook check
   ✅ daemon 在 127.0.0.1:11453 监听
-  ✅ ADR-026 multi-listener 全部端口可达（3 个 listener）
+  ✅ multi-listener 全部端口可达（3 个 listener）
   ✅ launchd com.sieve.daemon 已加载
   ✅ canary 本地规则引擎命中 OUT-01
 ✅ 所有检查通过，Sieve 运行正常。
@@ -304,7 +303,7 @@ test key: sk-ant-test-XXXXXXXXXXXXXXXXXXXXXXXXXXXX（固定字符串，不是真
   ✅ settings.json: ANTHROPIC_BASE_URL = http://127.0.0.1:11453
   ✅ settings.json: hooks.PreToolUse 含 sieve-hook check
   ✅ daemon 在 127.0.0.1:11453 监听
-  ❌ ADR-026 multi-listener 全部端口可达（3 个 listener）
+  ❌ multi-listener 全部端口可达（3 个 listener）
     失败的 listener: port 11454 (deepseek), port 11455 (openai)
   ✅ launchd com.sieve.daemon 已加载
   ✅ canary 本地规则引擎命中 OUT-01

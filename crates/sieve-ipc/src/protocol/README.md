@@ -5,8 +5,6 @@
 ## 关联文档
 
 - **SPEC-005**：`docs/specs/SPEC-005-ipc-protocol.md`（字段定义权威源，本目录跟随）
-- **ADR-028**：`docs/design/ADR-028-ipc-protocol-neutralization.md`（本目录结构来源）
-- **ADR-013**：`docs/design/ADR-013-ipc-protocol.md`（JSON-RPC over UDS 决策）
 
 ## 子模块职责
 
@@ -31,11 +29,11 @@
 - `tracing` / 日志
 - `sieve-core` / `sieve-rules` / `sieve-policy` / 任何业务 crate
 
-此约束使本目录在将来升级为独立 crate 时的成本等于 `mv` 一个目录（ADR-028 §决策 §2）。
+此约束使本目录在将来升级为独立 crate 时的成本等于 `mv` 一个目录。
 
 ## 修改流程
 
 1. **先修改 SPEC-005**（`docs/specs/SPEC-005-ipc-protocol.md`）——字段权威源
 2. **再改本目录代码**，保持字段名 / 类型 100% 与 SPEC 一致
 3. **更新 CHANGELOG** + 兼容性说明（向后兼容扩展 vs breaking change）
-4. 如涉及 method 名变更，参考 ADR-028 §决策 §1 的 alias 期策略
+4. 如涉及 method 名变更，沿用旧 method 名的 alias 期策略（过渡期同时接受新旧名）

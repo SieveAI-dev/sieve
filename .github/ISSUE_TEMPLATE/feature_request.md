@@ -50,6 +50,6 @@ assignees: doskey
 
 - [ ] 已搜索现有 issue 没有重复
 - [ ] 提议不要求"上传样本到云端" / "联网 verify" / "关闭 Critical 拦截"等违反 PRD §9 的行为
-- [ ] 提议不增加非 Rust 二进制依赖（[ADR-001](../../docs/design/ADR-001-rust-tech-stack.md)）
+- [ ] 提议不增加非 Rust 二进制依赖
 
 > Phase 2 功能按需求优先级评估，不保证排期。

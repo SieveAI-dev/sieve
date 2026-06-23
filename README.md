@@ -71,7 +71,7 @@ See [SPEC-006](./docs/specs/SPEC-006-update-and-telemetry.md).
 
 ### Installation (Phase 1: macOS only)
 
-Most `curl … | sh` installers ask you to blindly trust a script piping straight into your shell. Sieve's does the opposite: **before it lands anything on disk, the installer verifies its own release artifacts** with cosign / sigstore (keyless signatures + Rekor transparency log). If a binary has been tampered with or doesn't come from Sieve's release workflow, it **fails closed and refuses to install**. One command, still verifiable. Verification is the homework the installer does for you — not a hurdle it hands you. A security tool's installer should look exactly like this ([ADR-036](./docs/design/ADR-036-self-verifying-installer.md)).
+Most `curl … | sh` installers ask you to blindly trust a script piping straight into your shell. Sieve's does the opposite: **before it lands anything on disk, the installer verifies its own release artifacts** with cosign / sigstore (keyless signatures + Rekor transparency log). If a binary has been tampered with or doesn't come from Sieve's release workflow, it **fails closed and refuses to install**. One command, still verifiable. Verification is the homework the installer does for you — not a hurdle it hands you. A security tool's installer should look exactly like this.
 
 Pick the path that fits you, from frictionless to hardcore:
 
@@ -118,7 +118,7 @@ What `sieve setup` does internally:
 
 - detects whether Claude Code / Codex CLI / Cursor are installed;
 - writes `ANTHROPIC_BASE_URL=http://127.0.0.1:9119` into `~/.claude/settings.json`;
-- registers the PreToolUse hook ([ADR-014 dual-layer defense](./docs/design/ADR-014-dual-layer-defense.md));
+- registers the PreToolUse hook (dual-layer defense);
 - installs a macOS launchd plist so the daemon starts at login.
 
 Full install and operations guide: [docs/guides/deployment.md](./docs/guides/deployment.md). Development and build: [docs/guides/development.md](./docs/guides/development.md).
@@ -138,7 +138,7 @@ cosign verify-blob \
 # expected output: Verified OK
 ```
 
-Every signature is also written to the public [Rekor](https://search.sigstore.dev/) transparency log, and every release can be independently reproduced bit-for-bit from source — see [deployment.md §3](./docs/guides/deployment.md) and [ADR-006](./docs/design/ADR-006-sigstore-reproducible-build.md). Any re-signing leaves a trace in Rekor and cannot be done silently.
+Every signature is also written to the public [Rekor](https://search.sigstore.dev/) transparency log, and every release can be independently reproduced bit-for-bit from source — see [deployment.md §3](./docs/guides/deployment.md). Any re-signing leaves a trace in Rekor and cannot be done silently.
 
 ### Verify interception
 
@@ -158,7 +158,7 @@ sieve uninstall   # reverses every step of setup
 
 ## Configuration
 
-Sieve reads `~/.sieve/config.toml` and can bind multiple upstream listeners at once ([ADR-026](./docs/design/ADR-026-port-based-listener-routing.md)):
+Sieve reads `~/.sieve/config.toml` and can bind multiple upstream listeners at once:
 
 ```toml
 [[listener]]
@@ -199,7 +199,7 @@ Quality baseline (per `tasks/PROGRESS.md`): Critical false-positive rate **0.00%
 
 Sieve holds itself to the same standard it applies to the upstream:
 
-- **sigstore signing + reproducible builds** — every release can be independently reproduced and verified ([ADR-006](./docs/design/ADR-006-sigstore-reproducible-build.md)).
+- **sigstore signing + reproducible builds** — every release can be independently reproduced and verified.
 - **Pinned dependencies** — to avoid supply-chain incidents.
 - **Public source** — the interception logic is fully auditable.
 - **Transparent rule-update log** — every update ships a changelog and hashes so users can verify independently.
@@ -225,7 +225,6 @@ Free during Phase 1.
 | Entry | Purpose |
 |------|------|
 | [docs/glossary.md](./docs/glossary.md) | Glossary — unified definitions of domain terms |
-| [docs/design/ADR-INDEX.md](./docs/design/ADR-INDEX.md) | Architecture decision records, index |
 | [docs/design/architecture.md](./docs/design/architecture.md) | Architecture design |
 | [docs/design/data-model.md](./docs/design/data-model.md) | Data model |
 | [docs/api/api-reference.md](./docs/api/api-reference.md) | API reference (incl. config schema) |
@@ -242,7 +241,6 @@ Project site: [sieveai.dev](https://sieveai.dev)
 ```mermaid
 graph TD
     README["README.md<br/>project entry"]
-    ADR["docs/design/ADR-INDEX.md<br/>decision records"]
     ARCH["docs/design/architecture.md<br/>architecture"]
     DATA["docs/design/data-model.md<br/>data model"]
     API["docs/api/api-reference.md<br/>API reference"]
@@ -250,7 +248,6 @@ graph TD
     GUIDES["docs/guides/<br/>development + deployment"]
     CL["docs/changelog/CHANGELOG.md<br/>changelog"]
 
-    README --> ADR
     README --> ARCH
     README --> GUIDES
     ARCH --> DATA

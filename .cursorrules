@@ -22,7 +22,7 @@ README.md                  # 唯一放在根目录的文档（项目入口）
 .cursorrules               # 本文件
 docs/
 ├── requirements/          # 需求文档（PRD-sieve.md / user-stories.md）
-├── design/                # 设计文档（architecture.md / ADR-XXX.md / data-model.md）
+├── design/                # 设计文档（architecture.md / data-model.md）
 ├── api/                   # API 文档（api-reference.md）
 ├── guides/                # 使用指南（development.md / deployment.md）
 ├── changelog/             # 变更日志（CHANGELOG.md）
@@ -82,13 +82,13 @@ docs/changelog/CHANGELOG.md
 7. **Critical 拦截 FP 必须 < 0.5%**——公理 12，不可妥协；超过即用户禁用产品
 8. **Critical 在所有版本（包括降级模式）不可关闭**——产品安全承诺，不是用户偏好
 9. **Phase 1 GA 适配三家：Claude Code / OpenClaw / Hermes，UnifiedMessage 真实双协议**——Anthropic Messages API + OpenAI Chat Completions 都跑通；Gemini / Mistral 等其他协议推 Phase 2，真有用户主动要再做
-10. **GA 时一次性公开 repo + 代码 + 文档**——sigstore + reproducible build pipeline 照常跑通（关联 ADR-006）
+10. **GA 时一次性公开 repo + 代码 + 文档**——sigstore + reproducible build pipeline 照常跑通
 11. **不在 Anthropic API 协议层撒谎**——不伪造 tool_use / stop_reason / id / usage / type；拦截发生时允许截 SSE 流注入 `sieve_blocked` event（Sieve 自报，不是冒充模型）；keep-alive comment 行不算伪造
 12. **不装本地 CA 做 MITM**——Network Extension / 本地 CA 注入 / 系统 proxy 修改推 Phase 3 选购，Phase 1/2 不做
 13. **出站脱敏不打断工作流**——OUT-01~05/12 高频类自动脱敏 + 状态栏 5s 通知，不弹窗；弹窗次数过多用户直接禁用产品
-14. **用户规则系统 fail-safe**（v2.0 新增）——用户规则文件加载失败 / pattern 编译失败 / 安全 lint 拒绝 → daemon 必须正常启动 + 系统规则全功能；用户规则**不能 override 或 suppress 系统 Critical**；用户规则只能 High Ask/Warn/Mark，不能 Block / HookTerminal。详见 [ADR-020](./docs/design/ADR-020-user-rules-system.md) + [ADR-024](./docs/design/ADR-024-rules-engine-abstraction.md) LayeredEngine 合并顺序
-15. **行为序列检测的保守起步 + beta 默认关闭**（v2.0 新增）——IN-SEQ-* 仅触发 StatusBar 通知，不引入新 Block 路径；GA 默认关闭（`[features] sequence_detection = false`），闭测用户主动 opt-in；GA 营销不承诺行为序列。升级为 Block 类需 4 周 ≥ 50 样本 + FP < 0.5% + 新 ADR。详见 [ADR-022](./docs/design/ADR-022-behavior-sequence-window.md)
-16. **所有入站能力必须经过 content-type 路由矩阵测试**（v2.0 新增，v1.5.4 P0 教训永久化）——任何新增入站功能必须有集成测试覆盖 4 类组合（Anthropic SSE / Anthropic JSON / OpenAI SSE / OpenAI stream=false JSON）；新功能只挂 SSE 不挂 JSON 视为 P0 漏洞。详见 [ADR-025](./docs/design/ADR-025-content-type-routing-matrix.md)
+14. **用户规则系统 fail-safe**（v2.0 新增）——用户规则文件加载失败 / pattern 编译失败 / 安全 lint 拒绝 → daemon 必须正常启动 + 系统规则全功能；用户规则**不能 override 或 suppress 系统 Critical**；用户规则只能 High Ask/Warn/Mark，不能 Block / HookTerminal。详见 LayeredEngine 合并顺序
+15. **行为序列检测的保守起步 + beta 默认关闭**（v2.0 新增）——IN-SEQ-* 仅触发 StatusBar 通知，不引入新 Block 路径；GA 默认关闭（`[features] sequence_detection = false`），闭测用户主动 opt-in；GA 营销不承诺行为序列。升级为 Block 类需 4 周 ≥ 50 样本 + FP < 0.5% + 新 ADR。
+16. **所有入站能力必须经过 content-type 路由矩阵测试**（v2.0 新增，v1.5.4 P0 教训永久化）——任何新增入站功能必须有集成测试覆盖 4 类组合（Anthropic SSE / Anthropic JSON / OpenAI SSE / OpenAI stream=false JSON）；新功能只挂 SSE 不挂 JSON 视为 P0 漏洞。
 
 ---
 
@@ -109,7 +109,7 @@ docs/changelog/CHANGELOG.md
 
 ### 3.3 模块边界
 
-按 PRD §6 分七个 crate（ADR-030 sieve-updater 于 2026-05-05 新增）：
+按 PRD §6 分七个 crate（sieve-updater 于 2026-05-05 新增）：
 
 | crate | 职责 | 不允许做 |
 |-------|------|---------|
@@ -119,7 +119,7 @@ docs/changelog/CHANGELOG.md
 | `sieve-ipc` | IPC 协议（JSON-RPC over Unix socket + 文件锁 + pending/decisions 文件 IO） | 不参与请求处理 / 不依赖 sieve-core 业务逻辑 |
 | `sieve-hook` | 极简 PreToolUse hook 二进制，启动时延 < 50ms | 不依赖 sieve-core / sieve-rules / sieve-ipc / tokio |
 | `sieve-policy` (v2.0 新增) | 用户规则加载（user.toml） / lint（11 类约束） / 与系统规则合并（LayeredEngine） / 灰名单管理 / 规则编辑器（$EDITOR pipeline） | 不直接做匹配（调 sieve-rules）；不直接处理网络 IO（调 sieve-cli）；不破坏 critical_lock（用户规则永远不能 suppress 系统 Critical） |
-| `sieve-updater` (ADR-030 新增) | manifest 协议客户端 / install-id 生成 / 6h 定时器 / ed25519 + sha256 校验 / 三个 env var 解析（ADR-030） | 不参与请求处理 / 不依赖 sieve-core 业务逻辑 / 不做规则文件原子替换（属于 sieve-rules） |
+| `sieve-updater` (2026-05-05 新增) | manifest 协议客户端 / install-id 生成 / 6h 定时器 / ed25519 + sha256 校验 / 三个 env var 解析 | 不参与请求处理 / 不依赖 sieve-core 业务逻辑 / 不做规则文件原子替换（属于 sieve-rules） |
 
 跨 crate 调用走显式 trait，避免互相 import 实现细节。
 

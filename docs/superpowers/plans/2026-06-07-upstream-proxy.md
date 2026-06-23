@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust / hyper-util legacy Client / hyper-rustls 0.27 / tokio / tokio-socks 0.5（新增）/ tower-service。
 
-依据规格：`docs/specs/SPEC-007-upstream-proxy.md`。决策固化为 ADR-033（Task 10）。
+依据规格：`docs/specs/SPEC-007-upstream-proxy.md`。决策记录见 Task 10。
 
 ---
 
@@ -24,7 +24,6 @@
 | `crates/sieve-cli/src/daemon.rs` | listener_specs 构建透传 proxy 字符串到 `Forwarder::new` | 修改 |
 | `crates/sieve-updater/src/manifest.rs` + `download.rs` | connector 复用 ProxyConnector | 修改 |
 | `crates/sieve-core/tests/proxy_connector.rs` | mock HTTP-CONNECT / SOCKS5 代理 e2e | 新建 |
-| `docs/design/ADR-033-upstream-proxy.md` + `ADR-INDEX.md` | 决策记录 | 新建/修改 |
 | `docs/api/api-reference.md` + `guides/deployment.md` + `changelog/CHANGELOG.md` | 文档同步 | 修改 |
 
 **约定**：sieve-core 的 proxy 能力门控在现有 `forwarder` feature 下（与 `Forwarder` 同 feature，见 `crates/sieve-core/Cargo.toml`）。
@@ -905,40 +904,31 @@ git add -A && git commit -m "chore: SPEC-007 proxy fmt/clippy 收尾"
 
 ---
 
-## Task 10: ADR-033 + 文档同步
+## Task 10: 文档同步
 
 **Files:**
-- Create: `docs/design/ADR-033-upstream-proxy.md`
-- Modify: `docs/design/ADR-INDEX.md`、`docs/api/api-reference.md`、`docs/guides/deployment.md`、`docs/changelog/CHANGELOG.md`
+- Modify: `docs/api/api-reference.md`、`docs/guides/deployment.md`、`docs/changelog/CHANGELOG.md`
 - Modify: `docs/specs/SPEC-007-upstream-proxy.md`（状态 Draft → Stable）
 
-- [ ] **Step 1: 写 ADR-033**
+- [ ] **Step 1: 记录决策**
 
-新建 `docs/design/ADR-033-upstream-proxy.md`，含：状态 Accepted / 决策（支持 HTTP CONNECT + SOCKS5 上游代理，按 scheme 自选，每 upstream + 全局 + env）/ 硬约束分析（照搬 SPEC-007 §9：不违反 PRD §9 #2 出站目的地不变、#12 不 MITM、与 ADR-027 区分）/ 后果（受限网络可用 + 隐私提示用可信代理）。关联 SPEC-007。
+记录决策：状态 Accepted / 决策（支持 HTTP CONNECT + SOCKS5 上游代理，按 scheme 自选，每 upstream + 全局 + env）/ 硬约束分析（照搬 SPEC-007 §9：不违反 PRD §9 #2 出站目的地不变、#12 不 MITM、与网络层硬隔离区分）/ 后果（受限网络可用 + 隐私提示用可信代理）。关联 SPEC-007。
 
-- [ ] **Step 2: ADR-INDEX 加行**
-
-`docs/design/ADR-INDEX.md` 主表加：
-```
-| [ADR-033](./ADR-033-upstream-proxy.md) | 上游转发代理支持（HTTP CONNECT + SOCKS5） | Accepted | 2026-06-07 | v2.0 §6.1、§9 #2 |
-```
-并把 `CLAUDE.md` Source of Truth 段 ADR 计数 25 → 26。
-
-- [ ] **Step 3: api-reference + deployment + CHANGELOG**
+- [ ] **Step 2: api-reference + deployment + CHANGELOG**
 
 - `docs/api/api-reference.md` §3 config：新增 `proxy` / `[[upstream]].proxy` / `no_proxy` 字段说明 + 优先级链 + proxy URL 格式。
 - `docs/guides/deployment.md`：新增「受限网络（Shadowrocket/Clash）」章——示例 `proxy = "socks5://127.0.0.1:<socks 端口>"`，提示用可信本地代理。
 - `docs/changelog/CHANGELOG.md` `[Unreleased]` 加 `### Added` 上游代理支持条目。
 
-- [ ] **Step 4: SPEC-007 状态更新**
+- [ ] **Step 3: SPEC-007 状态更新**
 
 `docs/specs/SPEC-007-upstream-proxy.md` 第一行 `状态：Draft` → `Stable`；`docs/specs/INDEX.md` SPEC-007 行状态 Draft → Stable。
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add docs/ CLAUDE.md
-git commit -m "docs: ADR-033 上游代理 + api-reference/deployment/CHANGELOG 同步 (SPEC-007)"
+git add docs/
+git commit -m "docs: 上游代理 + api-reference/deployment/CHANGELOG 同步 (SPEC-007)"
 ```
 
 ---

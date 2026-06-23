@@ -2,7 +2,7 @@
 
 > Sieve is a security proxy that sits in your LLM traffic (PRD §1.1). If Sieve itself is
 > compromised, its entire value proposition collapses. "Verifiable, not merely trusted" is
-> the core of its security promise (PRD §1.2 + [ADR-006](docs/design/ADR-006-sigstore-reproducible-build.md)).
+> the core of its security promise (PRD §1.2).
 >
 > **Please do not report vulnerabilities in Sieve through public GitHub Issues.** Use the
 > private channel below.
@@ -60,7 +60,7 @@ Please include:
   databases included).
 - The reporter is credited when the fix ships (unless you ask to stay anonymous).
 - If user asset-loss risk is involved, a forced upgrade is pushed and the event is published via
-  the transparency log ([ADR-006 §3](docs/design/ADR-006-sigstore-reproducible-build.md)).
+  the transparency log.
 - No cash bounty for now, but significant findings are credited in the post-GA advisory and
   write-up.
 
@@ -85,7 +85,7 @@ The following are not Sieve security vulnerabilities:
 
 ## Our supply-chain commitments
 
-See [ADR-006: Sigstore signing + Reproducible Build + transparency log](docs/design/ADR-006-sigstore-reproducible-build.md):
+Sigstore signing + Reproducible Build + transparency log:
 
 - Every release binary is **sigstore-signed + logged in Rekor** (verifiable with `cosign verify-blob`).
 - **Tier 1 (macOS / Linux) reproducible builds**: two independent builds must produce an identical
@@ -94,7 +94,7 @@ See [ADR-006: Sigstore signing + Reproducible Build + transparency log](docs/des
 - Rules packages are **Ed25519-signed + fail-closed verified** (on signature failure, the last
   verified ruleset is kept). Alpha builds ship a placeholder key and are temporarily fail-open
   (skip+warn, backed by same-origin SHA-256); **GA builds enforce a real key at compile time via
-  the `ga_keys` gate** — a placeholder fails to compile ([ADR-034](docs/design/ADR-034-ga-key-gate.md)).
+  the `ga_keys` gate** — a placeholder fails to compile.
 - **Pinned dependencies**: `Cargo.lock` committed + Dependabot weekly (major bumps reviewed individually).
 
 Suggested supply-chain audit:
@@ -113,7 +113,7 @@ git clone https://github.com/SieveAI-dev/sieve.git --branch v0.1.0
 sha256sum target/repro/sieve-linux-amd64
 sha256sum ./sieve   # must match
 
-# 3. Confirm "no networked verifier" (ADR-003) by capturing traffic
+# 3. Confirm "no networked verifier" by capturing traffic
 sudo tcpdump -i any -nn host '!api.anthropic.com and !your-relay.com'
 sieve --config ~/.sieve/config.toml
 # expected: no outbound traffic except the upstream API
@@ -145,8 +145,5 @@ sieve --config ~/.sieve/config.toml
 
 ## Related documents
 
-- [ADR-003: Local-only, never a networked token verifier](docs/design/ADR-003-local-only-no-cloud-verifier.md)
-- [ADR-006: Sigstore signing + Reproducible Build + transparency log](docs/design/ADR-006-sigstore-reproducible-build.md)
-- [ADR-007: Fail-closed confirmation for Critical actions](docs/design/ADR-007-fail-closed-critical-actions.md)
 - PRD §9 engineering hard constraints
 - [Deployment guide — binary signature verification](docs/guides/deployment.md)

@@ -8,7 +8,6 @@
 
 - 关联 Issue: #
 - 关联 PRD 章节: <!-- 如 PRD §5.1 OUT-09 BIP39 -->
-- 关联 ADR: <!-- 如 ADR-002 / ADR-006 -->
 
 ## 类型
 
@@ -57,13 +56,13 @@
 - [ ] CHANGELOG 已加 `[BREAKING]` 前缀
 - [ ] **如涉及 PRD §9 十六条硬约束变化，已经维护者显式确认**（默认拒绝）
 - [ ] 用户迁移路径已写明
-- [ ] PRD-sieve.md 版本演进表 + 对应 ADR 已同步
+- [ ] PRD-sieve.md 版本演进表已同步
 
 ## 安全相关（如适用）
 
-- [ ] 不引入任何远端 verifier / 数据上报（[ADR-003](../docs/design/ADR-003-local-only-no-cloud-verifier.md)）
-- [ ] 不放宽 fail-closed Critical 行为（[ADR-007](../docs/design/ADR-007-fail-closed-critical-actions.md)）
-- [ ] 依赖版本已 pin（[ADR-006](../docs/design/ADR-006-sigstore-reproducible-build.md)），新增依赖已说明必要性
+- [ ] 不引入任何远端 verifier / 数据上报
+- [ ] 不放宽 fail-closed Critical 行为
+- [ ] 依赖版本已 pin，新增依赖已说明必要性
 - [ ] 不破坏 sigstore + reproducible build pipeline（Tier 1 必须双构建一致）
 
 ## 备注

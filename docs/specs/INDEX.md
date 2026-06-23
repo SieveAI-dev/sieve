@@ -8,17 +8,17 @@
 
 ## 已落地
 
-| 编号 | 标题 | 版本 | 状态 | 关联 ADR | 关联 PRD §  | 文件 |
-|------|------|------|------|---------|-------------|------|
-| SPEC-001 | sieve-hook 文件 IPC 协议 | v1.0 | Stable | ADR-013, ADR-014 | v2.0 §6.5 / §6.7 | [SPEC-001-sieve-hook-protocol.md](SPEC-001-sieve-hook-protocol.md) |
-| SPEC-002 | HIPS 弹窗行为规格 | v1.0 | Stable | ADR-014, ADR-016, ADR-021 | v2.0 §5.4 | [SPEC-002-hips-popup-behavior.md](SPEC-002-hips-popup-behavior.md) |
-| SPEC-003 | sieve setup 工具行为规格 | v1.0 | Stable | ADR-015 | v2.0 §6.6 / §10.1 W5 | [SPEC-003-sieve-setup-tool.md](SPEC-003-sieve-setup-tool.md) |
-| SPEC-004 | multi-agent setup 配置注入规格 | v1.0 | Stable | ADR-015, ADR-018, ADR-019 | v2.0 §6.6 / §6.7 / §10 W6 | [SPEC-004-multi-agent-setup.md](SPEC-004-multi-agent-setup.md) |
-| SPEC-005 | Sieve daemon ↔ GUI IPC 协议 | v2.0 | Frozen | ADR-013, ADR-014, ADR-016, ADR-019, ADR-021 | v2.0 §5.4 / §5.7 / §6.5 + GUI PRD v1.0 | [SPEC-005-ipc-protocol.md](SPEC-005-ipc-protocol.md) |
-| SPEC-006 | 更新通道 + 装机遥测 manifest 协议 | v0.1 | Draft | ADR-030 | v2.0 §11 / 关联 ADR-003/006/029 | [SPEC-006-update-and-telemetry.md](SPEC-006-update-and-telemetry.md) |
-| SPEC-007 | 上游转发代理支持 | v0.1 | Stable | ADR-033, ADR-018/026/027/030 | v2.0 §6.1 / §9 #2 | [SPEC-007-upstream-proxy.md](SPEC-007-upstream-proxy.md) |
-| SPEC-009 | 加密审计日志（full 档 write-only logging） | v0.1 | Draft | ADR-037, ADR-003/006/007 | v2.0 §9 #2 / §11.2 | [SPEC-009-encrypted-audit-log.md](SPEC-009-encrypted-audit-log.md) |
-| SPEC-010 | 超额计费检测（独立 token 核算 + 信任分级） | v0.1 | Draft | ADR-038, ADR-026/033 | v2.0 §9 #2 / §9 #11 | [SPEC-010-overbilling-detection.md](SPEC-010-overbilling-detection.md) |
+| 编号 | 标题 | 版本 | 状态 | 关联 PRD §  | 文件 |
+|------|------|------|------|-------------|------|
+| SPEC-001 | sieve-hook 文件 IPC 协议 | v1.0 | Stable | v2.0 §6.5 / §6.7 | [SPEC-001-sieve-hook-protocol.md](SPEC-001-sieve-hook-protocol.md) |
+| SPEC-002 | HIPS 弹窗行为规格 | v1.0 | Stable | v2.0 §5.4 | [SPEC-002-hips-popup-behavior.md](SPEC-002-hips-popup-behavior.md) |
+| SPEC-003 | sieve setup 工具行为规格 | v1.0 | Stable | v2.0 §6.6 / §10.1 W5 | [SPEC-003-sieve-setup-tool.md](SPEC-003-sieve-setup-tool.md) |
+| SPEC-004 | multi-agent setup 配置注入规格 | v1.0 | Stable | v2.0 §6.6 / §6.7 / §10 W6 | [SPEC-004-multi-agent-setup.md](SPEC-004-multi-agent-setup.md) |
+| SPEC-005 | Sieve daemon ↔ GUI IPC 协议 | v2.0 | Frozen | v2.0 §5.4 / §5.7 / §6.5 + GUI PRD v1.0 | [SPEC-005-ipc-protocol.md](SPEC-005-ipc-protocol.md) |
+| SPEC-006 | 更新通道 + 装机遥测 manifest 协议 | v0.1 | Draft | v2.0 §11 | [SPEC-006-update-and-telemetry.md](SPEC-006-update-and-telemetry.md) |
+| SPEC-007 | 上游转发代理支持 | v0.1 | Stable | v2.0 §6.1 / §9 #2 | [SPEC-007-upstream-proxy.md](SPEC-007-upstream-proxy.md) |
+| SPEC-009 | 加密审计日志（full 档 write-only logging） | v0.1 | Draft | v2.0 §9 #2 / §11.2 | [SPEC-009-encrypted-audit-log.md](SPEC-009-encrypted-audit-log.md) |
+| SPEC-010 | 超额计费检测（独立 token 核算 + 信任分级） | v0.1 | Draft | v2.0 §9 #2 / §9 #11 | [SPEC-010-overbilling-detection.md](SPEC-010-overbilling-detection.md) |
 
 ---
 
@@ -47,7 +47,6 @@
 
 ## 关联文档
 
-- [ADR 索引](../design/ADR-INDEX.md)
 - [架构](../design/architecture.md)
 - [API 参考](../api/api-reference.md)
 - 文档规范

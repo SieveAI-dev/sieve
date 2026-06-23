@@ -204,7 +204,7 @@ ANTHROPIC_BASE_URL=http://127.0.0.1:11453 claude --bare -p "hello"
 #    若 daemon 日志为空但 claude 仍正常返回，说明请求绕过代理（典型：忘了 --bare）。
 ```
 
-#### 3.4a Multi-listener 配置（ADR-026 推荐）
+#### 3.4a Multi-listener 配置（推荐）
 
 配置 daemon 同时监听多个端口，每个 port 独立连接不同的真实上游：
 
@@ -244,8 +244,6 @@ ANTHROPIC_BASE_URL=http://127.0.0.1:11454 ANTHROPIC_AUTH_TOKEN=<deepseek-key>  c
 curl -X POST http://127.0.0.1:11453/v1/chat/completions   # Anthropic listener 收 OpenAI path
 # → 400 + {"type":"sieve_blocked","reason":"listener_protocol_mismatch", ...}
 ```
-
-详见 [ADR-026 §决策 1-4](../design/ADR-026-port-based-listener-routing.md)。
 
 > daemon 日志环境变量是 `SIEVE_LOG`（不是 `RUST_LOG`），格式 `<crate>=<level>,fallback`，
 > 例如 `SIEVE_LOG=sieve_cli=debug,info`。
@@ -454,7 +452,7 @@ Week 2 起支持的字段，Week 5 后新增 IPC / 部署相关字段（与 [dat
 ```toml
 upstream_url = "https://api.anthropic.com"      # 上游 LLM API
 port = 11453                                     # 本地代理端口
-bind_addr = "127.0.0.1"                         # 强制 loopback（ADR-003）
+bind_addr = "127.0.0.1"                         # 强制 loopback
 log_path = "/path/to/audit.db"                  # 审计 SQLite，可选（默认 ~/.sieve/audit.db）
 tls_verify_upstream = true                      # 上游 TLS 校验（测试场景可关）
 rules_path = "/path/to/outbound.toml"           # 出站规则集，可选（默认 crates/sieve-rules/rules/outbound.toml）
@@ -748,7 +746,7 @@ GitHub Actions（`.github/workflows/ci.yml`）强制：
 
 ---
 
-## 13. 更新通道环境变量（ADR-030）
+## 13. 更新通道环境变量
 
 > 三个环境变量控制更新检查 / 遥测行为，适用于开发者本地测试与 CI 场景。优先级：**env var > sieve.toml [update] > 默认值**。完整协议规格见 [SPEC-006](../specs/SPEC-006-update-and-telemetry.md)。
 

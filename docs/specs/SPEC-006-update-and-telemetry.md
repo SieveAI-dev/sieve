@@ -2,7 +2,6 @@
 
 > Version: v0.1 — 2026-05-05
 > Status: **Draft**（待 TODO-7~12 代码落地后升 Frozen）
-> 关联 ADR：[ADR-003 amended](../design/ADR-003-local-only-no-cloud-verifier.md)（网络边界修订）/ [ADR-006](../design/ADR-006-sigstore-reproducible-build.md)（签名分发）
 > 关联 PRD：sieve-prd-v2.0.md §9 硬约束 #2
 
 ---
@@ -35,7 +34,7 @@
 
 - **复用既有更新请求**——本来就要拉规则，附带的匿名字段不新增任何独立网络访问
 - **可单独关闭**——遥测信标与规则更新同通道，用户可通过 `SIEVE_NO_TELEMETRY` 单独关闭 uid 字段，规则更新不受影响（见 §9.1 白名单）
-- **ADR-003 唯一允许例外**——更新通道是「绝对禁止独立 telemetry」反模式的唯一豁免，边界清晰可言简意赅地向用户解释
+- **网络边界硬约束的唯一允许例外**——更新通道是「绝对禁止独立 telemetry」反模式的唯一豁免，边界清晰可言简意赅地向用户解释
 
 ---
 
@@ -368,9 +367,9 @@ if TRUSTED_PUBKEY.is_none() {
 
 > **重要**：公钥未配置时 WARN + 跳过校验，绝不静默通过。GA 前必须填入真实公钥（TODO-14）。
 
-### 5.3 与 ADR-006 的关系
+### 5.3 与二进制签名体系的关系
 
-ADR-006 描述的是 Sieve 二进制自身的 sigstore + reproducible build 签名体系。SPEC-006 的 ed25519 签名保护的是规则包分发，两者独立：
+Sieve 二进制自身有独立的 sigstore + reproducible build 签名体系。SPEC-006 的 ed25519 签名保护的是规则包分发，两者独立：
 
 - 规则包签名：ed25519，trusted pubkey 编译期硬编码在 `sieve-updater` 二进制中
 - 二进制签名：sigstore / cosign，通过 rekor 透明日志验证
@@ -534,9 +533,9 @@ thiserror = "1"
 
 ## 9. 与其他模块的边界关系
 
-### 9.1 与 ADR-003 amended 的关系
+### 9.1 与网络边界硬约束的关系
 
-ADR-003 原条款「绝对禁止 telemetry 自动上报」经网络边界修订后部分放开。修订后：
+网络边界硬约束原条款「绝对禁止 telemetry 自动上报」经修订后部分放开。修订后：
 
 - 独立心跳通道：**仍禁止**
 - 更新通道附带匿名 install-id：**允许**（唯一例外，且可通过 `SIEVE_NO_TELEMETRY` 关闭 uid 字段）
@@ -552,11 +551,11 @@ manifest 请求是「绝对禁止 telemetry」反模式的**唯一允许例外**
 | UUIDv4 install-id（可通过 SIEVE_NO_TELEMETRY 关闭） | MAC 地址 / 设备序列号 |
 | 发布通道（stable/beta） | 任何能识别个人或设备的信息 |
 
-> **交叉引用（ADR-038 超额计费检测）**：token 用量统计（`~/.sieve/usage.db`，独立 token 核算对抗不可信 relay）**正是本表右列所列的「使用记录」**，严格归属「禁止上传」范畴——它**仅在本地 GUI / CLI 可见，永不上传**，即便做聚合产品分析也禁止。`[billing_check]` 默认关闭；其唯一可能触发主动出站的开关 `count_tokens_optin`（直连官方 `api.anthropic.com` 的 `count_tokens`）默认关、需用户显式开启，且与「token verifier 联网验证」（§9 行 543 永久禁止的 Sieve 自营云后端校验）严格区分。详见 [ADR-038](../design/ADR-038-overbilling-detection.md) / [SPEC-010](SPEC-010-overbilling-detection.md)。
+> **交叉引用（超额计费检测）**：token 用量统计（`~/.sieve/usage.db`，独立 token 核算对抗不可信 relay）**正是本表右列所列的「使用记录」**，严格归属「禁止上传」范畴——它**仅在本地 GUI / CLI 可见，永不上传**，即便做聚合产品分析也禁止。`[billing_check]` 默认关闭；其唯一可能触发主动出站的开关 `count_tokens_optin`（直连官方 `api.anthropic.com` 的 `count_tokens`）默认关、需用户显式开启，且与「token verifier 联网验证」（永久禁止的 Sieve 自营云后端校验）严格区分。详见 [SPEC-010](SPEC-010-overbilling-detection.md)。
 
-### 9.2 与 ADR-006 的关系
+### 9.2 与二进制签名体系的关系
 
-ADR-006 的 Tier 1 要求（macOS / Linux sigstore + reproducible build）适用于 `sieve-updater` crate 编译进 `sieve` 主二进制的部分。规则包的 ed25519 签名是 ADR-006 规则分发签名链的客户端验证端。
+二进制签名体系的 Tier 1 要求（macOS / Linux sigstore + reproducible build）适用于 `sieve-updater` crate 编译进 `sieve` 主二进制的部分。规则包的 ed25519 签名是规则分发签名链的客户端验证端。
 
 ### 9.3 与 `sieve-rules` 的关系
 
@@ -652,8 +651,6 @@ ts (TIMESTAMP) | uid (UUID) | v (TEXT) | os (TEXT) | arch (TEXT) | ch (TEXT) | c
 
 ## 相关文档
 
-- [ADR-003 amended](../design/ADR-003-local-only-no-cloud-verifier.md) — 网络边界修订（唯一允许例外）
-- [ADR-006](../design/ADR-006-sigstore-reproducible-build.md) — Sigstore 签名 + Reproducible Build
 - [docs/api/api-reference.md §8](../api/api-reference.md) — manifest 接口 API 参考
 - [docs/design/data-model.md §7](../design/data-model.md) — 服务端日志表 schema
 - [docs/guides/development.md §X](../guides/development.md) — 三个环境变量开发者指南

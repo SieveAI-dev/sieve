@@ -97,7 +97,7 @@
   <div class="sub">把 821 行手动联调 checklist 变成无真 API / 无真网络 / 无真 GUI 的一键 + 零 secret CI 端到端测试</div>
   <div class="meta">
     <span class="pill">Version: v1.0 — 2026-06-18</span>
-    <span class="pill">关联 ADR-026 / ADR-028 / ADR-030</span>
+    <span class="pill">关联：多 listener 路由 / IPC 协议中性化 / 规则热更新</span>
     <span class="pill">替代对象：docs/guides/manual-integration-test.md（16 节）</span>
     <span class="pill">进度真实源：tasks/PROGRESS.md「当前 Epic」</span>
   </div>
@@ -128,7 +128,7 @@
   <div class="grid2">
     <div class="card">
       <h4>① headless 客户端替代 GUI</h4>
-      <p>决策客户端不再依赖真 macOS GUI App。daemon 已经是 client-agnostic（ADR-028 协议中性化）：用 <code>sieve decisions</code> headless CLI / 直连 IPC socket 的 mock GUI 当决策客户端，跑通 watch / approve / block / warn 全链路。GUI 仓只保留<strong>跨仓 17-method fixture 一致性测试</strong>，不碰 XCUITest 可视层。</p>
+      <p>决策客户端不再依赖真 macOS GUI App。daemon 已经是 client-agnostic（协议中性化）：用 <code>sieve decisions</code> headless CLI / 直连 IPC socket 的 mock GUI 当决策客户端，跑通 watch / approve / block / warn 全链路。GUI 仓只保留<strong>跨仓 17-method fixture 一致性测试</strong>，不碰 XCUITest 可视层。</p>
     </div>
     <div class="card">
       <h4>② 全程 hermetic mock 上游</h4>
@@ -435,13 +435,13 @@
 
   <div class="bug-case">
     <h4><span class="tag bug">BUG-1</span> OUT-01 出站断言滞后于 disposition 改动（426 → auto_redact）</h4>
-    <p>给 <code>smoke_test.py</code> 加 <code>--mock-only</code> 时，<code>test_outbound_block_fake_key</code> 断言「OUT-01 fake key → HTTP 426 + sieve_blocked」实跑得到 401。OUT-01 的 disposition 早已从 <code>block</code> 改为 <code>auto_redact</code>（ADR-016 二维处置矩阵 + PRD v1.4 §6.1）——daemon 现在<strong>脱敏后转发</strong>而非 426 拦截。Rust 集成测试当时同步改对了，Python smoke 没改，断言变成错的。</p>
+    <p>给 <code>smoke_test.py</code> 加 <code>--mock-only</code> 时，<code>test_outbound_block_fake_key</code> 断言「OUT-01 fake key → HTTP 426 + sieve_blocked」实跑得到 401。OUT-01 的 disposition 早已从 <code>block</code> 改为 <code>auto_redact</code>（二维处置矩阵 + PRD v1.4 §6.1）——daemon 现在<strong>脱敏后转发</strong>而非 426 拦截。Rust 集成测试当时同步改对了，Python smoke 没改，断言变成错的。</p>
     <div class="why"><strong>为什么旧测试没抓到：</strong>smoke 默认要真 <code>ANTHROPIC_API_KEY</code> + 真网络才跑全套，进 dogfood 冻结期后几乎没人拿真 key 跑过，错误断言静默存活数月。<strong>修复：</strong>smoke 断言改为验「转发到上游的 body 已脱敏」（mock 捕获 body 比对，含 <code>REDACTED</code> 占位符）而非验状态码，<code>--mock-only</code> 29/29 通过。</div>
   </div>
 
   <div class="bug-case">
     <h4><span class="tag bug">BUG-2</span> sieve-updater ZSTD_MAGIC 字节序反置 —— 真实规则包永不解压（生产级）</h4>
-    <p><code>install.rs</code> 里 <code>ZSTD_MAGIC = [0xFD,0x2F,0xB5,0x28]</code> 字节序反了。zstd 帧 magic 是 <code>0xFD2FB528</code>，磁盘小端存储为 <code>28 B5 2F FD</code>（RFC 8878 §3.1.1）。于是 <code>data[..4] == ZSTD_MAGIC</code> 对<strong>任何真 zstd 流永远为假</strong> → <code>decompress_zstd</code> 永远走「当原始字节」fallback → 规则包被原样（压缩态）写盘 → sieve-rules 加载必失败。<strong>整个 ADR-030 规则热更新功能在生产中是坏的。</strong></p>
+    <p><code>install.rs</code> 里 <code>ZSTD_MAGIC = [0xFD,0x2F,0xB5,0x28]</code> 字节序反了。zstd 帧 magic 是 <code>0xFD2FB528</code>，磁盘小端存储为 <code>28 B5 2F FD</code>（RFC 8878 §3.1.1）。于是 <code>data[..4] == ZSTD_MAGIC</code> 对<strong>任何真 zstd 流永远为假</strong> → <code>decompress_zstd</code> 永远走「当原始字节」fallback → 规则包被原样（压缩态）写盘 → sieve-rules 加载必失败。<strong>整个规则热更新功能在生产中是坏的。</strong></p>
     <div class="why"><strong>为什么旧测试没抓到：</strong>现有 4 个 zstd 单测全部假阳性掩盖——要么用明文走 fallback、要么用<strong>同一个错误常量</strong>当 payload 前缀（与 bug 自洽）、要么只断言「文件存在 / 版本号」从不断言解压后内容。「测试通过」≠「功能正确」。唯有 <code>updater_e2e.rs</code> 用真实 zstd payload 做 encode→install→read 端到端内容回环断言才能抓出。<strong>修复：</strong>常量改 <code>[0x28,0xB5,0x2F,0xFD]</code> + happy_path 补解压内容断言；updater 39 单测 + 8 e2e 全绿。</div>
   </div>
 
@@ -496,9 +496,6 @@ python3 scripts/smoke_test.py --mock-only
 <footer><div>
   <p>SPEC-008 · Dogfood 完全自动化 · v1.0 — 2026-06-18 · Sieve daemon</p>
   <p>关联：<a href="../guides/manual-integration-test.md">manual-integration-test.md</a>（被自动化对象）·
-     <a href="../design/ADR-026-port-based-listener-routing.md">ADR-026</a> ·
-     <a href="../design/ADR-028-ipc-protocol-neutralization.md">ADR-028</a> ·
-     ADR-030 ·
      <a href="../specs/SPEC-006-update-and-telemetry.md">SPEC-006</a> ·
      PROGRESS.md</p>
 </div></footer>

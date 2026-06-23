@@ -2,8 +2,8 @@
 
 > Version: v0.1 — 2026-06-07
 > 状态：Stable（已实现并验证）
-> 关联：ADR-018（双协议）、ADR-026（multi-listener）、ADR-027（network jail，区分系统代理）、ADR-030（updater）、PRD §9 #2/#12
-> 决策记录：本 spec §9（实现时固化为 ADR-033）
+> 关联 PRD：§9 #2/#12
+> 决策记录：本 spec §9
 
 ---
 
@@ -114,19 +114,18 @@ target api.anthropic.com:443
 
 复用现有 `spawn_mock_upstream` 模式新增 mock 代理 harness。
 
-## §9 决策记录（实现时固化为 ADR-033）
+## §9 决策记录
 
 **决策**：sieve 主动支持配置的上游代理（HTTP CONNECT + SOCKS5），不依赖系统透明代理。
 
 **硬约束分析**：
 - **PRD §9 #2（唯一允许出站）**：代理是传输层隧道，出站**目的地不变**（仍仅上游 LLM / sieveai.dev）。代理本身是用户自己配置的本地/可信出口，不构成「联网做 verifier」。✔
 - **PRD §9 #12（不装本地 CA 做 MITM）**：TLS 端到端到上游，sieve 不解密、不注入 CA；代理（若远程）仅见 SNI 目标、不见 TLS 内容。✔
-- **ADR-027 区分**：ADR-027 承诺「不修改系统 HTTP_PROXY / 系统代理设置」。本 spec 是 sieve **自身主动走配置的代理**，不碰系统设置，二者不冲突。
+- **与 network jail 约束的区分**：network jail 约束承诺「不修改系统 HTTP_PROXY / 系统代理设置」。本 spec 是 sieve **自身主动走配置的代理**，不碰系统设置，二者不冲突。
 - **隐私提示**：经远程代理时代理可见「你在连 api.anthropic.com」（SNI/目标 IP），不可见 prompt/response。文档须提示用户使用可信代理（本地 Shadowrocket/Clash 出口为佳）。
 
 ## §10 文档同步清单（实现时）
 
-- 新增 `docs/design/ADR-033-upstream-proxy.md` + `docs/design/ADR-INDEX.md` 加行
 - `docs/api/api-reference.md` §3 config：proxy / upstream.proxy / no_proxy 字段
 - `docs/guides/deployment.md`：受限网络（Shadowrocket/Clash）部署章
 - `docs/changelog/CHANGELOG.md`
