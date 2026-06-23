@@ -196,6 +196,13 @@ cargo +nightly fuzz run inbound_filter -- -max_total_time=60
 
 # Benchmark（Week 4 起，验证 P99 < 20ms）
 cargo bench -p sieve-rules
+
+# 可选特性门（默认关，CLI 瘦身）：usage / audit-crypto 默认不编入主二进制
+cargo build -p sieve-cli --bins                          # 默认能力面：start / decisions / rules / audit(查询) / setup / doctor / uninstall / version
+cargo build -p sieve-cli --features usage --bins         # +token 用量观测（usage 子命令）
+cargo build -p sieve-cli --features audit-crypto --bins  # +加密审计归档（audit keygen / rotate-key / decrypt）
+# 红队回归是开发 / CI 工具，已移出主二进制：用 cargo test 而非 sieve 子命令
+cargo test -p sieve-cli --test redteam_inbound --test redteam_outbound --locked
 ```
 
 详细命令清单与系统依赖见 [docs/guides/development.md](docs/guides/development.md)。

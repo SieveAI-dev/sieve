@@ -308,3 +308,144 @@ async fn golden_benign_openai_chat() {
     let body = r#"{"model":"gpt-4o","stream":false,"messages":[{"role":"user","content":"hello world, tell me a joke"}]}"#.to_string();
     run_golden_outbound("benign_openai_chat", "/v1/chat/completions", body).await;
 }
+
+/// A3 e2e 变体：用 `[[upstream]]` + `[[upstream.routes]]` 配置化路由表启动 daemon，
+/// 让非标准 `route_path` 零代码路由到 `route_provider`。规则缺失返回 None（优雅 SKIP）。
+fn spawn_sieve_daemon_routed(
+    upstream_url: &str,
+    route_path: &str,
+    route_provider: &str,
+) -> Option<(u16, DaemonGuard)> {
+    let port = find_free_port();
+    let rules = outbound_rules_path();
+    let inbound_rules = inbound_rules_path();
+    if !rules.exists() || !inbound_rules.exists() {
+        eprintln!("SKIP: 规则文件不存在（需签名规则包），跳过 A3 路由表 e2e");
+        return None;
+    }
+
+    let mut config_file = tempfile::NamedTempFile::new().unwrap();
+    writeln!(
+        config_file,
+        r#"bind_addr = "127.0.0.1"
+rules_path = "{rules}"
+inbound_rules_path = "{inbound}"
+tls_verify_upstream = false
+dry_run = false
+
+[[upstream]]
+port = {port}
+url = "{url}"
+protocol = "auto"
+provider_id = "custom-relay"
+
+[[upstream.routes]]
+path = "{route_path}"
+provider = "{route_provider}"
+"#,
+        rules = rules.display(),
+        inbound = inbound_rules.display(),
+        port = port,
+        url = upstream_url,
+        route_path = route_path,
+        route_provider = route_provider,
+    )
+    .unwrap();
+    config_file.flush().unwrap();
+
+    let binary = sieve_binary();
+    assert!(binary.exists(), "sieve binary 不存在，先 cargo build");
+    let home = tempfile::tempdir().unwrap();
+    let mut cmd = Command::new(&binary);
+    cmd.arg("start")
+        .arg("--config")
+        .arg(config_file.path())
+        .env("SIEVE_LOG", "warn")
+        .env("SIEVE_NO_UPDATE", "1")
+        .env("SIEVE_NO_TELEMETRY", "1")
+        .env("SIEVE_HOME", home.path())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let proc = cmd.spawn().expect("spawn sieve daemon");
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if std::net::TcpStream::connect_timeout(
+            &format!("127.0.0.1:{port}").parse().unwrap(),
+            Duration::from_millis(500),
+        )
+        .is_ok()
+        {
+            break;
+        }
+        assert!(Instant::now() < deadline, "daemon 未在 10s 内监听 :{port}");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    Some((
+        port,
+        DaemonGuard {
+            proc,
+            _config_file: config_file,
+            _sieve_home: home,
+        },
+    ))
+}
+
+/// A3 配置化路由表 e2e（DoD②「加一行路由」最小可跑示例）：接「OpenAI 兼容但路径不同
+/// 的中转站」只需在 `[[upstream.routes]]` 加一行 `{ path, provider = "openai" }`，
+/// **零代码改动**——非标准路径 `/custom/llm/v1/chat` 经路由表落到 OpenAiCodec，
+/// 出站 OUT-01 脱敏端到端生效（上游只见 `[REDACTED]`，不见原始 key）。
+#[tokio::test]
+async fn custom_route_relay_openai_via_config() {
+    if !outbound_rules_path().exists() {
+        eprintln!("SKIP: 规则文件不存在");
+        return;
+    }
+    let (upstream_addr, received, _up_tx) = spawn_capturing_upstream().await;
+    let upstream_url = format!("http://{upstream_addr}");
+    let route_path = "/custom/llm/v1/chat";
+
+    let Some((port, _guard)) = spawn_sieve_daemon_routed(&upstream_url, route_path, "openai")
+    else {
+        return; // 规则缺失 → 优雅 SKIP
+    };
+
+    // OpenAI chat 请求体，content 含 OUT-01 key（应被脱敏）。
+    let body = serde_json::json!({
+        "model": "gpt-4",
+        "messages": [{ "role": "user", "content": format!("leaked: {}", out01_key()) }],
+    })
+    .to_string();
+
+    let client = plain_http_client();
+    let resp = client
+        .request(
+            Request::builder()
+                .method("POST")
+                .uri(format!("http://127.0.0.1:{port}{route_path}"))
+                .header("content-type", "application/json")
+                .body(Full::new(Bytes::from(body)))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        200,
+        "异路径中转站请求应被路由 + 转发，上游 200"
+    );
+
+    let received_body = received.lock().await.clone();
+    let received_str = String::from_utf8_lossy(&received_body);
+    assert!(!received_str.is_empty(), "上游应收到（脱敏后）body");
+    // 核心断言：routes 表把非标准路径路由到 OpenAiCodec → 出站脱敏生效 → 上游不见原始 key。
+    assert!(
+        !received_str.contains("sk-ant-api03-"),
+        "异路径中转站出站脱敏应生效，上游不应见原始 key：{received_str}"
+    );
+    assert!(
+        received_str.contains("REDACTED"),
+        "上游 body 应含 [REDACTED] 占位符（证明走了 OpenAiCodec 出站扫描）：{received_str}"
+    );
+}

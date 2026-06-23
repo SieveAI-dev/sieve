@@ -53,6 +53,20 @@ pub enum Protocol {
     Openai,
 }
 
+/// 配置化 endpoint 路由规则（A3）：单条 `path → provider` 映射。
+///
+/// `[[upstream.routes]]` 表项。`provider` 只接受 `anthropic` / `openai`（`auto` 无意义，
+/// 由 [`Config::enforce_safety_invariants`] 拒绝）。让「OpenAI 兼容但路径不同的中转站」
+/// 只需加一行配置即可路由到对应 codec，不改 daemon 代码（参见 `resolve_endpoint_route`）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RouteRule {
+    /// 请求 path 精确匹配（如 `/custom/v1/chat`）。
+    pub path: String,
+    /// 命中后路由到的出站 provider（`anthropic` / `openai`）。
+    pub provider: Protocol,
+}
+
 /// 上游信任级别（ADR-038 超额计费检测）。
 ///
 /// - `Official`：官方直连（`api.anthropic.com` / `api.openai.com`）。relay 无法插手，
@@ -102,6 +116,13 @@ pub struct UpstreamListener {
     /// 上游协议（默认 `auto`：按 path 自适应、不强制错位，向后兼容；ADR-026）。
     #[serde(default)]
     pub protocol: Protocol,
+
+    /// 配置化 endpoint 路由表（A3）：把非标准请求 path 显式映射到出站 provider。
+    /// 空表（默认）时按「标准路径 → provider，其余 → listener `protocol`」解析，行为不变。
+    /// 接「协议兼容但路径不同的中转站」只需加一行 `{ path = "/自定义/路径", provider = "openai" }`，
+    /// 零代码改动。
+    #[serde(default)]
+    pub routes: Vec<RouteRule>,
 
     /// 上游信任级别（ADR-038）。`None`（未显式声明）时由
     /// [`UpstreamListener::resolved_trust`] 按 URL host 派生：官方 host → `Official`，
@@ -537,6 +558,17 @@ impl Config {
                     u.port
                 ));
             }
+            // A3: routes 表的 provider 必须是确定 provider（anthropic/openai）；
+            // auto 无法决定 codec，配了等于无效路由——fail-fast 拒绝而非静默忽略。
+            for r in &u.routes {
+                if r.provider == Protocol::Auto {
+                    return Err(format!(
+                        "listener port {} route path {:?} has provider = \"auto\"; \
+                         routes must name a concrete provider (anthropic/openai). See A3.",
+                        u.port, r.path
+                    ));
+                }
+            }
         }
 
         // ADR-037: `full` 档必须配置 age recipient 公钥，否则归档无处加密。
@@ -629,6 +661,8 @@ impl Config {
             // legacy 单 upstream 未声明协议 → Auto：按 path 自适应，不强制错位
             // （ADR-026 §决策 1 向后兼容 + PRD §9 #16/#9 双协议）。
             protocol: Protocol::Auto,
+            // legacy 单 upstream 无配置化路由表（A3）。
+            routes: Vec::new(),
             // trust 留 None → resolved_trust() 按实际 url host 派生（默认 upstream_url
             // 指向 api.anthropic.com → Official；用户改成 relay 则派生 Relay，ADR-038）。
             trust: None,
@@ -1071,6 +1105,7 @@ mod tests {
             url: "https://api.deepseek.com/anthropic".to_string(),
             provider_id: "my-deepseek-relay".to_string(),
             protocol: Protocol::Anthropic,
+            routes: Vec::new(),
             trust: None,
             proxy: None,
             no_proxy: false,
@@ -1085,6 +1120,7 @@ mod tests {
             url: "https://api.deepseek.com/anthropic".to_string(),
             provider_id: String::new(),
             protocol: Protocol::Anthropic,
+            routes: Vec::new(),
             trust: None,
             proxy: None,
             no_proxy: false,
@@ -1099,6 +1135,7 @@ mod tests {
             url: "not a uri !!!".to_string(),
             provider_id: String::new(),
             protocol: Protocol::Anthropic,
+            routes: Vec::new(),
             trust: None,
             proxy: None,
             no_proxy: false,
@@ -1116,6 +1153,7 @@ mod tests {
                     url: "https://api.anthropic.com".to_string(),
                     provider_id: "anthropic".to_string(),
                     protocol: Protocol::Anthropic,
+                    routes: Vec::new(),
                     trust: None,
                     proxy: None,
                     no_proxy: false,
@@ -1125,6 +1163,7 @@ mod tests {
                     url: "https://api.deepseek.com/anthropic".to_string(),
                     provider_id: "deepseek".to_string(),
                     protocol: Protocol::Anthropic,
+                    routes: Vec::new(),
                     trust: None,
                     proxy: None,
                     no_proxy: false,
@@ -1167,6 +1206,7 @@ mod tests {
                     url: "https://api.anthropic.com".to_string(),
                     provider_id: "anthropic".to_string(),
                     protocol: Protocol::Anthropic,
+                    routes: Vec::new(),
                     trust: None,
                     proxy: None,
                     no_proxy: false,
@@ -1176,6 +1216,7 @@ mod tests {
                     url: "https://api.deepseek.com/anthropic".to_string(),
                     provider_id: "deepseek".to_string(),
                     protocol: Protocol::Anthropic,
+                    routes: Vec::new(),
                     trust: None,
                     proxy: None,
                     no_proxy: false,
@@ -1185,6 +1226,7 @@ mod tests {
                     url: "https://api.openai.com".to_string(),
                     provider_id: "openai".to_string(),
                     protocol: Protocol::Openai,
+                    routes: Vec::new(),
                     trust: None,
                     proxy: None,
                     no_proxy: false,
@@ -1193,6 +1235,55 @@ mod tests {
             ..Config::default()
         };
         assert!(c.check_safety_invariants().is_ok());
+    }
+
+    #[test]
+    fn check_invariants_rejects_route_with_auto_provider() {
+        let c = Config {
+            upstreams: vec![UpstreamListener {
+                port: 11454,
+                url: "https://relay.example.com".to_string(),
+                provider_id: "relay".to_string(),
+                protocol: Protocol::Auto,
+                routes: vec![RouteRule {
+                    path: "/custom/chat".to_string(),
+                    provider: Protocol::Auto, // 非法：route 必须指定确定 provider
+                }],
+                trust: None,
+                proxy: None,
+                no_proxy: false,
+            }],
+            ..Config::default()
+        };
+        let err = c.check_safety_invariants().unwrap_err();
+        assert!(
+            err.contains("provider = \"auto\""),
+            "route 配 provider=auto 应被拒绝，实际: {err}"
+        );
+    }
+
+    #[test]
+    fn check_invariants_accepts_concrete_route_provider() {
+        let c = Config {
+            upstreams: vec![UpstreamListener {
+                port: 11454,
+                url: "https://relay.example.com".to_string(),
+                provider_id: "relay".to_string(),
+                protocol: Protocol::Auto,
+                routes: vec![RouteRule {
+                    path: "/custom/chat".to_string(),
+                    provider: Protocol::Openai,
+                }],
+                trust: None,
+                proxy: None,
+                no_proxy: false,
+            }],
+            ..Config::default()
+        };
+        assert!(
+            c.check_safety_invariants().is_ok(),
+            "确定 provider 的 route 应通过安全校验"
+        );
     }
 
     #[test]
@@ -1216,6 +1307,7 @@ mod tests {
             url: url.to_string(),
             provider_id: String::new(),
             protocol: Protocol::Auto,
+            routes: Vec::new(),
             trust,
             proxy: None,
             no_proxy: false,

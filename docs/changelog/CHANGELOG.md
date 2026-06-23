@@ -18,11 +18,11 @@
 
 ### Changed — 网关上游分层重构：ProviderCodec / 入站 JSON 路由收敛 / Endpoint 路由表（2026-06-23，行为等价）
 
-把「上游会变的差异」全部收进一圈可替换的边缘，检测核心只面对统一中间表示——新增一个上游 = 写一个 codec + 路由表加一行，不碰 daemon、不碰检测核心。**纯结构重构，检测结论 / 脱敏输出 / 转发字节逐字节不变**，由 golden 字节基线（出站脱敏 + benign × Anthropic/OpenAI）+ 四路由矩阵 + 出入站红队回归共同证明。
+把「上游会变的差异」收进可替换的边缘：codec 收编 schema 操作、配置化路由表吸收 path 差异。**接「协议兼容但路径不同的中转站」零代码改动**（加一行 `[[upstream.routes]]`）；接全新协议族仍需写一个 codec impl（daemon 出站完全 provider 无关化 = Transport 对称层，本轮未做）。**纯结构重构，检测结论 / 脱敏输出 / 转发字节逐字节不变**，由 golden 字节基线（出站脱敏 + benign × Anthropic/OpenAI）+ 四路由矩阵 + 出入站红队回归共同证明。
 
 - **ProviderCodec 层**（`sieve-core/protocol/codec.rs`）：新增 `ProviderCodec` trait + `AnthropicCodec` / `OpenAiCodec`，把出站待检文本提取与脱敏写回（原散在 daemon 的 `apply_redacted_*`）收编为 provider 专属解码，逻辑一字不动地搬迁。
 - **入站 JSON 路由收敛**：原先 Anthropic / OpenAI 两条非流式 `application/json` 入站各写一遍的 serde 解析与处置，收敛为 codec 驱动的单一 `handle_json_inbound`，消除重复；四路由覆盖不变量的 CI 门禁同步改为守护这条统一 handler（见上「四路由覆盖 CI 门禁」条）。
-- **Endpoint 路由表**：`resolve_endpoint_route(path, listener_protocol)` + `EndpointRoute` 替换 daemon 里散落的 `if path == "/v1/messages"` / `"/v1/chat/completions"` 硬编码分派；标准路径优先、非标准路径按 listener 声明的协议归属——接一个「路径不同但协议兼容的上游」只需改配置、不改代码。
+- **Endpoint 路由表 + 配置化 `[[upstream.routes]]`**：`resolve_endpoint_route` + `EndpointRoute` 替换 daemon 里散落的 `if path == "/v1/messages"` / `"/v1/chat/completions"` 硬编码分派；新增 `[[upstream.routes]]` 配置表（`{ path, provider }`，安全校验拒 `provider=auto`），解析优先级 = **标准路径硬保证 → 用户路由表 → listener 协议兜底**。接「OpenAI 兼容但路径不同的中转站」只需加一行路由配置、**零代码改动**（e2e `custom_route_relay_openai_via_config` 端到端佐证：非标准路径经路由表落到 OpenAiCodec、出站脱敏生效）。
 
 ### Changed — CLI 瘦身：可选特性门隔离 + 红队 verify 移出主二进制（2026-06-23）
 

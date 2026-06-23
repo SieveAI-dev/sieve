@@ -165,6 +165,8 @@ struct ListenerSpec {
     provider_id: String,
     /// 协议声明（proxy_inner 用此字段做错位 fail-closed 校验）。
     protocol: crate::config::Protocol,
+    /// A3 配置化路由表：非标准 path → 出站 provider 映射。空表时按「标准路径 + protocol」解析。
+    routes: Arc<Vec<crate::config::RouteRule>>,
     /// 上游信任级别（ADR-038）：`Official` 直连 usage 权威、不核算；`Relay` 须独立核算。
     /// 按 host 派生（`UpstreamListener::resolved_trust`），透传到超额计费观测器。
     trust: crate::config::Trust,
@@ -841,6 +843,7 @@ pub async fn run(
                 forwarder: f,
                 provider_id,
                 protocol: u.protocol,
+                routes: Arc::new(u.routes.clone()),
                 trust,
             });
         }
@@ -1546,6 +1549,7 @@ async fn accept_loop(
         let archive = archive.clone();
         let billing = billing.clone();
         let listener_trust = spec.trust;
+        let listener_routes = Arc::clone(&spec.routes);
         let req_ctx = RequestCtx::new(
             caller_info.clone(),
             Arc::clone(&audit_store),
@@ -1569,6 +1573,7 @@ async fn accept_loop(
                 let pf = pf.clone();
                 let archive = archive.clone();
                 let billing = billing.clone();
+                let routes = listener_routes.clone();
                 // RequestCtx（caller + audit + listener meta）捕获到闭包
                 let ctx = req_ctx.clone();
                 async move {
@@ -1582,6 +1587,7 @@ async fn accept_loop(
                         archive,
                         billing,
                         listener_trust,
+                        routes,
                         ctx,
                         req,
                         no_client_policy,
@@ -1839,6 +1845,7 @@ async fn proxy(
     archive: ArchiveWriterHandle,
     billing: BillingObserverHandle,
     listener_trust: crate::config::Trust,
+    listener_routes: Arc<Vec<crate::config::RouteRule>>,
     ctx: RequestCtx,
     req: Request<Incoming>,
     no_client_policy: crate::cli::NoClientPolicy,
@@ -1853,6 +1860,7 @@ async fn proxy(
         archive,
         billing,
         listener_trust,
+        listener_routes,
         ctx,
         req,
         no_client_policy,
@@ -1904,6 +1912,7 @@ async fn proxy_inner(
     archive: ArchiveWriterHandle,
     billing: BillingObserverHandle,
     listener_trust: crate::config::Trust,
+    listener_routes: Arc<Vec<crate::config::RouteRule>>,
     ctx: RequestCtx,
     req: Request<Incoming>,
     no_client_policy: crate::cli::NoClientPolicy,
@@ -1952,7 +1961,9 @@ async fn proxy_inner(
     // 协议依然是硬约束——header routing 不能 override（PRD §9 #3 fail-closed 一致性）。
     // A3：用 endpoint 路由解析器（仅按 path 取标准路径的隐含 provider，listener_protocol=Auto）
     // 判错位——path 隐含协议与 listener 显式声明冲突即 fail-closed 400（行为同旧硬编码）。
-    let path_intrinsic = resolve_endpoint_route(&path, crate::config::Protocol::Auto);
+    // 错位检查只看「标准路径隐含协议」，不受用户 routes 表影响（传 &[]）——
+    // 用户自定义路由不应绕过 listener 协议错位 fail-closed。
+    let path_intrinsic = resolve_endpoint_route(&path, crate::config::Protocol::Auto, &[]);
     if matches!(
         (path_intrinsic, ctx.listener_protocol),
         (
@@ -2010,7 +2021,7 @@ async fn proxy_inner(
 
     // A3：用 endpoint 路由解析器（含 listener protocol，支持「异路径中转站」）确定出站分派；
     // 标准路径按 path、非标准路径按 listener 显式声明的 protocol（配置驱动，零代码改动）。
-    let endpoint_route = resolve_endpoint_route(&path, ctx.listener_protocol);
+    let endpoint_route = resolve_endpoint_route(&path, ctx.listener_protocol, &listener_routes);
     let is_messages_post =
         method == http::Method::POST && endpoint_route == Some(EndpointRoute::Anthropic);
     let is_chat_completions_post =
@@ -4872,12 +4883,14 @@ fn build_500_internal_response(reason: &str) -> Response<ResponseBody> {
 
 /// A3 Endpoint 路由：把请求 path 解析为出站 provider 路由（决定 codec 选择 + 出站扫描分派）。
 ///
-/// 替换散落在 proxy_inner 里的 `path == "/v1/messages"` 硬编码。规则：
-/// 1. 已知标准路径优先：`/v1/messages` → Anthropic，`/v1/chat/completions` → OpenAi
-///    （向后兼容 + `Auto` listener 自适应）。
-/// 2. 非标准路径 → 按 listener 显式声明的 `protocol` 路由：这让「接 OpenAI 兼容但路径不同
-///    的中转站」只需把该 listener 的 `protocol` 配成 `openai`（**配置驱动，零代码改动**）。
-/// 3. 非标准路径 + 未声明协议（`Auto`）→ `None`：不识别为 LLM endpoint，保持流式透传（无 DoS）。
+/// 替换散落在 proxy_inner 里的 `path == "/v1/messages"` 硬编码。解析优先级：
+/// 1. 已知标准路径硬保证：`/v1/messages` → Anthropic，`/v1/chat/completions` → OpenAi
+///    （向后兼容 + `Auto` listener 自适应；routes 表**不能** override 标准路径，防误配）。
+/// 2. 用户 `[[upstream.routes]]` 配置表精确匹配非标准 `path` → 显式 `provider`（A3 配置化路由表）：
+///    「OpenAI 兼容但路径不同的中转站」加一行 `{ path = "/custom/chat", provider = "openai" }`
+///    即可路由到对应 codec，**零代码改动**（config 安全校验已拒绝 `provider=auto`）。
+/// 3. 非标准路径 + 无表命中 → 按 listener 显式声明的 `protocol` 兜底（整段异路径单 provider listener）。
+/// 4. 以上皆不命中（`Auto` listener + 无表）→ `None`：不识别为 LLM endpoint，流式透传（无 DoS）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EndpointRoute {
     Anthropic,
@@ -4887,16 +4900,32 @@ enum EndpointRoute {
 fn resolve_endpoint_route(
     path: &str,
     listener_protocol: crate::config::Protocol,
+    routes: &[crate::config::RouteRule],
 ) -> Option<EndpointRoute> {
     use crate::config::Protocol;
+    // 1. 已知标准路径硬保证（向后兼容 + Auto listener 自适应）——
+    //    routes 表不能 override，防误配破坏 /v1/messages、/v1/chat/completions 标准流量。
     match path {
-        "/v1/messages" => Some(EndpointRoute::Anthropic),
-        "/v1/chat/completions" => Some(EndpointRoute::OpenAi),
-        _ => match listener_protocol {
-            Protocol::Anthropic => Some(EndpointRoute::Anthropic),
-            Protocol::Openai => Some(EndpointRoute::OpenAi),
-            Protocol::Auto => None,
-        },
+        "/v1/messages" => return Some(EndpointRoute::Anthropic),
+        "/v1/chat/completions" => return Some(EndpointRoute::OpenAi),
+        _ => {}
+    }
+    // 2. 用户配置路由表（A3 配置化）：非标准 path 精确匹配 → 显式 provider（异路径中转站）。
+    //    config 安全校验已拒 provider=Auto；此处 Auto 保守跳过（当未匹配，继续兜底）。
+    for r in routes {
+        if r.path == path {
+            match r.provider {
+                Protocol::Anthropic => return Some(EndpointRoute::Anthropic),
+                Protocol::Openai => return Some(EndpointRoute::OpenAi),
+                Protocol::Auto => {}
+            }
+        }
+    }
+    // 3. 非标准路径 + 无表命中 → listener 显式协议兜底（整段异路径单 provider listener）。
+    match listener_protocol {
+        Protocol::Anthropic => Some(EndpointRoute::Anthropic),
+        Protocol::Openai => Some(EndpointRoute::OpenAi),
+        Protocol::Auto => None,
     }
 }
 
@@ -5125,34 +5154,84 @@ mod tests {
     #[test]
     fn resolve_endpoint_route_standard_and_custom_paths() {
         use crate::config::Protocol;
+        let no_routes: &[crate::config::RouteRule] = &[];
         // 标准路径：path 优先，与 listener protocol 无关。
         assert_eq!(
-            resolve_endpoint_route("/v1/messages", Protocol::Auto),
+            resolve_endpoint_route("/v1/messages", Protocol::Auto, no_routes),
             Some(EndpointRoute::Anthropic)
         );
         assert_eq!(
-            resolve_endpoint_route("/v1/chat/completions", Protocol::Auto),
+            resolve_endpoint_route("/v1/chat/completions", Protocol::Auto, no_routes),
             Some(EndpointRoute::OpenAi)
         );
         assert_eq!(
-            resolve_endpoint_route("/v1/messages", Protocol::Openai),
+            resolve_endpoint_route("/v1/messages", Protocol::Openai, no_routes),
             Some(EndpointRoute::Anthropic)
         );
         // 非标准路径（异路径中转站）：按 listener 显式声明的 protocol 路由——配置驱动、零代码改动。
         assert_eq!(
-            resolve_endpoint_route("/v1/custom/chat", Protocol::Openai),
+            resolve_endpoint_route("/v1/custom/chat", Protocol::Openai, no_routes),
             Some(EndpointRoute::OpenAi)
         );
         assert_eq!(
-            resolve_endpoint_route("/relay/anthropic", Protocol::Anthropic),
+            resolve_endpoint_route("/relay/anthropic", Protocol::Anthropic, no_routes),
             Some(EndpointRoute::Anthropic)
         );
         // 非标准路径 + 未声明协议（Auto）→ None（不识别为 LLM endpoint，流式透传）。
         assert_eq!(
-            resolve_endpoint_route("/v1/custom/chat", Protocol::Auto),
+            resolve_endpoint_route("/v1/custom/chat", Protocol::Auto, no_routes),
             None
         );
-        assert_eq!(resolve_endpoint_route("/health", Protocol::Auto), None);
+        assert_eq!(
+            resolve_endpoint_route("/health", Protocol::Auto, no_routes),
+            None
+        );
+    }
+
+    /// A3 配置化路由表：`[[upstream.routes]]` 让异路径中转站零代码路由到指定 codec。
+    #[test]
+    fn resolve_endpoint_route_honours_config_routes_table() {
+        use crate::config::{Protocol, RouteRule};
+        let routes = vec![
+            RouteRule {
+                path: "/custom/llm/v1/chat".to_string(),
+                provider: Protocol::Openai,
+            },
+            RouteRule {
+                path: "/relay/claude".to_string(),
+                provider: Protocol::Anthropic,
+            },
+            // 误配：试图把标准路径改判到 OpenAi——必须被标准路径硬保证忽略。
+            RouteRule {
+                path: "/v1/messages".to_string(),
+                provider: Protocol::Openai,
+            },
+        ];
+        // 配置表精确命中非标准路径 → 显式 provider（即便 listener 是 Auto，零代码接异路径中转站）。
+        assert_eq!(
+            resolve_endpoint_route("/custom/llm/v1/chat", Protocol::Auto, &routes),
+            Some(EndpointRoute::OpenAi)
+        );
+        assert_eq!(
+            resolve_endpoint_route("/relay/claude", Protocol::Auto, &routes),
+            Some(EndpointRoute::Anthropic)
+        );
+        // 配置表优先于「非标准路径 → listener protocol」兜底：
+        // path 命中 routes(OpenAi) 即便 listener 声明 anthropic 也走 OpenAi。
+        assert_eq!(
+            resolve_endpoint_route("/custom/llm/v1/chat", Protocol::Anthropic, &routes),
+            Some(EndpointRoute::OpenAi)
+        );
+        // 标准路径硬保证：routes 表的 /v1/messages→openai 误配被忽略，仍 Anthropic。
+        assert_eq!(
+            resolve_endpoint_route("/v1/messages", Protocol::Auto, &routes),
+            Some(EndpointRoute::Anthropic)
+        );
+        // 表未命中 + listener Auto → None（保持透传，不误判）。
+        assert_eq!(
+            resolve_endpoint_route("/unknown/path", Protocol::Auto, &routes),
+            None
+        );
     }
 
     /// 构造最小化的 HookMark Detection，用于测试 write_hook_pending_to。
