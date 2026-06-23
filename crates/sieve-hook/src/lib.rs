@@ -5,6 +5,7 @@ pub mod codex;
 pub mod codex_ipc;
 pub mod decision;
 pub mod error;
+pub mod hermes;
 pub mod pending;
 pub mod protocol;
 

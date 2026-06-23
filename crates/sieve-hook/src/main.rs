@@ -20,6 +20,9 @@ use sieve_hook_lib::codex::{
 use sieve_hook_lib::codex_ipc;
 use sieve_hook_lib::decision::{write_decision, DecisionOutcome};
 use sieve_hook_lib::error::PendingError;
+use sieve_hook_lib::hermes::{
+    emit_hermes_decision, emit_hermes_fail_closed, HermesOutput, HermesPreToolCallInput,
+};
 use sieve_hook_lib::pending::{read_pending_checked, scan_pending_dir};
 use sieve_hook_lib::protocol;
 
@@ -32,6 +35,14 @@ const STALE_THRESHOLD_SECS: i64 = 600;
 /// **必须严格小于 codex 的 `timeout_sec`**：codex 到 `timeout_sec` 会强杀 hook，
 /// 被杀 = 无 exit code = fail-OPEN；本 deadline 到点主动 `exit 2`（fail-closed）抢在被杀前。
 const CODEX_INTERNAL_DEADLINE_SECS: u64 = 50;
+
+/// `hermes` 子命令的内部硬 deadline（秒）。
+///
+/// Hermes hook `timeout` 默认 60s / 上限 300s（`~/.hermes/config.yaml`）。本 deadline 必须
+/// **严格小于** Hermes 配置的 `timeout`：到点前主动输出 block JSON。注意 Hermes **fail-open**——
+/// 超时不会被 Hermes 当成 block（仅 warn 后放行），故本 deadline 只为"尽力赶在放行前发 block"，
+/// 真正 fail-closed 由 daemon 网关 `inbound_hold` 兜底（ADR-014 §6）。
+const HERMES_INTERNAL_DEADLINE_SECS: u64 = 50;
 
 /// sieve-hook: PreToolUse 安全确认 hook（Phase 1 macOS）。
 #[derive(Parser, Debug)]
@@ -62,6 +73,15 @@ enum Command {
         #[arg(long)]
         sieve_home: Option<PathBuf>,
     },
+    /// Hermes pre_tool_call hook：读 stdin 工具调用 JSON，经 daemon 判危，按 Hermes 契约输出。
+    ///
+    /// ⚠️ Hermes **fail-OPEN**：退出码不 block，决策经 stdout `{"decision":"block"}` 传达；
+    /// 超时即放行。本子命令固定 `exit 0`，真正 fail-closed 由网关 `inbound_hold` 兜底（ADR-014 §6）。
+    Hermes {
+        /// sieve home 目录；未传则读 $SIEVE_HOME，默认 $HOME/.sieve。
+        #[arg(long)]
+        sieve_home: Option<PathBuf>,
+    },
 }
 
 fn main() {
@@ -73,6 +93,7 @@ fn main() {
             sieve_home,
         } => run_check_command(request_id, sieve_home),
         Command::Codex { sieve_home } => run_codex_command(sieve_home),
+        Command::Hermes { sieve_home } => run_hermes_command(sieve_home),
     };
 
     std::process::exit(exit_code);
@@ -189,6 +210,81 @@ fn emit_codex(out: CodexOutput) -> i32 {
         let _ = se.flush();
     }
     out.exit_code
+}
+
+/// `hermes` 子命令：Hermes Agent `pre_tool_call` hook。
+///
+/// 读 stdin 的 pre_tool_call JSON → 经 daemon 判危（复用 agent-neutral 的 [`codex_ipc::judge_tool_call`]）
+/// → 按 Hermes 契约输出 stdout JSON。**任何错误路径一律 `emit_hermes_fail_closed`（尽力 block JSON）。**
+///
+/// ⚠️ Hermes **fail-OPEN**：退出码无效、超时即放行；本进程固定 `exit 0`，真正 fail-closed
+/// 由 daemon 网关 `inbound_hold` 兜底（ADR-014 §6）。
+fn run_hermes_command(sieve_home: Option<PathBuf>) -> i32 {
+    let base = match resolve_sieve_home(sieve_home) {
+        Some(b) => b,
+        None => {
+            return emit_hermes(emit_hermes_fail_closed(
+                "cannot determine sieve home ($HOME not set), fail-closed",
+            ));
+        }
+    };
+
+    // 内部硬 deadline：到点前输出 block JSON，抢在 Hermes hook timeout（默认 60s）放行之前。
+    let deadline = Instant::now() + Duration::from_secs(HERMES_INTERNAL_DEADLINE_SECS);
+
+    // 读 stdin 全部（Hermes pre_tool_call 输入）。
+    let mut buf = String::new();
+    if let Err(e) = io::stdin().read_to_string(&mut buf) {
+        return emit_hermes(emit_hermes_fail_closed(&format!(
+            "read stdin failed: {e}, fail-closed"
+        )));
+    }
+
+    // 解析 Hermes pre_tool_call JSON（容忍未知/缺失字段；解析失败也尽力 block）。
+    let input: HermesPreToolCallInput = match serde_json::from_str(&buf) {
+        Ok(v) => v,
+        Err(e) => {
+            return emit_hermes(emit_hermes_fail_closed(&format!(
+                "parse stdin failed: {e}, fail-closed"
+            )));
+        }
+    };
+
+    // 复用 codex 的 agent-neutral 判危 IPC。Hermes 无 `cwd`，传空串（daemon 对 tool_input
+    // 全文扫描不依赖 cwd）；用 `session_id` 作 daemon 请求关联键（代替 codex 的 tool_use_id）。
+    let verdict = match codex_ipc::judge_tool_call(
+        &base,
+        &input.tool_name,
+        &input.tool_input,
+        &input.session_id,
+        "",
+        deadline,
+    ) {
+        Ok(v) => v,
+        Err(e) => {
+            return emit_hermes(emit_hermes_fail_closed(&format!(
+                "daemon judge failed: {e}, fail-closed"
+            )));
+        }
+    };
+
+    emit_hermes(emit_hermes_decision(&verdict))
+}
+
+/// 写 Hermes 输出到 stdout/stderr，**固定返回 `exit 0`**（Hermes 退出码不影响 block，
+/// 决策完全经 stdout JSON 传达；非零退出在 Hermes = fail-open，更糟）。
+fn emit_hermes(out: HermesOutput) -> i32 {
+    if !out.stdout.is_empty() {
+        let mut so = io::stdout();
+        let _ = so.write_all(out.stdout.as_bytes());
+        let _ = so.flush();
+    }
+    if !out.stderr.is_empty() {
+        let mut se = io::stderr();
+        let _ = se.write_all(out.stderr.as_bytes());
+        let _ = se.flush();
+    }
+    0
 }
 
 /// 核心逻辑，返回进程退出码（0 = 允许，1 = 拒绝）。
