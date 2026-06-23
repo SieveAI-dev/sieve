@@ -148,7 +148,9 @@ impl ProviderCodec for AnthropicCodec {
             return out;
         };
         for block in content {
-            let Some(obj) = block.as_object() else { continue };
+            let Some(obj) = block.as_object() else {
+                continue;
+            };
             if obj.get("type").and_then(|v| v.as_str()) != Some("tool_use") {
                 continue;
             }
@@ -212,7 +214,9 @@ impl ProviderCodec for OpenAiCodec {
     fn claimed_usage(&self, resp_json: &serde_json::Value) -> Option<(u64, u64)> {
         let u = resp_json.get("usage")?;
         let input = u.get("prompt_tokens").and_then(serde_json::Value::as_u64)?;
-        let output = u.get("completion_tokens").and_then(serde_json::Value::as_u64)?;
+        let output = u
+            .get("completion_tokens")
+            .and_then(serde_json::Value::as_u64)?;
         Some((input, output))
     }
 
@@ -469,7 +473,9 @@ mod tests {
         let json = format!(
             r#"{{"model":"gpt-4","messages":[{{"role":"user","content":"my key is {raw_token}"}}]}}"#
         );
-        let decoded = OpenAiCodec.decode_request(json.as_bytes()).expect("valid openai");
+        let decoded = OpenAiCodec
+            .decode_request(json.as_bytes())
+            .expect("valid openai");
         let texts = decoded.extract_text_content();
         assert_eq!(texts.len(), 1);
         let redacted = vec!["my key is [REDACTED:OUT-01]".to_string()];
@@ -477,8 +483,14 @@ mod tests {
             .apply_redacted_texts(&texts, &redacted)
             .expect("apply ok");
         let new_json = String::from_utf8(new_body).unwrap();
-        assert!(!new_json.contains(raw_token), "脱敏后不应含原 token: {new_json}");
-        assert!(new_json.contains("[REDACTED:OUT-01]"), "应含占位符: {new_json}");
+        assert!(
+            !new_json.contains(raw_token),
+            "脱敏后不应含原 token: {new_json}"
+        );
+        assert!(
+            new_json.contains("[REDACTED:OUT-01]"),
+            "应含占位符: {new_json}"
+        );
     }
 
     /// 迁自 daemon.rs：array-of-content-parts，text part 脱敏、image_url part 原样保留。
@@ -488,7 +500,9 @@ mod tests {
         let json = format!(
             r#"{{"model":"gpt-4","messages":[{{"role":"user","content":[{{"type":"text","text":"key={raw_token}"}},{{"type":"image_url","image_url":{{"url":"https://example.com/img.png"}}}}]}}]}}"#
         );
-        let decoded = OpenAiCodec.decode_request(json.as_bytes()).expect("valid openai");
+        let decoded = OpenAiCodec
+            .decode_request(json.as_bytes())
+            .expect("valid openai");
         let texts = decoded.extract_text_content();
         assert_eq!(texts.len(), 1, "只有 text part 计 segment");
         let redacted = vec!["key=[REDACTED:OUT-01]".to_string()];
@@ -496,14 +510,19 @@ mod tests {
             String::from_utf8(decoded.apply_redacted_texts(&texts, &redacted).unwrap()).unwrap();
         assert!(!new_json.contains(raw_token));
         assert!(new_json.contains("[REDACTED:OUT-01]"));
-        assert!(new_json.contains("image_url"), "image_url 应保留: {new_json}");
+        assert!(
+            new_json.contains("image_url"),
+            "image_url 应保留: {new_json}"
+        );
     }
 
     /// 迁自 daemon.rs：长度不一致返回错误（不 silent fail）。
     #[test]
     fn openai_redact_mismatched_lengths_returns_error() {
         let json = r#"{"model":"gpt-4","messages":[{"role":"user","content":"hello"}]}"#;
-        let decoded = OpenAiCodec.decode_request(json.as_bytes()).expect("valid openai");
+        let decoded = OpenAiCodec
+            .decode_request(json.as_bytes())
+            .expect("valid openai");
         let texts = decoded.extract_text_content();
         let bad: Vec<String> = vec![];
         assert!(decoded.apply_redacted_texts(&texts, &bad).is_err());

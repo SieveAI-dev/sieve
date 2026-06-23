@@ -46,6 +46,7 @@ PAIRS="$(awk '
   /scan_assistant_text/         { print cur "|scan_assistant_text" }
   /on_tool_use_complete/        { print cur "|on_tool_use_complete" }
   /classify_inbound_detections/ { print cur "|classify_inbound_detections" }
+  /handle_json_inbound/         { print cur "|handle_json_inbound" }
 ' "$DAEMON" | sort -u)"
 
 has_pair() { grep -qxF "$1|$2" <<<"$PAIRS"; }
@@ -60,15 +61,18 @@ require() {  # require <fn> <call> <人类描述>
   fi
 }
 
-echo "── 检查 A：四路由 handler 入站钩子接线（${DAEMON}）──"
-require handle_anthropic_json_inbound on_tool_use_complete "M-2 Anthropic JSON 工具检测"
-require handle_anthropic_json_inbound scan_assistant_text  "M-2 Anthropic JSON 文本扫描 / IN-CR-01"
-require handle_openai_json_inbound    on_tool_use_complete "M-4 OpenAI JSON 工具检测"
-require handle_openai_json_inbound    scan_assistant_text  "M-4 OpenAI JSON 文本扫描 / IN-CR-01"
-require classify_inbound_detections   observe_event        "M-1/M-3 SSE 文本扫描 / IN-CR-01"
-require classify_inbound_detections   on_tool_use_complete "M-1/M-3 SSE 工具检测"
+echo "── 检查 A：四路由入站钩子接线（${DAEMON}）──"
+# A1/A2 网关三层重构后：JSON 两路由（M-2/M-4）收敛到 codec 驱动的单一 handle_json_inbound，
+# SSE 两路由（M-1/M-3）经各自 forward 进共享 classify_inbound_detections。不变量不变：
+# 四条路由都必须接入站文本扫描 + 工具检测钩子。
+require handle_json_inbound on_tool_use_complete "M-2/M-4 JSON 工具检测（codec 驱动统一 handler）"
+require handle_json_inbound scan_assistant_text  "M-2/M-4 JSON 文本扫描 / IN-CR-01"
+require classify_inbound_detections observe_event        "M-1/M-3 SSE 文本扫描 / IN-CR-01"
+require classify_inbound_detections on_tool_use_complete "M-1/M-3 SSE 工具检测"
 require forward_with_inbound_inspection        classify_inbound_detections "M-1 Anthropic SSE 接入分类器"
+require forward_with_inbound_inspection        handle_json_inbound         "M-2 Anthropic JSON 进统一 handler"
 require forward_with_openai_inbound_inspection classify_inbound_detections "M-3 OpenAI SSE 接入分类器"
+require forward_with_openai_inbound_inspection handle_json_inbound         "M-4 OpenAI JSON 进统一 handler"
 
 echo "── 检查 B：四路由端到端测试锚点（${MATRIX}）──"
 for route in anthropic_sse anthropic_json openai_sse openai_json; do

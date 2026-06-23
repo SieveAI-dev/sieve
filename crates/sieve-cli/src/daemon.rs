@@ -1387,7 +1387,6 @@ fn spawn_billing_observation(
 ) {
 }
 
-
 /// SSE 流式超额计费累计器（ADR-038）：跨 chunk 累计 completion 文本 + relay 声明的 usage，
 /// 流自然结束后用于交叉比对。
 ///
@@ -1956,8 +1955,13 @@ async fn proxy_inner(
     let path_intrinsic = resolve_endpoint_route(&path, crate::config::Protocol::Auto);
     if matches!(
         (path_intrinsic, ctx.listener_protocol),
-        (Some(EndpointRoute::Anthropic), crate::config::Protocol::Openai)
-            | (Some(EndpointRoute::OpenAi), crate::config::Protocol::Anthropic)
+        (
+            Some(EndpointRoute::Anthropic),
+            crate::config::Protocol::Openai
+        ) | (
+            Some(EndpointRoute::OpenAi),
+            crate::config::Protocol::Anthropic
+        )
     ) {
         tracing::warn!(
             path = %path,
@@ -4570,7 +4574,6 @@ fn classify_json_inbound_detection(
     }
 }
 
-
 /// 处理非流式 JSON 入站响应的统一入站检测路径（A2 Transport：四路由收敛到 codec 驱动）。
 ///
 /// `codec` 提供 provider 专属响应解码（completion_text / claimed_usage / extract_tool_calls /
@@ -4644,7 +4647,12 @@ async fn handle_json_inbound(
                     &listener_provider_id,
                 );
                 for d in hits {
-                    classify_json_inbound_detection(d, dry_run, meta.chain_depth, &mut all_blocking);
+                    classify_json_inbound_detection(
+                        d,
+                        dry_run,
+                        meta.chain_depth,
+                        &mut all_blocking,
+                    );
                 }
             }
             Err(e) => {
@@ -4659,7 +4667,12 @@ async fn handle_json_inbound(
         match inbound_filter.scan_assistant_text(&assistant_text) {
             Ok(hits) => {
                 for d in hits {
-                    classify_json_inbound_detection(d, dry_run, meta.chain_depth, &mut all_blocking);
+                    classify_json_inbound_detection(
+                        d,
+                        dry_run,
+                        meta.chain_depth,
+                        &mut all_blocking,
+                    );
                 }
             }
             Err(e) => {
@@ -4669,7 +4682,11 @@ async fn handle_json_inbound(
     }
 
     if !all_blocking.is_empty() {
-        tracing::warn!(count = all_blocking.len(), tag = audit_tag, "INBOUND BLOCKED (json)");
+        tracing::warn!(
+            count = all_blocking.len(),
+            tag = audit_tag,
+            "INBOUND BLOCKED (json)"
+        );
         for d in &all_blocking {
             tracing::warn!(rule = %d.rule_id, tag = audit_tag, "json inbound detection");
         }
@@ -5075,7 +5092,6 @@ fn is_json_media_type(content_type: &str) -> bool {
         .is_some_and(|mt| mt.eq_ignore_ascii_case("application/json"))
 }
 
-
 // ─── 单元测试：Hook pending fail-closed ──────────────────────────────────────
 
 #[cfg(test)]
@@ -5132,7 +5148,10 @@ mod tests {
             Some(EndpointRoute::Anthropic)
         );
         // 非标准路径 + 未声明协议（Auto）→ None（不识别为 LLM endpoint，流式透传）。
-        assert_eq!(resolve_endpoint_route("/v1/custom/chat", Protocol::Auto), None);
+        assert_eq!(
+            resolve_endpoint_route("/v1/custom/chat", Protocol::Auto),
+            None
+        );
         assert_eq!(resolve_endpoint_route("/health", Protocol::Auto), None);
     }
 
@@ -5206,7 +5225,6 @@ mod tests {
             "不可写 base 应返回 Err 以触发 fail-closed，但得到 Ok"
         );
     }
-
 
     // ── A2-#2：set_source_channel 已通过 InboundFilter 公开接口间接验证 ────────────
     //

@@ -71,8 +71,11 @@ fn golden_dir() -> PathBuf {
 }
 
 /// 在 :0 启动 plain-HTTP mock 上游，捕获收到的 body，返回 (addr, body_handle, shutdown)。
-async fn spawn_capturing_upstream(
-) -> (SocketAddr, Arc<tokio::sync::Mutex<Bytes>>, oneshot::Sender<()>) {
+async fn spawn_capturing_upstream() -> (
+    SocketAddr,
+    Arc<tokio::sync::Mutex<Bytes>>,
+    oneshot::Sender<()>,
+) {
     let received = Arc::new(tokio::sync::Mutex::new(Bytes::new()));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -214,7 +217,11 @@ fn assert_golden(name: &str, actual: &[u8]) {
     if std::env::var("SIEVE_GOLDEN_RECORD").is_ok() {
         std::fs::create_dir_all(golden_dir()).unwrap();
         std::fs::write(&path, actual).unwrap();
-        eprintln!("RECORDED golden: {} ({} bytes)", path.display(), actual.len());
+        eprintln!(
+            "RECORDED golden: {} ({} bytes)",
+            path.display(),
+            actual.len()
+        );
         return;
     }
     let expected = std::fs::read(&path).unwrap_or_else(|_| {
@@ -250,7 +257,11 @@ async fn run_golden_outbound(name: &str, path: &str, request_body: String) {
         )
         .await
         .unwrap();
-    assert_eq!(resp.status(), 200, "{name}: AutoRedact 脱敏后应转发，上游 200");
+    assert_eq!(
+        resp.status(),
+        200,
+        "{name}: AutoRedact 脱敏后应转发，上游 200"
+    );
 
     let body = received.lock().await.clone();
     assert!(!body.is_empty(), "{name}: 上游应收到（脱敏后）body");
