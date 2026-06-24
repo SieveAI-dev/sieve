@@ -1,7 +1,7 @@
 # Sieve Dependabot 配置
 # 文档：https://docs.github.com/en/code-security/dependabot/dependabot-version-updates
 #
-# 设计意图（PRD §9 #6 + ADR-006）：
+# 设计意图（供应链安全硬约束 + 可复现构建）：
 # - pinned dependencies 是供应链安全承诺的硬约束
 # - Dependabot 只动 patch / minor 升级；major 升级走人工评估
 # - reproducible build 要求 Cargo.lock 入库，Dependabot PR 会更新 lockfile
@@ -27,7 +27,7 @@ updates:
       prefix: "chore"
       prefix-development: "chore"
       include: "scope"
-    # PRD §9 #6 + ADR-006：major 升级必须人工评估（reproducible build 风险）
+    # 供应链硬约束：major 升级必须人工评估（reproducible build 风险）
     ignore:
       - dependency-name: "*"
         update-types:

@@ -1,8 +1,8 @@
 # Security Policy
 
-> Sieve is a security proxy that sits in your LLM traffic (PRD §1.1). If Sieve itself is
+> Sieve is a security proxy that sits in your LLM traffic. If Sieve itself is
 > compromised, its entire value proposition collapses. "Verifiable, not merely trusted" is
-> the core of its security promise (PRD §1.2).
+> the core of its security promise.
 >
 > **Please do not report vulnerabilities in Sieve through public GitHub Issues.** Use the
 > private channel below.
@@ -73,11 +73,12 @@ The following are not Sieve security vulnerabilities:
 - **User misconfiguration**: e.g. setting `[server].bind_address` to `0.0.0.0` (the config layer
   refuses to start).
 - **Relay / upstream API vulnerabilities**: outside Sieve's remit (these are precisely what Sieve
-  is built to detect, PRD §1.2).
+  is built to detect).
 - **Wallet / browser-extension phishing**: Sieve is a cognitive-friction layer, not a wallet
   security product.
-- **Detection false positives / negatives** (unless they violate the PRD §6.5 FP budget): FP
-  handling goes through [`.sieveignore`](docs/api/api-reference.md) and the normal GitHub issue flow.
+- **Detection false positives / negatives** (unless they violate the documented Critical FP
+  budget): FP handling goes through [`.sieveignore`](docs/api/api-reference.md) and the normal
+  GitHub issue flow.
 - **Using an expired / unsigned binary**: verifying the [sigstore signature](docs/guides/deployment.md)
   is the user's responsibility at install time — and the installer does it for you automatically.
 
@@ -123,27 +124,24 @@ sieve --config ~/.sieve/config.toml
 
 ## Past advisories
 
-> Pre-GA advisories are not assigned formal `SIEVE-YYYY-NNN` IDs; they are recorded in the
-> CHANGELOG. Formal IDs start post-GA.
+> Early-preview advisories are recorded in the CHANGELOG. Formal `SIEVE-YYYY-NNN` IDs are
+> assigned once the project reaches a stable release line.
 
-### Pre-GA P0: non-streaming JSON inbound detection bypass (fixed 2026-05-01)
+### JSON (non-streaming) inbound detection coverage gap (fixed)
 
-- **Affected versions**: v1.5.0 ~ v1.5.3 (v1.5.x, 70 inbound rules)
-- **Scope**:
-  - **Bug 1 (Anthropic)**: `tool_use` inside an `application/json` non-streaming response bypassed
-    all inbound rules (IN-CR-02/03/04/05 / IN-GEN-* all inert).
-  - **Bug 2 (OpenAI)**: the `proxy_openai` `stream=false` branch skipped inbound detection; OpenAI
-    defaults to `stream=false`, so OpenAI inbound rules had **never** taken effect.
-- **Severity**: P0 (a severe product-level defect, given that inbound detection is Sieve's core
-  capability — PRD §5.2).
-- **Fix**: v1.5.4, commit `14153e2`, see the [CHANGELOG](docs/changelog/CHANGELOG.md).
-- **Fix verification**: 2 new integration tests + dataset FP rate 0% / 99.71% recall, no regression.
-- **Disclosure status**: found and fixed during pre-GA internal dogfood; both discovery and fix
-  predate any public release, so no external users were affected.
+- **Scope**: a `tool_use` inside an `application/json` non-streaming response, and the OpenAI
+  `stream=false` branch, did not route through inbound detection — so inbound rules only took
+  effect on the streaming (SSE) path.
+- **Severity**: high — inbound detection is one of Sieve's core capabilities, so equal coverage
+  across all content-type routes is a hard requirement.
+- **Fix**: inbound detection is now wired across all four content-type routes
+  (Anthropic SSE / Anthropic JSON / OpenAI SSE / OpenAI JSON) with equal coverage, guarded by
+  integration tests and a CI routing-coverage check; see the
+  [CHANGELOG](docs/changelog/CHANGELOG.md).
 
 ---
 
 ## Related documents
 
-- PRD §9 engineering hard constraints
+- [`CLAUDE.md`](CLAUDE.md) / [`.cursorrules`](.cursorrules) — engineering hard constraints
 - [Deployment guide — binary signature verification](docs/guides/deployment.md)

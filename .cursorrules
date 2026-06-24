@@ -1,8 +1,8 @@
 # Sieve · Cursor 项目规则
 
-> 本文件是 Sieve 项目的 Cursor 工作规则，分两层：**文档规则**（沿用用户级 `.cursorrules` 模板骨架）+ **Sieve 工程硬约束**（来自 PRD v2.0 §9 与项目级共识）。
+> 本文件是 Sieve 项目的 Cursor 工作规则，分两层：**文档规则**（沿用用户级 `.cursorrules` 模板骨架）+ **Sieve 工程硬约束**（项目级共识）。
 >
-> **当前项目状态：v2.0 + v2.1 代码 100% 落地（2026-05-01），进入 dogfood 准备阶段**，所有约束按生产语境强制执行。
+> **当前项目状态：早期预览（0.1.0-alpha）**，所有约束按生产语境强制执行。
 
 ---
 
@@ -13,7 +13,7 @@
 1. **改代码前必须先读** `@docs/` 中相关文档（需求 → 设计 → API），不盲目重构
 2. **完成代码修改后必须更新所有关联文档**，禁止单独更新一个文档而忽略关联文档
 3. **临时文档**使用前缀 `_temp-` 或 `_draft-`，存放于 `docs/_temp/`，**任务完成后 24 小时内删除或归档**
-4. PRD v2.0 全文不复制到其他文档，所有跨文档引用一律使用相对路径链接
+4. 所有跨文档引用一律使用相对路径链接
 
 ### 1.2 文档位置约定
 
@@ -21,21 +21,20 @@
 README.md                  # 唯一放在根目录的文档（项目入口）
 .cursorrules               # 本文件
 docs/
-├── requirements/          # 需求文档（PRD-sieve.md / user-stories.md）
 ├── design/                # 设计文档（architecture.md / data-model.md）
 ├── api/                   # API 文档（api-reference.md）
+├── specs/                 # 功能技术规格（SPEC-NNN-*.md，含 SPEC-005 IPC 权威源）
 ├── guides/                # 使用指南（development.md / deployment.md）
 ├── changelog/             # 变更日志（CHANGELOG.md）
-├── prd/                   # PRD 历史归档（不要修改已发布版本）
 ├── research/              # 调研材料
 └── _temp/                 # 临时文档（用完即删）
 ```
 
 ### 1.3 AI 行为约定
 
-- 讨论需求时，主动引用 `@docs/requirements/`
 - 讨论技术方案时，主动引用 `@docs/design/`
 - 修改 API 时，**必须**引用 `@docs/api/`
+- 改 IPC 字段时，**必须**先改 `@docs/specs/SPEC-005-ipc-protocol.md`
 - 每次代码变更后，列出"需要更新的文档清单"
 
 ### 1.4 文档关联图
@@ -43,11 +42,9 @@ docs/
 ```
 README.md
   ↓ 链接到
-docs/requirements/PRD-sieve.md → docs/prd/sieve-prd-v2.0.md（活动版本）
-  ↓ 关联
 docs/design/architecture.md
   ↓ 约束
-docs/api/api-reference.md
+docs/api/api-reference.md + docs/specs/
   ↓ 记录变更
 docs/changelog/CHANGELOG.md
 ```
@@ -58,9 +55,9 @@ docs/changelog/CHANGELOG.md
 
 | 场景 | 目标文档 | 优先级 |
 |------|----------|--------|
-| 新增功能 | PRD + 设计文档 + README | P0 |
+| 新增功能 | 设计文档 + README + CHANGELOG | P0 |
 | 修改 API（Anthropic / Unified Message） | `api-reference.md` + CHANGELOG | P0 |
-| 架构变更（pipeline / 模块边界） | `architecture.md` + ADR | P0 |
+| 架构变更（pipeline / 模块边界） | `architecture.md` + CHANGELOG | P0 |
 | Bug 修复涉及检测规则逻辑变更 | CHANGELOG + 相关设计文档 | P1 |
 | 配置变更（`config.toml` schema） | `deployment.md` / `development.md` | P1 |
 | 依赖升级（含 vectorscan / rustls） | CHANGELOG | P2 |
@@ -69,7 +66,7 @@ docs/changelog/CHANGELOG.md
 
 ---
 
-## 二、Sieve 工程硬约束（来自 PRD v2.0 §9，十六条）
+## 二、Sieve 工程硬约束（十六条）
 
 每条都是"做错就死"，**不是优化项**，**不接受任何阶段性妥协**：
 
@@ -78,17 +75,17 @@ docs/changelog/CHANGELOG.md
 3. **fail-closed High-Risk Tool Policy Gate + 强制确认**——YOLO mode **不允许关闭**，签名 / shell / 敏感路径所有 Critical 工具调用必须走人工确认
 4. **BIP39 必须做 SHA-256 checksum 验证**——这是 Sieve 的**差异化点**，仅词表匹配不足以定级 Critical
 5. **SSE 边界处理写大量 fuzz test**——半行 chunk、跨 chunk 分隔符、嵌入 C0 控制字符、多 event 粘包、提前断流必须**全部覆盖**，PR 不带 fuzz 不合并
-6. **Sieve 自身的供应链必须 sigstore + reproducible build + pinned dependencies**——LiteLLM 事件就是先例。**这件事比检测精度重要**，且要做成产品营销 talking point（详见 PRD §1.2 第 4 句）
-7. **Critical 拦截 FP 必须 < 0.5%**——公理 12，不可妥协；超过即用户禁用产品
+6. **Sieve 自身的供应链必须 sigstore + reproducible build + pinned dependencies**——LiteLLM 事件就是先例。**这件事比检测精度重要**
+7. **Critical 拦截 FP 必须 < 0.5%**——超过即用户禁用产品
 8. **Critical 在所有版本（包括降级模式）不可关闭**——产品安全承诺，不是用户偏好
-9. **Phase 1 GA 适配三家：Claude Code / OpenClaw / Hermes，UnifiedMessage 真实双协议**——Anthropic Messages API + OpenAI Chat Completions 都跑通；Gemini / Mistral 等其他协议推 Phase 2，真有用户主动要再做
+9. **适配四家 agent：Claude Code / OpenClaw / Hermes / Codex CLI，UnifiedMessage 真实双协议**——Anthropic Messages API + OpenAI Chat Completions 都跑通；Codex CLI 走原生 PreToolUse hook 经 IPC judge_tool_call 取裁决，OpenClaw / Hermes 两家 hook 作 UX 层、安全不变量由网关 inbound_hold 兜底 fail-closed；Gemini / Mistral 等其他协议推 Phase 2，真有用户主动要再做
 10. **GA 时一次性公开 repo + 代码 + 文档**——sigstore + reproducible build pipeline 照常跑通
 11. **不在 Anthropic API 协议层撒谎**——不伪造 tool_use / stop_reason / id / usage / type；拦截发生时允许截 SSE 流注入 `sieve_blocked` event（Sieve 自报，不是冒充模型）；keep-alive comment 行不算伪造
 12. **不装本地 CA 做 MITM**——Network Extension / 本地 CA 注入 / 系统 proxy 修改推 Phase 3 选购，Phase 1/2 不做
 13. **出站脱敏不打断工作流**——OUT-01~05/12 高频类自动脱敏 + 状态栏 5s 通知，不弹窗；弹窗次数过多用户直接禁用产品
 14. **用户规则系统 fail-safe**（v2.0 新增）——用户规则文件加载失败 / pattern 编译失败 / 安全 lint 拒绝 → daemon 必须正常启动 + 系统规则全功能；用户规则**不能 override 或 suppress 系统 Critical**；用户规则只能 High Ask/Warn/Mark，不能 Block / HookTerminal。详见 LayeredEngine 合并顺序
-15. **行为序列检测的保守起步 + beta 默认关闭**（v2.0 新增）——IN-SEQ-* 仅触发 StatusBar 通知，不引入新 Block 路径；GA 默认关闭（`[features] sequence_detection = false`），闭测用户主动 opt-in；GA 营销不承诺行为序列。升级为 Block 类需 4 周 ≥ 50 样本 + FP < 0.5% + 新 ADR。
-16. **所有入站能力必须经过 content-type 路由矩阵测试**（v2.0 新增，v1.5.4 P0 教训永久化）——任何新增入站功能必须有集成测试覆盖 4 类组合（Anthropic SSE / Anthropic JSON / OpenAI SSE / OpenAI stream=false JSON）；新功能只挂 SSE 不挂 JSON 视为 P0 漏洞。
+15. **行为序列检测的保守起步 + 默认关闭**（v2.0 新增）——IN-SEQ-* 仅触发 StatusBar 通知，不引入新 Block 路径；默认关闭（`[features] sequence_detection = false`），用户主动 opt-in。升级为 Block 类需充分样本积累 + FP < 0.5% + 新决策记录。
+16. **所有入站能力必须经过 content-type 路由矩阵测试**（v2.0 新增）——任何新增入站功能必须有集成测试覆盖 4 类组合（Anthropic SSE / Anthropic JSON / OpenAI SSE / OpenAI stream=false JSON）；新功能只挂 SSE 不挂 JSON 视为 P0 漏洞。
 
 ---
 
@@ -97,7 +94,7 @@ docs/changelog/CHANGELOG.md
 ### 3.1 工具链与 Lint
 
 - **rustfmt**：默认配置，PR 必须 `cargo fmt --check` 通过
-- **clippy strict**：CI 跑 `cargo clippy --all-targets --all-features -- -D warnings`，**警告即错误**
+- **clippy strict**：CI 跑 `cargo clippy --all-targets -- -D warnings`（外加 sieve-cli 带 `sequence_detection` 特性单独一步），**警告即错误**
 - 禁用 `#[allow(...)]` 兜底掩盖 lint，必须修；确需 allow 时附 SAFETY/TODO 注释
 
 ### 3.2 unsafe / async / 错误处理
@@ -109,17 +106,18 @@ docs/changelog/CHANGELOG.md
 
 ### 3.3 模块边界
 
-按 PRD §6 分七个 crate（sieve-updater 于 2026-05-05 新增）：
+分八个 crate：
 
 | crate | 职责 | 不允许做 |
 |-------|------|---------|
-| `sieve-core` | Pipeline / SSE Parser / UnifiedMessage / Forwarder | 任何 CLI / TUI / 配置加载 |
+| `sieve-core` | Pipeline / SSE Parser / UnifiedMessage / Forwarder / ProviderCodec 协议适配 | 任何 CLI / TUI / 配置加载 |
 | `sieve-rules` | 规则定义 / vectorscan 编译 / 匹配引擎 / Ed25519 验证 | 任何网络 IO |
 | `sieve-cli` | 入口 / 配置 / 弹窗 / 审计日志（SQLite） | 直接做规则匹配 |
 | `sieve-ipc` | IPC 协议（JSON-RPC over Unix socket + 文件锁 + pending/decisions 文件 IO） | 不参与请求处理 / 不依赖 sieve-core 业务逻辑 |
 | `sieve-hook` | 极简 PreToolUse hook 二进制，启动时延 < 50ms | 不依赖 sieve-core / sieve-rules / sieve-ipc / tokio |
 | `sieve-policy` (v2.0 新增) | 用户规则加载（user.toml） / lint（11 类约束） / 与系统规则合并（LayeredEngine） / 灰名单管理 / 规则编辑器（$EDITOR pipeline） | 不直接做匹配（调 sieve-rules）；不直接处理网络 IO（调 sieve-cli）；不破坏 critical_lock（用户规则永远不能 suppress 系统 Critical） |
-| `sieve-updater` (2026-05-05 新增) | manifest 协议客户端 / install-id 生成 / 6h 定时器 / ed25519 + sha256 校验 / 三个 env var 解析 | 不参与请求处理 / 不依赖 sieve-core 业务逻辑 / 不做规则文件原子替换（属于 sieve-rules） |
+| `sieve-updater` | manifest 协议客户端 / install-id 生成 / 定时器 / ed25519 + sha256 校验 / env var 解析 | 不参与请求处理 / 不依赖 sieve-core 业务逻辑 / 不做规则文件原子替换（属于 sieve-rules） |
+| `sieve-testing` | 集成测试 harness（DaemonGuard / mock upstream / e2e helper），`publish=false` | 不进生产二进制；仅供测试依赖 |
 
 跨 crate 调用走显式 trait，避免互相 import 实现细节。
 
@@ -127,7 +125,7 @@ docs/changelog/CHANGELOG.md
 
 - **不写无意义注释**（`// 增加计数器` / `// 返回结果` 之类一律删）
 - 注释只解释"为什么"和非显然的 invariant / trade-off
-- 公开 API 必须有 `///` rustdoc，关联到 PRD 章节或 ADR 编号
+- 公开 API 必须有 `///` rustdoc，关联到相关 SPEC
 
 ---
 
@@ -136,9 +134,9 @@ docs/changelog/CHANGELOG.md
 | 场景 | 行为 |
 |------|------|
 | 明确需求 | 直接给方案 + 必要文档更新清单 |
-| 模糊需求 | 引用相关 PRD/设计文档 + 给最可能方案 + 1 个关键追问 |
+| 模糊需求 | 引用相关设计 / SPEC 文档 + 给最可能方案 + 1 个关键追问 |
 | 破坏性操作（删文件、改 schema、重构 crate 边界） | **先确认后执行**，给出回退方案 |
-| 涉及 PRD §9 十六条硬约束 | **任何放宽都必须显式让用户确认**，默认不允许 |
+| 涉及十六条工程硬约束（§二） | **任何放宽都必须显式让用户确认**，默认不允许 |
 
 ---
 
@@ -146,9 +144,9 @@ docs/changelog/CHANGELOG.md
 
 - [ ] `cargo fmt --check` + `cargo clippy -- -D warnings` 通过
 - [ ] 涉及 SSE / 规则 / 工具调用判定的改动有对应 fuzz / 单元测试
-- [ ] PRD §9 十六条硬约束未被绕过
+- [ ] 十六条工程硬约束（§二）未被绕过
 - [ ] CHANGELOG 已更新（依赖升级 / 行为变更 / 检测项 ID 变化必记）
-- [ ] 关联文档（requirements / design / api）已同步
+- [ ] 关联文档（design / api / specs）已同步
 - [ ] 临时文档（`_temp-` / `_draft-`）已清理或归档
 
 ---
@@ -156,6 +154,6 @@ docs/changelog/CHANGELOG.md
 ## 参考
 
 - 项目入口：[README.md](./README.md)
-- 当前活动 PRD：[docs/prd/sieve-prd-v2.0.md](./docs/prd/sieve-prd-v2.0.md)
-- 需求入口：[docs/requirements/PRD-sieve.md](./docs/requirements/PRD-sieve.md)
-- 用户故事：[docs/requirements/user-stories.md](./docs/requirements/user-stories.md)
+- 架构设计：[docs/design/architecture.md](./docs/design/architecture.md)
+- IPC 协议权威源：[docs/specs/SPEC-005-ipc-protocol.md](./docs/specs/SPEC-005-ipc-protocol.md)
+- 功能规格索引：[docs/specs/INDEX.md](./docs/specs/INDEX.md)

@@ -1,6 +1,6 @@
 name: Performance Gate
 
-# Phase 1 仅 macOS（PRD v1.4 §6.6 + ADR-012）
+# Phase 1 仅 macOS
 # 仅在 main 分支 push 和 PR 目标为 main 时触发，避免每次 dev push 占用 runner
 on:
   push:

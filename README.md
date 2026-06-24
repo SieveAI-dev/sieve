@@ -4,11 +4,11 @@ English | [中文](./README.zh-CN.md)
 
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
 [![Platform: macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](#installation-phase-1-macos-only)
-[![Status: pre-GA beta](https://img.shields.io/badge/status-pre--GA%20beta-orange.svg)](#project-status)
+[![Status: alpha](https://img.shields.io/badge/status-0.1.0--alpha-orange.svg)](#project-status)
 
 > **A fully local LLM-traffic security proxy — the last gate before irreversible actions.**
 
-Sieve is a fully local LLM-traffic security proxy (a single Rust binary) that sits between your AI coding agent (Claude Code / Codex CLI / Cursor) and the upstream model API (Anthropic / OpenAI / relays). It inspects traffic in both directions — redacting secrets on the way out, and blocking dangerous tool calls on the way in (fail-closed) — to force a moment of cognitive friction before irreversible actions (signing, transfers, deploys). Built for crypto-native developers.
+Sieve is a fully local LLM-traffic security proxy (a single Rust binary) that sits between your AI coding agent (Claude Code / OpenClaw / Hermes / Codex CLI) and the upstream model API (Anthropic / OpenAI / relays). It inspects traffic in both directions — redacting secrets on the way out, and blocking dangerous tool calls on the way in (fail-closed) — to force a moment of cognitive friction before irreversible actions (signing, transfers, deploys). Built for crypto-native developers.
 
 All detection reasoning runs 100% on your machine. Sieve never uploads your prompts, responses, or API keys.
 
@@ -20,12 +20,12 @@ Your agent points its base URL at a loopback listener (`127.0.0.1`). Sieve forwa
 
 ```mermaid
 flowchart LR
-    A["AI agent<br/>Claude Code / Codex / Cursor"]
+    A["AI agent<br/>Claude Code / OpenClaw / Hermes / Codex CLI"]
     S["Sieve<br/>(local · 127.0.0.1)"]
     U["Upstream<br/>Anthropic / OpenAI / relay"]
 
     A -- "request" --> S
-    S -- "outbound: redact secrets<br/>(OUT-01..05/12, auto, no popup)" --> U
+    S -- "outbound: redact secrets<br/>(auto, no popup)" --> U
     U -- "response" --> S
     S -- "inbound: block Critical tool calls<br/>fail-closed + HIPS confirmation" --> A
 
@@ -56,18 +56,29 @@ See [SPEC-006](./docs/specs/SPEC-006-update-and-telemetry.md).
 
 ---
 
-## What sets Sieve apart (the moat)
+## What sets Sieve apart
 
-1. **Exclusive position at the LLM-traffic layer** — wallet-security products cannot see the prompt; DLP is not in the workflow.
+1. **Positioned at the LLM-traffic layer** — Sieve sees the full request/response stream, where wallet-security products and DLP cannot reach.
 2. **Local inference + a clearly bounded update channel** — detection is 100% local, zero cloud dependency.
-3. **Crypto-specific detection** — none of the 19 surveyed LLM/DLP products and none of the 9 surveyed AI-agent security tools have this capability.
+3. **Crypto-specific detection** — secret/mnemonic/private-key formats (including BIP39 with SHA-256 checksum verification, WIF and BIP-32 extended keys via Base58Check) and on-chain address-substitution detection, purpose-built for crypto-native workflows.
 4. **Bidirectional detection + fail-closed** — Critical cannot be disabled in any mode.
+
+### Capabilities at a glance
+
+- **Bidirectional inspection** — outbound secret redaction (auto-rewrite in place, no popup, 5s status-bar notice) + inbound interception of dangerous tool calls (fail-closed + human confirmation).
+- **Four-route parity** — every inbound detection covers all four content-type routes: Anthropic SSE, Anthropic JSON, OpenAI SSE, OpenAI JSON. A feature can never ship streaming-only and silently miss non-streaming traffic.
+- **Crypto private-key formats** — API keys and high-entropy secrets, BIP39 mnemonics (SHA-256 checksum verified), Bitcoin WIF and BIP-32 extended private keys (xprv) via Base58Check.
+- **Address-substitution detection** — tracks EVM addresses seen in a session and flags near-identical substitutes.
+- **Outbound exfiltration-chain detection** — multi-step secret-exfiltration patterns layered on behavioral-sequence detection (notify-only, conservative defaults).
+- **Canary decoy detection** — plants decoy files in sensitive credential/wallet directories; any tool call that reads one raises an inbound alert.
+- **Configurable routing table** — relays that are protocol-compatible but use non-standard paths can be onboarded with a single `[[upstream.routes]]` config line, zero code changes.
+- **Four agents supported** — Claude Code / OpenClaw / Hermes / Codex CLI.
 
 ---
 
 ## Quick Start
 
-> ⚠️ Sieve is currently in **pre-GA closed beta** (see [Project status](#project-status)). The commands below describe the post-GA released form.
+> ⚠️ Sieve is currently an **early preview (0.1.0-alpha)** (see [Project status](#project-status)). Today the supported path is building from source / invited alpha preview; the commands below describe the released form, with package installers coming soon.
 
 ### Installation (Phase 1: macOS only)
 
@@ -90,7 +101,7 @@ brew install --cask sieve
 curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/SieveAI-dev/sieve/main/scripts/install.sh | bash
 ```
 
-> A branded short link `sieveai.dev/install.sh` will front this script after GA (not yet deployed).
+> A branded short link `sieveai.dev/install.sh` will front this script — coming soon.
 
 **3. cargo install** — build from source.
 
@@ -116,8 +127,8 @@ sieve doctor
 
 What `sieve setup` does internally:
 
-- detects whether Claude Code / Codex CLI / Cursor are installed;
-- writes `ANTHROPIC_BASE_URL=http://127.0.0.1:9119` into `~/.claude/settings.json`;
+- detects which of Claude Code / OpenClaw / Hermes / Codex CLI are installed;
+- writes `ANTHROPIC_BASE_URL=http://127.0.0.1:11453` into `~/.claude/settings.json`;
 - registers the PreToolUse hook (dual-layer defense);
 - installs a macOS launchd plist so the daemon starts at login.
 
@@ -163,20 +174,26 @@ Sieve reads `~/.sieve/config.toml` and can bind multiple upstream listeners at o
 ```toml
 [[listener]]
 name = "anthropic-official"
-port = 9119
+port = 11453
 protocol = "anthropic"
 upstream = "https://api.anthropic.com"
 api_key = "${ANTHROPIC_API_KEY}"
 
 [[listener]]
 name = "openai-via-relay"
-port = 9120
+port = 11454
 protocol = "openai"
 upstream = "https://your-relay.example.com/v1"
 api_key = "${RELAY_API_KEY}"
 
+# Optional: onboard a protocol-compatible relay that uses a non-standard path
+# with a single route line — no code changes.
+[[upstream.routes]]
+path = "/custom/chat"
+provider = "openai"
+
 [detection]
-sequence_detection = false   # behavioral-sequence detection, off by default at GA
+sequence_detection = false   # behavioral-sequence detection, off by default
 
 [telemetry]
 # Install-count telemetry is on by default; SIEVE_NO_TELEMETRY=1 disables it globally.
@@ -189,9 +206,9 @@ Full schema: [api-reference §3](./docs/api/api-reference.md).
 
 ## Project status
 
-The repository is now **public**, in **pre-GA closed beta** (invited testers only). The source is public to make good on the trust narrative — *verifiable, not merely trusted*.
+The repository is **public**, at an **early-preview stage (0.1.0-alpha)**. The source is public to make good on the trust narrative — *verifiable, not merely trusted*. Today the supported path is building from source / invited alpha preview, with one-line installers and automatic rule updates being polished.
 
-Quality baseline (per `tasks/PROGRESS.md`): Critical false-positive rate **0.00%** / attack recall **99.71%**; **clippy 0 warnings** (`fmt` / `deny` all green); an extensive test suite that includes real attack-reproduction samples.
+What already works: bidirectional detection (outbound secret redaction + inbound fail-closed interception of Critical tool calls), four-route content-type parity (Anthropic/OpenAI × SSE/JSON), Critical interception that cannot be disabled in any mode, fully local detection with zero cloud verification, signed rule packages, and four supported agents (Claude Code / OpenClaw / Hermes / Codex CLI). The detection engine ships with an extensive test suite that includes real attack-reproduction samples.
 
 ---
 
@@ -203,12 +220,6 @@ Sieve holds itself to the same standard it applies to the upstream:
 - **Pinned dependencies** — to avoid supply-chain incidents.
 - **Public source** — the interception logic is fully auditable.
 - **Transparent rule-update log** — every update ships a changelog and hashes so users can verify independently.
-
----
-
-## Pricing
-
-Free during Phase 1.
 
 ---
 

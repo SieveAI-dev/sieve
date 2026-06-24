@@ -2,7 +2,7 @@
 
 > Version: v1.0 — 2026-04-28
 > Status: Stable
-> 关联 PRD：v2.0 §6.5、§6.7（v1.4 引入）
+> 关联：PreToolUse hook 接入与多 agent 调用链能力（v1.4 引入）
 
 ---
 
@@ -64,7 +64,7 @@
   "tool_name": "bash",                                      // string，Claude Code tool_use name 字段原文
   "tool_args_preview": "rm -rf /tmp/data",                  // string，≤ 200 字符，参数摘要（敏感内容已脱敏）
   "created_at_rfc3339": "2026-04-28T03:14:15Z",            // RFC 3339，主代理写入时间
-  "timeout_seconds": 30,                                    // uint32，规则超时（见 PRD §5.4.2）
+  "timeout_seconds": 30,                                    // uint32，规则超时
   "default_on_timeout": "deny"                              // "deny" | "allow"（Critical 永远是 "deny"）
 }
 ```

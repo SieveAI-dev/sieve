@@ -1,53 +1,48 @@
 # Sieve daemon · 手动联调 Checklist
 
-> 上次更新：2026-05-05（增补 §14 sieve-updater 联调,域名落定 sieveai.dev）
-> 范围：unix-style 改造 v2.x 5 项 TODO + sieve-updater 客户端闭环 的用户验证步骤
-> 关联：[SPEC-006](../specs/SPEC-006-update-and-telemetry.md) / PROGRESS.md
+> 范围：multi-listener / 协议路由 / 审计 CLI / 决策流 / sieve-updater 客户端闭环 的本地验证步骤
+> 关联：[SPEC-006](../specs/SPEC-006-update-and-telemetry.md)
 
 ---
 
-## ⚙️ 自动化状态（2026-06-18）
+## ⚙️ 自动化状态
 
 > **本清单大部分已被自动化覆盖**，无需逐项手动跑。一键 hermetic 验证（无真 API key / 无网络 / 无 GUI）：
 > ```bash
-> scripts/dogfood.sh        # 构建 + cargo e2e + smoke + updater 闭环，全过即 dogfood 就绪
+> scripts/dogfood.sh        # 构建 + cargo e2e + smoke + updater 闭环
 > ```
-> 自动化映射（详见 [SPEC-008 dogfood 自动化](../specs/SPEC-008-dogfood-automation.html)）：
+> 自动化映射：
 > - **§1 基线** → `cargo fmt/clippy/test/deny/build`（CI `fmt`/`clippy`/`test`/`deny` job）
 > - **§3-§5 multi-listener/协议错位/doctor** → `crates/sieve-cli/tests/{multi_agent_routing,content_type_matrix,doctor}.rs`
 > - **§6-§9 audit/decisions CLI + 决策流** → `crates/sieve-cli/tests/dogfood_e2e.rs`（出站脱敏/入站拦截/no-client-policy 三策略/mock-GUI 决策流/audit 闭环）
-> - **§14 sieve-updater 闭环** → `crates/sieve-updater/tests/updater_e2e.rs`（install-id/fetch→download→sha256→zstd 解压→原子落盘/失败模式/公钥 None skip），**已替代 §14.3 的 caddy+mkcert 手动 mock**
+> - **§14 sieve-updater 闭环** → `crates/sieve-updater/tests/updater_e2e.rs`（install-id/fetch→download→sha256→zstd 解压→原子落盘/失败模式/公钥未配置 skip）
 > - **透传/SSE/tool_use/脱敏黑盒** → `python3 scripts/smoke_test.py --mock-only`
-> - **§13 跨仓一致性** → GUI 仓 `IPCSchemaV2FixtureTests.swift`（81 fixture 消费测试，防漂移红线）
+> - **跨仓一致性** → GUI 仓 IPC schema fixture 消费测试（防漂移红线）
 >
-> **仍需手动**（自动化收益低/依赖外部）：§3.3/§10 真 API key 实打、GUI 可视层（菜单栏/Toast/Settings/Onboarding）、真 Claude Code 流量触发 OUT-*/IN-CR-*。
->
-> ⚠️ 自动化首轮抓出多个真 bug（见 PROGRESS.md 🚫 段 + lessons.md 2026-06-18）：zstd 字节序（已修）、headless CLI 嵌套 runtime panic（已修）、detection 审计未接线 + 6 类跨仓 schema 漂移（待排期）。
+> **仍需手动**（自动化收益低/依赖外部）：真 API key 实打、GUI 可视层（菜单栏/Toast/Settings/Onboarding）、真 Claude Code 流量触发 OUT-*/IN-CR-*。
 
 ---
 
 ## 0. 文档目的
 
-把 2026-05-05 完成的 13 commits（unix-style 改造）+ sieve-updater 客户端闭环转化为**可逐项勾选**的人工验证步骤。所有步骤跑完且勾选 → daemon 侧 dogfood 就绪。GUI 仓侧的联调（sieve-gui-macos）见该仓自己的 checklist，本文档不覆盖。服务端尚未实施,§14 用本地 mock 服务器即可验证客户端独立闭环。
+把 multi-listener / 协议路由 / 审计 CLI / 决策流 + sieve-updater 客户端闭环转化为**可逐项勾选**的人工验证步骤。所有步骤跑完且勾选 → daemon 侧本地验证通过。GUI 仓侧的联调（sieve-gui-macos）见该仓自己的 checklist，本文档不覆盖。§14 用本地 mock 服务器验证客户端独立闭环。
 
-**前置假设**：你在 macOS（Phase 1 唯一 Tier 1 平台）；本仓 clone 到 `~/src/sieve-suite/sieve`；已经装了 Rust toolchain（见 `rust-toolchain.toml`）+ `sqlite3` CLI + `zstd` CLI（`brew install zstd`,§14 用）+ `python3`（§14 mock server 用,系统自带）+ `caddy` + `mkcert`（§14.3 https 反代,`brew install caddy mkcert`）。
+**前置假设**：你在 macOS（当前唯一 Tier 1 平台）；已经装了 Rust toolchain（见 `rust-toolchain.toml`）+ `sqlite3` CLI + `zstd` CLI（`brew install zstd`,§14 用）+ `python3`（§14 mock server 用,系统自带）+ `caddy` + `mkcert`（§14.3 https 反代,`brew install caddy mkcert`）。
 
 ---
 
 ## 1. 基线验证（先跑这个，全过才进 §2 起的功能验证）
 
-```bash
-cd ~/src/sieve-suite/sieve
-```
+在本仓根目录下运行：
 
-- [x] **fmt clean**：`cargo fmt --all -- --check` exit 0
-- [x] **clippy 0 issues**：`cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` exit 0
-- [ ] **workspace 测试 760 passed / 7 ignored / 0 failed**：`cargo test --workspace --locked`（含 sieve-updater 35 个新测试）
+- [ ] **fmt clean**：`cargo fmt --all -- --check` exit 0
+- [ ] **clippy 干净**：`cargo clippy --workspace --all-targets --locked -- -D warnings` 与 `cargo clippy -p sieve-cli --all-targets --features sequence_detection --locked -- -D warnings` 均 exit 0
+- [ ] **workspace 测试全过**：`cargo test --workspace --locked`
 - [ ] **deny 检查通过**：`cargo deny check`（如未装：`cargo install cargo-deny --locked`）
-- [ ] **build 干净**：`cargo build --workspace --release --locked`,release 二进制大小约 9 MB
-- [ ] **七个 crate 都在**：`ls crates/` 应有 `sieve-cli/ sieve-core/ sieve-hook/ sieve-ipc/ sieve-policy/ sieve-rules/ sieve-updater/`
+- [ ] **build 干净**：`cargo build --workspace --release --locked`
+- [ ] **8 个 crate 都在**：`ls crates/` 应有 `sieve-cli/ sieve-core/ sieve-hook/ sieve-ipc/ sieve-policy/ sieve-rules/ sieve-testing/ sieve-updater/`
 
-任一项 fail → **不要继续**，先排查（看 PROGRESS.md / lessons.md）。
+任一项 fail → **不要继续**，先排查。
 
 ---
 
@@ -134,7 +129,7 @@ daemon 引入 `[[upstream]]` 数组的同时保证旧 sieve.toml 仍可用。验
   ```
 
 - [ ] daemon **拒绝启动**，stderr 含 `FATAL: duplicate listener port 11453`，exit code 非零
-- [ ] PRD §9 #2 一致性：bind_addr 改成 `0.0.0.0` 同样 fail-fast
+- [ ] 本地回环约束一致性：bind_addr 改成 `0.0.0.0` 同样 fail-fast
 
 ### 3.3 实际打两个上游（需要真 API key）
 
@@ -150,7 +145,7 @@ daemon 引入 `[[upstream]]` 数组的同时保证旧 sieve.toml 仍可用。验
 
   返回 Claude 正常响应（通过 sieve 透传上游）；daemon 日志看到 11453 listener 接到连接。
 
-- [ ] **Shell B**（DeepSeek，验证 path prefix bug 修复 TODO-1）：
+- [ ] **Shell B**（DeepSeek，验证 path prefix 转发正确）：
 
   ```bash
   ANTHROPIC_BASE_URL=http://127.0.0.1:11454 \
@@ -439,9 +434,9 @@ daemon 跑过实际流量后：
 
 ---
 
-## 10. forwarder path prefix 修复（TODO-1）
+## 10. forwarder path prefix 转发
 
-DeepSeek Anthropic 兼容入口 `https://api.deepseek.com/anthropic` 是验证 TODO-1 的最直接 case。已经在 §3.3 Shell B 验证过。补充：
+DeepSeek Anthropic 兼容入口 `https://api.deepseek.com/anthropic` 是验证 path prefix 转发的最直接 case。已经在 §3.3 Shell B 验证过。补充：
 
 - [ ] **抓包确认 path 前缀正确转发**（如 §3.3 提到的 tcpdump）
 - [ ] **多层前缀验证**（如果有这种中转站）：
@@ -520,7 +515,7 @@ DeepSeek Anthropic 兼容入口 `https://api.deepseek.com/anthropic` 是验证 T
 ## 14. sieve-updater 客户端独立闭环（SPEC-006）
 
 > 关联：[SPEC-006](../specs/SPEC-006-update-and-telemetry.md)
-> **服务端尚未实施**。本节用本地 mock HTTP 服务器验证客户端能完整跑通 manifest → 下载 → 校验 → 原子落盘的闭环。
+> 本节用本地 mock HTTP 服务器验证客户端能完整跑通 manifest → 下载 → 校验 → 原子落盘的闭环。
 
 ### 14.1 install-id 模块（首启幂等 + 删后重生）
 
@@ -584,7 +579,7 @@ DeepSeek Anthropic 兼容入口 `https://api.deepseek.com/anthropic` 是验证 T
   SIEVE_NO_UPDATE=1 cargo run -p sieve-cli -- start --config /tmp/sieve-legacy.toml 2>&1 | head -30 | grep -i "update check disabled"
   ```
 
-  期望日志含一行：`update check disabled by SIEVE_NO_UPDATE`。**找不到这行视为 P0 bug**——用户忘了设过此变量却奇怪规则不更新的最大防护。
+  期望日志含一行：`update check disabled by SIEVE_NO_UPDATE`。**找不到这行视为严重问题**——用户忘了设过此变量却奇怪规则不更新的最大防护。
 
 - [ ] **SIEVE_NO_UPDATE 不发任何更新请求**（不应连 updates.sieveai.dev）：
 
@@ -748,7 +743,7 @@ CADDY_PID=$!
 
   把 `rules.json.zst` 替换为非 zst 字节（`echo "not zstd" > rules.json.zst`）+ 改 manifest 的 sha256。日志应有 `DecompressFailed`。
 
-### 14.6 公钥 None 占位的 WARN 强制可见（SPEC-006 §安全）
+### 14.6 公钥未配置占位的 WARN 强制可见（SPEC-006 §安全）
 
 - [ ] 在 §14.4 完整闭环日志里查找：
 
@@ -756,7 +751,7 @@ CADDY_PID=$!
   grep -i "trusted pubkey not configured" /tmp/sieve-updater.log
   ```
 
-  期望含一行：`ed25519 trusted pubkey not configured, skipping signature verification`。**找不到这行视为 P0 bug**——若公钥占位被人误改成跳过 WARN,会导致供应链攻击防线失效（TODO-14 GCP KMS 落地后填真值,届时这行 WARN 消失）。
+  期望含一行：`ed25519 trusted pubkey not configured, skipping signature verification`。**找不到这行视为严重问题**——若公钥占位被人误改成跳过 WARN,会导致供应链攻击防线失效（正式发布版填入真实公钥后,这行 WARN 消失）。
 
 ### 14.7 清理
 
@@ -769,7 +764,7 @@ rm -rf "$MOCK_DIR"
 
 ## 15. 完成定义（DoD）
 
-- [ ] §1 基线全过（含 sieve-updater 35 测试,workspace 760 passed）
+- [ ] §1 基线全过（fmt / clippy / test / deny / build）
 - [ ] §2 旧 schema 兼容
 - [ ] §3 multi-listener bind + 实际两个上游各能跑
 - [ ] §4 协议错位 fail-closed（4 个子 case 全过）
@@ -787,11 +782,11 @@ rm -rf "$MOCK_DIR"
 - [ ] §14.3 本地 mock + caddy https 反代起得来
 - [ ] §14.4 完整闭环（fetch→download→sha256→ed25519 skip WARN→zstd→tmp+rename+symlink+latest_version.json）
 - [ ] §14.5 三种失败模式不击穿 daemon（sha256 mismatch / 服务端 down 重试耗尽 / 解压失败）
-- [ ] §14.6 公钥 None 占位 WARN 强制可见
+- [ ] §14.6 公钥未配置占位 WARN 强制可见
 
-**任一项 fail**：在 tasks/lessons.md 记一条 lesson，回报到主上下文准备修复。
+**任一项 fail**：记录复现步骤，准备修复。
 
-**全过**：unix-style 改造 v2.x + sieve-updater 客户端闭环 联调通过 → 进 dogfood 阶段（服务端实现与 dogfood 并行启动）。
+**全过**：multi-listener / 协议路由 / 审计 CLI / 决策流 + sieve-updater 客户端闭环本地验证通过。
 
 ---
 
@@ -836,4 +831,3 @@ unset SIEVE_NO_UPDATE SIEVE_NO_TELEMETRY     # 默认放开
 - [deployment.md §6a Multi-listener 部署](deployment.md#6a-multi-listener-部署) / §13 企业自托管镜像
 - [development.md §3.4a Multi-listener 配置](development.md#34a-multi-listener-配置) / §13 三个 env var
 - [api-reference.md §6.4a sieve decisions / §6.4b sieve audit](../api/api-reference.md#64a-sieve-decisions-cli) / §8 manifest 接口
-- tasks/PROGRESS.md 用户验证清单段
