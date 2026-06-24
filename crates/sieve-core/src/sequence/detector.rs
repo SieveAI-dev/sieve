@@ -638,7 +638,8 @@ mod tests {
         });
         let hits = detect_kill_chains(&seq);
         assert!(
-            hits.iter().any(|h| h.rule_id == "IN-SEQ-06-CROSS-AGENT-SECRET"),
+            hits.iter()
+                .any(|h| h.rule_id == "IN-SEQ-06-CROSS-AGENT-SECRET"),
             "A reads secret, B exfils → IN-SEQ-06"
         );
     }
@@ -661,7 +662,9 @@ mod tests {
         });
         let hits = detect_kill_chains(&seq);
         assert!(
-            !hits.iter().any(|h| h.rule_id == "IN-SEQ-06-CROSS-AGENT-SECRET"),
+            !hits
+                .iter()
+                .any(|h| h.rule_id == "IN-SEQ-06-CROSS-AGENT-SECRET"),
             "missing actor should not trigger IN-SEQ-06"
         );
     }
@@ -686,7 +689,9 @@ mod tests {
         });
         let hits = detect_kill_chains(&seq);
         assert!(
-            !hits.iter().any(|h| h.rule_id == "IN-SEQ-06-CROSS-AGENT-SECRET"),
+            !hits
+                .iter()
+                .any(|h| h.rule_id == "IN-SEQ-06-CROSS-AGENT-SECRET"),
             "same actor should not trigger IN-SEQ-06"
         );
     }
@@ -709,7 +714,8 @@ mod tests {
         });
         let hits = detect_kill_chains(&seq);
         assert!(
-            hits.iter().any(|h| h.rule_id == "IN-SEQ-07-CLIPBOARD-SECRET"),
+            hits.iter()
+                .any(|h| h.rule_id == "IN-SEQ-07-CLIPBOARD-SECRET"),
             "secret→clipboard should trigger IN-SEQ-07"
         );
     }
@@ -732,7 +738,8 @@ mod tests {
         });
         let hits = detect_kill_chains(&seq);
         assert!(
-            hits.iter().any(|h| h.rule_id == "IN-SEQ-08-PUBLIC-ARTIFACT"),
+            hits.iter()
+                .any(|h| h.rule_id == "IN-SEQ-08-PUBLIC-ARTIFACT"),
             "secret→public artifact should trigger IN-SEQ-08"
         );
     }

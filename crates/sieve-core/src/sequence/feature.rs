@@ -258,7 +258,9 @@ fn compute_secret_confidence(
     }
     let path_is_secret = matches!(
         path_category,
-        Some(PathCategory::SensitiveSecret) | Some(PathCategory::Wallet) | Some(PathCategory::DotEnv)
+        Some(PathCategory::SensitiveSecret)
+            | Some(PathCategory::Wallet)
+            | Some(PathCategory::DotEnv)
     );
     if path_is_secret || detect_secret_source(input_str) {
         return SecretConfidence::Heuristic;
@@ -526,7 +528,11 @@ mod tests {
         assert!(rec.archive_mech, "tar should set archive_mech");
         assert!(rec.encode_mech, "base64 should set encode_mech");
         // 命中 OUT-* 的 record → ChecksumConfirmed
-        let rec2 = extract_record("Read", &json!({"file_path": "x"}), vec!["OUT-04".to_string()]);
+        let rec2 = extract_record(
+            "Read",
+            &json!({"file_path": "x"}),
+            vec!["OUT-04".to_string()],
+        );
         assert_eq!(rec2.secret_confidence, SecretConfidence::ChecksumConfirmed);
     }
 

@@ -849,7 +849,8 @@ mod sequence_integration_tests {
             .unwrap();
         let hits = filter.detect_sequence_hits().unwrap();
         assert!(
-            hits.iter().any(|h| h.rule_id == "IN-SEQ-06-CROSS-AGENT-SECRET"),
+            hits.iter()
+                .any(|h| h.rule_id == "IN-SEQ-06-CROSS-AGENT-SECRET"),
             "actor-a reads secret, actor-b exfils should trigger IN-SEQ-06"
         );
     }
@@ -871,7 +872,9 @@ mod sequence_integration_tests {
             .unwrap();
         let hits = filter.detect_sequence_hits().unwrap();
         assert!(
-            !hits.iter().any(|h| h.rule_id == "IN-SEQ-06-CROSS-AGENT-SECRET"),
+            !hits
+                .iter()
+                .any(|h| h.rule_id == "IN-SEQ-06-CROSS-AGENT-SECRET"),
             "same actor should not trigger IN-SEQ-06"
         );
     }
@@ -896,7 +899,8 @@ mod sequence_integration_tests {
             .unwrap();
         let hits = filter.detect_sequence_hits().unwrap();
         assert!(
-            hits.iter().any(|h| h.rule_id == "IN-SEQ-07-CLIPBOARD-SECRET"),
+            hits.iter()
+                .any(|h| h.rule_id == "IN-SEQ-07-CLIPBOARD-SECRET"),
             "read secret → pbcopy should trigger IN-SEQ-07"
         );
     }
@@ -917,7 +921,8 @@ mod sequence_integration_tests {
             .unwrap();
         let hits = filter.detect_sequence_hits().unwrap();
         assert!(
-            hits.iter().any(|h| h.rule_id == "IN-SEQ-08-PUBLIC-ARTIFACT"),
+            hits.iter()
+                .any(|h| h.rule_id == "IN-SEQ-08-PUBLIC-ARTIFACT"),
             "read secret → write dist/ should trigger IN-SEQ-08"
         );
     }
