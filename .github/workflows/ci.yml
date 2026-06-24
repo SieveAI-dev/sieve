@@ -167,7 +167,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build pkg-config libssl-dev libboost-dev ragel
-      - run: cargo install cargo-fuzz --locked
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
       - uses: Swatinem/rust-cache@v2
       - name: Fuzz sse_parser (60s)
         run: cargo +nightly fuzz run -s none sse_parser -- -max_total_time=60
