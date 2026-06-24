@@ -12,7 +12,7 @@ use std::process::{Command, Output};
 /// `args` 是子命令参数，如 `["audit", "query", "--format", "jsonl"]` /
 /// `["decisions", "resolve", id, "--block"]` / `["doctor"]`。
 /// `env` 是额外环境变量（如 `SIEVE_HOME`）；同时默认注入 `SIEVE_NO_UPDATE=1` /
-/// `SIEVE_NO_TELEMETRY=1`（ADR-030，可被 `env` 覆盖）。
+/// `SIEVE_NO_TELEMETRY=1`（可被 `env` 覆盖）。
 ///
 /// # Panics
 ///

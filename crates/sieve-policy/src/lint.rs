@@ -1,4 +1,4 @@
-//! 用户规则 lint 校验（PRD v2.0 §5.5.3 11 类约束）。
+//! 用户规则 lint 校验（11 类约束）。
 //!
 //! 分为三类：
 //! - **A 类（语义边界）**：防止用户规则越权（5 类）
@@ -118,7 +118,7 @@ fn lint_entry(
             kind: LintKind::ForbiddenSeverityActionDisposition,
             message: format!(
                 "rule '{}': severity=critical/action=block/disposition=hook_terminal forbidden \
-                 in user rules (PRD §5.5.3-A); got severity={}, action={}, disposition={:?}",
+                 in user rules; got severity={}, action={}, disposition={:?}",
                 entry.id, entry.severity, entry.action, entry.disposition
             ),
         });
@@ -131,7 +131,7 @@ fn lint_entry(
             kind: LintKind::ForbiddenPatternPrefix,
             message: format!(
                 "rule '{}': pattern contains '__' prefix which is reserved for system \
-                 placeholder bypass (PRD §5.5.3-A)",
+                 placeholder bypass",
                 entry.id
             ),
         });
@@ -142,7 +142,7 @@ fn lint_entry(
         violations.push(LintViolation {
             rule_id: entry.id.clone(),
             kind: LintKind::DuplicateRuleId,
-            message: format!("rule '{}': duplicate rule id (PRD §5.5.2.1)", entry.id),
+            message: format!("rule '{}': duplicate rule id", entry.id),
         });
     }
 
@@ -152,16 +152,16 @@ fn lint_entry(
             rule_id: entry.id.clone(),
             kind: LintKind::SystemRuleIdConflict,
             message: format!(
-                "rule '{}': conflicts with system Critical rule id (PRD §5.5.3-A)",
+                "rule '{}': conflicts with system Critical rule id",
                 entry.id
             ),
         });
     }
 
-    // A-5. 入站方向规则禁止 disposition=auto_redact（用户不能改写入站 model 输出，PRD §9 #11）
+    // A-5. 入站方向规则禁止 disposition=auto_redact（用户不能改写入站 model 输出）
     //
     // direction=Inbound 或 direction=Both（会挂入站侧）且 disposition=auto_redact → 拒绝。
-    // direction=Outbound 时 auto_redact 语义合法（出站自动脱敏，PRD §5.5.3-A 第 4 条）。
+    // direction=Outbound 时 auto_redact 语义合法（出站自动脱敏）。
     let direction_touches_inbound = matches!(
         entry.direction,
         RuleDirection::Inbound | RuleDirection::Both
@@ -172,7 +172,7 @@ fn lint_entry(
             kind: LintKind::InboundAutoRedactForbidden,
             message: format!(
                 "rule '{}': disposition=auto_redact forbidden for inbound/both direction \
-                 (PRD §5.5.3-A: 用户不能改写 model 输出); \
+                 (用户不能改写 model 输出); \
                  若只扫出站方向请改为 direction = \"outbound\"",
                 entry.id
             ),
@@ -188,22 +188,21 @@ fn lint_entry(
                 rule_id: entry.id.clone(),
                 kind: LintKind::AllowlistTargetsSystemCritical,
                 message: format!(
-                    "rule '{}': allowlist_stopwords contains system Critical rule id '{}' \
-                     (PRD §5.5.3-A)",
+                    "rule '{}': allowlist_stopwords contains system Critical rule id '{}'",
                     entry.id, sw
                 ),
             });
         }
     }
 
-    // B. keywords 非空（强制 keywords 预过滤，PRD §5.5.3-B）
+    // B. keywords 非空（强制 keywords 预过滤）
     if entry.keywords.is_empty() {
         violations.push(LintViolation {
             rule_id: entry.id.clone(),
             kind: LintKind::KeywordsEmpty,
             message: format!(
-                "rule '{}': keywords field must be non-empty (PRD §5.5.3-B: \
-                 强制 keywords 预过滤避免 match-all pattern 拖慢扫描)",
+                "rule '{}': keywords field must be non-empty \
+                 (强制 keywords 预过滤避免 match-all pattern 拖慢扫描)",
                 entry.id
             ),
         });
@@ -217,7 +216,7 @@ fn lint_entry(
                 kind: LintKind::StopwordTooShort,
                 message: format!(
                     "rule '{}': allowlist_stopword '{}' is {} bytes, minimum 4 bytes \
-                     (PRD §5.5.3-B: 防止超短停用词污染所有匹配)",
+                     (防止超短停用词污染所有匹配)",
                     entry.id,
                     sw,
                     sw.len()
@@ -264,10 +263,7 @@ fn check_pattern_compile_limits(entry: &UserRuleEntry, violations: &mut Vec<Lint
             violations.push(LintViolation {
                 rule_id: entry.id.clone(),
                 kind: LintKind::PatternCompileTimeout,
-                message: format!(
-                    "rule '{}': pattern failed to compile: {} (PRD §5.5.3-B)",
-                    entry.id, e
-                ),
+                message: format!("rule '{}': pattern failed to compile: {}", entry.id, e),
             });
         }
         Ok(_engine) => {
@@ -278,7 +274,7 @@ fn check_pattern_compile_limits(entry: &UserRuleEntry, violations: &mut Vec<Lint
                     kind: LintKind::PatternCompileTimeout,
                     message: format!(
                         "rule '{}': pattern compile took {}ms, exceeds 100ms limit \
-                         (PRD §5.5.3-B: ReDoS 防御)",
+                         (ReDoS 防御)",
                         entry.id,
                         elapsed.as_millis()
                     ),

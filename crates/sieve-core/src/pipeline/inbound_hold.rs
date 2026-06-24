@@ -4,7 +4,7 @@
 //! 等待用户在 GUI 做出决策；同时每 25 秒向调用方提供的 channel 发送一条 SSE keep-alive
 //! comment（`: keep-alive\n\n`），防止客户端因无数据而超时断开。
 //!
-//! 关联：ADR-014 §GUI 路径、SPEC-002（keep-alive 规约）、ADR-013（IPC 协议）。
+//! 关联：GUI 路径、SPEC-002（keep-alive 规约）、IPC 协议。
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -16,7 +16,7 @@ use tracing::warn;
 
 use sieve_ipc::{DecisionAction, DecisionRequest, DefaultOnTimeout, IpcServer};
 
-/// Keep-alive 注释间隔（PRD v1.4 §6.7 要求 ≤ 30 s，取 25 s 留余量）。
+/// Keep-alive 注释间隔（要求 ≤ 30 s，取 25 s 留余量）。
 const KEEP_ALIVE_INTERVAL_SECS: u64 = 25;
 
 /// Keep-alive SSE comment 字节（RFC 8895 §9.2：以 `:` 开头的行是注释，客户端忽略）。
@@ -33,10 +33,10 @@ pub enum HoldError {
 /// [`hold_and_decide`] 的返回值，表示 hold 结束后的处置动作。
 ///
 /// `remember` / `context_hint` 从 IPC [`sieve_ipc::DecisionResponse`] 透传，
-/// 供 daemon 在 Allow / RedactAndAllow 路径写灰名单（PRD v2.0 §5.4.2）。
+/// 供 daemon 在 Allow / RedactAndAllow 路径写灰名单。
 ///
 /// **注意**：daemon 消费 `remember` 字段写灰名单前**必须二次校验** critical_lock
-/// （PRD §5.4.2 三道防线之三），sieve-core 不做该校验（crate 边界，避免依赖 sieve-rules）。
+/// （三道防线之三），sieve-core 不做该校验（crate 边界，避免依赖 sieve-rules）。
 #[derive(Debug, PartialEq, Eq)]
 pub enum HoldOutcome {
     /// 用户允许（或超时 default_on_timeout = Allow）→ 继续转发原始 SSE。
@@ -45,12 +45,12 @@ pub enum HoldOutcome {
         ///
         /// `true` 时 daemon 应写灰名单；超时兜底路径强制为 `false`。
         ///
-        /// **注意**：daemon 写灰名单前必须二次校验 critical_lock（PRD §5.4.2 三道防线之三），
+        /// **注意**：daemon 写灰名单前必须二次校验 critical_lock（三道防线之三），
         /// sieve-core 不做该校验（crate 边界，避免依赖 sieve-rules）。
         remember: bool,
         /// 用户在 GUI 输入的上下文备注（来自 `DecisionResponse.context_hint`）。
         ///
-        /// 写入灰名单 JSON `context_hint` 字段（PRD v2.0 §5.4.2 schema）。
+        /// 写入灰名单 JSON `context_hint` 字段（灰名单 schema）。
         context_hint: Option<String>,
     },
     /// 用户允许且要求脱敏（仅出站脱敏类，入站实际等价 Allow）→ 继续转发。
@@ -83,7 +83,7 @@ pub enum HoldOutcome {
 /// - `Allow` → `HoldOutcome::Allow`
 /// - `Redact` → `HoldOutcome::RedactAndAllow`（入站场景少见，逻辑完整性保留）
 ///
-/// 关联：ADR-014 §GUI 路径、SPEC-002 §keep-alive。
+/// 关联：GUI 路径、SPEC-002 §keep-alive。
 pub async fn hold_and_decide(
     ipc: Arc<IpcServer>,
     req: DecisionRequest,
@@ -133,7 +133,7 @@ pub async fn hold_and_decide(
         }
     };
 
-    // 透传 remember + context_hint（PRD v2.0 §5.4.2 灰名单 schema）。
+    // 透传 remember + context_hint（灰名单 schema）。
     // Deny 路径不携带这两个字段（灰名单仅对 Allow 路径有意义）。
     let outcome = match resp.decision {
         DecisionAction::Allow => HoldOutcome::Allow {
@@ -427,7 +427,7 @@ mod tests {
 
     /// `hold_outcome_remember_default_false`：超时 Allow 路径 remember 为 false。
     ///
-    /// 验证 PRD §5.4.2：超时兜底不触发灰名单写入（无用户主动选择）。
+    /// 验证：超时兜底不触发灰名单写入（无用户主动选择）。
     #[test]
     fn hold_outcome_remember_default_false() {
         let outcome = HoldOutcome::Allow {
@@ -489,7 +489,7 @@ mod tests {
     /// `hold_and_decide_propagates_remember_from_response`：
     /// mock IPC 返回 remember=true + context_hint，HoldOutcome 携带相同字段。
     ///
-    /// 验证 PRD §5.4.2：daemon 收到 Allow { remember: true } 时可直接写灰名单。
+    /// 验证：daemon 收到 Allow { remember: true } 时可直接写灰名单。
     #[tokio::test]
     async fn hold_and_decide_propagates_remember_from_response() {
         let (server, listener, socket_path) = make_ipc_server();

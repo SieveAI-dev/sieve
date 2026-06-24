@@ -1,4 +1,4 @@
-//! 控制面 IPC handler（ADR-013 Supplement 2026-05-02 §S.4 落地）。
+//! 控制面 IPC handler。
 //!
 //! 接收 [`sieve_ipc::ControlPlaneRequest`]，处理后通过 oneshot 回执给 IPC server，
 //! 并按需写 audit + 广播 daemon → GUI 通知（preset_changed / paused_changed）。
@@ -7,14 +7,14 @@
 //! - **fail-soft 审计**：所有 audit 写入 spawn task 异步执行，hot path 不阻塞。
 //! - **Critical 锁防线二**：`set_preset_overrides` 路径在写入前对每条 rule_id 调用
 //!   [`sieve_rules::critical_lock::is_fail_closed`]，命中则记入 rejected + 审计 `kind=critical_lock_blocked`。
-//! - **fail-closed paused**：暂停状态影响范围**永远不包含 Critical 锁规则的 disposition**
-//!   （PRD v2.0 §9 #3 #8）。`applies_to` 列表在 [`paused_applies_to`] 中固定声明。
+//! - **fail-closed paused**：暂停状态影响范围**永远不包含 Critical 锁规则的 disposition**。
+//!   `applies_to` 列表在 [`paused_applies_to`] 中固定声明。
 //! - **paused 的 hot path 消费**：handle_set_paused 双写到 `RuntimeState.paused_until`（GUI 快照）
 //!   与 `IpcServer.paused_until`（hot path 共享）。daemon::gated_request_decision 在每次
 //!   `request_decision` 前调 `IpcServer::is_paused()`，命中且无 critical 检测时跳过弹窗、
 //!   按 `default_on_timeout` 自动决策、写 `AuditEvent::AutoDecidedPaused`。
 //!
-//! 关联：ADR-013 §S.4 / ADR-021 防线二 / SPEC-002 §9。
+//! 关联：防线二 / SPEC-002 §9。
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -53,10 +53,10 @@ pub struct RuntimeState {
     pub started_at: DateTime<Utc>,
     /// 监听端口与地址（不可变）。
     ///
-    /// **ADR-026 后**：daemon 可同时绑定多个 listener。本字段保留为 `listeners[0]`
+    /// daemon 可同时绑定多个 listener。本字段保留为 `listeners[0]`
     /// 别名向后兼容旧 GUI 客户端（仅读 health.listen 单值）；新代码应读 `listeners` 数组。
     pub listen: ListenSnapshot,
-    /// 多 listener 快照数组（ADR-026 §决策 6 + Stage F）。
+    /// 多 listener 快照数组（Stage F）。
     /// daemon::run 启动时按 `cfg.resolved_upstreams()` 顺序填充，不可变。
     pub listeners: Vec<sieve_ipc::ListenerSnapshot>,
     /// daemon 版本号（不可变）。
@@ -692,7 +692,7 @@ async fn handle_evaluate(
         .iter()
         .map(|hit| {
             let critical_locked = sieve_rules::critical_lock::is_fail_closed(&hit.rule_id);
-            // critical_lock 规则只回类别摘要，不回原 payload 片段（ADR-013 §S.4 数据保护）。
+            // critical_lock 规则只回类别摘要，不回原 payload 片段（数据保护）。
             let summary = if critical_locked {
                 format!("(critical_locked) rule={}", hit.rule_id)
             } else {
@@ -1032,7 +1032,7 @@ async fn handle_judge_tool_call(
         .check_tool_use(&tool, ContentSource::InboundToolUseInput)
         .map_err(|e| ControlError::internal(format!("inbound engine scan failed: {e}")))?;
 
-    // 2. 只对 fail-closed Critical 命中强制人工确认（PRD §9 #3 High-Risk Tool Policy Gate）。
+    // 2. 只对 fail-closed Critical 命中强制人工确认（High-Risk Tool Policy Gate）。
     let critical: Vec<&sieve_core::Detection> = detections
         .iter()
         .filter(|d| sieve_rules::critical_lock::is_fail_closed(&d.rule_id))
@@ -1136,7 +1136,7 @@ async fn handle_judge_tool_call(
 fn spawn_audit(audit: &Arc<AuditStore>, event: AuditEvent) {
     let store = Arc::clone(audit);
     tokio::spawn(async move {
-        // ADR-026 Stage E：control plane 是 daemon 系统级路径，无 listener 上下文
+        // control plane 是 daemon 系统级路径，无 listener 上下文
         if let Err(e) = store.append(event, crate::audit::SYSTEM_PROVIDER_ID).await {
             tracing::warn!(error = %e, "audit append failed (control plane)");
         }
@@ -1164,7 +1164,7 @@ mod tests {
                 addr: "127.0.0.1".to_owned(),
                 port: 11453,
             },
-            // ADR-026 Stage F：multi-listener 快照数组（测试用单元素）
+            // multi-listener 快照数组（测试用单元素）
             listeners: vec![sieve_ipc::ListenerSnapshot {
                 addr: "127.0.0.1".to_owned(),
                 port: 11453,
@@ -1185,7 +1185,7 @@ mod tests {
 
     /// Critical 锁防线二：set_preset_overrides 路径必须拒绝 critical_lock 规则。
     ///
-    /// 关联：ADR-013 §S.7 任务清单第 4 条 / ADR-021 防线二 / PRD §9 #3 #8。
+    /// 关联：防线二。
     #[tokio::test]
     async fn set_preset_overrides_rejects_critical_lock_rules() {
         // IN-CR-05-EVM 是系统 fail-closed 规则；运行时注册（替代历史硬编码名单）。

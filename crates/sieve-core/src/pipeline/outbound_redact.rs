@@ -6,7 +6,7 @@
 //!   返回替换后的文本段列表，由调用方重新序列化 JSON——这是 daemon AutoRedact 路径
 //!   的正确用法（修 #1：AutoRedact 偏移修复）。
 //!
-//! 关联：PRD v1.4 §6.1（出站 AutoRedact 路径）、ADR-016（二维处置矩阵）。
+//! 关联：出站 AutoRedact 路径、二维处置矩阵。
 
 /// 单个脱敏命中范围（half-open `[start, end)`）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,7 +56,7 @@ pub fn align_to_utf8_char_start(body: &[u8], pos: usize) -> usize {
 ///
 /// 如果 `hits` 为空，原样返回 body（`body.to_vec()`，最小拷贝）。
 ///
-/// 关联：ADR-016 §AutoRedact 路径。
+/// 关联：AutoRedact 路径。
 pub fn redact_body_bytes(body: &[u8], hits: &[RedactHit]) -> RedactResult {
     if hits.is_empty() {
         return RedactResult {
@@ -163,7 +163,7 @@ pub struct SegmentRedactResult {
 /// # 返回
 /// [`SegmentRedactResult`]，其中 `texts` 顺序对应输入 `segments`。
 ///
-/// 关联：PRD v1.4 §6.1（AutoRedact 路径）、ADR-016（二维处置矩阵）。
+/// 关联：AutoRedact 路径、二维处置矩阵。
 pub fn redact_segments(segments: &[(usize, String)], hits: &[RedactHit]) -> SegmentRedactResult {
     if hits.is_empty() {
         return SegmentRedactResult {

@@ -2,7 +2,7 @@ use thiserror::Error;
 
 /// IPC 层错误枚举。
 ///
-/// 关联规格：ADR-013（IPC 协议）、SPEC-001（sieve-hook 文件协议）。
+/// 关联规格：SPEC-001（sieve-hook 文件协议）。
 #[derive(Debug, Error)]
 pub enum IpcError {
     /// Unix socket 绑定或连接失败。
@@ -66,7 +66,7 @@ impl From<crate::frame_reader::FrameError> for IpcError {
     }
 }
 
-/// JSON-RPC 2.0 错误码常量（ADR-013 Supplement 2026-05-02 §S.2）。
+/// JSON-RPC 2.0 错误码常量。
 ///
 /// 标准段（-32700 ~ -32600）保留给 JSON-RPC 协议本身；
 /// -32000 ~ -32099 为 Sieve 自定义实现段。
@@ -83,10 +83,10 @@ pub mod rpc_codes {
     /// 服务端内部错误。
     pub const INTERNAL_ERROR: i64 = -32603;
 
-    // ── Sieve 自定义段（ADR-013 §S.2）──────────────────────────
+    // ── Sieve 自定义段 ──────────────────────────
     /// 客户端协议版本不被接受。
     pub const PROTOCOL_VERSION_MISMATCH: i64 = -32000;
-    /// 操作触碰 critical_lock 名单（ADR-021 防线二）。
+    /// 操作触碰 critical_lock 名单（防线二）。
     pub const CRITICAL_LOCK_VIOLATED: i64 = -32001;
     /// daemon 忙（reload / restart 进行中）。
     pub const DAEMON_BUSY: i64 = -32002;

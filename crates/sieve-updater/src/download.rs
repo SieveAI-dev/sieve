@@ -1,4 +1,4 @@
-//! Rules bundle download (ADR-030 §5, SPEC-006 §3.3).
+//! Rules bundle download (SPEC-006 §3.3).
 
 use http::Uri;
 use http_body_util::BodyExt;
@@ -7,13 +7,13 @@ use crate::error::UpdaterError;
 
 /// Default maximum payload size for a downloaded rules bundle (50 MiB).
 ///
-/// ADR-030: rule bundles are expected to be small; reject anything larger to
+/// Rule bundles are expected to be small; reject anything larger to
 /// limit memory use and guard against hostile CDN responses.
 pub const DEFAULT_MAX_RULES_SIZE: usize = 50 * 1024 * 1024;
 
 /// Downloads a rules bundle from `url` and returns the raw bytes.
 ///
-/// ADR-030 §5 / SPEC-006 §3.3:
+/// SPEC-006 §3.3:
 /// - TLS 1.2+ enforced by hyper-rustls.
 /// - User-Agent: `sieve-updater/<CARGO_PKG_VERSION>`.
 /// - Returns at most `max_size` bytes; exceeding it yields

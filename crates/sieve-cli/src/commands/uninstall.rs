@@ -1,4 +1,4 @@
-//! `sieve uninstall` 命令实现（ADR-015 / SPEC-003 §uninstall / SPEC-004 §2.3）。
+//! `sieve uninstall` 命令实现（关联 SPEC-003 §uninstall / SPEC-004 §2.3）。
 //!
 //! 步骤：
 //! 1. 读 `~/.sieve/setup.log` 反向遍历 entries（了解 backup_dir + created_new 标志）
@@ -57,7 +57,7 @@ mod macos {
         pub(super) created_new: bool,
     }
 
-    /// 运行 `sieve uninstall`。关联 ADR-015 / SPEC-003 §uninstall / SPEC-004 §2.3。
+    /// 运行 `sieve uninstall`。关联 SPEC-003 §uninstall / SPEC-004 §2.3。
     pub fn run(args: UninstallArgs) -> Result<()> {
         // ── 0. 参数校验：必须传 --agent 或 --all（SPEC-004 §2.3）
         if args.agent.is_none() && !args.all {

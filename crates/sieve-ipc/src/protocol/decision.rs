@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 /// 触发本次决策的上游 AI agent。
 ///
-/// 关联：PRD v1.5 §6.5、ADR-019。
+/// 关联：X-Sieve-Origin header 协议。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SourceAgent {
@@ -31,7 +31,7 @@ pub enum SourceAgent {
 
 /// 嵌套调用链中的一跳。
 ///
-/// 关联：PRD v1.5 §4.6 场景 F、ADR-019。
+/// 关联：嵌套调用链场景。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OriginHop {
     /// 此跳的来源 agent。
@@ -48,7 +48,7 @@ pub struct OriginHop {
 /// 检测结果的最终处置方式。
 ///
 /// 与 sieve-rules 中的处置枚举镜像，IPC 层独立定义以避免循环依赖。
-/// 关联：ADR-014（双层防御）、SPEC-001。
+/// 关联：双层防御、SPEC-001。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Disposition {
@@ -64,7 +64,7 @@ pub enum Disposition {
 
 /// 超时后的默认决策。
 ///
-/// Critical 规则强制使用 Block，不允许下游覆盖。关联：ADR-014 §fail-closed。
+/// Critical 规则强制使用 Block，不允许下游覆盖。关联：fail-closed 双层防御。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DefaultOnTimeout {
@@ -78,7 +78,7 @@ pub enum DefaultOnTimeout {
 
 /// 检测命中的严重等级。
 ///
-/// 关联：PRD §4 检测项分级、ADR-014。
+/// 关联：检测项分级、双层防御。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Severity {
@@ -127,7 +127,7 @@ pub struct DetectionPayload {
 /// 主代理 → GUI / Hook 的决策请求。
 ///
 /// JSON-RPC 2.0 method = `"request_decision"`，通过 Unix socket 或 pending
-/// 文件协议传输。关联：ADR-013 §3、SPEC-001 §3.1。
+/// 文件协议传输。关联：SPEC-001 §3.1。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DecisionRequest {
     /// 全局唯一请求 ID（UUIDv7，含时间戳，便于排序和 stale 检测）。
@@ -145,20 +145,20 @@ pub struct DecisionRequest {
     // v1.5 新增字段（serde default 保证 v1.4 旧请求依然可解析）
     /// 触发此次决策的 agent。默认 Unknown（v1.4 旧请求）。
     ///
-    /// 关联 PRD v1.5 §6.5、ADR-019。
+    /// 关联：X-Sieve-Origin header 协议。
     #[serde(default)]
     pub source_agent: SourceAgent,
 
     /// sub-agent 嵌套调用链。空 = 用户直接调（chain_depth=0）。
     ///
-    /// 关联 PRD v1.5 §4.6、ADR-019。
+    /// 关联：嵌套调用链。
     #[serde(default)]
     pub origin_chain: Vec<OriginHop>,
 
     /// OpenClaw 跨通道时的来源 channel（whatsapp / slack / etc）。
     ///
     /// 仅 OpenClaw 适配场景使用；其他 agent 为 None。
-    /// 关联 PRD v1.5 §4.5 场景 E、IN-GEN-06。
+    /// 关联：跨通道来源场景、IN-GEN-06。
     #[serde(default)]
     pub source_channel: Option<String>,
 
@@ -169,7 +169,7 @@ pub struct DecisionRequest {
     /// 真实嵌套层级，而不是受限于 `origin_chain.len()`。
     ///
     /// `None` 表示旧格式请求（v1.4 及以前），回退到 `origin_chain.len()`。
-    /// 关联：ADR-019 §chain_depth 语义、PRD v1.5 §4.6。
+    /// 关联：chain_depth 语义、嵌套调用链。
     #[serde(default)]
     pub explicit_chain_depth: Option<usize>,
 
@@ -183,12 +183,12 @@ pub struct DecisionRequest {
     ///
     /// GUI 端若收到 `false`，必须把 Remember checkbox disabled + 灰显，
     /// 并在 tooltip 解释"内置 Critical 规则保护核心安全场景，不允许永久绕过"
-    ///（PRD v2.0 §5.4.3）。
+    ///（GUI 接口预留）。
     ///
     /// 旧 v1.5 客户端不发此字段时，serde 默认为 `false`（保守 fail-safe：
     /// 老 GUI 即使能选 Remember 也会被 daemon 在 §5.4.2 二次校验里拒绝写入灰名单）。
     ///
-    /// 关联：PRD v2.0 §5.4.2 灰名单 schema、§5.4.3 GUI 接口预留、PRD §9 #3 Critical fail-closed。
+    /// 关联：灰名单 schema、GUI 接口预留、Critical fail-closed。
     #[serde(default)]
     pub allow_remember: bool,
 }
@@ -199,7 +199,7 @@ impl DecisionRequest {
     /// 优先使用 `explicit_chain_depth`（来自 `X-Sieve-Origin` header 真实数值，修 R7-#5）；
     /// 旧格式请求（v1.4）回退到 `origin_chain.len()`。
     ///
-    /// 0 = 用户直接调；≥2 强制 fail-closed GUI hold（ADR-019）；≥5 直接 426 拒绝。
+    /// 0 = 用户直接调；≥2 强制 fail-closed GUI hold；≥5 直接 426 拒绝。
     pub fn chain_depth(&self) -> usize {
         self.explicit_chain_depth.unwrap_or(self.origin_chain.len())
     }
@@ -228,7 +228,7 @@ pub enum UiPhase {
 
 /// 用户或超时产生的决策动作。
 ///
-/// 关联：SPEC-001 §3.3、ADR-014 §决策流程。
+/// 关联：SPEC-001 §3.3、双层防御决策流程。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DecisionAction {
@@ -243,7 +243,7 @@ pub enum DecisionAction {
 /// GUI / Hook → 主代理的决策响应。
 ///
 /// 写入 `<sieve_home>/decisions/<request_id>.json` 或通过 socket 返回。
-/// 关联：ADR-013 §3.4、SPEC-001 §3.3。
+/// 关联：SPEC-001 §3.3。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DecisionResponse {
     /// 对应的请求 ID，用于主代理侧匹配 oneshot channel。
@@ -264,7 +264,7 @@ pub struct DecisionResponse {
     /// 2. 命中规则必须不在 `sieve_rules::critical_lock::FAIL_CLOSED_RULES`
     ///
     /// 任一不满足 → 忽略 remember + 写 audit ERROR 事件 +（可选）GUI 状态栏告警。
-    /// 详见 PRD v2.0 §5.4.2「Critical 锁约束」三道防线。
+    /// 详见「Critical 锁约束」三道防线。
     #[serde(default)]
     pub remember: bool,
 
@@ -276,7 +276,7 @@ pub struct DecisionResponse {
     ///
     /// 旧 v1.5 客户端不发此字段时，serde 默认为 `None`。
     ///
-    /// 关联：PRD v2.0 §5.4.2 灰名单 schema 中 context_hint 字段。
+    /// 关联：灰名单 schema 中 context_hint 字段。
     #[serde(default)]
     pub context_hint: Option<String>,
 
@@ -293,7 +293,7 @@ pub struct DecisionResponse {
 
 /// `sieve.request_decision_canceled` 取消原因。
 ///
-/// 关联：ADR-013 §S.3 / SPEC-002 §9.3 / §9.4。
+/// 关联：SPEC-002 §9.3 / §9.4。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CancelReason {

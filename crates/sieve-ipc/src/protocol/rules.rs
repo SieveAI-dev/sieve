@@ -18,9 +18,9 @@ use super::decision::SourceAgent;
 /// `sieve.set_paused` 请求参数。
 ///
 /// `minutes ∈ [0, 60]`：0 = 立刻恢复；上限 60（防止"事实上的关闭"）。
-/// Critical 锁规则不受暂停影响（[PRD v2.0 §9 #3 #8]）。
+/// Critical 锁规则不受暂停影响。
 ///
-/// 关联：ADR-013 §S.4 / SPEC-002 §9.1。
+/// 关联：SPEC-002 §9.1。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SetPausedRequest {
     pub minutes: u32,
@@ -68,7 +68,7 @@ pub struct SetPresetOverridesRequest {
 
 /// 单条被拒绝的 override。
 ///
-/// `reason ∈ { "critical_lock" | "unknown_rule" | "invalid_value" }`（ADR-013 §S.4）。
+/// `reason ∈ { "critical_lock" | "unknown_rule" | "invalid_value" }`。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RejectedOverride {
     pub rule_id: String,
@@ -121,7 +121,7 @@ pub enum EvaluateDirection {
 /// `sieve.evaluate` 请求参数。
 ///
 /// payload 上限 64KB（daemon 端校验），超过返回 -32003 payload_too_large。
-/// 关联：ADR-013 §S.4。
+/// 关联：SPEC-002 §9.x。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EvaluateRequest {
     pub direction: EvaluateDirection,

@@ -1,8 +1,8 @@
-//! `sieve decisions` 子命令实现（ADR-028 TODO-4，headless decision CLI）。
+//! `sieve decisions` 子命令实现（headless decision CLI）。
 //!
 //! 在 GUI 不在线时通过 CLI 订阅 / 查看 / 解决待决策事件。
 //! CLI 跟 GUI 共用同一组 IPC 方法（`sieve.request_decision` / `sieve.health`），
-//! **不引入特权 endpoint**（ADR-028 §3）。
+//! **不引入特权 endpoint**。
 //!
 //! ## IPC 客户端实现策略
 //!
@@ -277,7 +277,7 @@ async fn run_resolve(id: Uuid, action: ResolveAction, reason: Option<String>) ->
     };
 
     // 构造 DecisionResponse（GUI → daemon 方向）
-    // daemon 不区分 caller 身份，CLI 回复和 GUI 回复走同一路径（ADR-028 §3）
+    // daemon 不区分 caller 身份，CLI 回复和 GUI 回复走同一路径
     let response = serde_json::json!({
         "request_id": id.to_string(),
         "decision": decision_action,

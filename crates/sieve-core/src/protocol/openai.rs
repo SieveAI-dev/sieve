@@ -1,13 +1,13 @@
 //! OpenAI Chat Completions 协议适配层。
 //!
 //! 实现服务端接收视角的 schema 解析和到 [`UnifiedMessage`] 的转换。
-//! 关联 ADR-018：sieve-core 新增 OpenAI Chat Completions 协议适配层。
+//! sieve-core 新增 OpenAI Chat Completions 协议适配层。
 //!
 //! # 设计原则
 //!
 //! - 只解析 Sieve 检测所需字段；无关字段（temperature 等）通过 `#[serde(flatten)]`
-//!   保留在 `extra` 中以便无损转发，见 ADR-018 §schema 设计。
-//! - 不引入 async-openai / openai-api-rs 等大型外部 crate（ADR-018 §依赖决策）。
+//!   保留在 `extra` 中以便无损转发。
+//! - 不引入 async-openai / openai-api-rs 等大型外部 crate。
 //! - 错误类型统一用 `thiserror`，禁 `anyhow`（库 crate 约束）。
 
 use serde::{Deserialize, Serialize};
@@ -19,7 +19,7 @@ use super::unified_message::{ContentBlock, MessageMetadata, Role, ToolUseBlock, 
 
 /// OpenAI Chat Completions 请求体（服务端接收视角）。
 ///
-/// 关联 ADR-018 §schema 设计。
+/// 关联 schema 设计。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenAIRequest {
     /// 模型名（如 "gpt-4o"、"gpt-4"）。
@@ -47,7 +47,7 @@ pub struct OpenAIRequest {
 /// OpenAI Chat Completions 单条消息。
 ///
 /// `content` 可以是纯字符串或 content part 数组（含 image_url 等），
-/// 统一用 `serde_json::Value` 接收以兼容两种形式（ADR-018 §content 多态）。
+/// 统一用 `serde_json::Value` 接收以兼容两种形式（content 多态）。
 ///
 /// `extra` 通过 `#[serde(flatten)]` 兜底，保留 legacy `function_call` 字段
 /// 及厂商私有扩展字段，确保 AutoRedact 重序列化时不丢失原始内容
@@ -122,7 +122,7 @@ pub struct OpenAIFunctionDef {
 
 /// OpenAI SSE 流式 delta chunk（每条 `data:` 行的 JSON 结构）。
 ///
-/// 关联 ADR-018 §流式解析。
+/// 关联流式解析。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenAIStreamingChunk {
     /// chunk ID。
@@ -137,7 +137,7 @@ pub struct OpenAIStreamingChunk {
     pub choices: Vec<OpenAIChoiceDelta>,
     /// token 用量（仅 `stream_options.include_usage=true` 时，在 `choices` 为空的
     /// 末尾 chunk 出现：`{prompt_tokens, completion_tokens, total_tokens}`）。原始 JSON
-    /// 透传，供 ADR-038 超额计费观测消费；缺省 `None`（绝大多数 chunk 无此字段）。
+    /// 透传，供超额计费观测消费；缺省 `None`（绝大多数 chunk 无此字段）。
     #[serde(default)]
     pub usage: Option<serde_json::Value>,
 }
@@ -171,7 +171,7 @@ pub struct OpenAIDelta {
 /// 流式工具调用增量。
 ///
 /// `index` 用于跨 chunk 聚合同一工具调用；`id` 和 `name` 只在首个 chunk 出现，
-/// `arguments` 在后续 chunk 中增量追加（见 ADR-018 §流式聚合）。
+/// `arguments` 在后续 chunk 中增量追加（流式聚合）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenAIToolCallDelta {
     /// 工具调用下标（用于多工具并发时区分）。
@@ -205,7 +205,7 @@ impl OpenAIRequest {
     /// 提取所有 message content 中的文本片段，行为与 `AnthropicRequest::extract_text_content` 一致。
     ///
     /// 返回 `(segment_index, text_chunk)` 列表，供规则匹配引擎使用。
-    /// 关联 ADR-018 §检测兼容性。
+    /// 关联检测兼容性。
     pub fn extract_text_content(&self) -> Vec<(usize, String)> {
         let mut result = Vec::new();
         let mut cursor = 0usize;
@@ -236,7 +236,7 @@ impl OpenAIRequest {
 
     /// 将 OpenAI 请求转换为 Sieve 内部统一消息表示。
     ///
-    /// 转换策略（ADR-018 §UnifiedMessage 映射）：
+    /// 转换策略（UnifiedMessage 映射）：
     /// - `system` role → `ContentBlock::Text` + `Role::System`（合并为首条）
     /// - `user` / `assistant` / `tool` role → 对应 `Role` variant
     /// - `tool_calls` 中的 function 调用 → `ToolUseBlock`（arguments 字符串解析为 JSON）
@@ -244,7 +244,7 @@ impl OpenAIRequest {
     ///
     /// 注意：返回的是**最后一条非 system 消息**对应的 UnifiedMessage（代理检测场景下
     /// 规则引擎逐消息调用，此处返回 messages 末尾用户/助手消息；完整会话扫描由调用方
-    /// 迭代 `self.messages` 并逐条转换，ADR-018 §扫描粒度）。
+    /// 迭代 `self.messages` 并逐条转换，扫描粒度）。
     pub fn into_unified(self, metadata: MessageMetadata) -> UnifiedMessage {
         // 取最后一条消息作为主体；若列表为空则生成空 user 消息
         let last = self.messages.into_iter().next_back();

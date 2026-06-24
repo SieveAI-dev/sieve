@@ -1,18 +1,18 @@
-//! SSE 增量解析器（关联 PRD §9 #5 硬约束 / ADR-018 OpenAI 协议支持）。
+//! SSE 增量解析器（关联硬约束 / OpenAI 协议支持）。
 //!
 //! 设计：
 //! - 增量 push_chunk 接口，支持半行 / 跨 chunk / 多 event 粘包 / C0 控制字符 / 提前断流
 //! - 内部维护 buffer + 状态机，**不缓冲整流**，每次 push_chunk 立即返回已 parse 完整的 events
 //! - malformed event 返回 SseEvent::Unknown，不 panic
 //! - 超过 MAX_SSE_EVENT_BYTES 时返回 SseParserError::EventTooLarge（P0-5 容量上限，防 OOM）
-//! - ADR-018：支持 OpenAI Chat Completions SSE 格式（`OpenAiSseParser`）并通过 `SseParse` trait
+//! - 支持 OpenAI Chat Completions SSE 格式（`OpenAiSseParser`）并通过 `SseParse` trait
 //!   向上游 pipeline 暴露统一接口，pipeline 无需感知具体协议
 
 use serde::{Deserialize, Serialize};
 
 // ── 协议标记 ──────────────────────────────────────────────────────────────────
 
-/// SSE 上游协议判别（关联 ADR-018 §协议路由）。
+/// SSE 上游协议判别（关联协议路由）。
 ///
 /// 用于在 pipeline 层区分 Anthropic 和 OpenAI SSE 格式，
 /// 并选择对应的解析器实现（`SseParse` trait）。
@@ -26,7 +26,7 @@ pub enum SseProtocol {
 
 // ── 统一解析器 trait ──────────────────────────────────────────────────────────
 
-/// SSE 解析器统一接口（关联 ADR-018 §trait 抽象）。
+/// SSE 解析器统一接口（关联 trait 抽象）。
 ///
 /// pipeline / inbound_filter 通过此 trait 消费 SSE 事件，
 /// 无需感知底层协议差异（Anthropic vs OpenAI）。
@@ -167,7 +167,7 @@ pub enum SseDelta {
 /// Anthropic SSE 增量解析器（实现 [`SseParse`] trait）。
 ///
 /// 处理带 `event:` 头行的 Anthropic Messages API SSE 格式。
-/// OpenAI 格式请使用 [`super::openai_parser::OpenAiSseParser`]（ADR-018）。
+/// OpenAI 格式请使用 [`super::openai_parser::OpenAiSseParser`]。
 ///
 /// 典型用法：
 /// ```rust

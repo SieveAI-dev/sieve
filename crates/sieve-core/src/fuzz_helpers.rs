@@ -1,7 +1,7 @@
 //! Fuzz helpers — cargo fuzz 与 AFL++ 共享的 fuzz 函数体。
 //!
-//! 关联 PRD §9 硬约束 #5：SSE 边界处理 fuzz test 全覆盖。
-//! ADR-018：新增 OpenAI SSE parser fuzz target（`fuzz_one_sse_openai`）。
+//! 关联硬约束：SSE 边界处理 fuzz test 全覆盖。
+//! 新增 OpenAI SSE parser fuzz target（`fuzz_one_sse_openai`）。
 //!
 //! 这些函数不包含具体的 fuzz corpus 逻辑，由 `fuzz/` 子 crate 的 target 调用。
 //! 设计为幂等：无论输入如何都不 panic（满足 fuzz 的核心目标）。
@@ -20,7 +20,7 @@ pub fn fuzz_one_sse(data: &[u8]) {
     let _ = parser.flush();
 }
 
-/// OpenAI SSE Parser fuzz target（关联 ADR-018 §fuzz 覆盖 / PRD §9 #5）。
+/// OpenAI SSE Parser fuzz target（关联 fuzz 覆盖）。
 ///
 /// 覆盖：半行 chunk / 跨 chunk 分隔符 / C0 控制字符 / 多 event 粘包 /
 /// 提前断流 / [DONE] 标记 / finish_reason 变体 / 空 delta / tool_calls delta。

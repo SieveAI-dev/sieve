@@ -1,6 +1,6 @@
 //! `sieve-updater` — update check + telemetry beacon for Sieve daemon.
 //!
-//! Implements ADR-030 §5 (客户端实现).
+//! Update protocol client implementation.
 //!
 //! ## Design
 //! - Runs as a detached `tokio::spawn` task inside `sieve-cli`.

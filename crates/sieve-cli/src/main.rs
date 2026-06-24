@@ -1,13 +1,13 @@
-//! Sieve CLI 入口（关联 PRD §6.1 / ADR-001）。
+//! Sieve CLI 入口。
 //!
 //! 子命令：
 //! - `sieve start [--config <path>] [--dry-run] [--no-client-policy <policy>]`：启动 daemon
 //! - `sieve version`：打印版本号
-//! - `sieve setup [--agent <name>] [--all-detected] [--dry-run] [--yes]`：配置 AI agent（仅 macOS，ADR-015 / SPEC-004）
+//! - `sieve setup [--agent <name>] [--all-detected] [--dry-run] [--yes]`：配置 AI agent（仅 macOS，SPEC-004）
 //! - `sieve doctor [--agent <name>] [--all]`：诊断 Sieve 安装状态（仅 macOS）
 //! - `sieve uninstall [--agent <name>] [--all] [--dry-run] [--yes]`：回滚 setup 改动（仅 macOS）
-//! - `sieve decisions watch|show|resolve`：headless decision CLI（ADR-028 TODO-4）
-//! - `sieve audit tail|query|show`：unix-pipeable 审计日志查询（ADR-028 TODO-5）
+//! - `sieve decisions watch|show|resolve`：headless decision CLI（TODO-4）
+//! - `sieve audit tail|query|show`：unix-pipeable 审计日志查询（TODO-5）
 //!
 //! 红队 bypass 回归基线改由 `verifier/redteam.sh` 直接驱动 `cargo test`，
 //! 不再作为主二进制子命令（瘦身：红队是 CI/dev 工具，不属用户运行时面）。
@@ -89,7 +89,7 @@ async fn main() -> Result<()> {
             );
 
             // 加载出站系统规则：优先签名规则包 current.json → dev TOML → 空集 fail-safe。
-            // 这放宽了旧的「加载失败 exit1」语义（参见 ADR-007 fail-closed）：
+            // 这放宽了旧的「加载失败 exit1」语义（fail-closed）：
             // 引擎须能在无规则包时独立启动供审计，装了签名包（经更新通道下发）才有检测能力。
             let pack_path = cfg.resolved_rules_pack_path();
             let dev_outbound_path = cfg.resolved_rules_path();
@@ -98,19 +98,19 @@ async fn main() -> Result<()> {
             // 编译出站系统引擎（空集 / 编译失败均降级空集 fail-safe），包成可热替换的 SystemEngine
             let system_engine = build_system_engine(rules.clone(), "outbound");
 
-            // 加载用户规则（PRD §5.5 + §9 #14 fail-safe）
+            // 加载用户规则（fail-safe）
             let user_rules_path = sieve_ipc::paths::sieve_home()
                 .map(|h| h.join("rules").join("user.toml"))
                 .ok();
 
-            // 出站用户规则引擎（只编译 direction=outbound/both 的规则，PRD v2.0 §5.5）
+            // 出站用户规则引擎（只编译 direction=outbound/both 的规则）
             let outbound_user_engine = load_user_engine_fail_safe(
                 user_rules_path.as_deref(),
                 sieve_policy::loader::RuleDirection::Outbound,
             );
 
-            // 用 LayeredEngine 包装系统 + 用户规则（PRD §6.3 / §5.5.2.1）
-            // 以 Arc 持有，同时给 OutboundAdapter 使用，并保留 Arc 引用供 reload hot swap（PRD §5.5.5 v2.1）
+            // 用 LayeredEngine 包装系统 + 用户规则
+            // 以 Arc 持有，同时给 OutboundAdapter 使用，并保留 Arc 引用供 reload hot swap（v2.1）
             let outbound_layered =
                 Arc::new(LayeredEngine::new(system_engine, outbound_user_engine));
             let adapter = OutboundAdapter::new(Arc::clone(&outbound_layered), rules);
@@ -149,14 +149,14 @@ async fn main() -> Result<()> {
             // 编译入站系统引擎（空集 / 编译失败均降级空集 fail-safe），包成可热替换的 SystemEngine
             let inbound_system_engine = build_system_engine(vectorscan_rules, "inbound");
 
-            // 入站用户规则引擎（只编译 direction=inbound/both 的规则，PRD v2.0 §5.5）
+            // 入站用户规则引擎（只编译 direction=inbound/both 的规则）
             let inbound_user_engine = load_user_engine_fail_safe(
                 user_rules_path.as_deref(),
                 sieve_policy::loader::RuleDirection::Inbound,
             );
 
             // 用 LayeredEngine 包装入站系统 + 用户规则
-            // 以 Arc 持有，同时给 InboundAdapter 使用，并保留 Arc 引用供 reload hot swap（PRD §5.5.5 v2.1）
+            // 以 Arc 持有，同时给 InboundAdapter 使用，并保留 Arc 引用供 reload hot swap（v2.1）
             let inbound_layered = Arc::new(LayeredEngine::new(
                 inbound_system_engine,
                 inbound_user_engine,
@@ -252,7 +252,7 @@ async fn main() -> Result<()> {
 /// # Errors
 /// 当前实现不返回错误；签名保留 `Result<()>` 便于 Week 4 扩展检查逻辑。
 fn audit_yolo_disabled(cfg: &config::Config) -> Result<()> {
-    // dry_run 模式下 fail-closed 规则仍强制 Block（ADR-007 §2）
+    // dry_run 模式下 fail-closed 规则仍强制 Block
     if cfg.dry_run {
         tracing::warn!(
             "dry_run=true: non-fail-closed Critical detections will only be logged, \
@@ -295,7 +295,7 @@ fn load_sieveignore(path: &Path) -> HashSet<String> {
 /// 优先级：① 签名规则包 `current.json`（updater 经更新通道下发后安装，按 ID 前缀过滤方向）→
 /// ② dev TOML（过渡期；规则后续迁出后此路失效）→ ③ 空集 fail-safe。
 ///
-/// 与旧逻辑（加载失败 `exit(1)`，参见 ADR-007 fail-closed）的差异：引擎须能在无规则包时
+/// 与旧逻辑（加载失败 `exit(1)`，fail-closed）的差异：引擎须能在无规则包时
 /// 独立构建运行供审计，故系统规则加载放宽为 **fail-safe 空集**——无包（正常态）/ 包解析失败 /
 /// dev TOML 解析失败，都降级空集 + 醒目 warn，而非崩溃。注意区分：包**验签**失败由
 /// `sieve-updater::install` 在安装阶段拒绝，daemon 见到的 `current.json` 已通过验签，
@@ -430,13 +430,13 @@ pub(crate) fn reload_system_vectorscan(
     }
 }
 
-/// 加载并按方向编译用户规则引擎（PRD v2.0 §5.5 / §9 #14 fail-safe）。
+/// 加载并按方向编译用户规则引擎（fail-safe）。
 ///
 /// 文件不存在时 `sieve_policy::loader::load_user_rules` 返回空 `UserRulesFile`，
 /// 空规则列表（或按方向过滤后 0 条）导致 `UserEngine::compile_for_direction` 返回错误，
 /// 此时 `load_user_engine_fail_safe` 返回 `None`，daemon 以纯系统规则正常启动。
 ///
-/// `direction` 控制哪些规则被编译进该引擎实例（PRD §5.5）：
+/// `direction` 控制哪些规则被编译进该引擎实例：
 /// - `Outbound`：只编译 direction=outbound/both 的规则，挂出站侧
 /// - `Inbound`：只编译 direction=inbound/both 的规则，挂入站侧
 fn load_and_compile_user_engine(
@@ -446,7 +446,7 @@ fn load_and_compile_user_engine(
     use sieve_policy::lint::lint;
     use sieve_policy::loader::load_user_rules;
 
-    // 文件不存在时 load_user_rules 返回空 UserRulesFile（PRD §5.5.2.1）
+    // 文件不存在时 load_user_rules 返回空 UserRulesFile
     let file_size = if path.exists() {
         std::fs::metadata(path)?.len()
     } else {
@@ -463,10 +463,10 @@ fn load_and_compile_user_engine(
         );
     }
 
-    // lint 校验（PRD §5.5.3）
+    // lint 校验
     let violations = lint(&file, file_size);
     if !violations.is_empty() {
-        // PRD §9 #14：记录 + 返错（调用方把错降级为 warn + 用 None）
+        // 记录 + 返错（调用方把错降级为 warn + 用 None）
         let summary = violations
             .iter()
             .map(|v| format!("[{}] {:?}: {}", v.rule_id, v.kind, v.message))
@@ -475,15 +475,15 @@ fn load_and_compile_user_engine(
         anyhow::bail!("user rules lint failed: {summary}");
     }
 
-    // 按方向过滤后编译（PRD §5.5）
+    // 按方向过滤后编译
     sieve_policy::engine::UserEngine::compile_for_direction(file.rules, direction)
         .map_err(|e| anyhow::anyhow!("compile user engine (direction={direction:?}): {e}"))
 }
 
-/// fail-safe 包装：将 `load_and_compile_user_engine` 的失败降级为 `None`（PRD §9 #14）。
+/// fail-safe 包装：将 `load_and_compile_user_engine` 的失败降级为 `None`。
 ///
 /// daemon 必须在用户规则损坏时正常启动，系统规则不受影响。
-/// `direction` 参数同时作为日志标识和过滤条件（PRD v2.0 §5.5）。
+/// `direction` 参数同时作为日志标识和过滤条件。
 fn load_user_engine_fail_safe(
     path: Option<&std::path::Path>,
     direction: sieve_policy::loader::RuleDirection,
@@ -496,7 +496,7 @@ fn load_user_engine_fail_safe(
                 side = %side,
                 path = %path.display(),
                 rule_count = eng.rule_count(),
-                "用户规则加载成功（PRD §5.5）"
+                "用户规则加载成功"
             );
             Some(eng)
         }
@@ -507,14 +507,14 @@ fn load_user_engine_fail_safe(
                 tracing::debug!(
                     side = %side,
                     path = %path.display(),
-                    "用户规则文件不存在或该方向无规则，以纯系统规则启动（PRD §9 #14）"
+                    "用户规则文件不存在或该方向无规则，以纯系统规则启动"
                 );
             } else {
                 tracing::warn!(
                     side = %side,
                     path = %path.display(),
                     error = %e,
-                    "用户规则加载失败，以纯系统规则继续启动（PRD §9 #14 fail-safe）"
+                    "用户规则加载失败，以纯系统规则继续启动（fail-safe）"
                 );
             }
             None

@@ -10,7 +10,7 @@
 //! - §14.1 install-id 首启生成 / 幂等 / 删后重生（经 `SIEVE_CACHE_DIR` 隔离，P0.1）。
 //! - §14.5 失败模式：sha256 mismatch / 服务不可达 / 坏 zstd / 超大响应——各自精确报错，不 panic。
 //! - §14.6 公钥 None 占位：签名校验被 skip（非静默通过；WARN 由 `verify_signature` 发出）。
-//! - 遥测参数：uid 在 telemetry 开启时出现在 manifest query，关闭时缺失（ADR-030）。
+//! - 遥测参数：uid 在 telemetry 开启时出现在 manifest query，关闭时缺失。
 //!
 //! `.cursorrules §3.2`：测试代码允许 `.unwrap()`。
 

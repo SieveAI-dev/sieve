@@ -1,13 +1,13 @@
 // X-Sieve-Origin HTTP header 解析、签名验证与构造。
 //
-// 关联 ADR-019（X-Sieve-Origin header 协议）、PRD v1.5 §6.5。
+// X-Sieve-Origin header 协议定义。
 //
 // Header 格式：
 //   无签名：`<source_agent>:<request_id>:<chain_depth>`
 //   有签名：`<source_agent>:<request_id>:<chain_depth>:<base64_ed25519_sig>`
 //
 // 签名对象为 `<source_agent>:<request_id>:<chain_depth>` 整体字符串。
-// Phase 1 GA 前签名可选；GA 后强制（按 ADR-019）。
+// Phase 1 GA 前签名可选；GA 后强制。
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
@@ -18,18 +18,18 @@ use crate::protocol::SourceAgent;
 
 /// Sieve 主代理签发 X-Sieve-Origin header 使用的 Ed25519 公钥（原始 32 字节）。
 ///
-/// 关联 ADR-019 §签名验证。这是 X-Sieve-Origin 验签的长期信任根：对应私钥签发
+/// 这是 X-Sieve-Origin 验签的长期信任根：对应私钥签发
 /// header，客户端用本公钥 fail-closed 验证。
 pub const SIEVE_ORIGIN_PUBLIC_KEY: &[u8; 32] = &[
     0x17, 0xb8, 0xa9, 0xfd, 0x14, 0xa8, 0x50, 0x6e, 0x32, 0xa4, 0xe4, 0x48, 0x74, 0xa1, 0xf5, 0x06,
     0x81, 0x97, 0xc2, 0x99, 0xff, 0x24, 0xf5, 0xf7, 0xc2, 0xa9, 0x43, 0x56, 0xb2, 0x66, 0x67, 0x1b,
 ];
 
-/// ADR-034 GA 编译期密钥 gate。
+/// GA 编译期密钥 gate。
 ///
 /// 启用 `ga_keys` feature（GA release build）时，若 [`SIEVE_ORIGIN_PUBLIC_KEY`]
 /// 仍为全零占位，则**编译失败**——阻止 X-Sieve-Origin 验签 fail-open 进入 GA
-/// 二进制。alpha build（默认无此 feature）行为不变。关联 ADR-019、SECURITY.md。
+/// 二进制。alpha build（默认无此 feature）行为不变。关联 SECURITY.md。
 #[cfg(feature = "ga_keys")]
 const _: () = {
     const fn is_all_zeros(key: &[u8; 32]) -> bool {
@@ -44,7 +44,7 @@ const _: () = {
     }
     assert!(
         !is_all_zeros(SIEVE_ORIGIN_PUBLIC_KEY),
-        "ga_keys feature enabled but SIEVE_ORIGIN_PUBLIC_KEY is all zeros — GA build must embed a real Ed25519 public key (ADR-034)"
+        "ga_keys feature enabled but SIEVE_ORIGIN_PUBLIC_KEY is all zeros — GA build must embed a real Ed25519 public key"
     );
 };
 
@@ -52,7 +52,7 @@ const _: () = {
 
 /// X-Sieve-Origin header 解析 / 验证错误。
 ///
-/// 关联 ADR-019 §Header 格式规范。
+/// Header 格式规范。
 #[derive(Debug, thiserror::Error)]
 pub enum OriginHeaderError {
     /// header 值格式不合法（必须是 3 或 4 个冒号分隔字段）。
@@ -73,7 +73,7 @@ pub enum OriginHeaderError {
 
     /// `chain_depth` ≥ 5，直接拒绝（攻击防御门限）。
     ///
-    /// 关联 ADR-019 §chain_depth 语义、ADR-007 fail-closed。
+    /// chain_depth 语义、fail-closed 防御。
     #[error("X-Sieve-Origin chain_depth too deep ({0} >= 5): nested call rejected")]
     ChainTooDeep(usize),
 
@@ -92,7 +92,7 @@ pub enum OriginHeaderError {
 
 /// 解析后的 X-Sieve-Origin header 字段。
 ///
-/// 关联 ADR-019 §Header 格式规范。
+/// Header 格式规范。
 #[derive(Debug, Clone)]
 pub struct OriginHeader {
     /// 触发调用链的源 agent。
@@ -140,7 +140,7 @@ fn source_agent_to_str(agent: SourceAgent) -> &'static str {
 /// - `<agent>:<request_id>:<depth>`
 /// - `<agent>:<request_id>:<depth>:<base64_sig>`
 ///
-/// 关联 ADR-019 §Header 格式规范。
+/// Header 格式规范。
 ///
 /// # Errors
 ///
@@ -195,7 +195,7 @@ pub fn parse_origin_header(value: &str) -> Result<OriginHeader, OriginHeaderErro
 ///
 /// Phase 1 GA 前行为：签名缺失时返回 [`OriginHeaderError::SignatureMissing`]。
 ///
-/// 关联 ADR-019 §签名验证。
+/// 签名验证。
 ///
 /// # Errors
 ///
@@ -239,7 +239,7 @@ pub fn parse_and_verify_origin_header(
 ///
 /// 签名覆盖 `<agent>:<request_id>:<depth>` 字符串，防止攻击者伪造 header 绕过弹窗去重。
 ///
-/// 关联 ADR-019 §签名验证。
+/// 签名验证。
 pub fn build_signed_origin_header(
     source_agent: SourceAgent,
     request_id: uuid::Uuid,
@@ -400,7 +400,7 @@ mod tests {
         );
     }
 
-    // 11. ADR-034: 信任根已嵌入真公钥——`SIEVE_ORIGIN_PUBLIC_KEY` 非全零占位，
+    // 11. 信任根已嵌入真公钥——`SIEVE_ORIGIN_PUBLIC_KEY` 非全零占位，
     // X-Sieve-Origin 验签 fail-closed 生效。守护：改回全零会让此测试红；`ga_keys`
     // 启用时文件顶部 const 断言在编译期同样保证非全零。
     #[test]

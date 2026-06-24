@@ -62,7 +62,7 @@ pub fn write_decision(resp: &DecisionResponse, base: &Path) -> Result<PathBuf, I
 /// 选择轮询而非 inotify/notify 是为了跨平台简单性；Phase 1 仅 macOS，
 /// 但未来 Linux 支持时轮询同样生效，不需要额外适配。
 ///
-/// 超时后按 `default_on_timeout` 构造兜底响应。关联：ADR-013 §4.2。
+/// 超时后按 `default_on_timeout` 构造兜底响应。
 pub async fn wait_for_decision(
     request_id: Uuid,
     base: &Path,

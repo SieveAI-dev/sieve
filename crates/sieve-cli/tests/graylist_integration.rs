@@ -1,4 +1,4 @@
-//! 灰名单端到端集成测试（PRD v2.0 §5.4.2）。
+//! 灰名单端到端集成测试。
 //!
 //! 测试范围：
 //! 1. compute_fingerprint 对相同输入产生相同摘要（确定性）
@@ -75,7 +75,7 @@ fn make_entry(rule_id: &str) -> GraylistEntry {
 
 // ─── Test 1: fingerprint 确定性 ───────────────────────────────────────────────
 
-/// 同一输入 compute_fingerprint 两次结果必须相同（PRD §5.4.2 fingerprint 设计）。
+/// 同一输入 compute_fingerprint 两次结果必须相同（fingerprint 设计）。
 #[test]
 fn fingerprint_is_deterministic() {
     let inputs = make_inputs("IN-GEN-04");

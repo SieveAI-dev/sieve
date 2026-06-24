@@ -68,7 +68,7 @@ pub struct HelloBuilder {
 
 /// 控制面错误（IPC handler 内部用，序列化为 JSON-RPC ErrorObject）。
 ///
-/// 关联：ADR-013 §S.2 错误码段。
+/// 关联：JSON-RPC 错误码段。
 #[derive(Debug, Clone)]
 pub struct ControlError {
     pub code: i64,
@@ -141,7 +141,7 @@ pub enum BroadcastPlan {
 /// 每条请求携带 `oneshot::Sender` 用于回执（daemon 处理完写入），
 /// IPC server 收到回执后序列化为 JSON-RPC response 写回 GUI socket。
 ///
-/// 关联：ADR-013 Supplement 2026-05-02 §S.4。
+/// 关联：IPC 控制面 dispatch 协议。
 pub enum ControlPlaneRequest {
     /// SPEC-005 §10.0.1：reply 携带 BroadcastPlan，IPC server 先 fan-out 再写 result。
     SetPaused {
@@ -233,7 +233,7 @@ const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_millis(100);
 /// 通道容量设为 32，满了视为短暂背压（保留 sender）而非断线。
 /// 写失败（`TrySendError::Closed`）时立即从 Vec 移除（lazy 清理，无需显式注销）。
 ///
-/// 关联：PRD v2.1 §5.4.3（多 GUI 客户端支持）、ADR-013。
+/// 关联：多 GUI 客户端支持。
 type GuiWriters = Arc<std::sync::Mutex<Vec<mpsc::Sender<String>>>>;
 
 /// IPC 服务端，监听 Unix socket，维护与 GUI 的长连接并推送决策请求。
@@ -264,11 +264,11 @@ type GuiWriters = Arc<std::sync::Mutex<Vec<mpsc::Sender<String>>>>;
 ///   `TrySendError::Closed` 的 sender 立即从 Vec 移除（lazy 清理）；
 ///   `TrySendError::Full` 视为短暂背压，保留 sender 不断线。
 ///   失败（无客户端 / socket 写错）静默丢弃 + debug 日志，**daemon 主流程不阻塞**。
-///   关联：PRD v2.0 §5.7、PRD v2.1 §5.4.3、ADR-013。
+///   关联：行为序列 StatusBar 通知 + 多 GUI 客户端支持。
 /// - `reload_rx`：daemon 通过此 channel 接收来自 `sieve rules edit` 的 reload 通知。
-///   关联：PRD v2.0 §5.5.5、ADR-013。
+///   关联：编辑器关闭后 lint + atomic backup + IPC reload 流程。
 ///
-/// 关联：ADR-013 §3（JSON-RPC over Unix socket）、ADR-014 §5（GUI 路径）。
+/// 关联：JSON-RPC over Unix socket 传输 + 双层防御 GUI 路径。
 pub struct IpcServer {
     socket_path: PathBuf,
     pending: PendingMap,
@@ -287,7 +287,7 @@ pub struct IpcServer {
     control_rx: Arc<Mutex<Option<mpsc::Receiver<ControlPlaneRequest>>>>,
     /// 暂停截止时间（hot path 直接读，避免跨 crate 取 RuntimeState）。
     ///
-    /// 关联：ADR-013 §S.4 set_paused / SPEC-002 §9.1。
+    /// 关联：set_paused / SPEC-002 §9.1。
     /// `None` = 未暂停；`Some(t)` 且 `t > now` = 暂停中。
     /// daemon 控制面 handler 通过 [`Self::set_paused_until`] 同步。
     paused_until: Arc<ArcSwap<Option<DateTime<Utc>>>>,
@@ -359,7 +359,7 @@ impl IpcServer {
     /// 内部触发用户规则 reload（控制面 `sieve.reload_config` 复用此通道）。
     ///
     /// 与外部 `send_reload_user_rules_oneshot` 等价，但走进程内 mpsc 而非 socket。
-    /// 关联：ADR-013 Supplement §S.4 sieve.reload_config。
+    /// 关联：sieve.reload_config 控制面方法。
     pub async fn trigger_user_rules_reload(
         &self,
         trigger: ReloadUserRules,
@@ -448,7 +448,7 @@ impl IpcServer {
     /// }
     /// ```
     ///
-    /// 关联：PRD v2.0 §5.5.5、ADR-013。
+    /// 关联：编辑器关闭后 lint + atomic backup + IPC reload 流程。
     pub async fn reload_rx(&self) -> Option<mpsc::Receiver<ReloadUserRules>> {
         self.reload_rx.lock().await.take()
     }
@@ -550,7 +550,7 @@ impl IpcServer {
     ///   - `TrySendError::Full`：GUI 写通道短暂背压，保留 sender，记录 debug 日志。
     /// - 持锁时间极短（drain + try_send 均不 await），不会跨 await 点持 std Mutex。
     ///
-    /// 关联：PRD v2.0 §5.7（行为序列 StatusBar 通知）+ PRD v2.1 §5.4.3（多 GUI 客户端）+ ADR-013。
+    /// 关联：行为序列 StatusBar 通知 + 多 GUI 客户端支持。
     pub fn broadcast_status_bar(&self, notify: StatusBarNotify) {
         let label = format!("status_bar notify_id={}", notify.notify_id);
         self.broadcast_method("sieve.notify_status_bar", &notify, &label);
@@ -558,7 +558,7 @@ impl IpcServer {
 
     /// 向**所有**已连接的 GUI 广播 preset 变更通知。
     ///
-    /// 关联：ADR-013 Supplement §S.3 / SPEC-002 §9.2。
+    /// 关联：SPEC-002 §9.2。
     pub fn broadcast_preset_changed(&self, notify: PresetChangedNotify) {
         let label = format!("preset_changed mode={}", notify.mode);
         self.broadcast_method("sieve.preset_changed", &notify, &label);
@@ -566,7 +566,7 @@ impl IpcServer {
 
     /// 向**所有**已连接的 GUI 广播 paused 状态变更通知。
     ///
-    /// 关联：ADR-013 Supplement §S.3 / SPEC-002 §9.1。
+    /// 关联：SPEC-002 §9.1。
     pub fn broadcast_paused_changed(&self, notify: PausedChangedNotify) {
         let label = format!("paused_changed paused={}", notify.paused);
         self.broadcast_method("sieve.paused_changed", &notify, &label);
@@ -574,7 +574,7 @@ impl IpcServer {
 
     /// 向**所有**已连接的 GUI 广播 request_decision 取消通知。
     ///
-    /// 关联：ADR-013 Supplement §S.3 / SPEC-002 §9.3 / §9.4。
+    /// 关联：SPEC-002 §9.3 / §9.4。
     pub fn broadcast_request_decision_canceled(&self, notify: RequestDecisionCanceledNotify) {
         let label = format!("request_decision_canceled request_id={}", notify.request_id);
         self.broadcast_method("sieve.request_decision_canceled", &notify, &label);
@@ -1333,7 +1333,7 @@ async fn dispatch_control_plane(
                 Ok(p) => p,
                 Err(e) => return write_error_response(id, e, write_tx).await,
             };
-            // payload 上限 64KB（ADR-013 §S.4）。
+            // payload 上限 64KB。
             const PAYLOAD_LIMIT: usize = 64 * 1024;
             if p.payload.len() > PAYLOAD_LIMIT {
                 return write_error_response(

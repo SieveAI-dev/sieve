@@ -1,4 +1,4 @@
-# Reproducible build flags(ADR-006)
+# Reproducible build flags
 # SOURCE_DATE_EPOCH 由 CI 设置,本地开发不强制
 [build]
 rustflags = [

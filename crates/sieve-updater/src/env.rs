@@ -1,8 +1,8 @@
-//! Environment variable overrides for sieve-updater (ADR-030 §5.3).
+//! Environment variable overrides for sieve-updater.
 
 /// Runtime overrides read from environment variables.
 ///
-/// ADR-030 §5.3: any non-empty value for a boolean env var is treated as `true`.
+/// Any non-empty value for a boolean env var is treated as `true`.
 #[derive(Debug, Clone, Default)]
 pub struct EnvOverrides {
     /// `SIEVE_NO_UPDATE` — skip update check entirely when `true`.
@@ -15,7 +15,7 @@ pub struct EnvOverrides {
 
 /// Reads [`EnvOverrides`] from the current process environment.
 ///
-/// ADR-030 §5.3: called once at daemon startup; subsequent env changes are
+/// Called once at daemon startup; subsequent env changes are
 /// not observed (intentional — avoids TOCTOU races).
 pub fn from_env() -> EnvOverrides {
     EnvOverrides {

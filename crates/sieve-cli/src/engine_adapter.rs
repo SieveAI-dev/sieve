@@ -5,9 +5,9 @@
 //! 由本 crate 在启动时桥接两边（`.cursorrules §3.3` crate 边界协调）。
 //!
 //! v2.0 Phase A 升级：adapter 改为泛型 `<E: MatchEngine>`，支持 `LayeredEngine<S, U>`
-//! 传入（PRD §6.3 + §5.5.2.1），`is_excluded` 逻辑提取为模块级函数。
+//! 传入，`is_excluded` 逻辑提取为模块级函数。
 //!
-//! 关联 ADR-002 / PRD §5.1 / Week 2 出站 / Week 3 入站拦截集成。
+//! 关联 Week 2 出站 / Week 3 入站拦截集成。
 
 use sieve_core::detection::{fingerprint, Action, ContentSource, Detection, Severity};
 use sieve_core::error::SieveCoreResult;
@@ -61,7 +61,7 @@ fn is_excluded_by_rule(candidate: &str, full_context: &str, rule: &RuleEntry) ->
 /// 内部持有规则反查表（`rule_id → RuleEntry`），用于从 `MatchHit` 取真实 severity/action。
 ///
 /// 泛型 `E` 允许传入 `VectorscanEngine`（系统规则）或 `LayeredEngine<VectorscanEngine, UserEngine>`
-/// （系统 + 用户规则，PRD §6.3 / §5.5.2.1，Week 6 Phase A 起）。
+/// （系统 + 用户规则，Week 6 Phase A 起）。
 pub struct OutboundAdapter<E: MatchEngine + Send + Sync + 'static = VectorscanEngine> {
     engine: Arc<E>,
     /// rule_id → RuleEntry 反查表，用于从 MatchHit 映射元数据。
@@ -121,7 +121,7 @@ fn map_default_on_timeout(
 ///
 /// `timeout_seconds` / `default_on_timeout` 取自 `RuleEntry`，不再硬编码 5。
 ///
-/// 关联：ADR-016（二维处置矩阵）、PRD v1.4 §5.4。
+/// 关联：二维处置矩阵。
 fn map_action_by_disposition(
     disposition: sieve_rules::manifest::Disposition,
     _rule_action: RulesAction,
@@ -181,7 +181,7 @@ fn redact_evidence(matched: &str) -> String {
 /// 额外在工具调用检查中调用 `sieve_rules::critical_lock::enforce_action` 保证 fail-closed。
 ///
 /// 泛型 `E` 允许传入 `VectorscanEngine`（系统规则）或 `LayeredEngine<VectorscanEngine, UserEngine>`
-/// （系统 + 用户规则，PRD §6.3 / §5.5.2.1，Week 6 Phase A 起）。
+/// （系统 + 用户规则，Week 6 Phase A 起）。
 pub struct InboundAdapter<E: MatchEngine + Send + Sync + 'static = VectorscanEngine> {
     engine: Arc<E>,
     /// rule_id → RuleEntry 反查表。
@@ -235,7 +235,7 @@ impl<E: MatchEngine + Send + Sync + 'static> InboundEngine for InboundAdapter<E>
             // 这确保 IN-CR-02（hook_terminal）/ IN-CR-05（gui_popup）即使在 fail-closed
             // 名单里也能走正确的 HookMark / HoldForDecision 路径（不被截成 Block）。
             //
-            // 关联：ADR-016（二维处置矩阵）、ADR-014（双层防御）、PRD v1.4 §5.4。
+            // 关联：二维处置矩阵、双层防御。
             let action = if let Some(r) = rule {
                 if let Some(disp) = r.disposition {
                     // 显式 disposition：直接路由，不经过 enforce_action
@@ -290,7 +290,7 @@ impl<E: MatchEngine + Send + Sync + 'static> InboundEngine for InboundAdapter<E>
             });
         }
 
-        // BIP39 inbound second-pass（关联 PRD §9 #4 / IN-CR-03-BIP39-INBOUND）
+        // BIP39 inbound second-pass（关联 IN-CR-03-BIP39-INBOUND）
         // 攻击者诱导用户在入站对话中粘贴助记词（fear-privkey-074~087）。
         // 与 outbound 路径共用同一套 API（candidate_bip39_windows + verify_checksum），
         // 仅 checksum 通过的窗口定级 Critical（避免 BIP39 教学词组 FP）。
@@ -369,7 +369,7 @@ impl<E: MatchEngine + Send + Sync + 'static> OutboundEngine for OutboundAdapter<
     /// - `body_byte_offset`：该文本段在原始请求 body 中的绝对起始偏移，
     ///   用于生成 `Detection.span`（精确字节区间，half-open [start, end)）。
     ///
-    /// BIP39 second-pass（PRD §9 #4）：vectorscan 之后独立扫描。
+    /// BIP39 second-pass：vectorscan 之后独立扫描。
     /// 先提取全部在词表的连续词窗口，再做 SHA-256 checksum 验证，
     /// **仅 checksum 通过才生成 Critical Detection**。
     /// 词表命中但 checksum 失败的窗口**不得**定级 Critical（差异化要求）。
@@ -398,9 +398,9 @@ impl<E: MatchEngine + Send + Sync + 'static> OutboundEngine for OutboundAdapter<
                 }
             }
 
-            // OUT-12/13 Base58Check second-pass（ADR-042）：vectorscan 粗 pattern（前缀+字符集
+            // OUT-12/13 Base58Check second-pass：vectorscan 粗 pattern（前缀+字符集
             // +长度）命中后，仅 Base58Check 校验和通过的候选才产 Detection；校验和失败者视为
-            // 误报丢弃。与 BIP39（OUT-09 second-pass）的 checksum 差异化打法同构（PRD §9 #4）。
+            // 误报丢弃。与 BIP39（OUT-09 second-pass）的 checksum 差异化打法同构。
             if matches!(hit.rule_id.as_str(), "OUT-12" | "OUT-13")
                 && !sieve_rules::base58check::verify_base58check(matched_text)
             {
@@ -416,7 +416,7 @@ impl<E: MatchEngine + Send + Sync + 'static> OutboundEngine for OutboundAdapter<
             // 这确保 OUT-01（auto_redact）即使在 fail-closed 名单里也走 Redact 而非 Block。
             // 只有 disposition=None（旧规则 / 无显式配置）且 fail-closed 时，才走 Block。
             //
-            // 关联：ADR-016（二维处置矩阵）、PRD v1.4 §5.4。
+            // 关联：二维处置矩阵。
             let action = rule
                 .map(|r| {
                     if let Some(disp) = r.disposition {
@@ -469,7 +469,7 @@ impl<E: MatchEngine + Send + Sync + 'static> OutboundEngine for OutboundAdapter<
             });
         }
 
-        // BIP39 second-pass（关联 PRD §9 #4 差异化点）
+        // BIP39 second-pass（差异化点）
         // vectorscan 不覆盖 BIP39，此处独立扫描：
         // 1. 按空白分词，提取全在词表的连续窗口
         // 2. 对每个窗口做 SHA-256 checksum 验证
@@ -615,7 +615,7 @@ mod tests {
         assert_eq!(hits[0].span.end, 109); // 100 + 9
     }
 
-    // ── ADR-042：OUT-12/13 Base58Check second-pass ────────────────────────────
+    // ── OUT-12/13 Base58Check second-pass ────────────────────────────
 
     /// OUT-12 WIF：合法 WIF（校验和通过）被检出并走 Redact；
     /// pattern 命中但校验和错误的伪样本不产 Detection（差异化降 FP）。

@@ -20,12 +20,12 @@ name = "sieve"
 path = "src/main.rs"
 
 [features]
-# v2.0 Phase B beta：行为序列检测，默认关闭（PRD §9 #15）。
+# v2.0 Phase B beta：行为序列检测，默认关闭。
 # 调用方通过 `cargo build --features sequence_detection` 启用，
 # 触发 sieve-core 内 SessionState.sequence_window + 3 条 IN-SEQ-* 启发式。
 default = []
 sequence_detection = ["sieve-core/sequence_detection"]
-# ADR-034 GA 编译期密钥 gate：传递给 sieve-updater + sieve-ipc。
+# GA 编译期密钥 gate：传递给 sieve-updater + sieve-ipc。
 # GA release build 用 `cargo build --features ga_keys` 强制真实签名公钥就位，
 # 占位（TRUSTED_PUBKEY=None / SIEVE_ORIGIN_PUBLIC_KEY 全零）则编译失败。
 # alpha build（default）不启用，行为不变。

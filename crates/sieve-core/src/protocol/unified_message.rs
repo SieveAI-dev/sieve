@@ -1,7 +1,7 @@
-//! UnifiedMessage：Sieve 内部统一消息表示（关联 PRD §6.1）。
+//! UnifiedMessage：Sieve 内部统一消息表示。
 //!
 //! Phase 1 仅 Anthropic 实现，UpstreamProvider::Relay variant 预留但不实现解析。
-//! 设计依据：data-model.md §1 + ADR-004。
+//! 设计依据：data-model.md §1。
 
 use serde::{Deserialize, Serialize};
 use std::time::SystemTime;
@@ -30,13 +30,13 @@ pub enum Direction {
     Inbound,
 }
 
-/// 上游 provider（Phase 1 仅 Anthropic；Phase 1 Week 6 新增 OpenAI；Relay 预留，见 ADR-004 + ADR-018）。
+/// 上游 provider（Phase 1 仅 Anthropic；Phase 1 Week 6 新增 OpenAI；Relay 预留）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "value")]
 pub enum UpstreamProvider {
-    /// Anthropic Messages API（Phase 1 唯一实现，ADR-004）。
+    /// Anthropic Messages API（Phase 1 唯一实现）。
     Anthropic,
-    /// OpenAI Chat Completions API（Phase 1 Week 6 新增，ADR-018）。
+    /// OpenAI Chat Completions API（Phase 1 Week 6 新增）。
     OpenAI,
     /// 中转站（Phase 2 预留，不实现解析）。
     Relay(String),
@@ -127,7 +127,7 @@ mod systemtime_as_secs {
     }
 }
 
-/// Sieve 内部统一消息（Phase 1 仅 Anthropic 实现解析，见 PRD §6.1）。
+/// Sieve 内部统一消息（Phase 1 仅 Anthropic 实现解析）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnifiedMessage {
     /// 角色。

@@ -1,7 +1,7 @@
 //! Anthropic Messages API 请求/响应 schema（子集）。
 //!
 //! 文档: <https://docs.anthropic.com/en/api/messages>
-//! 关联 PRD §6.1 Phase 1 边界。
+//! 关联 Phase 1 边界。
 //!
 //! 只实现 Phase 1 需要的字段；extra 字段通过 `#[serde(flatten)]` 保留，
 //! 确保原始 body 可无损转发到上游。
@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 
 /// POST /v1/messages 请求 body。
 ///
-/// 关联 PRD §6.1：Phase 1 只解析 Anthropic 格式，其他 provider 预留 (ADR-004)。
+/// Phase 1 只解析 Anthropic 格式，其他 provider 预留。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnthropicRequest {
     /// 模型名（如 claude-sonnet-4-6）。

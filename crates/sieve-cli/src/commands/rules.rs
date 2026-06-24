@@ -1,4 +1,4 @@
-//! `sieve rules` 用户规则管理子命令（PRD v2.0 §5.5.2 §5.5.5）。
+//! `sieve rules` 用户规则管理子命令。
 //!
 //! Phase A MVP 4 个子命令：
 //! - `edit`：调用 `$EDITOR`（fallback vim/nano）+ lint pipeline + atomic backup/rename
@@ -16,12 +16,12 @@ use sieve_policy::loader::{load_user_rules, UserRulesFile};
 use std::path::{Path, PathBuf};
 
 const TEMPLATE_USER_TOML: &str = r#"# ~/.sieve/rules/user.toml
-# Sieve 用户规则文件（PRD v2.0 §5.5）。
+# Sieve 用户规则文件。
 #
 # 用户规则只能 ask / warn / mark / status_bar，不能 critical / block / hook_terminal。
 # 系统规则的 Critical 永远先评估，用户规则不能 override 系统拦截。
 #
-# direction 字段（PRD v2.0 §5.5）：
+# direction 字段：
 #   "outbound" — 只扫出站请求（user prompt / system prompt）
 #   "inbound"  — 只扫入站响应（assistant text / tool_use）
 #   "both"     — 两侧都扫（默认值，旧规则文件缺省即 both）
@@ -192,7 +192,7 @@ fn run_edit_at(path: &Path) -> Result<()> {
         eprintln!("⚠ 备份失败（不影响保存）：{}", e);
     }
 
-    // 4. 通知 daemon 重新加载用户规则（PRD §5.5.5 步骤 4）
+    // 4. 通知 daemon 重新加载用户规则
     notify_daemon_reload();
 
     println!(

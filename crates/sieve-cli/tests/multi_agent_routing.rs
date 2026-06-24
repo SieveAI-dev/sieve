@@ -1,4 +1,4 @@
-//! multi-agent 路由集成测试（v1.5，ADR-018 + ADR-019）。
+//! multi-agent 路由集成测试（v1.5）。
 //!
 //! 验证：
 //! 1. Anthropic 路径（/v1/messages）正常路由
@@ -14,7 +14,7 @@
 //! 注：测试 3/4/5/9 需要 IPC 路径验证 DecisionRequest 字段，
 //!     当前通过观察 daemon 行为（426 / 透传 / sieve_blocked 注入）来间接验证。
 //!
-//! 关联：PRD v1.5 §6.1 §4.5 §4.6 / ADR-018（OpenAI 协议）/ ADR-019（multi-agent header）。
+//! 关联：OpenAI 协议路径分发 / multi-agent header 设计。
 
 use bytes::Bytes;
 use http_body_util::{BodyExt, StreamBody};
@@ -351,7 +351,7 @@ fn benign_openai_json() -> Bytes {
 /// POST /v1/messages → 走 Anthropic 解析路径，benign 内容透传，返回 200。
 ///
 /// 验证：v1.4 Anthropic 路径在 v1.5 路径分发后仍正常工作（回归）。
-/// 关联：ADR-018 §路径分发、PRD v1.5 §6.1。
+/// 关联：OpenAI 路径分发。
 #[tokio::test]
 async fn test_1_anthropic_path_routes_correctly() {
     let sse = benign_anthropic_sse();
@@ -381,7 +381,7 @@ async fn test_1_anthropic_path_routes_correctly() {
 /// POST /v1/chat/completions + benign OpenAI body → 透传，返回 200。
 ///
 /// 验证：OpenAI 路径路由正确，benign 内容不触发拦截。
-/// 关联：ADR-018 §路由、PRD v1.5 §6.1。
+/// 关联：OpenAI 路由。
 #[tokio::test]
 async fn test_2_openai_path_routes_correctly() {
     let oai_resp = benign_openai_json();
@@ -405,7 +405,7 @@ async fn test_2_openai_path_routes_correctly() {
 /// POST /v1/chat/completions + 含 secret 的 OpenAI body → 规则引擎应触发出站拦截（426）。
 ///
 /// 验证：OpenAI 路径的出站扫描与 Anthropic 路径对称，规则引擎能扫到 secret。
-/// 关联：ADR-018 §检测兼容性、PRD v1.5 §6.1。
+/// 关联：OpenAI 检测兼容性。
 #[tokio::test]
 async fn test_2b_openai_path_outbound_secret_blocked() {
     let oai_resp = benign_openai_json();
@@ -443,7 +443,7 @@ async fn test_2b_openai_path_outbound_secret_blocked() {
 ///
 /// chain_depth=0 = 用户直接调用，不触发升级。
 /// 验证：source_agent=Claude + chain_depth=0 不影响正常流量。
-/// 关联：ADR-019 §header 格式、PRD v1.5 §6.5。
+/// 关联：multi-agent header 格式。
 #[tokio::test]
 async fn test_3_origin_header_claude_depth_0_passthrough() {
     let sse = benign_anthropic_sse();
@@ -484,7 +484,7 @@ async fn test_3_origin_header_claude_depth_0_passthrough() {
 ///
 /// chain_depth=1 < 2，不触发强制 GuiPopup，benign 请求正常透传。
 /// 验证：Hermes 来源解析正确，chain_depth=1 不升级 disposition。
-/// 关联：ADR-019 §agent 识别、PRD v1.5 §4.6。
+/// 关联：agent 识别。
 #[tokio::test]
 async fn test_4_origin_header_hermes_depth_1_passthrough() {
     let sse = benign_anthropic_sse();
@@ -528,7 +528,7 @@ async fn test_4_origin_header_hermes_depth_1_passthrough() {
 /// 本测试验证 chain_depth=2 不影响 benign 流量（无误报），
 /// 且 chain_depth ≥ 2 的请求不会直接被 426 拒绝。
 ///
-/// 关联：ADR-019 §chain_depth 升级策略、PRD v1.5 §6.5。
+/// 关联：chain_depth 升级策略。
 #[tokio::test]
 async fn test_5_chain_depth_2_benign_still_passes() {
     let sse = benign_anthropic_sse();
@@ -574,8 +574,8 @@ async fn test_5_chain_depth_2_benign_still_passes() {
 
 /// X-Sieve-Origin: claude:<uuid>:5 → chain_depth ≥ 5，直接返回 426。
 ///
-/// ADR-019 §嵌套深度限制：超过 5 层视为攻击模式，跳过所有检测直接拒绝。
-/// 关联：ADR-019 §嵌套深度限制、PRD v1.5 §6.5。
+/// 嵌套深度限制：超过 5 层视为攻击模式，跳过所有检测直接拒绝。
+/// 关联：嵌套深度限制。
 #[tokio::test]
 async fn test_6_chain_depth_5_rejected_immediately() {
     // 上游不应被调用（直接 426 返回），但仍需有效地址
@@ -651,7 +651,7 @@ async fn test_6b_chain_depth_6_also_rejected() {
 
 /// 缺 X-Sieve-Origin header → source_agent=Unknown, chain_depth=0，正常透传。
 ///
-/// 关联：ADR-019 §缺 header 处理、PRD v1.5 §6.5。
+/// 关联：缺 header 处理。
 #[tokio::test]
 async fn test_7_missing_origin_header_passes_as_unknown() {
     let sse = benign_anthropic_sse();
@@ -687,7 +687,7 @@ async fn test_7_missing_origin_header_passes_as_unknown() {
 /// X-Sieve-Origin 格式错误 → fail-open：视为无 header（source_agent=Unknown），正常透传。
 ///
 /// 格式错误不应阻断请求，但 daemon 应记录 audit 警告。
-/// 关联：ADR-019 §解析失败处理、PRD v1.5 §6.5。
+/// 关联：解析失败处理。
 #[tokio::test]
 async fn test_8_malformed_origin_header_fail_open() {
     let sse = benign_anthropic_sse();
@@ -768,7 +768,7 @@ async fn test_8b_invalid_chain_depth_fail_open() {
 ///
 /// 当前通过观察 benign 流量正常透传来验证 header 解析不会崩溃；
 /// 详细字段验证需要 IPC 侧 hook（当前无 GUI 连接）。
-/// 关联：PRD v1.5 §4.5 场景 E、IN-GEN-06。
+/// 关联：场景 E、IN-GEN-06。
 #[tokio::test]
 async fn test_9_source_channel_header_parsed_without_error() {
     let sse = benign_anthropic_sse();
@@ -818,7 +818,7 @@ async fn test_9_source_channel_header_parsed_without_error() {
 /// chain_depth=4 时（< 5），请求应正常透传（不触发 426）。
 ///
 /// 验证 chain_depth 边界：4 不拒绝，5 拒绝。
-/// 关联：ADR-019 §嵌套深度限制边界。
+/// 关联：嵌套深度限制边界。
 #[tokio::test]
 async fn test_chain_depth_4_not_rejected() {
     let sse = benign_anthropic_sse();
@@ -856,7 +856,7 @@ async fn test_chain_depth_4_not_rejected() {
 /// OpenAI 路径 + chain_depth=5 → 直接 426。
 ///
 /// 验证 chain_depth ≥ 5 拒绝逻辑在 OpenAI 路径上也工作。
-/// 关联：ADR-019 §嵌套深度限制、ADR-018 §路径分发。
+/// 关联：嵌套深度限制、OpenAI 路径分发。
 #[tokio::test]
 async fn test_openai_path_chain_depth_5_rejected() {
     let (upstream, _up) =

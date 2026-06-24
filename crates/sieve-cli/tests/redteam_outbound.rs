@@ -1,17 +1,17 @@
-//! ADR-043 红队 bypass 测试集——出站方向（request-side 脱敏）。
+//! 红队 bypass 测试集——出站方向（request-side 脱敏）。
 //!
 //! **这是已知攻击手法的回归基线，不是检测能力的完备性证明。**
 //! 红队集只驱动密钥样本并断言期望处置（脱敏改写 / 伪样本放行），**不新增任何
 //! 检测规则**；检测规则定义由签名规则包提供、随更新通道分发。规则包缺失时本测试
 //! 优雅 SKIP（打印 SKIP 并 return），绝不 panic / fail——这是公开仓的预期态。
 //!
-//! 覆盖（ADR-043 §红队 bypass 用例清单 #6）：
+//! 覆盖（红队 bypass 用例清单 #6）：
 //! - BIP39 真助记词（真 SHA-256 checksum）→ 出站请求体被脱敏（recall）。
 //! - Bitcoin WIF（5HueCGU…）→ 被脱敏。
 //! - BIP-32 xprv（xprv9s21…）→ 被脱敏。
 //!
 //! 全程 hermetic：mock 上游记录 sieve 转发给上游的请求体，断言原始密钥不出现、
-//! 出现 `REDACTED` 占位符（脱敏后转发，不弹窗——ADR-043 出站脱敏自动改写约束）。
+//! 出现 `REDACTED` 占位符（脱敏后转发，不弹窗——出站脱敏自动改写约束）。
 //!
 //! 密钥样本是公开的测试向量（BIP39 / WIF / BIP-32 规范示例），写在测试里是回归样本，
 //! 不构成检测规则定义。
@@ -173,7 +173,7 @@ dry_run = false
         .arg("--config")
         .arg(config_file.path())
         .env("SIEVE_LOG", "warn")
-        // ADR-030: 测试禁止触发真实更新检查联网 + telemetry 上报
+        // 测试禁止触发真实更新检查联网 + telemetry 上报
         .env("SIEVE_NO_UPDATE", "1")
         .env("SIEVE_NO_TELEMETRY", "1")
         .env("SIEVE_HOME", sieve_home.path())

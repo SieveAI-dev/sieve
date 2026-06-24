@@ -1,4 +1,4 @@
-//! Sieve daemon 入站拦截集成测试（UCSB 4 类攻击 PoC，关联 PRD §10.1 Week 3 完成定义）。
+//! Sieve daemon 入站拦截集成测试（UCSB 4 类攻击 PoC）。
 //!
 //! 启动真实 sieve 二进制 + mock 上游（返回带攻击 payload 的 SSE 流）+ 客户端发请求，
 //! 验证：
@@ -196,7 +196,7 @@ dry_run = false
         binary.display()
     );
 
-    // 测试隔离：自动 isolate 到 tempdir + 禁更新（ADR-030 防止打 updates.sieveai.dev）。
+    // 测试隔离：自动 isolate 到 tempdir + 禁更新（防止打 updates.sieveai.dev）。
     let sieve_home = tempfile::tempdir().unwrap();
 
     let proc = Command::new(&binary)
@@ -406,7 +406,7 @@ async fn fetch_response_body_with_prompt(port: u16, prompt: &str) -> (hyper::Sta
 
 /// 同一 SSE 流：第一个 event 植入原始地址，第二个 event 出现近似地址（末字符 2→3）→ 截流。
 ///
-/// 关联 PRD §5.2 IN-CR-01 / UCSB 论文 attack 1。
+/// 关联 IN-CR-01 / UCSB 论文 attack 1。
 #[tokio::test]
 async fn ucsb_attack_1_address_substitution_blocked() {
     // 原始地址：0xabcdef1234567890abcdef1234567890abcdef12
@@ -473,7 +473,7 @@ async fn ucsb_attack_1_address_substitution_blocked() {
 ///
 /// 修 #2（disposition 优先）后：IN-CR-02 走 HookMark 路径，而非旧的 Block 路径。
 ///
-/// 关联 PRD §5.2 IN-CR-02 / UCSB 论文 attack 2 / ADR-014（双层防御）。
+/// 关联 IN-CR-02 / UCSB 论文 attack 2 / 双层防御。
 #[tokio::test]
 async fn ucsb_attack_2_dangerous_shell_hookmark_passthrough() {
     let attack_payload = sse_response(&[
@@ -525,7 +525,7 @@ async fn ucsb_attack_2_dangerous_shell_hookmark_passthrough() {
 
 /// tool_use name = `eth_signTransaction` → 聚合完成后 IN-CR-05-EVM 触发截流。
 ///
-/// 关联 PRD §5.2 IN-CR-05 / UCSB 论文 attack 3。
+/// 关联 IN-CR-05 / UCSB 论文 attack 3。
 #[tokio::test]
 async fn ucsb_attack_3_signing_tool_blocked() {
     let attack_payload = sse_response(&[
@@ -584,7 +584,7 @@ async fn ucsb_attack_3_signing_tool_blocked() {
 /// 注：IN-GEN-04 设为 gui_popup 是设计决策（exfil 需要用户确认），但生产中应有 GUI 连接。
 /// 集成测试中无 GUI，因此 fail-closed → sieve_blocked 被注入。
 ///
-/// 关联 PRD §5.2 / US-08 / UCSB 论文 attack 4 / ADR-014（双层防御）。
+/// 关联 US-08 / UCSB 论文 attack 4 / 双层防御。
 #[tokio::test]
 async fn ucsb_attack_4_markdown_exfil_failclosed_without_gui() {
     let attack_payload = sse_response(&[
@@ -624,7 +624,7 @@ async fn ucsb_attack_4_markdown_exfil_failclosed_without_gui() {
     );
 }
 
-// ─── IN-CR-04: 持久化机制（Critical block，Week 4，PRD §5.2 / US-07）──────────
+// ─── IN-CR-04: 持久化机制（Critical block，Week 4，US-07）──────────
 
 /// tool_use Bash command 含 `>> ~/.bashrc` → IN-CR-04-SHELL-RC-APPEND 触发 HookMark。
 ///
@@ -634,7 +634,7 @@ async fn ucsb_attack_4_markdown_exfil_failclosed_without_gui() {
 ///
 /// 修 #2（disposition 优先）后：IN-CR-04 走 HookMark 路径，旧的直接 Block 路径已更新。
 ///
-/// 关联 PRD §5.2 IN-CR-04 / Roadmap Week 4 / US-07 / ADR-014（双层防御）。
+/// 关联 IN-CR-04 / Roadmap Week 4 / US-07 / 双层防御。
 #[tokio::test]
 async fn in_cr_04_persistence_shell_rc_hookmark_passthrough() {
     let attack_payload = sse_response(&[
@@ -682,7 +682,7 @@ async fn in_cr_04_persistence_shell_rc_hookmark_passthrough() {
     );
 }
 
-// ─── IN-CR-03: 敏感路径访问（warn-only，Week 4，PRD §5.2）─────────────────────
+// ─── IN-CR-03: 敏感路径访问（warn-only，Week 4）─────────────────────
 
 /// tool_use input 含 `~/.ssh/id_rsa` → IN-CR-03-SSH-PRIVATE 触发 high warn detection。
 ///
@@ -690,7 +690,7 @@ async fn in_cr_04_persistence_shell_rc_hookmark_passthrough() {
 /// 用户可能合法请求读取 SSH 密钥（如配置 git）。daemon 仅记录 detection 到日志，
 /// 流量透传。Week 5 接 CLI 弹窗后会变成 5s 倒计时确认。
 ///
-/// 关联 PRD §5.2 IN-CR-03 / Roadmap Week 4。
+/// 关联 IN-CR-03 / Roadmap Week 4。
 #[tokio::test]
 async fn in_cr_03_sensitive_path_warn_passes_through() {
     let attack_payload = sse_response(&[
@@ -751,10 +751,10 @@ async fn in_cr_03_sensitive_path_warn_passes_through() {
 
 /// request body 中含 EVM 地址 A，上游 SSE 仅输出与 A Levenshtein 距离 1 的地址 B。
 ///
-/// 真实 PRD §4.2 攻击场景：用户 prompt → 地址 A，模型/中转站响应 → 地址 B（偷换地址）。
+/// 真实攻击场景：用户 prompt → 地址 A，模型/中转站响应 → 地址 B（偷换地址）。
 /// 修复前 IN-CR-01 只从 SSE text_delta 学地址，首轮漏报；修复后先 seed prompt 地址。
 ///
-/// 关联 P0-3 / PRD §4.2 / IN-CR-01。
+/// 关联 P0-3 / IN-CR-01。
 #[tokio::test]
 async fn address_substitution_from_prompt_seed_blocks() {
     // 原始地址（在 prompt 中）：0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb1
@@ -820,7 +820,7 @@ async fn address_substitution_from_prompt_seed_blocks() {
 /// 修复前：flush() 残留 event 的 detection 被 `let _ = ...` 丢弃，不阻断。
 /// 修复后：flush 分支走同一套 blocking 决策，必须注入 sieve_blocked。
 ///
-/// 关联 P0-4 / PRD §9 #5 "提前断流"。
+/// 关联 P0-4 / "提前断流"。
 #[tokio::test]
 async fn unterminated_final_event_still_blocks_critical() {
     // 构造 SSE 流：最后一个 content_block_stop 缺末尾 \n\n（未闭合）
@@ -861,7 +861,7 @@ async fn unterminated_final_event_still_blocks_critical() {
 
 /// tool_use block 的 partial_json 为畸形 JSON（缺闭合引号与大括号）→ 应注入 sieve_blocked。
 ///
-/// 攻击者可故意发畸形 JSON 绕过 IN-CR-05 签名工具检测（P0-6 / PRD §9 #3 fail-closed）。
+/// 攻击者可故意发畸形 JSON 绕过 IN-CR-05 签名工具检测（P0-6 / fail-closed）。
 /// 修复前：aggregator 静默 Ok(None)，daemon 跳过 on_tool_use_complete，畸形 JSON 被透传。
 /// 修复后：aggregator 返回 Err(MalformedToolUse)，daemon fail-closed 注入 sieve_blocked。
 #[tokio::test]
@@ -913,7 +913,7 @@ async fn malformed_tool_use_partial_json_blocks() {
 
 /// benign SSE 响应（无任何攻击 payload）→ 正常透传，无 sieve_blocked 注入。
 ///
-/// 关联 PRD §9 #7：Critical 拦截 FP < 0.5%。
+/// 关联 Critical 拦截 FP < 0.5%。
 #[tokio::test]
 async fn benign_response_passes_through_unchanged() {
     let benign_payload = sse_response(&[
@@ -1043,7 +1043,7 @@ async fn fetch_openai_stream_response(port: u16, prompt: &str) -> (hyper::Status
 /// 修复后（R9-#1）：proxy_openai 在 forward_with_openai_inbound_inspection 前 seed，
 /// 地址 A 进入状态机 → 地址 B 命中 IN-CR-01 → sieve_blocked 注入。
 ///
-/// 关联：R9-#1 / PRD §4.2 IN-CR-01 / ADR-014 §双层防御。
+/// 关联：R9-#1 / IN-CR-01 / 双层防御。
 #[tokio::test]
 async fn openai_prompt_address_seed_blocks_address_substitution() {
     // 原始地址（在 prompt 中）：0x742d35Cc6634C0532925a3b844Bc9e7595f1234A
@@ -1251,7 +1251,7 @@ async fn fetch_openai_json_response(port: u16) -> (hyper::StatusCode, Bytes) {
 /// application/json 响应里的 tool_use 完全绕过所有入站规则。
 /// 修复后：按 Content-Type 路由，JSON 路径解析 content[] 提取 tool_use 喂 InboundFilter。
 ///
-/// 关联：lessons.md 2026-04-27 [安全] 条目 / PRD §5.2 IN-CR-05。
+/// 关联：lessons.md 2026-04-27 [安全] 条目 / IN-CR-05。
 #[tokio::test]
 async fn anthropic_non_streaming_json_inbound_block() {
     // 非流式 Anthropic 响应：含 tool_use eth_signTransaction → 应触发 IN-CR-05-EVM 截流
@@ -1306,7 +1306,7 @@ async fn anthropic_non_streaming_json_inbound_block() {
 /// 同上漏洞的 OpenAI 路径（/v1/chat/completions 非流式响应）。
 /// 修复后：JSON 路径解析 choices[0].message.tool_calls 提取 function 调用喂 InboundFilter。
 ///
-/// 关联：lessons.md 2026-04-27 [安全] 条目 / PRD §5.2 IN-CR-05 / ADR-018。
+/// 关联：lessons.md 2026-04-27 [安全] 条目 / IN-CR-05 / OpenAI 协议路径分发。
 #[tokio::test]
 async fn openai_non_streaming_json_inbound_block() {
     // 非流式 OpenAI 响应：含 tool_calls eth_signTransaction → 应触发 IN-CR-05-EVM 截流
@@ -1370,7 +1370,7 @@ async fn openai_non_streaming_json_inbound_block() {
 /// 验证 AutoRedact 路径（redact_hits_openai 非空）也调用 seed_known_addresses_from_text，
 /// 不因走 early-return 路径而跳过 seed。
 ///
-/// 关联：R9-#1 / PRD §4.2 IN-CR-01 / 修 A2-#1 AutoRedact。
+/// 关联：R9-#1 / IN-CR-01 / 修 A2-#1 AutoRedact。
 #[tokio::test]
 async fn openai_autoredact_path_still_seeds_address() {
     // 同时含 auto-redact 触发的 secret + EVM 地址

@@ -1,4 +1,4 @@
-//! Sieve policy crate（PRD v2.0 Phase A）。
+//! Sieve policy crate（Phase A）。
 //!
 //! 提供用户规则系统（§5.5）和灰名单管理（§5.4.2）的核心能力：
 //!

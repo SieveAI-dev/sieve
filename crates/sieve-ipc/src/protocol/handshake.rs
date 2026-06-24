@@ -35,11 +35,11 @@ pub struct HelloParams {
 ///
 /// JSON-RPC 2.0 method = `"sieve.reload_user_rules"`，fire-and-forget（无 id 字段）。
 ///
-/// 关联：PRD v2.0 §5.5.5（编辑器关闭后 lint + atomic backup + IPC reload）+ ADR-013。
+/// 关联：编辑器关闭后 lint + atomic backup + IPC reload 流程。
 ///
 /// daemon 收到后：
 /// 1. 重新读取 `~/.sieve/rules/user.toml`
-/// 2. lint + UserEngine::compile（fail-safe，PRD §9 #14：失败保留旧引擎）
+/// 2. lint + UserEngine::compile（fail-safe：失败保留旧引擎）
 /// 3. atomic swap LayeredEngine 内的 user 字段
 /// 4. 成功 → 推一条 `NotifyKind::UserRulesReloaded` StatusBarNotify
 /// 5. 失败 → 推一条 `NotifyKind::UserRulesLoadFailed`

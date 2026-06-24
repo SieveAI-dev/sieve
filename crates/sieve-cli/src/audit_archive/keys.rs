@@ -1,4 +1,4 @@
-//! `full` 档密钥生命周期（ADR-037 决策 3/5/6 / SPEC-009 §4）。
+//! `full` 档密钥生命周期（SPEC-009 §4）。
 //!
 //! write-only logging：daemon **只持公钥 recipient**（加密能力），**私钥 identity 离线**
 //! 用口令（age 原生 scrypt）保护。本模块负责：①生成密钥对 ②口令保护/解锁私钥。

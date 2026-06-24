@@ -1,4 +1,4 @@
-//! `AuditStore` append-only 集成测试（ADR-007 / ADR-014）。
+//! `AuditStore` append-only 集成测试（审计存储 + 双层防御日志）。
 //!
 //! 验证：写 3 条 → SELECT 能读到；UPDATE / DELETE 被触发器拒绝。
 //!

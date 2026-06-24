@@ -1,4 +1,4 @@
-//! IPC 控制面 dispatch 集成测试（ADR-013 Supplement 2026-05-02 §S.4）。
+//! IPC 控制面 dispatch 集成测试。
 //!
 //! 验证 socket_server 的 dispatch_message 能正确路由 8 个新方法到 control_rx，
 //! 并把 reply 写回 GUI socket。daemon 侧 handler 在 daemon_control_plane.rs 单测覆盖；
@@ -70,7 +70,7 @@ fn spawn_mock_daemon(server: Arc<IpcServer>) {
                             addr: "127.0.0.1".to_owned(),
                             port: 11453,
                         },
-                        // ADR-026 Stage F：multi-listener 快照数组（测试用单元素）
+                        // multi-listener 快照数组（测试用单元素）
                         listeners: vec![sieve_ipc::ListenerSnapshot {
                             addr: "127.0.0.1".to_owned(),
                             port: 11453,

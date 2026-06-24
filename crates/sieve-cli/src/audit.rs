@@ -1,9 +1,9 @@
-//! 审计日志（关联 data-model.md §审计 + ADR-007 + ADR-014）。
+//! 审计日志（关联审计数据模型 + 双层防御日志设计）。
 //!
 //! Week 5 起接入 SQLite append-only 存储。
-//! Week 6（PRD §5.6.1 v2.0）：schema v2 加 caller_pid / caller_exe 两列。
+//! Week 6（v2.0）：schema v2 加 caller_pid / caller_exe 两列。
 //!
-//! 设计约束（ADR-007 / ADR-014）：
+//! 设计约束：
 //! - SQLite append-only：BEFORE UPDATE / DELETE 触发器拒绝修改。
 //! - 异步写入接口：`tokio::task::spawn_blocking` + internal `Mutex` 串行化。
 //! - 不暴露 `rusqlite` 类型到 crate 外部。
@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 
 // ─────────────────────────── CallerContext ─────────────────────────────────
 
-/// 调用方上下文（PRD §5.6.1 v2.0）。
+/// 调用方上下文（v2.0）。
 ///
 /// 记录触发审计事件的进程 PID 和可执行文件路径，用于追溯 Claude Code
 /// 或其他接入方的身份。两个字段均为 NULL 兼容（接入方未提供时为 None）。
@@ -34,9 +34,9 @@ pub struct CallerContext {
 
 // ─────────────────────────── AuditEvent ────────────────────────────────────
 
-/// 审计事件枚举（关联 PRD §5.4 处置矩阵 + ADR-014 双层防御日志需求）。
+/// 审计事件枚举（关联处置矩阵 + 双层防御日志需求）。
 ///
-/// PRD §5.6.1 v2.0：每个 variant 含 `caller: CallerContext`，
+/// v2.0：每个 variant 含 `caller: CallerContext`，
 /// 记录 caller_pid / caller_exe；`#[serde(default)]` 保证旧 raw_json 反序列化兼容。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -47,7 +47,7 @@ pub enum AuditEvent {
         severity: String,
         request_id: String,
         raw_json: Option<String>,
-        /// 调用方上下文（PRD §5.6.1）；旧 JSON 缺失时 Default 为空。
+        /// 调用方上下文；旧 JSON 缺失时 Default 为空。
         #[serde(default)]
         caller: CallerContext,
     },
@@ -57,7 +57,7 @@ pub enum AuditEvent {
         severity: String,
         request_id: String,
         raw_json: Option<String>,
-        /// 调用方上下文（PRD §5.6.1）；旧 JSON 缺失时 Default 为空。
+        /// 调用方上下文；旧 JSON 缺失时 Default 为空。
         #[serde(default)]
         caller: CallerContext,
     },
@@ -67,7 +67,7 @@ pub enum AuditEvent {
         severity: String,
         request_id: String,
         raw_json: Option<String>,
-        /// 调用方上下文（PRD §5.6.1）；旧 JSON 缺失时 Default 为空。
+        /// 调用方上下文；旧 JSON 缺失时 Default 为空。
         #[serde(default)]
         caller: CallerContext,
     },
@@ -78,7 +78,7 @@ pub enum AuditEvent {
         decision: String,
         request_id: String,
         raw_json: Option<String>,
-        /// 调用方上下文（PRD §5.6.1）；旧 JSON 缺失时 Default 为空。
+        /// 调用方上下文；旧 JSON 缺失时 Default 为空。
         #[serde(default)]
         caller: CallerContext,
     },
@@ -88,12 +88,12 @@ pub enum AuditEvent {
         severity: String,
         request_id: String,
         raw_json: Option<String>,
-        /// 调用方上下文（PRD §5.6.1）；旧 JSON 缺失时 Default 为空。
+        /// 调用方上下文；旧 JSON 缺失时 Default 为空。
         #[serde(default)]
         caller: CallerContext,
     },
-    // ── v2.0 新增事件变体（PRD §5.4.2 / §5.5.5 / §5.7）──────────────────────
-    /// 入站工具调用被用户决策（Allow/Deny）处置完成（PRD §5.4.2）。
+    // ── v2.0 新增事件变体 ──────────────────────
+    /// 入站工具调用被用户决策（Allow/Deny）处置完成。
     DecisionMade {
         rule_id: String,
         /// "allow" | "deny" | "redact_and_allow"
@@ -105,7 +105,7 @@ pub enum AuditEvent {
         #[serde(default)]
         caller: CallerContext,
     },
-    /// 灰名单条目已写入（PRD §5.4.2）。
+    /// 灰名单条目已写入。
     GraylistAdded {
         rule_id: String,
         fingerprint: String,
@@ -113,14 +113,14 @@ pub enum AuditEvent {
         #[serde(default)]
         caller: CallerContext,
     },
-    /// 灰名单写入被 Critical 锁拒绝（fail-closed 二次校验，PRD §5.4.2）。
+    /// 灰名单写入被 Critical 锁拒绝（fail-closed 二次校验）。
     GraylistCriticalRejected {
         rule_id: String,
         request_id: String,
         #[serde(default)]
         caller: CallerContext,
     },
-    /// 灰名单命中，跳过 IPC 弹窗直接 Allow（PRD §5.4.2）。
+    /// 灰名单命中，跳过 IPC 弹窗直接 Allow。
     GraylistHit {
         rule_id: String,
         fingerprint: String,
@@ -128,7 +128,7 @@ pub enum AuditEvent {
         #[serde(default)]
         caller: CallerContext,
     },
-    /// 灰名单写入失败（磁盘满 / 权限错 / 序列化错，PRD §5.4.2）。
+    /// 灰名单写入失败（磁盘满 / 权限错 / 序列化错）。
     ///
     /// 写入失败不影响本次 Allow 决策（fail-soft），但必须记录到 audit 供事后排查。
     GraylistAddFailed {
@@ -139,7 +139,7 @@ pub enum AuditEvent {
         #[serde(default)]
         caller: CallerContext,
     },
-    /// 行为序列检测命中（IN-SEQ-*，PRD §5.7）。
+    /// 行为序列检测命中（IN-SEQ-*）。
     SequenceHit {
         rule_id: String,
         description: String,
@@ -147,7 +147,7 @@ pub enum AuditEvent {
         #[serde(default)]
         caller: CallerContext,
     },
-    /// 用户规则 reload 结果（PRD §5.5.5）。
+    /// 用户规则 reload 结果。
     UserRulesReloaded {
         /// reload 是否成功
         success: bool,
@@ -161,7 +161,7 @@ pub enum AuditEvent {
         #[serde(default)]
         trigger_id: Option<String>,
     },
-    // ── v2.1 GUI 控制面（ADR-013 Supplement 2026-05-02）─────────────────────
+    // ── v2.1 GUI 控制面 ─────────────────────
     /// 操作被 critical_lock 拒绝（防线二的非 graylist 出口，如 set_preset_overrides）。
     CriticalLockBlocked {
         rule_id: String,
@@ -222,11 +222,11 @@ pub enum AuditEvent {
         #[serde(default)]
         caller: CallerContext,
     },
-    /// 入站 Critical 工具调用被 fail-closed 自动拦截（无用户决策，PRD §9 #3）。
+    /// 入站 Critical 工具调用被 fail-closed 自动拦截（无用户决策）。
     ///
     /// 接线背景：入站 block 路径（SSE + JSON、Anthropic + OpenAI）此前一律不落 audit
     /// （真机 dogfood 抓出，2026-06-18），`sieve audit query` 查不到任何拦截记录。
-    /// 仅记录元数据（无 payload），整体序列化天然零 secret（PRD §5.6.1 / §9 #13）。
+    /// 仅记录元数据（无 payload），整体序列化天然零 secret。
     InboundBlocked {
         rule_id: String,
         severity: String,
@@ -427,7 +427,7 @@ impl AuditEvent {
         }
     }
 
-    /// 提取调用方 PID（PRD §5.6.1）。
+    /// 提取调用方 PID。
     fn caller_pid(&self) -> Option<i32> {
         match self {
             Self::OutboundRedacted { caller, .. }
@@ -457,7 +457,7 @@ impl AuditEvent {
         }
     }
 
-    /// 提取调用方可执行路径（PRD §5.6.1）。
+    /// 提取调用方可执行路径。
     fn caller_exe(&self) -> Option<&str> {
         match self {
             Self::OutboundRedacted { caller, .. }
@@ -490,17 +490,17 @@ impl AuditEvent {
 
 // ─────────────────────────── Schema migration ──────────────────────────────
 
-/// 当前 schema 版本（v3：ADR-026 Stage E 加 provider_id 列）。
+/// 当前 schema 版本（v3：加 provider_id 列）。
 const CURRENT_SCHEMA_VERSION: u32 = 3;
 
 /// 打开数据库后执行一次 schema 迁移。
 ///
 /// - 全新 DB（user_version = 0）：CREATE TABLE 已含全部最新列，直接设版本号。
 /// - v1 老 DB（user_version = 1）：`ALTER TABLE ADD COLUMN`（caller_pid/exe + provider_id），不重写表。
-/// - v2 老 DB（user_version = 2）：仅加 provider_id 列（ADR-026 Stage E）。
+/// - v2 老 DB（user_version = 2）：仅加 provider_id 列。
 /// - v3 及以上：跳过。
 ///
-/// 迁移在事务内执行，失败自动回滚（PRD §5.6.1）。
+/// 迁移在事务内执行，失败自动回滚。
 ///
 /// # Errors
 /// SQLite 执行失败时返回错误。
@@ -523,7 +523,7 @@ fn migrate(conn: &Connection) -> Result<()> {
     }
 
     if current == 1 {
-        // v1 → v2：加 caller_pid + caller_exe（PRD §5.6.1）。
+        // v1 → v2：加 caller_pid + caller_exe。
         // ALTER TABLE ADD COLUMN 在 SQLite 中是 O(1) 操作（不重写表），
         // 新列对现有行为 NULL，不触发 NOT NULL 约束失败（列定义无 NOT NULL）。
         // BEFORE UPDATE/DELETE 触发器基于行操作，ADD COLUMN 不失效触发器。
@@ -543,16 +543,16 @@ fn migrate(conn: &Connection) -> Result<()> {
         .context("读取 PRAGMA user_version 失败")?;
 
     if after_v1 == 2 {
-        // v2 → v3：加 provider_id 列（ADR-026 Stage E）。
-        // 新列默认 'unknown' 兼容 ADR-026 之前写入的旧记录；
-        // ADR-026 之后所有 audit.append 都会显式传 provider_id（来自 listener 元信息）。
+        // v2 → v3：加 provider_id 列。
+        // 新列默认 'unknown' 兼容旧记录；
+        // 之后所有 audit.append 都会显式传 provider_id（来自 listener 元信息）。
         conn.execute_batch(
             "BEGIN;
              ALTER TABLE audit_events ADD COLUMN provider_id TEXT NOT NULL DEFAULT 'unknown';
              PRAGMA user_version = 3;
              COMMIT;",
         )
-        .context("v2→v3 schema 迁移失败（ADR-026 provider_id）")?;
+        .context("v2→v3 schema 迁移失败（provider_id）")?;
     }
 
     Ok(())
@@ -563,8 +563,8 @@ fn migrate(conn: &Connection) -> Result<()> {
 /// 审计存储句柄（SQLite append-only）。
 ///
 /// Week 5 起持有真实 SQLite 连接；线程安全通过 `Arc<Mutex<Connection>>` 实现。
-/// 关联 ADR-014 双层防御日志需求。
-/// 审计存储句柄（SQLite append-only，PRD §5.6.1 / ADR-014）。
+/// 关联双层防御日志需求。
+/// 审计存储句柄（SQLite append-only）。
 pub struct AuditStore {
     conn: Arc<Mutex<Connection>>,
 }
@@ -572,7 +572,7 @@ pub struct AuditStore {
 impl AuditStore {
     /// 初始化审计存储：打开 SQLite，执行 schema 迁移，安装 append-only 触发器。
     ///
-    /// 幂等——文件已存在时执行 schema 迁移（v1→v2），不重建表（PRD §5.6.1）。
+    /// 幂等——文件已存在时执行 schema 迁移（v1→v2），不重建表。
     ///
     /// # Errors
     /// SQLite 打开、迁移或 DDL 执行失败时返回错误。
@@ -694,7 +694,6 @@ impl AuditStore {
 /// 用于 control plane 调用、规则 reload、preset 变更等不属于任何具体上游的事件。
 /// `audit_events.provider_id` 列 NOT NULL，所以系统事件需用此常量而非空字符串。
 ///
-/// 关联：ADR-026 Stage E。
 pub const SYSTEM_PROVIDER_ID: &str = "_system";
 
 /// 测试 / 兜底场景的 provider_id 常量（同样 NOT NULL 占位）。
@@ -705,8 +704,8 @@ pub const UNKNOWN_PROVIDER_ID: &str = "unknown";
 
 /// 建表 DDL（含 v3 全部新列：caller_pid / caller_exe / provider_id）。
 ///
-/// - v2 列（PRD §5.6.1）：caller_pid / caller_exe
-/// - v3 列（ADR-026 Stage E）：provider_id —— 标注本次审计事件命中哪个 listener 上游
+/// - v2 列：caller_pid / caller_exe
+/// - v3 列：provider_id —— 标注本次审计事件命中哪个 listener 上游
 const CREATE_TABLE_DDL: &str = r#"
 CREATE TABLE IF NOT EXISTS audit_events (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -718,13 +717,13 @@ CREATE TABLE IF NOT EXISTS audit_events (
     decision            TEXT,               -- 'Allow' | 'Block' | NULL
     request_id          TEXT    NOT NULL,
     raw_json            TEXT,
-    caller_pid          INTEGER,                                        -- 调用方 PID（PRD §5.6.1，NULL 表示未知）
-    caller_exe          TEXT,                                           -- 调用方可执行路径（PRD §5.6.1，NULL 表示未知）
-    provider_id         TEXT    NOT NULL DEFAULT 'unknown'              -- 上游身份标识（ADR-026 Stage E，'unknown' 表示无 listener 上下文）
+    caller_pid          INTEGER,                                        -- 调用方 PID（NULL 表示未知）
+    caller_exe          TEXT,                                           -- 调用方可执行路径（NULL 表示未知）
+    provider_id         TEXT    NOT NULL DEFAULT 'unknown'              -- 上游身份标识（'unknown' 表示无 listener 上下文）
 );
 "#;
 
-/// append-only 触发器：拒绝 UPDATE / DELETE（ADR-007 / ADR-014）。
+/// append-only 触发器：拒绝 UPDATE / DELETE。
 const APPEND_ONLY_TRIGGERS_DDL: &str = r#"
 CREATE TRIGGER IF NOT EXISTS no_update
 BEFORE UPDATE ON audit_events
@@ -848,7 +847,7 @@ mod tests {
                         Option::<String>::None,
                         Option::<i32>::None,    // caller_pid
                         Option::<String>::None, // caller_exe
-                        UNKNOWN_PROVIDER_ID,    // provider_id (v3 schema, ADR-026 Stage E)
+                        UNKNOWN_PROVIDER_ID,    // provider_id (v3 schema)
                     ],
                 )
                 .unwrap();
@@ -877,7 +876,7 @@ mod tests {
         }
     }
 
-    // ─── 新增：schema migration 测试（PRD §5.6.1）───────────────────────────
+    // ─── 新增：schema migration 测试 ───────────────────────────
 
     /// 构建一个模拟 v1 schema 的 in-memory 数据库（无 caller_pid/caller_exe 列，
     /// PRAGMA user_version = 1），插入一条记录，调用 migrate，验证数据无损 + 版本升到 2。
@@ -920,17 +919,14 @@ mod tests {
         )
         .unwrap();
 
-        // 调用迁移（v1 → v3 一次性迁移，ADR-026 Stage E 升级到 v3）
+        // 调用迁移（v1 → v3 一次性迁移）
         migrate(&conn).expect("migrate 应成功");
 
         // 验证 user_version = 3（v1 → v3 完整迁移）
         let ver: u32 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(
-            ver, 3,
-            "v1 迁移后 user_version 应为最新 v3 (ADR-026 Stage E)"
-        );
+        assert_eq!(ver, 3, "v1 迁移后 user_version 应为最新 v3");
 
         // 验证旧数据仍存在
         let rule_id: String = conn
@@ -958,7 +954,7 @@ mod tests {
         assert!(pid.is_none(), "迁移后旧行 caller_pid 应为 NULL");
         assert!(exe.is_none(), "迁移后旧行 caller_exe 应为 NULL");
 
-        // 验证 v3 列存在且旧行默认 'unknown'（ADR-026 Stage E）
+        // 验证 v3 列存在且旧行默认 'unknown'
         let provider: String = conn
             .query_row(
                 "SELECT provider_id FROM audit_events WHERE id = 1",
@@ -982,14 +978,11 @@ mod tests {
 
         let conn = Connection::open(&db_path).unwrap();
 
-        // 验证 user_version = 3（ADR-026 Stage E）
+        // 验证 user_version = 3
         let ver: u32 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(
-            ver, 3,
-            "全新 DB 的 user_version 应为最新 v3 (ADR-026 Stage E)"
-        );
+        assert_eq!(ver, 3, "全新 DB 的 user_version 应为最新 v3");
 
         // 验证 caller_pid / caller_exe / provider_id 列均存在
         let mut stmt = conn.prepare("PRAGMA table_info(audit_events)").unwrap();
@@ -1008,7 +1001,7 @@ mod tests {
         );
         assert!(
             cols.contains(&"provider_id".to_string()),
-            "全新 DB 应含 provider_id 列（ADR-026 Stage E v3），实际列：{cols:?}"
+            "全新 DB 应含 provider_id 列（v3），实际列：{cols:?}"
         );
     }
 
@@ -1140,9 +1133,9 @@ mod tests {
         );
     }
 
-    // ─── v2.1 GraylistAddFailed 变体测试（PRD §5.4.2）──────────────────────────
+    // ─── v2.1 GraylistAddFailed 变体测试 ──────────────────────────
 
-    /// GraylistAddFailed 事件能够写入并从 SQLite 读回，字段完整（PRD §5.4.2）。
+    /// GraylistAddFailed 事件能够写入并从 SQLite 读回，字段完整。
     ///
     /// 验证：disposition = "graylist_add_failed"、rule_id、request_id、caller 字段全部持久化。
     #[tokio::test]
@@ -1190,7 +1183,7 @@ mod tests {
         );
     }
 
-    /// GraylistAddFailed direction = "inbound"，severity = "info"（PRD §5.4.2）。
+    /// GraylistAddFailed direction = "inbound"，severity = "info"。
     #[test]
     fn graylist_add_failed_metadata() {
         let event = AuditEvent::GraylistAddFailed {

@@ -1,6 +1,6 @@
 //! Tool Use Aggregator：跨多个 SSE event 累积 partial_json，complete block_stop 后 deserialize。
 //!
-//! 关联 PRD §6.2 Pipeline 节点 ⑦（入站流式检测）。
+//! 关联 Pipeline 节点 ⑦（入站流式检测）。
 //!
 //! P0-5 容量上限：blocks 数量、partial_json 大小、text buffer 大小均有上限，防止恶意上游 OOM。
 
@@ -46,7 +46,7 @@ pub enum AggregatorError {
         /// 配置的上限。
         max: usize,
     },
-    /// tool_use partial_json 解析失败（P0-6 fail-closed，PRD §9 #3）。
+    /// tool_use partial_json 解析失败（P0-6 fail-closed）。
     ///
     /// 已进入 tool_use 状态后无法解析参数，等价于 Critical 威胁：
     /// 攻击者可故意发畸形 JSON 绕过 IN-CR-05 等签名工具检测。
@@ -146,7 +146,7 @@ impl Aggregator {
     ///   [`AggregatorError::PartialJsonTooLarge`] / [`AggregatorError::TextBufferTooLarge`]。
     ///   调用方应将容量错误视为 fail-closed Critical（IN-CAP-02），注入 sieve_blocked 并截断流。
     /// - 已识别的 `tool_use` block 在 content_block_stop 时 partial_json 解析失败，返回
-    ///   [`AggregatorError::MalformedToolUse`]。调用方应视为 Critical fail-closed（PRD §9 #3），
+    ///   [`AggregatorError::MalformedToolUse`]。调用方应视为 Critical fail-closed，
     ///   注入 sieve_blocked。"看不懂 tool_use 参数"不等价于"无风险"（P0-6）。
     pub fn process(
         &mut self,
@@ -245,7 +245,7 @@ impl Aggregator {
                         Err(e) => {
                             // P0-6 fail-closed：已识别为 tool_use block，partial_json 解析失败
                             // 必须返回 Err 而非 Ok(None)，否则 daemon 静默跳过 on_tool_use_complete
-                            // 触发 Critical fail-closed 拦截（PRD §9 #3）。
+                            // 触发 Critical fail-closed 拦截。
                             tracing::warn!(
                                 tool_id = %id,
                                 error = %e,

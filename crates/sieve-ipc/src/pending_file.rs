@@ -14,7 +14,7 @@ use crate::{
 /// 写入前用 fd-lock 对目标文件加独占写锁，防止并发写入同一 request_id（极少见
 /// 但理论可行）。文件以 pretty JSON 格式写入，方便调试和 hook 侧直接读取。
 ///
-/// 关联：SPEC-001 §3.1（pending 文件写入规约）、ADR-013 §4（文件协议备用路径）。
+/// 关联：SPEC-001 §3.1（pending 文件写入规约）。
 pub fn write_pending(req: &DecisionRequest, base: &Path) -> Result<PathBuf, IpcError> {
     ensure_dirs(base)?;
     let dir = pending_dir(base);

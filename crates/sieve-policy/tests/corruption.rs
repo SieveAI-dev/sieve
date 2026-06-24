@@ -1,4 +1,4 @@
-//! sieve-policy 破坏性输入端到端测试（PRD v2.0 §9 #14 用户规则 fail-safe）。
+//! sieve-policy 破坏性输入端到端测试（用户规则 fail-safe）。
 //!
 //! 覆盖 loader + lint 在异常输入下的防御行为，每类破坏一个 `#[test]`。
 //! 不启动 daemon，纯粹测 sieve-policy 层。
@@ -102,7 +102,7 @@ fn make_file(rules: Vec<UserRuleEntry>) -> UserRulesFile {
 
 /// 破坏 1：TOML 语法错误 → load_user_rules 返 PolicyError::TomlParse。
 ///
-/// 覆盖 PRD §9 #14：破坏的文件不能导致 daemon panic，必须明确返回错误。
+/// 覆盖：破坏的文件不能导致 daemon panic，必须明确返回错误。
 #[test]
 fn corruption_toml_syntax_error() {
     let tmp = TempDir::new().unwrap();
@@ -119,7 +119,7 @@ fn corruption_toml_syntax_error() {
 
 /// 破坏 2：lint 违规 — severity=critical → lint() 返 ForbiddenSeverityActionDisposition。
 ///
-/// 覆盖 PRD §5.5.3-A：用户规则禁止声明 critical 等级。
+/// 覆盖：用户规则禁止声明 critical 等级。
 #[test]
 fn corruption_lint_severity_critical() {
     let mut entry = valid_entry("USER-CRITICAL");
@@ -137,7 +137,7 @@ fn corruption_lint_severity_critical() {
 
 /// 破坏 3：lint 违规 — action=block → lint() 返 ForbiddenSeverityActionDisposition。
 ///
-/// 覆盖 PRD §5.5.3-A：用户规则禁止声明 block 处置。
+/// 覆盖：用户规则禁止声明 block 处置。
 #[test]
 fn corruption_lint_action_block() {
     let mut entry = valid_entry("USER-BLOCK");
@@ -155,7 +155,7 @@ fn corruption_lint_action_block() {
 
 /// 破坏 4：lint 违规 — keywords=[] → lint() 返 KeywordsEmpty。
 ///
-/// 覆盖 PRD §5.5.3-B：keywords 预过滤为必填非空字段。
+/// 覆盖：keywords 预过滤为必填非空字段。
 #[test]
 fn corruption_lint_keywords_empty() {
     let mut entry = valid_entry("USER-EMPTY-KW");
@@ -171,7 +171,7 @@ fn corruption_lint_keywords_empty() {
 
 /// 破坏 5：lint 违规 — 201 条规则超过上限 → lint() 返 TooManyRules。
 ///
-/// 覆盖 PRD §5.5.3-B：用户规则条数上限 200。
+/// 覆盖：用户规则条数上限 200。
 #[test]
 fn corruption_lint_too_many_rules() {
     let rules: Vec<_> = (0..201)
@@ -188,7 +188,7 @@ fn corruption_lint_too_many_rules() {
 
 /// 破坏 6：文件大小超过 1MB → lint() 返 FileTooLarge。
 ///
-/// 覆盖 PRD §5.5.3-B：文件大小上限 1MB，防止文件系统攻击。
+/// 覆盖：文件大小上限 1MB，防止文件系统攻击。
 #[test]
 fn corruption_lint_file_too_large() {
     let file = make_file(vec![valid_entry("USER-RULE")]);
@@ -203,7 +203,7 @@ fn corruption_lint_file_too_large() {
 
 /// 破坏 7：文件权限 0644（非 0600）→ load_user_rules 返 PolicyError::FilePermissions。
 ///
-/// 覆盖 PRD §5.5.3-C：owner-only 权限保护，防止其他用户读取规则文件。
+/// 覆盖：owner-only 权限保护，防止其他用户读取规则文件。
 #[test]
 #[cfg(unix)]
 fn corruption_file_permissions_wrong() {
@@ -227,7 +227,7 @@ fn corruption_file_permissions_wrong() {
 
 /// 破坏 8：符号链接指向真实文件 → load_user_rules 返 PolicyError::SymlinkRejected。
 ///
-/// 覆盖 PRD §5.5.3-C：no-follow symlink 策略，防止 ln -s /etc/passwd 攻击。
+/// 覆盖：no-follow symlink 策略，防止 ln -s /etc/passwd 攻击。
 #[test]
 #[cfg(unix)]
 fn corruption_symlink_rejected() {
@@ -254,7 +254,7 @@ fn corruption_symlink_rejected() {
 
 /// 破坏 9：目录权限 0755（文件 0600 正确，但目录太宽松）→ load_user_rules 返 FilePermissions。
 ///
-/// 覆盖 PRD §5.5.3-C：目录权限校验，目录 0755 允许任意用户遍历，不符合最小权限原则。
+/// 覆盖：目录权限校验，目录 0755 允许任意用户遍历，不符合最小权限原则。
 #[test]
 #[cfg(unix)]
 fn corruption_dir_permissions_wrong() {
@@ -279,7 +279,7 @@ fn corruption_dir_permissions_wrong() {
 
 /// 破坏 10：两条规则 id 重复 → lint() 返 DuplicateRuleId。
 ///
-/// 覆盖 PRD §5.5.2.1：用户规则 ID 必须唯一（含禁用规则），防止规则集歧义。
+/// 覆盖：用户规则 ID 必须唯一（含禁用规则），防止规则集歧义。
 #[test]
 fn corruption_lint_duplicate_rule_id() {
     let entry1 = valid_entry("DUPLICATE-ID");
@@ -318,8 +318,8 @@ injected_field = "attacker_value"
 
 /// 破坏 11b：direction=inbound + disposition=auto_redact → lint() 返 InboundAutoRedactForbidden。
 ///
-/// 覆盖 PRD §5.5.3-A 第 4 条：入站方向规则禁止 disposition=auto_redact，
-/// 用户不能改写 model 输出（PRD §9 #11）。
+/// 覆盖：入站方向规则禁止 disposition=auto_redact，
+/// 用户不能改写 model 输出。
 #[test]
 fn corruption_lint_inbound_auto_redact_forbidden() {
     let mut entry = valid_entry("USER-INBOUND-REDACT");
@@ -336,7 +336,7 @@ fn corruption_lint_inbound_auto_redact_forbidden() {
     );
 }
 
-/// direction=outbound + disposition=auto_redact 合法（出站自动脱敏，PRD §5.5.3-A）。
+/// direction=outbound + disposition=auto_redact 合法（出站自动脱敏）。
 #[test]
 fn outbound_auto_redact_is_allowed() {
     let mut entry = valid_entry("USER-OUTBOUND-REDACT");

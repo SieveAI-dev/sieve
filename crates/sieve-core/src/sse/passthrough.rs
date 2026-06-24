@@ -1,7 +1,7 @@
 //! SSE 字节级透传（Week 1）。
 //!
 //! Week 1 不解析 SSE，直接把上游 response body 作为客户端 response body 返回。
-//! 关键约束（PRD §9 #5）：任何缓冲都会破坏 chunk 边界，Week 1 不允许聚合。
+//! 关键约束：任何缓冲都会破坏 chunk 边界，Week 1 不允许聚合。
 //!
 //! 由于 hyper 的 `Incoming` body 已实现流式 `poll_frame`，
 //! 直接把上游 `Response::into_body()` 包装成响应 body 即可零成本透传。

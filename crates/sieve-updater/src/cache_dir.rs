@@ -1,4 +1,4 @@
-//! Platform-specific cache directory resolution (ADR-030 §5.1).
+//! Platform-specific cache directory resolution.
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -17,7 +17,7 @@ pub const CACHE_DIR_ENV: &str = "SIEVE_CACHE_DIR";
 
 /// Returns the sieve updater cache directory for the current platform.
 ///
-/// ADR-030 §5.1: directory is created (mode 0700 on Unix) if it does not
+/// The directory is created (mode 0700 on Unix) if it does not
 /// already exist.
 ///
 /// | Source | Path |

@@ -19,7 +19,7 @@ sha2 = "0.10"
 regex = "1"
 arc-swap = { workspace = true }
 
-# Vectorscan 多模式正则引擎（关联 ADR-001）。
+# Vectorscan 多模式正则引擎。
 #
 # 编译前置系统依赖（macOS）：
 #   brew install boost cmake pkg-config ragel

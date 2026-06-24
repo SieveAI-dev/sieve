@@ -1,4 +1,4 @@
-//! `sieve audit` 子命令实现（ADR-028 TODO-5，unix-pipeable）。
+//! `sieve audit` 子命令实现（unix-pipeable 审计查询）。
 //!
 //! 直接读 `~/.sieve/audit.db` SQLite，输出 jsonl 格式方便接 jq / fluentd / vector。
 //! 不修改 `crates/sieve-cli/src/audit.rs` 的写入路径，本文件是**只读查询路径**。

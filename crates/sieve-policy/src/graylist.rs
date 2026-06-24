@@ -1,10 +1,10 @@
-//! 灰名单存储（PRD v2.0 §5.4.2）。
+//! 灰名单存储。
 //!
 //! 灰名单允许用户对非 Critical 规则命中选择"永久允许此次场景"（Allow + Remember）。
 //! 每条灰名单一个 JSON 文件，存放于 `~/.sieve/decisions/<fingerprint>.json`。
 //! 文件名是 fingerprint hex digest，不直接暴露 rule_id。
 //!
-//! # Critical 锁约束（PRD §5.4.2 / §9 #3 #8 #14）
+//! # Critical 锁约束
 //!
 //! - 写入前**必须**验证 rule_id 不在 `critical_lock.rs::FAIL_CLOSED_RULES`
 //! - Critical 规则命中**永不允许** Remember（GUI 端同步禁用 checkbox）
@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use sieve_rules::critical_lock::is_fail_closed;
 use std::path::Path;
 
-/// fingerprint 计算的输入字段（PRD §5.4.2 `fingerprint_inputs`）。
+/// fingerprint 计算的输入字段（`fingerprint_inputs`）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FingerprintInputs {
     /// 命中的规则 ID。
@@ -33,7 +33,7 @@ pub struct FingerprintInputs {
     pub source_agent: String,
 }
 
-/// 灰名单条目（PRD §5.4.2 schema）。
+/// 灰名单条目 schema。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraylistEntry {
     /// schema 版本（当前 = 1）。
@@ -91,7 +91,7 @@ pub fn compute_fingerprint(inputs: &FingerprintInputs) -> String {
 /// - 文件权限 `0600`，目录权限 `0700`（Unix only）
 /// - no-follow symlink 校验
 pub fn add_entry(dir: &Path, entry: GraylistEntry) -> PolicyResult<()> {
-    // Critical 锁：禁止将 fail-closed 规则加入灰名单（PRD §5.4.2）
+    // Critical 锁：禁止将 fail-closed 规则加入灰名单
     if is_fail_closed(&entry.rule_id) {
         return Err(PolicyError::CriticalRuleNotGraylistable {
             rule_id: entry.rule_id.clone(),
@@ -128,7 +128,7 @@ pub fn add_entry(dir: &Path, entry: GraylistEntry) -> PolicyResult<()> {
 /// 查询灰名单条目（通过 fingerprint hex 字符串）。
 ///
 /// 找到后**重新计算 fingerprint 并校验一致性**，不一致返回
-/// [`PolicyError::FingerprintMismatch`]（防文件被人为修改，PRD §5.4.2）。
+/// [`PolicyError::FingerprintMismatch`]（防文件被人为修改）。
 pub fn lookup(dir: &Path, fingerprint: &str) -> PolicyResult<Option<GraylistEntry>> {
     let path = dir.join(format!("{fingerprint}.json"));
     if !path.exists() {
@@ -147,7 +147,7 @@ pub fn lookup(dir: &Path, fingerprint: &str) -> PolicyResult<Option<GraylistEntr
     let content = std::fs::read_to_string(&path)?;
     let entry: GraylistEntry = serde_json::from_str(&content)?;
 
-    // 重新计算 fingerprint 验证一致性（防人为修改，PRD §5.4.2）
+    // 重新计算 fingerprint 验证一致性（防人为修改）
     let computed = compute_fingerprint(&entry.fingerprint_inputs);
     if computed != entry.fingerprint {
         return Err(PolicyError::FingerprintMismatch {
@@ -176,7 +176,7 @@ pub fn lookup(dir: &Path, fingerprint: &str) -> PolicyResult<Option<GraylistEntr
 ///   保证一个坏文件不会让整个 list 操作失败（GUI list_graylist 调用方期望 fail-soft）。
 /// - 返回结果按 `added_at` 倒序（最近添加的在前）。
 ///
-/// 关联：ADR-013 §S.4 sieve.list_graylist。
+/// 关联：sieve.list_graylist。
 pub fn list_entries(dir: &Path) -> PolicyResult<Vec<GraylistEntry>> {
     if !dir.exists() {
         return Ok(Vec::new());

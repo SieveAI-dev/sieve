@@ -1,4 +1,4 @@
-//! OpenAI Chat Completions SSE 格式解析器（关联 ADR-018 §流式解析 / PRD v1.5 §10 Week 6）。
+//! OpenAI Chat Completions SSE 格式解析器（关联流式解析，Week 6）。
 //!
 //! ## 格式说明
 //!
@@ -8,7 +8,7 @@
 //! data: [DONE]\n\n
 //! ```
 //!
-//! ## 转换规则（ADR-018 §SseEvent 映射）
+//! ## 转换规则（SseEvent 映射）
 //!
 //! | OpenAI 字段 | 产出 `SseEvent` |
 //! |------------|----------------|
@@ -22,7 +22,7 @@
 //!
 //! ## Phase 1 限制
 //!
-//! - `choices` 数组只处理 `index=0` 的第一条（OpenAI 常用 `n=1`，ADR-018 §多候选）
+//! - `choices` 数组只处理 `index=0` 的第一条（OpenAI 常用 `n=1`，多候选）
 //! - `finish_reason="tool_calls"` 时额外设置 `has_tool_calls=true` 标记，
 //!   调用方可通过 [`OpenAiSseParser::has_tool_calls`] 查询
 
@@ -40,7 +40,7 @@ const DONE_MARKER: &[u8] = b"[DONE]";
 /// OpenAI Chat Completions SSE 增量解析器（实现 [`SseParse`] trait）。
 ///
 /// 与 [`super::parser::SseParser`]（Anthropic 专用）共享 `SseEvent` 输出类型，
-/// 使 pipeline / inbound_filter 无需感知上游协议差异（ADR-018 §trait 抽象）。
+/// 使 pipeline / inbound_filter 无需感知上游协议差异（trait 抽象）。
 ///
 /// ### tool_calls 状态机
 ///
@@ -80,7 +80,7 @@ impl OpenAiSseParser {
 
     /// 当前流是否含 tool_calls 类响应（`finish_reason="tool_calls"` 时为 `true`）。
     ///
-    /// 供 inbound_filter 判断走 tool_use 拦截路径（ADR-018 §finish_reason 处理）。
+    /// 供 inbound_filter 判断走 tool_use 拦截路径（finish_reason 处理）。
     pub fn has_tool_calls(&self) -> bool {
         self.has_tool_calls
     }
@@ -105,7 +105,7 @@ impl OpenAiSseParser {
 
         let mut events = Vec::new();
 
-        // ADR-038：include_usage 时末尾 chunk（choices 为空）携带 usage → 归一化为
+        // include_usage 时末尾 chunk（choices 为空）携带 usage → 归一化为
         // MessageDelta，与 Anthropic SSE 对齐，供超额计费观测消费（否则 OpenAI SSE 拿不到
         // relay 声明的 usage，四路径覆盖留缺口）。
         if let Some(usage) = chunk.usage {
@@ -121,7 +121,7 @@ impl OpenAiSseParser {
             None => return events,
         };
 
-        // finish_reason 处理（ADR-018 §finish_reason 处理）
+        // finish_reason 处理
         // 注意：先处理 tool_calls delta（包含 Start/Delta），再发 Stop + MessageStop，
         // 保证 Aggregator 先收到 Start/Delta 才收到 Stop。
         let finish_reason = choice.finish_reason.clone();
@@ -238,7 +238,7 @@ impl SseParse for OpenAiSseParser {
     /// 若 buffer 含完整 `data:` 行（仅缺末尾 `\n\n`），尝试解析并产生对应 SseEvent。
     /// 解析失败时丢弃 + warn（fail-safe；流已断，不能再 fail-closed 关流）。
     ///
-    /// 参考 Anthropic [`super::parser::SseParser::flush`] 的残留事件处理策略（ADR-018 §提前断流）。
+    /// 参考 Anthropic [`super::parser::SseParser::flush`] 的残留事件处理策略（提前断流）。
     fn flush(&mut self) -> Vec<SseEvent> {
         let remaining = std::mem::take(&mut self.buf);
         if remaining.is_empty() {
@@ -263,7 +263,7 @@ impl SseParse for OpenAiSseParser {
 
 /// 从单个 event 字节块中提取所有 OpenAI data 行并转换为 SseEvent 列表。
 ///
-/// OpenAI SSE 无 `event:` 头，仅有 `data:` 行（ADR-018 §格式差异）。
+/// OpenAI SSE 无 `event:` 头，仅有 `data:` 行（格式差异）。
 impl OpenAiSseParser {
     fn parse_openai_event(&mut self, bytes: &[u8]) -> Vec<SseEvent> {
         // C0 控制字符清洗（与 Anthropic 解析器保持一致）
@@ -367,7 +367,7 @@ mod tests {
         format!("data: {}\n\n", json).into_bytes()
     }
 
-    // ─── ADR-038: include_usage 末尾 chunk（choices 空）→ MessageDelta 带 usage ──
+    // ─── include_usage 末尾 chunk（choices 空）→ MessageDelta 带 usage ──
     #[test]
     fn openai_usage_only_chunk_emits_message_delta() {
         let mut p = OpenAiSseParser::new();

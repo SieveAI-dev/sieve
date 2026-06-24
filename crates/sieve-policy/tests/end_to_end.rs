@@ -1,4 +1,4 @@
-//! sieve-policy 端到端集成测试（PRD v2.0 §5.4 §5.5 §6.3）。
+//! sieve-policy 端到端集成测试。
 //!
 //! 覆盖完整链路：加载 user.toml → lint → 编译 UserEngine → 扫描 → graylist 全链路。
 
@@ -164,7 +164,7 @@ fn lint_blocks_forbidden_rules() {
     );
 }
 
-/// 文件不存在时返回空 UserRulesFile（daemon 正常启动，PRD §5.5.2.1）。
+/// 文件不存在时返回空 UserRulesFile（daemon 正常启动）。
 #[test]
 fn missing_file_returns_empty_ruleset() {
     let path = PathBuf::from("/tmp/sieve_e2e_nonexistent_user_rules.toml");
@@ -175,7 +175,7 @@ fn missing_file_returns_empty_ruleset() {
     );
 }
 
-/// Critical 规则不可加入灰名单（PRD §5.4.2 Critical 锁）。
+/// Critical 规则不可加入灰名单（Critical 锁）。
 #[test]
 fn critical_rule_graylist_blocked() {
     let tmp = TempDir::new().unwrap();
@@ -228,7 +228,7 @@ fn tampered_graylist_detected() {
     );
 }
 
-/// direction 字段按方向过滤：outbound 规则不进入 inbound 引擎（PRD v2.0 §5.5）。
+/// direction 字段按方向过滤：outbound 规则不进入 inbound 引擎。
 #[test]
 fn direction_field_filters_rules_correctly() {
     use sieve_policy::engine::UserEngine;
@@ -326,7 +326,7 @@ fn direction_field_filters_rules_correctly() {
     assert_eq!(hits.len(), 1, "入站引擎应命中 BOTH-RULE");
 }
 
-/// 旧 user.toml（无 direction 字段）默认 Both，出站入站两侧都能命中（向后兼容，PRD §5.5）。
+/// 旧 user.toml（无 direction 字段）默认 Both，出站入站两侧都能命中（向后兼容）。
 #[test]
 fn legacy_toml_without_direction_defaults_to_both() {
     // 旧格式 TOML：无 direction 字段

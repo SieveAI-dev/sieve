@@ -6,7 +6,7 @@
 //! **禁止 import** `tokio / hyper / fd-lock / bytes / memchr / tracing / 任何 IO crate`。
 //!
 //! 违反此约束会导致 protocol/ 将来升级为独立 crate 时出现编译错误。
-//! 关联：ADR-028 §决策 §2（sieve-ipc 内部模块化）。
+//! 关联：sieve-ipc 内部模块化设计。
 //!
 //! # 修改流程
 //!

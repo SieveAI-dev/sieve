@@ -1,5 +1,5 @@
 //! 占位符黑名单：vectorscan 命中后，若候选文本匹配任意 placeholder 正则则拒绝定级 Critical。
-//! 关联 PRD §5.1 出站检测 P0 表 + Explore 调研建议。
+//! 关联出站检测 P0 表 + Explore 调研建议。
 
 use regex::Regex;
 use std::sync::OnceLock;

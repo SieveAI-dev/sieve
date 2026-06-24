@@ -1,6 +1,6 @@
 //! Sieve core library
 //!
-//! Phase 1: Anthropic Messages API only (PRD §6.1)。
+//! Phase 1: Anthropic Messages API only。
 //! UnifiedMessage 接口预留 OpenAI / Gemini variant，但仅 Anthropic 实现解析。
 //!
 //! crate 边界：不允许 CLI / TUI / 配置加载 (.cursorrules §3.3)。

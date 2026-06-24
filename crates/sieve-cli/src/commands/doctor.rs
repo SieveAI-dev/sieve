@@ -1,4 +1,4 @@
-//! `sieve doctor` 命令实现（ADR-015 / SPEC-003 §doctor / SPEC-004 §6）。
+//! `sieve doctor` 命令实现（关联 SPEC-003 §doctor / SPEC-004 §6）。
 //!
 //! 6 项检查（Claude Code）：
 //! 1. settings.json 中 ANTHROPIC_BASE_URL 是否为 http://127.0.0.1:11453
@@ -145,7 +145,7 @@ mod macos {
         PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".sieve")
     }
 
-    /// 按 4 级优先级解析**入站**规则路径（ADR-041 canary 自检用）。
+    /// 按 4 级优先级解析**入站**规则路径（canary 自检用）。
     ///
     /// 与 [`resolve_rules_path`]（出站）对称，但解析 `inbound_rules_path` 字段
     /// 与 `rules/inbound.toml` 文件：
@@ -203,7 +203,7 @@ mod macos {
         ))
     }
 
-    /// 运行 `sieve doctor`。关联 ADR-015 / SPEC-003 §doctor / SPEC-004 §6 / R10-#5。
+    /// 运行 `sieve doctor`。关联 SPEC-003 §doctor / SPEC-004 §6 / R10-#5。
     ///
     /// - `args.agent` 指定时只检查该 agent
     /// - 不传参数时：Claude 直接跑；OpenClaw/Hermes 先 detect，未装则跳过 + 友好提示
@@ -284,7 +284,7 @@ mod macos {
             }
         }
 
-        // ── canary 诱饵自检（ADR-041 步骤 5；与具体 agent 无关，只跑一次）
+        // ── canary 诱饵自检（与具体 agent 无关，只跑一次）
         //
         // 优雅降级：诱饵缺失 / 规则包未安装均只打印诊断，**不**翻转 all_passed。
         // 诱饵是纵深防御补充，不是主防线；规则包随更新通道分发，本地可能尚未安装。
@@ -367,17 +367,14 @@ mod macos {
         print_check("daemon 在 127.0.0.1:11453 监听", check3);
         results.push(("daemon 监听 :11453", check3));
 
-        // ── 检查 3b（ADR-026 Stage F）: multi-listener 体检
+        // ── 检查 3b: multi-listener 体检
         // 读 ~/.sieve/sieve.toml 解析 upstreams，逐个 TCP 探测。
         // 配置无 multi-listener（旧 schema 或无 sieve.toml）时跳过此项。
         let (total, ml_failures) = check_all_listeners_from_config();
         if total > 1 {
             // 仅 multi-listener 时打印（避免单 listener 重复 check 3 信息）
             let ml_passed = ml_failures.is_empty();
-            let label = format!(
-                "ADR-026 multi-listener 全部端口可达（{} 个 listener）",
-                total
-            );
+            let label = format!("multi-listener 全部端口可达（{} 个 listener）", total);
             print_check(&label, ml_passed);
             if !ml_passed {
                 println!("    失败的 listener: {}", ml_failures.join(", "));
@@ -483,7 +480,7 @@ mod macos {
 
     /// 尝试 TCP 连接 127.0.0.1:11453，成功则 daemon 在监听。
     ///
-    /// 兼容性检查：仅探测默认端口 11453。ADR-026 multi-listener 配置下，
+    /// 兼容性检查：仅探测默认端口 11453。multi-listener 配置下，
     /// 用户可能配多个端口（如 11453 / 11454 / 11455），本函数只覆盖默认端口。
     /// 完整的 multi-listener 体检见 [`check_all_listeners_from_config`]。
     fn check_daemon_listening() -> bool {
@@ -496,12 +493,12 @@ mod macos {
         .is_ok()
     }
 
-    /// ADR-026 multi-listener 体检：读 sieve.toml 解析 upstreams，逐个 TCP 探测。
+    /// multi-listener 体检：读 sieve.toml 解析 upstreams，逐个 TCP 探测。
     ///
     /// 返回 (总数, 失败的 listener 列表)。配置文件不存在或解析失败时返回 (0, vec\[\])
     /// 表示 "没有 multi-listener 配置"，由调用方决定是否打印诊断。
     ///
-    /// 关联：ADR-026 §决策 7 / Stage F doctor 升级。
+    /// 关联：multi-listener doctor 升级。
     fn check_all_listeners_from_config() -> (usize, Vec<String>) {
         use std::net::TcpStream;
         use std::time::Duration;
@@ -599,7 +596,7 @@ mod macos {
         hits.iter().any(|h| h.rule_id == "OUT-01")
     }
 
-    /// Canary 诱饵自检（ADR-041 步骤 5）。
+    /// Canary 诱饵自检。
     ///
     /// 两部分，**全部本地完成、不发任何网络请求**（沿用检查 5 的「本地 scan canary
     /// token」范式）：
@@ -617,7 +614,7 @@ mod macos {
         use crate::commands::setup::macos::{canary_deploy_status, CANARY_MAGIC};
 
         println!();
-        println!("=== canary 诱饵自检（ADR-041）===");
+        println!("=== canary 诱饵自检 ===");
 
         // ── ① 布放体检 ──────────────────────────────────────────────────────
         let (existing_dirs, deployed, missing) = canary_deploy_status(home);
@@ -666,7 +663,7 @@ mod macos {
 
     /// 直接调本地 sieve-rules 入站引擎对 magic 串 scan，判定是否命中 IN-CR-CANARY。
     ///
-    /// 不发任何网络请求（ADR-041 §硬约束「绝不联网做 verifier」）。规则路径经
+    /// 不发任何网络请求（硬约束「绝不联网做 verifier」）。规则路径经
     /// [`resolve_inbound_rules_path`] 4 级解析；任一环节不可用返回 `RulesAbsent`。
     fn check_canary_rule_hits() -> CanaryRuleCheck {
         use crate::commands::setup::macos::CANARY_MAGIC;

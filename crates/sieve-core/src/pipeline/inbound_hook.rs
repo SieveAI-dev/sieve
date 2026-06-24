@@ -4,7 +4,7 @@
 //! **不修改 SSE 流**——流由调用方（daemon）原样转发给客户端。
 //! sieve-hook 二进制会在 PreToolUse 阶段读取 pending 文件并在 TTY 拦截。
 //!
-//! 关联：ADR-014 §Hook 路径、SPEC-001（pending 文件写入规约）。
+//! 关联：Hook 路径、SPEC-001（pending 文件写入规约）。
 
 use sieve_ipc::{paths::sieve_home, pending_file::write_pending, DecisionRequest};
 use thiserror::Error;
@@ -28,7 +28,7 @@ pub enum HookError {
 /// # 错误
 /// 目录创建或文件写入失败时返回 [`HookError::Ipc`]。
 ///
-/// 关联：ADR-014 §Hook 路径、SPEC-001 §3.1。
+/// 关联：Hook 路径、SPEC-001 §3.1。
 pub fn write_hook_pending(request_id: Uuid, req: &DecisionRequest) -> Result<(), HookError> {
     let _ = request_id; // request_id 已包含在 req.request_id 中，此参数保留供调用侧校验
     let base = sieve_home()?;

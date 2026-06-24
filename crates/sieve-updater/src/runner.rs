@@ -1,4 +1,4 @@
-//! Long-running update check loop (ADR-030 §5.6).
+//! Long-running update check loop.
 
 use std::path::PathBuf;
 
@@ -10,19 +10,19 @@ use crate::error::UpdaterError;
 use crate::install::{install_rules, read_installed_version};
 use crate::manifest::{fetch_manifest, ManifestParams};
 
-/// Default manifest endpoint (ADR-030 §3).
+/// Default manifest endpoint.
 pub const DEFAULT_MANIFEST_URL: &str = "https://updates.sieveai.dev/v1/manifest";
 
 /// Default release channel.
 pub const DEFAULT_CHANNEL: &str = "stable";
 
-/// Default check interval: 6 hours (ADR-030 §3 — "每日 4 次").
+/// Default check interval: 6 hours（每日 4 次）.
 pub const DEFAULT_INTERVAL_SECS: u64 = 6 * 3600;
 
 /// Subdirectory under `cache_dir()` where rules bundles are staged.
 pub const DEFAULT_RULES_DIR: &str = "rules";
 
-/// Maximum accepted rules bundle size: 50 MiB (ADR-030 §5).
+/// Maximum accepted rules bundle size: 50 MiB.
 pub const MAX_RULES_SIZE: usize = 50 * 1024 * 1024;
 
 /// Hook invoked after a new rules pack is successfully installed.
@@ -35,7 +35,7 @@ pub type RulesInstalledHook = std::sync::Arc<dyn Fn() + Send + Sync>;
 
 /// Configuration for the update runner task.
 ///
-/// ADR-030 §5.6: constructed by the daemon from `Config::update` + env overrides.
+/// Constructed by the daemon from `Config::update` + env overrides.
 #[derive(Debug, Clone)]
 pub struct UpdaterConfig {
     /// Manifest fetch URL (env > config > default).
@@ -54,7 +54,7 @@ pub struct UpdaterConfig {
 
 /// Runs the update check loop forever.
 ///
-/// ADR-030 §5.6:
+/// Loop behaviour:
 /// 1. Performs an initial check immediately after startup.
 /// 2. Subsequent checks are spaced by `interval_secs` (or `next_check_after_seconds`
 ///    if the server provides it).
@@ -191,7 +191,7 @@ async fn run_one_check(
 /// Processes a successfully fetched manifest: logs client update info and
 /// triggers a rules download + atomic install when a newer version is available.
 ///
-/// ADR-030 §5.6 / SPEC-006 §3.3:
+/// SPEC-006 §3.3:
 /// - Compares `rules.version` against the currently installed version.
 /// - Skips download when already up-to-date.
 /// - On download failure retries with 1s/4s/16s exponential back-off.
@@ -251,7 +251,7 @@ async fn process_manifest(
     };
 
     // Install: verify sha256 + ed25519 + decompress + atomic write.
-    // Production injects the embedded distribution trust root (ADR-034).
+    // Production injects the embedded distribution trust root.
     match install_rules(
         &payload,
         &rules.sha256,

@@ -1,11 +1,11 @@
-//! 行为序列窗口（PRD v2.0 §5.7 / §6.5 / §9 #15 Phase B beta，默认关闭）。
+//! 行为序列窗口（Phase B beta，默认关闭）。
 //!
 //! # 设计原则
 //!
-//! - **保守起步**（PRD §9 #15）：仅触发 StatusBar 通知，不引入新 Block 路径
+//! - **保守起步**：仅触发 StatusBar 通知，不引入新 Block 路径
 //! - **GA 默认关闭**：通过 cargo feature `sequence_detection`，调用方默认禁用
 //! - **隐私安全**：只存结构化特征枚举，不存原始 input
-//! - **双路径不变量**（PRD §5.7.4 + §9 #16）：调用方必须从 SSE + JSON 两条路径同时调 [`ToolUseSequence::record`]
+//! - **双路径不变量**：调用方必须从 SSE + JSON 两条路径同时调 [`ToolUseSequence::record`]
 
 use std::collections::VecDeque;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -21,7 +21,7 @@ pub use feature::{extract_record, PathCategory, SecretConfidence, ToolClass};
 pub struct SequenceConfig {
     /// 最大保留事件数，默认 10。
     pub max_size: usize,
-    /// 事件过期时长（毫秒），默认 300_000（5 分钟）。PRD §5.7.1。
+    /// 事件过期时长（毫秒），默认 300_000（5 分钟）。
     pub expires_after_ms: u64,
 }
 
@@ -34,7 +34,7 @@ impl Default for SequenceConfig {
     }
 }
 
-/// 单次工具调用的结构化特征（PRD §5.7.1）。
+/// 单次工具调用的结构化特征。
 ///
 /// 不存原始 input：用预定义枚举 + 布尔特征替代，便于隐私 + ML 升级路径。
 #[derive(Debug, Clone, Default)]
@@ -73,7 +73,7 @@ pub struct ToolUseRecord {
     pub rule_hits: Vec<String>,
 }
 
-/// 滑动窗口（PRD §5.7.1 ToolUseSequence）。
+/// 滑动窗口（ToolUseSequence）。
 #[derive(Debug)]
 pub struct ToolUseSequence {
     window: VecDeque<ToolUseRecord>,

@@ -1,8 +1,8 @@
-//! 用户规则引擎（PRD v2.0 §6.3.1 / §5.5.2.1）。
+//! 用户规则引擎。
 //!
 //! [`UserEngine`] 包装 [`sieve_rules::engine::VectorscanEngine`]，将 [`UserRuleEntry`]
 //! 转换为 [`RuleEntry`] 后编译。所有命中的 `rule_id` 自动加 `user:` 前缀，防止与系统规则冲突
-//! （PRD §5.5.2.1 "命中标识"）。
+//! （命中标识）。
 
 use crate::error::{PolicyError, PolicyResult};
 use crate::loader::{RuleDirection, UserRuleEntry};
@@ -51,7 +51,7 @@ impl UserEngine {
         &self.source_rules
     }
 
-    /// 按方向过滤后编译（PRD v2.0 §5.5）。
+    /// 按方向过滤后编译。
     ///
     /// - `direction = Outbound`：只编译 `direction == Outbound || Both` 的规则
     /// - `direction = Inbound`：只编译 `direction == Inbound || Both` 的规则
@@ -82,7 +82,7 @@ impl UserEngine {
 impl MatchEngine for UserEngine {
     fn scan(&self, input: &[u8]) -> SieveRulesResult<Vec<MatchHit>> {
         let mut hits = self.inner.scan(input)?;
-        // 所有命中的 rule_id 加 `user:` 前缀（PRD §5.5.2.1）
+        // 所有命中的 rule_id 加 `user:` 前缀
         for h in &mut hits {
             if !h.rule_id.starts_with("user:") {
                 h.rule_id = format!("user:{}", h.rule_id);
@@ -150,7 +150,7 @@ fn to_rule_entry(u: UserRuleEntry) -> RuleEntry {
         allowlist_regexes: vec![],
         allowlist_stopwords: u.allowlist_stopwords,
         disposition,
-        // 用户规则永不可 fail-closed（PRD §9 #14：不能 suppress / 提级系统 Critical）。
+        // 用户规则永不可 fail-closed（不能 suppress / 提级系统 Critical）。
         // 显式 Some(false) 防御：即便 severity 异常也绝不进 fail-closed 注册表。
         fail_closed: Some(false),
         timeout_seconds: None,

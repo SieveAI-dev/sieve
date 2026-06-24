@@ -33,16 +33,16 @@ pub enum Preset {
     Custom,
 }
 
-/// 上游协议（ADR-018 / ADR-026 §决策 4）。
+/// 上游协议。
 ///
 /// `Auto`（默认，未显式声明）：daemon 按请求 path 自适应路由，**不做协议错位拒绝**。
 /// legacy `upstream_url` 与省略 `protocol` 字段的 `[[upstream]]` 均映射为此态，保留 v1.x
-/// 单 upstream 双协议能力（ADR-026 §决策 1 向后兼容 + PRD §9 #16/#9 双协议硬约束）。
+/// 单 upstream 双协议能力（向后兼容 + 双协议硬约束）。
 ///
 /// `Anthropic` / `Openai`（显式声明）：daemon 严格校验请求 path——`Anthropic` listener 仅
 /// 接受 `/v1/messages`，`Openai` listener 仅接受 `/v1/chat/completions`。错位请求（如
 /// Anthropic listener 收到 `/v1/chat/completions`）→ daemon fail-closed 400 + sieve_blocked
-/// event 注入（PRD §9 #3）。
+/// event 注入。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Protocol {
@@ -67,7 +67,7 @@ pub struct RouteRule {
     pub provider: Protocol,
 }
 
-/// 上游信任级别（ADR-038 超额计费检测）。
+/// 上游信任级别（超额计费检测）。
 ///
 /// - `Official`：官方直连（`api.anthropic.com` / `api.openai.com`）。relay 无法插手，
 ///   上游回报的 `usage` **权威**，直接采纳，不必独立核算。
@@ -84,19 +84,19 @@ pub enum Trust {
     Relay,
 }
 
-/// 内置官方 host 白名单（ADR-038 决策 1，「可配置扩展」MVP 硬编码两 host）。
+/// 内置官方 host 白名单（「可配置扩展」MVP 硬编码两 host）。
 /// daemon trust 透传接通前仅被 `resolved_trust` + 单测消费，保留 allow 直到 Inc2 落地。
 #[allow(dead_code)]
 const OFFICIAL_HOSTS: &[&str] = &["api.anthropic.com", "api.openai.com"];
 
-/// 单 listener 上游配置（ADR-026 §决策 1）。
+/// 单 listener 上游配置。
 ///
 /// 一个 sieve daemon 可同时绑定多个 port，每个 port 对应一个上游 LLM endpoint。
 /// 哑 client（Claude Code、Codex CLI、Cursor 等仅认 single base_url 的 agent）
 /// 无法注入路由 header，靠不同 port 区分上游。
 ///
 /// `bind_addr` 不在本结构内——所有 listener 共享 [`Config::bind_addr`]，
-/// 强制 `127.0.0.1`（PRD §9 #2 完全本地）。
+/// 强制 `127.0.0.1`（完全本地）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UpstreamListener {
@@ -105,7 +105,7 @@ pub struct UpstreamListener {
     pub port: u16,
 
     /// 真实上游 URL（含 path 前缀，如 `https://api.deepseek.com/anthropic`）。
-    /// path 前缀的拼接由 [`sieve_core::Forwarder`] 处理（ADR-026 TODO-1）。
+    /// path 前缀的拼接由 [`sieve_core::Forwarder`] 处理（TODO-1）。
     pub url: String,
 
     /// 上游身份标识，用于审计 / 日志 / IPC 事件标注。
@@ -113,7 +113,7 @@ pub struct UpstreamListener {
     #[serde(default)]
     pub provider_id: String,
 
-    /// 上游协议（默认 `auto`：按 path 自适应、不强制错位，向后兼容；ADR-026）。
+    /// 上游协议（默认 `auto`：按 path 自适应、不强制错位，向后兼容）。
     #[serde(default)]
     pub protocol: Protocol,
 
@@ -124,7 +124,7 @@ pub struct UpstreamListener {
     #[serde(default)]
     pub routes: Vec<RouteRule>,
 
-    /// 上游信任级别（ADR-038）。`None`（未显式声明）时由
+    /// 上游信任级别。`None`（未显式声明）时由
     /// [`UpstreamListener::resolved_trust`] 按 URL host 派生：官方 host → `Official`，
     /// 其余（含无法解析）→ `Relay`（保守 fail-closed）。仅 `Relay` 上游在开启
     /// `[billing_check]` 时参与独立 token 核算。
@@ -160,7 +160,7 @@ impl UpstreamListener {
         }
     }
 
-    /// 规范化信任级别（ADR-038）：显式 `trust` 优先；否则按 URL host 派生——
+    /// 规范化信任级别：显式 `trust` 优先；否则按 URL host 派生——
     /// 命中 [`OFFICIAL_HOSTS`] → [`Trust::Official`]，其余或无法解析 → [`Trust::Relay`]
     /// （保守 fail-closed：宁可对官方多算一次，绝不把 relay 误当可信而漏掉欺诈）。
     ///
@@ -181,7 +181,7 @@ impl UpstreamListener {
     }
 }
 
-/// Update / telemetry-beacon configuration (ADR-030 §5).
+/// Update / telemetry-beacon configuration.
 ///
 /// Corresponds to the `[update]` section in `sieve.toml`.
 /// All fields have defaults so the section is entirely optional
@@ -216,12 +216,12 @@ impl Default for UpdateConfig {
     }
 }
 
-/// 审计日志档位（ADR-037 决策 1）。
+/// 审计日志档位。
 ///
 /// - `Off`：什么都不留。
 /// - `Metadata`（默认）：现状——只写 `audit.db` 元数据（fingerprint + 最小元信息），
 ///   **零行为变化**。命名刻意避开既有术语 `decisions`（`~/.sieve/decisions/` 灰名单 +
-///   `sieve decisions` CLI），见 ADR-037。
+///   `sieve decisions` CLI）。
 /// - `Full`（opt-in）：在 `Metadata` 基础上额外把**脱敏后**内容加密归档（write-only
 ///   logging + 哈希链 + 保留期）。默认关闭。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -233,7 +233,7 @@ pub enum AuditLevel {
     Full,
 }
 
-/// `full` 档归档段切分粒度（ADR-037 决策 5：保留期按段清理）。
+/// `full` 档归档段切分粒度（保留期按段清理）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ArchiveRotation {
@@ -243,7 +243,7 @@ pub enum ArchiveRotation {
     Monthly,
 }
 
-/// 加密审计日志配置（ADR-037 / SPEC-009）。对应 `[audit]` 段。
+/// 加密审计日志配置（SPEC-009）。对应 `[audit]` 段。
 ///
 /// 整段可选；省略时 `level = metadata`（= 现状，零行为变化）。`full` 档的密钥
 /// 管理见 `sieve audit keygen`，daemon **只持公钥 `recipient`**，无解密能力。
@@ -254,13 +254,13 @@ pub struct AuditConfig {
     pub level: AuditLevel,
     /// `full` 档加密归档的 age recipient 公钥（`age1...`）。
     /// `level = full` 时**必填**（[`Config::check_safety_invariants`] fail-fast 校验）；
-    /// daemon 只持此公钥，私钥离线（ADR-037 决策 3 write-only logging）。
+    /// daemon 只持此公钥，私钥离线（write-only logging）。
     pub recipient: Option<String>,
     /// 归档段目录（`None` → `~/.sieve/audit-archive/`）。
     pub archive_dir: Option<PathBuf>,
-    /// 保留期天数；超期段整段删除（ADR-037 决策 5）。`0` = 永久保留。
+    /// 保留期天数；超期段整段删除。`0` = 永久保留。
     pub retention_days: u32,
-    /// 是否对归档记录加哈希链防篡改（ADR-037 决策 4，默认开）。
+    /// 是否对归档记录加哈希链防篡改（默认开）。
     pub hash_chain: bool,
     /// 归档段切分粒度（默认 `daily`）。
     pub rotation: ArchiveRotation,
@@ -279,7 +279,7 @@ impl Default for AuditConfig {
     }
 }
 
-/// 超额计费检测配置（ADR-038 / SPEC-010）。对应 `[billing_check]` 段。
+/// 超额计费检测配置（SPEC-010）。对应 `[billing_check]` 段。
 ///
 /// 整段可选；**默认全关**（`enabled = false`），不开启则零行为变化、零新增出站、
 /// 零计算开销。
@@ -289,11 +289,11 @@ pub struct BillingCheckConfig {
     /// 是否启用超额计费检测（默认 `false`）。仅对 `Relay` 上游生效。
     pub enabled: bool,
     /// 偏差容差百分比（默认 `15.0`）。独立计数与 relay 声明偏差超此值则报警。
-    /// 远高于 tokenizer 噪声 ±5~10%、远低于欺诈量级 +50%（ADR-038 决策 2）。
+    /// 远高于 tokenizer 噪声 ±5~10%、远低于欺诈量级 +50%。
     pub tolerance_pct: f64,
-    /// 是否允许调官方 `count_tokens` 直连（**默认 `false`**，ADR-038 决策 5 路径 C）。
+    /// 是否允许调官方 `count_tokens` 直连（**默认 `false`**，路径 C）。
     /// 唯一可能触发 Sieve 主动出站的开关；仅用户显式开启才生效，且 UI 须显著警示
-    /// 「会向官方 endpoint 发起一次主动出站」。默认姿态下 PRD §9 #2 一字不破。
+    /// 「会向官方 endpoint 发起一次主动出站」。默认姿态下完全本地一字不破。
     pub count_tokens_optin: bool,
 }
 
@@ -309,10 +309,10 @@ impl Default for BillingCheckConfig {
 
 /// Sieve 顶层配置。
 ///
-/// 对应 `sieve.toml`（ADR-003 / data-model.md §配置）。
+/// 对应 `sieve.toml`（data-model.md §配置）。
 /// 文件不存在时 [`Config::load`] 返回 [`Config::default`]。
 ///
-/// **多 listener 配置（ADR-026）**：
+/// **多 listener 配置**：
 /// - 推荐用 `[[upstream]]` 数组列出每个 listener（含 port / url / provider_id / protocol）
 /// - 旧字段 `upstream_url` + `port` 仍可用，等价于单元素 upstreams
 ///   （[`Config::resolved_upstreams`] 自动映射）
@@ -324,16 +324,16 @@ pub struct Config {
     ///
     /// 仅当 `upstreams` 为空时生效，等价于 `[[upstream]] { port, url = upstream_url,
     /// provider_id = "anthropic", protocol = anthropic }`。
-    /// 推荐用 `upstreams` 数组配置 multi-listener（ADR-026）。
+    /// 推荐用 `upstreams` 数组配置 multi-listener。
     #[serde(default = "default_upstream")]
     pub upstream_url: String,
 
     /// 本地代理监听端口（**已废弃**，保留向后兼容；见 `upstream_url`）。
-    /// 默认 11453（PRD §6.1）。
+    /// 默认 11453。
     #[serde(default = "default_port")]
     pub port: u16,
 
-    /// 多 listener 上游配置（ADR-026）。
+    /// 多 listener 上游配置。
     ///
     /// 非空时优先于 `upstream_url` + `port`。每个 listener 独立 bind 一个端口，
     /// 各自连接不同的真实上游。哑 client（Claude Code 等）通过指向不同 port
@@ -349,7 +349,7 @@ pub struct Config {
     #[serde(default)]
     pub proxy: Option<String>,
 
-    /// 监听地址。**强制 `127.0.0.1`**（ADR-003 / PRD §9 #2 完全本地）。
+    /// 监听地址。**强制 `127.0.0.1`**（完全本地）。
     /// 任何其他值都会触发 [`Config::enforce_safety_invariants`] 中的 exit(1)。
     #[serde(default = "default_bind_addr")]
     pub bind_addr: String,
@@ -417,7 +417,7 @@ pub struct Config {
     #[serde(default)]
     pub audit_db_path: Option<PathBuf>,
 
-    /// Update check + telemetry beacon settings (ADR-030 §5).
+    /// Update check + telemetry beacon settings.
     ///
     /// The `[update]` section is optional; omitting it preserves all defaults
     /// (`enabled = true`, `telemetry = true`, `check_interval_hours = 6`,
@@ -425,12 +425,12 @@ pub struct Config {
     #[serde(default)]
     pub update: UpdateConfig,
 
-    /// 加密审计日志配置（ADR-037）。`[audit]` 段可选；省略时 `level = metadata`
+    /// 加密审计日志配置。`[audit]` 段可选；省略时 `level = metadata`
     /// （现状，零行为变化）。
     #[serde(default)]
     pub audit: AuditConfig,
 
-    /// 超额计费检测配置（ADR-038）。`[billing_check]` 段可选；默认全关。
+    /// 超额计费检测配置。`[billing_check]` 段可选；默认全关。
     #[serde(default)]
     pub billing_check: BillingCheckConfig,
 }
@@ -536,25 +536,25 @@ impl Config {
 
     /// 检查安全不变量（纯函数，可单测）：返回首个违规的 FATAL 描述，无违规返回 `Ok(())`。
     ///
-    /// 关联 ADR-003 / PRD §9 #2 / ADR-026 §决策 1。供 [`Self::enforce_safety_invariants`]
+    /// 关联完全本地与 multi-listener 不变量。供 [`Self::enforce_safety_invariants`]
     /// 包装成 exit-on-fail 行为；测试代码直接调本方法验证检测逻辑。
     pub fn check_safety_invariants(&self) -> Result<(), String> {
         if self.bind_addr != "127.0.0.1" {
             return Err(format!(
                 "bind_addr must be 127.0.0.1 (got {:?}). \
-                 Sieve refuses to bind on a non-loopback address. See ADR-003.",
+                 Sieve refuses to bind on a non-loopback address.",
                 self.bind_addr
             ));
         }
 
-        // ADR-026: 端口冲突检查（针对 multi-listener 配置）。
+        // 端口冲突检查（针对 multi-listener 配置）。
         let upstreams = self.resolved_upstreams();
         let mut seen_ports = std::collections::HashSet::new();
         for u in &upstreams {
             if !seen_ports.insert(u.port) {
                 return Err(format!(
                     "duplicate listener port {} in `upstreams`. \
-                     Each listener must bind a unique port. See ADR-026.",
+                     Each listener must bind a unique port.",
                     u.port
                 ));
             }
@@ -571,33 +571,33 @@ impl Config {
             }
         }
 
-        // ADR-037: `full` 档必须配置 age recipient 公钥，否则归档无处加密。
+        // `full` 档必须配置 age recipient 公钥，否则归档无处加密。
         // daemon 只持公钥（write-only logging），缺它则无法初始化 ArchiveWriter。
         if self.audit.level == AuditLevel::Full {
             match self.audit.recipient.as_deref() {
                 None | Some("") => {
                     return Err(
                         "audit.level = \"full\" requires `audit.recipient` (an age public \
-                         key, e.g. age1...). Run `sieve audit keygen` first. See ADR-037."
+                         key, e.g. age1...). Run `sieve audit keygen` first."
                             .to_string(),
                     );
                 }
                 Some(r) if !r.starts_with("age1") => {
                     return Err(format!(
                         "audit.recipient must be an age public key starting with `age1` \
-                         (got {r:?}). See ADR-037."
+                         (got {r:?})."
                     ));
                 }
                 _ => {}
             }
         }
 
-        // ADR-038: 容差必须是 (0, 100] 的正数百分比，否则比对无意义。
+        // 容差必须是 (0, 100] 的正数百分比，否则比对无意义。
         if self.billing_check.enabled {
             let tol = self.billing_check.tolerance_pct;
             if !(tol > 0.0 && tol <= 100.0) {
                 return Err(format!(
-                    "billing_check.tolerance_pct must be in (0, 100] (got {tol}). See ADR-038."
+                    "billing_check.tolerance_pct must be in (0, 100] (got {tol})."
                 ));
             }
         }
@@ -607,7 +607,7 @@ impl Config {
 
     /// 强制安全不变量：违规时打印 FATAL 并 `exit(1)`，正常时打印降级 WARN。
     ///
-    /// 关联 ADR-003 / PRD §9 #2 / data-model.md §配置 / ADR-026 §决策 1。
+    /// 关联完全本地不变量 / data-model.md §配置 / multi-listener 决策。
     /// 配置错误悄悄启动会暴露代理到局域网或半启动状态，违反"完全本地"承诺。
     pub fn enforce_safety_invariants(&self) {
         if let Err(msg) = self.check_safety_invariants() {
@@ -641,7 +641,7 @@ impl Config {
         }
     }
 
-    /// 返回规范化的 listener 列表（ADR-026）。
+    /// 返回规范化的 listener 列表。
     ///
     /// - `upstreams` 非空时直接克隆返回
     /// - `upstreams` 为空时从旧 `upstream_url` + `port` 字段映射成单元素 vec
@@ -659,12 +659,12 @@ impl Config {
             url: self.upstream_url.clone(),
             provider_id: "anthropic".to_string(),
             // legacy 单 upstream 未声明协议 → Auto：按 path 自适应，不强制错位
-            // （ADR-026 §决策 1 向后兼容 + PRD §9 #16/#9 双协议）。
+            // （向后兼容 + 双协议）。
             protocol: Protocol::Auto,
             // legacy 单 upstream 无配置化路由表（A3）。
             routes: Vec::new(),
             // trust 留 None → resolved_trust() 按实际 url host 派生（默认 upstream_url
-            // 指向 api.anthropic.com → Official；用户改成 relay 则派生 Relay，ADR-038）。
+            // 指向 api.anthropic.com → Official；用户改成 relay 则派生 Relay）。
             trust: None,
             proxy: None,
             no_proxy: false,
@@ -754,7 +754,7 @@ impl Config {
 
     /// 拼接监听 SocketAddr（**已废弃**，仅保留兼容性 + 测试使用）。
     ///
-    /// ADR-026 后 daemon 走 [`Config::resolved_upstreams`] 多 listener 路径，
+    /// daemon 走 [`Config::resolved_upstreams`] 多 listener 路径，
     /// 不再读 single `port` 字段。本方法保留供旧 sieve.toml 反序列化校验测试使用。
     ///
     /// # Errors
@@ -972,7 +972,7 @@ mod tests {
         );
     }
 
-    // ── ADR-026 multi-listener schema 测试 ──────────────────────────────
+    // ── multi-listener schema 测试 ──────────────────────────────
 
     #[test]
     fn legacy_schema_maps_to_single_upstream() {
@@ -1084,7 +1084,7 @@ mod tests {
     #[test]
     fn protocol_default_is_auto() {
         // 未指定 protocol 字段时默认 Auto：按请求 path 自适应，不强制协议错位
-        // （ADR-026 §决策 1 向后兼容 + PRD §9 #16/#9 双协议）。
+        // （向后兼容 + 双协议）。
         let toml_str = r#"
             [[upstream]]
             port = 11454
@@ -1299,7 +1299,7 @@ mod tests {
         assert!(result.is_err(), "UpstreamListener 应拒绝未知字段");
     }
 
-    // ── ADR-038 信任分级（Trust）────────────────────────────────────────────
+    // ── 信任分级（Trust）────────────────────────────────────────────
 
     fn listener(url: &str, trust: Option<Trust>) -> UpstreamListener {
         UpstreamListener {
@@ -1365,18 +1365,18 @@ mod tests {
         assert_eq!(ups[0].resolved_trust(), Trust::Official);
     }
 
-    // ── ADR-037 / ADR-038 config schema 默认值与 fail-fast ──────────────────
+    // ── audit / billing config schema 默认值与 fail-fast ──────────────────
 
     #[test]
     fn audit_and_billing_defaults_are_off_or_status_quo() {
         let c = Config::default();
-        // ADR-037：默认 metadata（= 现状，零行为变化），full 默认关。
+        // 默认 metadata（= 现状，零行为变化），full 默认关。
         assert_eq!(c.audit.level, AuditLevel::Metadata);
         assert_eq!(c.audit.retention_days, 30);
         assert!(c.audit.hash_chain);
         assert_eq!(c.audit.rotation, ArchiveRotation::Daily);
         assert!(c.audit.recipient.is_none());
-        // ADR-038：默认全关。
+        // 默认全关。
         assert!(!c.billing_check.enabled);
         assert!(!c.billing_check.count_tokens_optin);
         assert_eq!(c.billing_check.tolerance_pct, 15.0);

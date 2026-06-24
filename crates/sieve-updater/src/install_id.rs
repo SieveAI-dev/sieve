@@ -1,4 +1,4 @@
-//! Persistent install-ID management (ADR-030 §5.2 + §3 遥测信标).
+//! Persistent install-ID management（遥测信标）.
 //!
 //! The install-ID is a UUIDv4 stored at `<cache_dir>/install-id`.
 //! It is created on first run and re-created whenever the file is deleted
@@ -12,7 +12,7 @@ use crate::error::UpdaterError;
 
 /// Loads the install-ID from disk or generates a fresh one.
 ///
-/// ADR-030 §5.2: file written with mode 0600 on Unix.
+/// File written with mode 0600 on Unix.
 /// File-not-found → generate new UUID + write → return.
 /// Deletion between runs → next call regenerates (counts as new install).
 ///
