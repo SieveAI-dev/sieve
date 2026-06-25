@@ -624,7 +624,7 @@ async fn ucsb_attack_4_markdown_exfil_failclosed_without_gui() {
     );
 }
 
-// ─── IN-CR-04: 持久化机制（Critical block，Week 4，US-07）──────────
+// ─── IN-CR-04: 持久化机制（Critical block）──────────
 
 /// tool_use Bash command 含 `>> ~/.bashrc` → IN-CR-04-SHELL-RC-APPEND 触发 HookMark。
 ///
@@ -634,7 +634,7 @@ async fn ucsb_attack_4_markdown_exfil_failclosed_without_gui() {
 ///
 /// 修 #2（disposition 优先）后：IN-CR-04 走 HookMark 路径，旧的直接 Block 路径已更新。
 ///
-/// 关联 IN-CR-04 / Roadmap Week 4 / US-07 / 双层防御。
+/// 关联 IN-CR-04 / 双层防御。
 #[tokio::test]
 async fn in_cr_04_persistence_shell_rc_hookmark_passthrough() {
     let attack_payload = sse_response(&[
@@ -682,15 +682,15 @@ async fn in_cr_04_persistence_shell_rc_hookmark_passthrough() {
     );
 }
 
-// ─── IN-CR-03: 敏感路径访问（warn-only，Week 4）─────────────────────
+// ─── IN-CR-03: 敏感路径访问（warn-only）─────────────────────
 
 /// tool_use input 含 `~/.ssh/id_rsa` → IN-CR-03-SSH-PRIVATE 触发 high warn detection。
 ///
 /// IN-CR-03 是 warn 级别（非 fail-closed Critical），不应注入 sieve_blocked 截流——
 /// 用户可能合法请求读取 SSH 密钥（如配置 git）。daemon 仅记录 detection 到日志，
-/// 流量透传。Week 5 接 CLI 弹窗后会变成 5s 倒计时确认。
+/// 流量透传。CLI 弹窗接入后会变成 5s 倒计时确认。
 ///
-/// 关联 IN-CR-03 / Roadmap Week 4。
+/// 关联 IN-CR-03。
 #[tokio::test]
 async fn in_cr_03_sensitive_path_warn_passes_through() {
     let attack_payload = sse_response(&[
