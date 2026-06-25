@@ -5,6 +5,7 @@
     "protocol_version": "v2",
     "daemon_version": "0.1.0",
     "paused": false,
+    "paused_until": null,
     "preset": "standard",
     "uptime_seconds": 0,
     "audit_db_user_version": 2,

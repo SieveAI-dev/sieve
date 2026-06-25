@@ -3,9 +3,10 @@
 //! 包含 sieve.hello 握手通知参数及 sieve.reload_user_rules 单向通知参数，
 //! 对应 SPEC-005 §3（握手协议）。
 //!
-//! **零 IO 约束**：本文件仅 import serde / uuid / std，
+//! **零 IO 约束**：本文件仅 import serde / uuid / chrono / std（纯数据类型），
 //! 禁止引入 tokio / fd-lock / 任何 IO / 异步 / 运行时依赖。
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -21,6 +22,13 @@ pub struct HelloParams {
     pub daemon_version: String,
     /// 当前是否处于暂停状态。
     pub paused: bool,
+    /// 暂停截止时间（UTC，SPEC-005 §4A）；未暂停时为 `None`。
+    ///
+    /// 与 `paused` 配对：client 握手即可正确进入 paused 态并显示「恢复至…」，
+    /// 无需等第一条 `sieve.paused_changed` 才补齐 until（SPEC-005 §3.2，D-5 修复）。
+    /// nullable + `#[serde(default)]` → v2.x 向后兼容扩展，旧 client 忽略未知字段，不 bump 协议版本。
+    #[serde(default, serialize_with = "crate::ts_serde::serialize_opt_utc_millis")]
+    pub paused_until: Option<DateTime<Utc>>,
     /// 当前生效的 preset 名称（如 `"default"` / `"paranoid"` / `"custom"`）。
     pub preset: String,
     /// daemon 已运行秒数（启动时刻到连接时刻）。

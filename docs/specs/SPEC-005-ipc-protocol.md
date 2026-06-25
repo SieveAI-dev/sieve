@@ -174,6 +174,7 @@ loop:
     "protocol_version": "v2",
     "daemon_version": "0.7.2",
     "paused": false,
+    "paused_until": null,
     "preset": "standard",
     "uptime_seconds": 14523,
     "audit_db_user_version": 2,
@@ -187,6 +188,7 @@ loop:
 | `protocol_version` | String | yes | — | no | 当前固定 `"v2"` |
 | `daemon_version` | String | yes | — | no | semver，如 `"0.7.2"`、`"1.0.0-rc1"` |
 | `paused` | bool | yes | — | no | daemon 当前是否处于暂停态 |
+| `paused_until` | `Timestamp` | no | `null` | yes | 暂停截止时间（UTC，§4A）；`paused=false` 时为 `null`，与 `paused` 配对。client 握手即可正确进入 paused 态并显示「恢复至…」，无需等首条 `sieve.paused_changed` 补齐。v2.x 向后兼容扩展（字段新增，旧 client 忽略未知字段），**不** bump `protocol_version` |
 | `preset` | enum (§5.6) | yes | — | no | preset mode 枚举值 |
 | `uptime_seconds` | u64 | yes | — | no | daemon 进程启动至今秒数 |
 | `audit_db_user_version` | u32 | yes | — | no | `PRAGMA user_version` 当前值（v2.0 起为 `2`） |

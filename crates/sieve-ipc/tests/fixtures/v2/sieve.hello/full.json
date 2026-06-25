@@ -4,7 +4,8 @@
   "params": {
     "protocol_version": "v2",
     "daemon_version": "0.1.0",
-    "paused": false,
+    "paused": true,
+    "paused_until": "2026-05-03T13:00:00.000Z",
     "preset": "standard",
     "uptime_seconds": 42,
     "audit_db_user_version": 2,

@@ -45,9 +45,18 @@
   签名规则包下发，不内置于源码树；红队 / 四路由集成测试在规则包缺失时优雅 SKIP（覆盖未
   真正生效）。新 job 在规则包可用时（`SIEVE_RULES_PACK_B64` secret）落地规则后运行回归，
   使四路由对等 / 出站脱敏处置等覆盖真实生效；secret 缺失时优雅跳过。
+- **`sieve.hello` 握手新增 `paused_until` 字段（GUI 审查 D-5）。** nullable `Timestamp`
+  （§4A 毫秒 + Z），与 `paused` 配对：client 握手即可正确进入暂停态并显示「恢复至…」，无需
+  等首条 `sieve.paused_changed` 才补齐 until。v2.x 向后兼容扩展（字段新增 + `#[serde(default)]`，
+  旧 client 忽略未知字段），**不** bump `protocol_version`。SPEC-005 §3.2 同步。
 
 ### Fixed
 
+- **暂停态握手丢弃截止时间修复（GUI 审查 D-5）。** `handle_connection` 发 `sieve.hello` 时此前
+  只读 `paused` 布尔、丢弃 `paused_until` 时间值，导致 client 握手进入暂停态却拿不到 until →
+  状态降级、菜单栏假装正常（违反「菜单栏状态以握手为准，不假装健康」）。现 daemon 取过期过滤
+  后的 until 快照填入 hello，`paused` 由其 `is_some()` 派生，二者天然一致。含 schema 双向稳定
+  测试 + 暂停态握手 wire 回归测试（`hello_carries_paused_until_when_paused`）。
 - **`timeout_seconds` 越界钳制（GUI 审查 D-3）。** `IpcServer::request_decision`（所有
   `request_decision` 发送的唯一 choke point）在 wire 序列化前把 `timeout_seconds` 钳到 SPEC-005
   §6.1.1 区间 `[30,120]`（越界 `0` / 合并取最小后 `<30` / `>120` 一律钳边界 + warn，不拒绝以免
