@@ -4552,6 +4552,7 @@ fn classify_json_inbound_detection(
     dry_run: bool,
     chain_depth: usize,
     blocking: &mut Vec<sieve_core::Detection>,
+    hook: &mut Vec<sieve_core::Detection>,
 ) {
     match &d.action {
         sieve_core::detection::Action::Block => {
@@ -4570,16 +4571,25 @@ fn classify_json_inbound_detection(
             d.action = sieve_core::detection::Action::Block;
             blocking.push(d);
         }
-        _ => {
-            // HookMark / MarkOnly / SilentLog / Redact：记录但不阻断
-            // chain_depth ≥ 2 时 HookMark 升级为 GuiPopup（同 SSE 路径）
-            if chain_depth >= 2 && matches!(d.action, sieve_core::detection::Action::HookMark) {
+        sieve_core::detection::Action::HookMark => {
+            // 四路由对等修复（ADR-025 / 硬约束 #16）：JSON 路径必须像 SSE 一样为
+            // HookMark 写 IPC pending 文件，由 sieve-hook 在 PreToolUse 阶段拦截。
+            // 此前 JSON 路径对 HookMark 静默丢弃（既不注入 sieve_blocked，也不写 pending），
+            // 导致非流式 JSON 响应里的 hook_terminal 危险工具调用（IN-CR-02 危险 shell /
+            // IN-CR-03 敏感文件访问）对 `check`-hook agent（如 Claude Code）双层防御全失效。
+            // 与 SSE 路径一致：chain_depth >= 2 升级为强制阻断；否则写 pending（由调用方处理）。
+            if chain_depth >= 2 {
                 tracing::warn!(
                     rule = %d.rule_id,
-                    "HookMark upgraded to GuiPopup (chain_depth >= 2), fail-closed in JSON path"
+                    "HookMark upgraded to block (chain_depth >= 2), fail-closed in JSON path"
                 );
                 blocking.push(d);
+            } else {
+                hook.push(d);
             }
+        }
+        _ => {
+            // MarkOnly / SilentLog / Redact：记录但不阻断
         }
     }
 }
@@ -4640,6 +4650,8 @@ async fn handle_json_inbound(
     );
 
     let mut all_blocking: Vec<sieve_core::Detection> = Vec::new();
+    // HookMark 命中：JSON 路径写 IPC pending 文件供 sieve-hook PreToolUse 拦截（四路由对等）。
+    let mut hook_detections: Vec<sieve_core::Detection> = Vec::new();
 
     // 工具调用检测（codec 按 provider schema 提取 tool_use / tool_calls）。
     for completed in codec.extract_tool_calls(&resp_json) {
@@ -4662,6 +4674,7 @@ async fn handle_json_inbound(
                         dry_run,
                         meta.chain_depth,
                         &mut all_blocking,
+                        &mut hook_detections,
                     );
                 }
             }
@@ -4682,12 +4695,29 @@ async fn handle_json_inbound(
                         dry_run,
                         meta.chain_depth,
                         &mut all_blocking,
+                        &mut hook_detections,
                     );
                 }
             }
             Err(e) => {
                 tracing::warn!(error = %e, "handle_json_inbound({audit_tag}): scan_assistant_text error");
             }
+        }
+    }
+
+    // HookMark 命中：写 IPC pending 文件（sieve-hook 在 PreToolUse 阶段读取并拦截）。
+    // 与 SSE 路径 [`write_hook_pending_or_fail_closed`] 调用点一致；写失败则 fail-closed
+    // 升级为阻断（注入 sieve_blocked），绝不静默放过。修复非流式 JSON 路径此前完全
+    // 不写 pending 文件的四路由不对等缺口。
+    for d in &hook_detections {
+        if let Err(e) = write_hook_pending_or_fail_closed(d, &meta) {
+            tracing::warn!(
+                rule = %d.rule_id,
+                tag = audit_tag,
+                error = %e,
+                "handle_json_inbound: write hook pending failed, fail-closed (escalate to block)"
+            );
+            all_blocking.push(d.clone());
         }
     }
 
