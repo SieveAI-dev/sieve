@@ -191,7 +191,7 @@ fingerprint = sha256("{rule_id}:{content_normalized}")[:16]
 
 - `content_normalized`：UTF-8、NFC、移除前后空白；密钥类内容截断到前 32 字节计算（避免长度差异导致 fingerprint 不稳定）；
 - 截取前 16 字符（hex）≈ 64 bit，碰撞概率在单用户规模可忽略；
-- 不同 rule_id 即使内容相同也得到不同 fingerprint —— 防止"忽略 OUT-06 ETH 私钥"误覆盖到"OUT-09 BIP39"。
+- 不同 rule_id 即使内容相同也得到不同 fingerprint —— 防止"忽略 OUT-06 ETH 私钥"误覆盖到"OUT-14 BIP39"。
 
 ### 4.2 文件语法
 
@@ -210,7 +210,7 @@ fingerprint = sha256("{rule_id}:{content_normalized}")[:16]
 # ===== OUT-04 JWT =====
 a1b2c3d4e5f60708  # demo JWT used in unit tests
 
-# ===== OUT-09 BIP39 =====
+# ===== OUT-14 BIP39 =====
 9988776655443322  # canary mnemonic (honeypot wallet only)
 
 # ===== IN-CR-01 AddressGuard =====
@@ -330,39 +330,37 @@ tls_verify_upstream = true
 - 路径：`~/.sieve/audit.db`
 - 权限：`0600`（仅当前 user 可读写）
 - 写入模式：append-only（通过 `BEFORE UPDATE` / `BEFORE DELETE` 触发器拒绝任何修改）
-- **不存原始 prompt 内容**——只存 fingerprint 与最小元信息
-- 当前 schema 版本：**v2**（`PRAGMA user_version = 2`）
+- **不存原始 prompt 内容、不存任何命中原文**——见下方 §6.3「脱敏契约（规范性）」
+- 当前 schema 版本：**v3**（`PRAGMA user_version = 3`；`full` 档启用时迁 v4，见 §14.6）
 
-### 6.2 `events` 表（schema v3，multi-listener Stage E）
+### 6.2 `audit_events` 表（schema v3，权威源 = `crates/sieve-cli/src/audit.rs` `CREATE_TABLE_DDL`）
+
+> **表名 = `audit_events`**（不是 `events`）。此前本节误写为 `events` + 含 `evidence_meta` 列，与实现（`audit.rs`）及 §14 归档段所用的 `audit_events` 不一致；GUI（`sieve-gui-macos`）曾按旧 schema 读 `events.evidence_meta`，应同步对齐到本节真实 schema（读 `audit_events`、移除 `evidence_meta` 期望）。
 
 ```sql
 PRAGMA user_version = 3;
 
-CREATE TABLE events (
-  id              INTEGER PRIMARY KEY AUTOINCREMENT,
-  timestamp       INTEGER NOT NULL,        -- unix ms
-  session_id      TEXT    NOT NULL,
-  direction       TEXT    NOT NULL CHECK (direction IN ('outbound','inbound')),
-  severity        TEXT    NOT NULL CHECK (severity IN ('critical','high','medium','low')),
-  rule_id         TEXT    NOT NULL,
-  fingerprint     TEXT    NOT NULL,        -- 16-hex
-  action_taken    TEXT    NOT NULL,        -- block/redact/warn_confirm/mark/silent
-  user_choice     TEXT,                    -- allow_once/cancel/redact_send/null
-  evidence_meta   TEXT,                    -- JSON: { "len": N, "prefix": "sk-ant-...", ... }
-  caller_pid      INTEGER,                 -- v2 新增：调用方进程 PID（NULL 若反查失败）
-  caller_exe      TEXT,                    -- v2 新增：调用方可执行文件路径（NULL 若反查失败）
-  provider_id     TEXT    NOT NULL DEFAULT 'unknown'   -- v3 新增：listener 上游身份标识
+CREATE TABLE IF NOT EXISTS audit_events (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  timestamp_rfc3339   TEXT    NOT NULL,    -- RFC 3339 UTC（非 unix ms）
+  direction           TEXT    NOT NULL,    -- 'outbound' | 'inbound'
+  rule_id             TEXT    NOT NULL,    -- 命中规则 ID（如 IN-CR-05 / OUT-01）
+  severity            TEXT    NOT NULL,    -- 'Critical' | 'High' | 'Medium' | 'Low'
+  disposition         TEXT    NOT NULL,    -- 'redact' | 'mark' | 'pending' | 'resolved' | 'notify'
+  decision            TEXT,                -- 'Allow' | 'Block' | NULL（无用户交互时）
+  request_id          TEXT    NOT NULL,    -- 请求 UUID（与 IPC request_id 串联）
+  raw_json            TEXT,                -- 序列化的 AuditEvent 元数据 JSON；【绝不含命中原文/密钥/前缀】，见 §6.3
+  caller_pid          INTEGER,             -- 调用方 PID（NULL 表示反查失败）
+  caller_exe          TEXT,                -- 调用方可执行路径（NULL 表示反查失败）
+  provider_id         TEXT    NOT NULL DEFAULT 'unknown'  -- listener 上游身份标识（'_system' = 系统事件）
 );
 
-CREATE INDEX idx_events_timestamp ON events(timestamp);
-CREATE INDEX idx_events_session   ON events(session_id);
-CREATE INDEX idx_events_rule      ON events(rule_id);
+-- append-only：拒绝 UPDATE / DELETE
+CREATE TRIGGER IF NOT EXISTS no_update BEFORE UPDATE ON audit_events
+BEGIN SELECT RAISE(FAIL, 'audit_events is append-only: UPDATE is forbidden'); END;
 
-CREATE TRIGGER events_no_update BEFORE UPDATE ON events
-BEGIN SELECT RAISE(ABORT, 'events is append-only'); END;
-
-CREATE TRIGGER events_no_delete BEFORE DELETE ON events
-BEGIN SELECT RAISE(ABORT, 'events is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS no_delete BEFORE DELETE ON audit_events
+BEGIN SELECT RAISE(FAIL, 'audit_events is append-only: DELETE is forbidden'); END;
 ```
 
 ### 6.2a schema v1 → v2 迁移
@@ -371,13 +369,13 @@ BEGIN SELECT RAISE(ABORT, 'events is append-only'); END;
 
 ```sql
 BEGIN;
-ALTER TABLE events ADD COLUMN caller_pid INTEGER;
-ALTER TABLE events ADD COLUMN caller_exe TEXT;
+ALTER TABLE audit_events ADD COLUMN caller_pid INTEGER;
+ALTER TABLE audit_events ADD COLUMN caller_exe TEXT;
 PRAGMA user_version = 2;
 COMMIT;
 ```
 
-迁移完成后重建 append-only 触发器（SQLite ALTER TABLE 不触发触发器重建，需显式 DROP + RECREATE）。迁移失败则回滚并打印 `ERROR`，daemon 拒绝启动。
+迁移失败则回滚并打印 `ERROR`，daemon 拒绝启动。
 
 ### 6.2b schema v2 → v3 迁移（multi-listener Stage E）
 
@@ -385,36 +383,35 @@ COMMIT;
 
 ```sql
 BEGIN;
-ALTER TABLE events ADD COLUMN provider_id TEXT NOT NULL DEFAULT 'unknown';
+ALTER TABLE audit_events ADD COLUMN provider_id TEXT NOT NULL DEFAULT 'unknown';
 PRAGMA user_version = 3;
 COMMIT;
 ```
 
-`provider_id` 列记录每条事件命中哪个 listener 上游（multi-listener
-场景）。NOT NULL DEFAULT `'unknown'`
-保证旧记录（migration 时存在的 audit）填上兜底值；引入 multi-listener 后所有
-`audit.append` 调用都从 `RequestCtx.listener_provider_id` 显式传入。
+`provider_id` 列记录每条事件命中哪个 listener 上游。NOT NULL DEFAULT `'unknown'`
+保证旧记录填上兜底值；引入 multi-listener 后所有 `audit.append` 调用都从
+`RequestCtx.listener_provider_id` 显式传入。特殊值：`_system`（系统级事件，无 listener
+上下文）/ `unknown`（v2 老记录迁移默认 / 测试 fixture）/ 普通字符串（来自
+`sieve.toml [[upstream]] provider_id` 或 URL host 派生）。迁移失败回滚 + `ERROR` + 拒绝启动。
 
-特殊值：
-- `_system`：daemon 系统级事件（control plane / config reload / preset change /
-  IPC oversize 等无 listener 上下文的事件）
-- `unknown`：兜底值（v2 老记录 migration 默认 / 测试 fixture）
-- 普通字符串：来自 `sieve.toml [[upstream]] provider_id` 字段，或 URL host 派生
+### 6.3 脱敏契约（规范性）+ 字段语义
 
-迁移失败则回滚并打印 `ERROR`，daemon 拒绝启动。
+**脱敏契约（D-1，规范性，安全不变量）**：
 
-### 6.3 字段语义
+- `audit_events` 表的**任何列都不得持久化命中原文 / 原始密钥 / 助记词 / 地址，也不得存其前缀片段**。
+- `raw_json` 列仅写**已序列化的 `AuditEvent` 元数据**（`kind` / `rule_id` / `severity` / `request_id` / `caller`），命中证据字段（`Detection.evidence_truncated` 等）**不进入** `AuditEvent`，故不落库；出站脱敏类事件 `raw_json` 恒为 `NULL`（见 `daemon.rs` `OutboundRedacted { raw_json: None }`）。当前实现全 crate **零** `raw_json: Some(<原文>)` 写入路径。
+- **禁止**后续给本表新增任何含命中原文/前缀的列（如 `evidence` / `evidence_meta` / `matched_text`）。GUI 硬约束「不存储原始 prompt / 命中片段，evidence 只在内存持有」在数据层的兑现：GUI 若需展示命中详情，**MUST** 从 IPC `request_decision` 的内存态 `detections[].details` 实时取（弹窗关闭即丢弃），**不得**从 audit.db 读取。
+- 违反本契约（任一列出现明文/前缀）视为 P0 安全缺陷。
 
-- `evidence_meta`：JSON 字符串，**仅存元信息**（长度、前缀几个字符、entropy 值），用于事后分析 FP 而不是回放 prompt；
-- `user_choice`：仅 Critical / High 在用户交互后写入；Medium / Low 为 NULL；
-- `session_id`：与 Claude Code 单次进程绑定（启动时随机），**不**做跨进程关联；
-- `caller_pid` / `caller_exe`（v2 新增）：由 accept loop 进程上下文反查注入；macOS `proc_listpids` + `proc_pidfdinfo` 4-tuple 匹配；反查失败时存 NULL，不阻断请求处理。
-- `provider_id`（v3 新增）：标注本条事件命中的 listener 上游身份。
-  multi-listener 场景下用于审计追溯（"用户哪个 endpoint 触发的告警"）；
-  系统级事件（control plane / config reload）填 `_system`；
-  来源：`sieve.toml [[upstream]] provider_id` → `RequestCtx.listener_provider_id` → `AuditStore::append(event, provider_id)`。
+**字段语义**：
 
-> 即使审计文件被攻击者读到，也只能拿到"此用户在此时间点触发过 OUT-09 BIP39 检测"，无法还原任何敏感内容。这是"完全本地、绝不联网 verifier"原则在数据层的兑现。
+- `raw_json`：见上，仅元数据 JSON，多数事件为 `NULL`。
+- `decision`：仅在用户对 Critical / High 交互后写入（`Allow` / `Block`）；无交互为 `NULL`。
+- `disposition`：处置方式（`redact` / `mark` / `pending` / `resolved` / `notify`）。
+- `caller_pid` / `caller_exe`（v2 新增）：由 accept loop 进程上下文反查注入；macOS `proc_listpids` + `proc_pidfdinfo` 4-tuple 匹配；反查失败存 `NULL`，不阻断请求处理。
+- `provider_id`（v3 新增）：本条事件命中的 listener 上游身份；系统级事件填 `_system`；来源链：`sieve.toml [[upstream]] provider_id` → `RequestCtx.listener_provider_id` → `AuditStore::append(event, provider_id)`。
+
+> 即使审计文件被攻击者读到，也只能拿到"此用户在此时间点触发过某规则（如 OUT-14 BIP39）检测"，无法还原任何敏感内容。这是"完全本地、绝不联网 verifier"原则在数据层的兑现。
 
 ---
 

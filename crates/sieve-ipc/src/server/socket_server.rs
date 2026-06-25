@@ -687,6 +687,23 @@ impl IpcServer {
         timeout: Duration,
         direction: &str,
     ) -> Result<DecisionResponse, IpcError> {
+        // SPEC-005 §6.1.1：wire 字段 `timeout_seconds` 必须落在 [30, 120]。client（GUI）对该
+        // 字段无下限校验——下发 0 会让倒计时首 tick 即归零（异常/静默关窗），下发越界大值则
+        // 进度条失真。所有 request_decision 发送都经过本方法这唯一 choke point，故在此钳制即可
+        // 保证 wire 契约对所有构造路径成立（含多 issue 合并取最小值后越界的情形）。
+        // 钳制而非拒绝：拒绝会中断决策流→可能 fail-open；钳到 SPEC 下限 30s 保证 GUI 可用。（D-3）
+        let mut req = req;
+        let clamped_timeout = req.timeout_seconds.clamp(30, 120);
+        if clamped_timeout != req.timeout_seconds {
+            warn!(
+                request_id = %req.request_id,
+                original = req.timeout_seconds,
+                clamped = clamped_timeout,
+                "timeout_seconds out of SPEC-005 §6.1.1 range [30,120]; clamped before wire send"
+            );
+            req.timeout_seconds = clamped_timeout;
+        }
+
         let request_id = req.request_id;
         let default_on_timeout = req.default_on_timeout;
 
@@ -1786,6 +1803,64 @@ mod tests {
         );
         assert_eq!(resp.decision, DecisionAction::Deny);
         assert!(!resp.by_user, "fallback 不应标记为 by_user");
+    }
+
+    /// SPEC-005 §6.1.1：wire `timeout_seconds` 必须在 [30,120]。daemon 发送前在唯一 choke
+    /// point 钳制越界值（如 0），保证 GUI 倒计时不被 0 击穿。（D-3）
+    #[tokio::test]
+    async fn request_decision_clamps_out_of_range_timeout_seconds() {
+        let dir = tempdir().expect("tempdir");
+        let socket_path = dir.path().join("ipc.sock");
+        let (server, _listener) = IpcServer::bind(socket_path).expect("bind");
+
+        // 注册能收帧的 writer（容量足够，不触发背压降级）。
+        let (tx, mut rx) = mpsc::channel::<String>(4);
+        server
+            .gui_writers
+            .lock()
+            .expect("gui_writers lock")
+            .push(tx);
+
+        // 越界 timeout_seconds=0 → wire 应被钳到 SPEC 下限 30。
+        let mut req = dummy_request();
+        req.timeout_seconds = 0;
+
+        // 短 oneshot 超时：帧 try_send 后立即走 fallback，不阻塞测试。
+        let _ = server
+            .request_decision(req, Duration::from_millis(50), "inbound")
+            .await
+            .expect("request_decision");
+
+        // 取出已发送的 wire 帧，断言 timeout_seconds 已钳到 30。
+        let payload = rx.try_recv().expect("wire frame should have been sent");
+        let v: serde_json::Value =
+            serde_json::from_str(payload.trim_end()).expect("wire frame is valid JSON");
+        assert_eq!(
+            v["params"]["timeout_seconds"], 30,
+            "越界 timeout_seconds 应钳到 SPEC-005 §6.1.1 下限 30；wire frame: {payload}"
+        );
+
+        // 上界同理：121 → 120。
+        let (tx2, mut rx2) = mpsc::channel::<String>(4);
+        server.gui_writers.lock().expect("gui_writers lock").clear();
+        server
+            .gui_writers
+            .lock()
+            .expect("gui_writers lock")
+            .push(tx2);
+        let mut req2 = dummy_request();
+        req2.timeout_seconds = 121;
+        let _ = server
+            .request_decision(req2, Duration::from_millis(50), "inbound")
+            .await
+            .expect("request_decision");
+        let payload2 = rx2.try_recv().expect("wire frame 2 sent");
+        let v2: serde_json::Value =
+            serde_json::from_str(payload2.trim_end()).expect("wire frame 2 valid JSON");
+        assert_eq!(
+            v2["params"]["timeout_seconds"], 120,
+            "越界 timeout_seconds 应钳到 SPEC-005 §6.1.1 上限 120；wire frame: {payload2}"
+        );
     }
 
     /// SPEC-005 §3：连接建立后第一条出站消息必须是 sieve.hello，含全部 7 个必填字段。
