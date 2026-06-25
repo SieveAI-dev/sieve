@@ -190,10 +190,13 @@ jobs:
     # Phase 1 仅 macOS 的约束不强制要求 fuzz runner 也切 macOS。
     name: fuzz-quick (cargo fuzz, 60s/target)
     runs-on: ubuntu-latest
-    # ⚠️ fuzz 工具链漂移暂未完全修复：cargo-fuzz 新版从源码编译失败已改用 taiki-e 预编译
-    # binary 绕过，但 nightly 编译 fuzz target 时用 musl target 缺 std（E0463 can't find
-    # crate for core）。fuzz 是 nightly 调研工具、非发布 gate，暂设 continue-on-error 不
-    # 阻塞 CI，待单独修复 fuzz 工具链（给 nightly 装 musl target 或改用 gnu target）后移除。
+    # cargo-fuzz 在 Linux 默认编到 `x86_64-unknown-linux-musl` target，需要 musl 的 rust-std
+    # **和** musl C++ 交叉编译器（libfuzzer-sys 的 C++ 运行时构建）——`--profile minimal` 两者皆缺，
+    # 此前 fuzz 构建即失败（E0463 can't find crate for core / 找不到 x86_64-linux-musl-g++），
+    # fuzz 从未真正运行（CI 覆盖虚化）。改为显式 `--target x86_64-unknown-linux-gnu`：ubuntu host
+    # 即 gnu，rust-std 在 minimal profile 已含、g++ 也现成，无需额外装 musl 工具链。fuzz 现可
+    # 真正运行并提供覆盖。仍保留 continue-on-error：fuzz 是非确定性调研工具，新种子偶发命中不应
+    # 阻断无关 PR；正式升级为发布 gate 需另立稳定 corpus + 决策。
     continue-on-error: true
     # 关 ASan 跑 fuzz：rust-fuzz/cargo-fuzz#404 已知问题。LLVM 20 的 ASan
     # 与 cargo-fuzz 0.13.1 的 SanCov instrumentation 路径冲突，链接报
@@ -216,13 +219,14 @@ jobs:
         with:
           tool: cargo-fuzz
       - uses: Swatinem/rust-cache@v2
+      # 显式 --target gnu：避开 cargo-fuzz 默认 musl（需 musl rust-std + musl-g++，runner 均无）。
       - name: Fuzz sse_parser (60s)
-        run: cargo +nightly fuzz run -s none sse_parser -- -max_total_time=60
+        run: cargo +nightly fuzz run -s none --target x86_64-unknown-linux-gnu sse_parser -- -max_total_time=60
       - name: Fuzz sse_parser_openai (60s)
         # Phase 1 已接 OpenAI 协议，SSE 边界 fuzz 必须覆盖
         # OpenAI 分支。target 见 fuzz/fuzz_targets/sse_parser_openai.rs。
-        run: cargo +nightly fuzz run -s none sse_parser_openai -- -max_total_time=60
+        run: cargo +nightly fuzz run -s none --target x86_64-unknown-linux-gnu sse_parser_openai -- -max_total_time=60
       - name: Fuzz tool_use_aggregator (60s)
-        run: cargo +nightly fuzz run -s none tool_use_aggregator -- -max_total_time=60
+        run: cargo +nightly fuzz run -s none --target x86_64-unknown-linux-gnu tool_use_aggregator -- -max_total_time=60
       - name: Fuzz inbound_filter (60s)
-        run: cargo +nightly fuzz run -s none inbound_filter -- -max_total_time=60
+        run: cargo +nightly fuzz run -s none --target x86_64-unknown-linux-gnu inbound_filter -- -max_total_time=60
