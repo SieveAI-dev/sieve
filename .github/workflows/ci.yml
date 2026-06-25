@@ -112,6 +112,46 @@ jobs:
       - name: 四路由入站钩子接线 + 端到端测试锚点检查
         run: bash scripts/check_routing_coverage.sh
 
+  detection-regression:
+    name: 检测回归（规则包：四路由 + 红队）
+    # 检测规则通过签名规则包下发，不内置于源码树。红队 / 四路由集成测试在规则包缺失时
+    # 优雅 SKIP（vacuous pass，覆盖未真正生效）。本 job 在规则包可用时（配置
+    # SIEVE_RULES_PACK_B64 secret）落地规则后运行这些回归，使四路由对等 / 红队 bypass /
+    # 出站脱敏处置等回归真实生效；secret 缺失（如 fork 触发的 PR）时整 job 优雅跳过。
+    #
+    # secret 制备：
+    #   tar czf - -C crates/sieve-rules/rules inbound.toml outbound.toml | base64
+    # 存为仓库 / 环境 secret `SIEVE_RULES_PACK_B64`。
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - name: 安装构建依赖（macOS）
+        run: brew install cmake ninja pkg-config boost ragel
+      - uses: taiki-e/install-action@nextest
+      - name: 落地规则包（secret 缺失则后续步骤跳过）
+        id: rules
+        env:
+          RULES_PACK_B64: ${{ secrets.SIEVE_RULES_PACK_B64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RULES_PACK_B64:-}" ]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::SIEVE_RULES_PACK_B64 未配置——跳过检测回归（红队 / 四路由测试在无规则包时 SKIP，覆盖未真正生效）。"
+            exit 0
+          fi
+          mkdir -p crates/sieve-rules/rules
+          echo "$RULES_PACK_B64" | base64 -d | tar xzf - -C crates/sieve-rules/rules
+          test -f crates/sieve-rules/rules/inbound.toml
+          test -f crates/sieve-rules/rules/outbound.toml
+          echo "available=true" >> "$GITHUB_OUTPUT"
+      - name: 四路由 + 红队检测回归（仅规则可用时跑，规则在树→测试真跑不 SKIP）
+        if: steps.rules.outputs.available == 'true'
+        run: |
+          cargo nextest run -p sieve-cli --locked --profile ci \
+            -E 'binary(content_type_matrix) or binary(inbound_block) or binary(redteam_inbound) or binary(redteam_outbound)'
+
   dogfood:
     name: dogfood hermetic (macos-14)
     # 完全 hermetic：无真 ANTHROPIC_API_KEY、无真网络、无真 GUI，零 secret。

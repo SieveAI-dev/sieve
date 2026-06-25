@@ -721,7 +721,39 @@ fn openai_json_shell_tool_use(command: &str) -> Bytes {
     Bytes::from(attack_json.to_string())
 }
 
-/// 通用 SSE 路由断言：危险 shell tool_use 应被拦（sieve_blocked）。
+/// 断言 daemon 为 hook_terminal 命中写出了 IPC pending 文件（供 sieve-hook 在 PreToolUse 拦截）。
+///
+/// 危险 shell tool_use（IN-CR-02 eval / IN-CR-03 敏感文件访问）处置 = hook_terminal → HookMark：
+/// daemon **不注入 sieve_blocked**（那是 Block / GuiPopup 处置的行为，见 inbound_block.rs
+/// ucsb_attack_2），而是写 pending 文件，由 sieve-hook 在工具执行前拦截（双层防御）。
+/// 四路由对等保证（硬约束 #16）：危险 shell tool_use 在 Anthropic/OpenAI × SSE/JSON 任一
+/// 路由都必须写出 pending 文件——此前非流式 JSON 路径完全不写 pending 是 P0 缺口。
+fn assert_pending_written(sieve_home: &TempDir, label: &str, resp_body: &[u8]) {
+    let pending_dir = sieve_home.path().join("pending");
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        let count = std::fs::read_dir(&pending_dir)
+            .map(|rd| {
+                rd.filter_map(|e| e.ok())
+                    .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
+                    .count()
+            })
+            .unwrap_or(0);
+        if count >= 1 {
+            return;
+        }
+        if Instant::now() >= deadline {
+            panic!(
+                "{label}: 危险 shell 入站样本应写 IPC pending 文件供 hook 拦截，\
+                 但 {pending_dir:?} 无 pending 文件；resp body: {}",
+                String::from_utf8_lossy(resp_body)
+            );
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// 通用 SSE 路由断言：危险 shell tool_use 应写 pending 文件（hook_terminal 路径）。
 async fn assert_sse_shell_blocked(label: &str, route: &str, attack: Bytes, body_json: String) {
     let (upstream, _up) = spawn_mock_sse_upstream(move |_req| {
         let body = attack.clone();
@@ -741,14 +773,10 @@ async fn assert_sse_shell_blocked(label: &str, route: &str, attack: Bytes, body_
         .unwrap();
 
     assert_eq!(status, 200, "{label}: 上游 200 应保留");
-    let body_str = String::from_utf8_lossy(&body);
-    assert!(
-        body_str.contains("sieve_blocked"),
-        "{label}: 危险 shell 入站样本应被拦（sieve_blocked）；body: {body_str}"
-    );
+    assert_pending_written(&sieve_home, label, &body);
 }
 
-/// 通用 JSON 路由断言：危险 shell tool_use 应被拦（sieve_blocked）。
+/// 通用 JSON 路由断言：危险 shell tool_use 应写 pending 文件（hook_terminal 路径，四路由对等）。
 async fn assert_json_shell_blocked(label: &str, route: &str, attack: Bytes, body_json: String) {
     let (upstream, _up) = spawn_mock_json_upstream(move |_req| {
         let body = attack.clone();
@@ -768,11 +796,7 @@ async fn assert_json_shell_blocked(label: &str, route: &str, attack: Bytes, body
         .unwrap();
 
     assert_eq!(status, 200, "{label}: 上游 200 应保留");
-    let body_str = String::from_utf8_lossy(&body);
-    assert!(
-        body_str.contains("sieve_blocked"),
-        "{label}: 危险 shell 入站样本应被拦（sieve_blocked）；body: {body_str}"
-    );
+    assert_pending_written(&sieve_home, label, &body);
 }
 
 /// M-1 Anthropic SSE：危险 shell tool_use（三形态各一）应被拦。

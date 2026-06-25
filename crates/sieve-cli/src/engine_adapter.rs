@@ -355,12 +355,47 @@ impl<E: MatchEngine + Send + Sync + 'static> InboundEngine for InboundAdapter<E>
         let mut hits = Vec::new();
         // 1. 工具名扫描（IN-CR-05 签名工具）
         hits.extend(self.scan_text(&tool.name, source, 0)?);
-        // 2. 工具输入序列化扫描（IN-CR-02 危险 shell 等）
+        // 2a. 工具输入「反转义字符串值」扫描（修复引号转义绕过）。
+        //     此前仅扫 serde_json::to_string(&tool.input) —— 序列化把字符串里的 `"`
+        //     转义成 `\"`，导致依赖引号的 Critical pattern（如 IN-CR-02-EVAL
+        //     `eval\s*["(\$]` 匹配 `eval "$(...)"`）被转义符破坏而绕过。改为递归收集
+        //     原始字符串值（换行连接，防跨值误匹配）后扫描，命中不再受 JSON 转义影响。
+        let value_text = collect_string_values(&tool.input);
+        if !value_text.is_empty() {
+            hits.extend(self.scan_text(&value_text, source, 0)?);
+        }
+        // 2b. 保留原序列化扫描作兜底（不丢历史覆盖：键名 / 非字符串结构层面命中）。
         if let Ok(input_str) = serde_json::to_string(&tool.input) {
             hits.extend(self.scan_text(&input_str, source, 0)?);
         }
+        // 同一 rule 可能在 2a/2b 两次命中同一证据（fingerprint = rule_id + matched_text，
+        // 与偏移无关）→ 去重，避免重复 Detection（重复 pending 文件 / 审计双计）。
+        hits.sort_by(|a, b| {
+            (a.rule_id.as_str(), a.fingerprint.as_str())
+                .cmp(&(b.rule_id.as_str(), b.fingerprint.as_str()))
+        });
+        hits.dedup_by(|a, b| a.rule_id == b.rule_id && a.fingerprint == b.fingerprint);
         Ok(hits)
     }
+}
+
+/// 递归收集 JSON Value 中的所有字符串值，换行连接。
+///
+/// 用于工具输入内容扫描：扫原始字符串值（反转义后）而非序列化 JSON，避免
+/// `serde_json::to_string` 的引号转义破坏依赖引号的检测 pattern。换行分隔防止
+/// 相邻字符串值被拼接后产生跨值误匹配。
+fn collect_string_values(v: &serde_json::Value) -> String {
+    fn walk(v: &serde_json::Value, out: &mut Vec<String>) {
+        match v {
+            serde_json::Value::String(s) => out.push(s.clone()),
+            serde_json::Value::Array(a) => a.iter().for_each(|x| walk(x, out)),
+            serde_json::Value::Object(o) => o.values().for_each(|x| walk(x, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    walk(v, &mut out);
+    out.join("\n")
 }
 
 impl<E: MatchEngine + Send + Sync + 'static> OutboundEngine for OutboundAdapter<E> {
@@ -400,7 +435,7 @@ impl<E: MatchEngine + Send + Sync + 'static> OutboundEngine for OutboundAdapter<
 
             // OUT-12/13 Base58Check second-pass：vectorscan 粗 pattern（前缀+字符集
             // +长度）命中后，仅 Base58Check 校验和通过的候选才产 Detection；校验和失败者视为
-            // 误报丢弃。与 BIP39（OUT-09 second-pass）的 checksum 差异化打法同构。
+            // 误报丢弃。与 BIP39（OUT-14 second-pass）的 checksum 差异化打法同构。
             if matches!(hit.rule_id.as_str(), "OUT-12" | "OUT-13")
                 && !sieve_rules::base58check::verify_base58check(matched_text)
             {
@@ -473,7 +508,19 @@ impl<E: MatchEngine + Send + Sync + 'static> OutboundEngine for OutboundAdapter<
         // vectorscan 不覆盖 BIP39，此处独立扫描：
         // 1. 按空白分词，提取全在词表的连续窗口
         // 2. 对每个窗口做 SHA-256 checksum 验证
-        // 3. 仅 checksum 通过的窗口定级 Critical（OUT-09）
+        // 3. 仅 checksum 通过的窗口定级 Critical（rule_id = OUT-14，BIP39 专属编号）
+        //
+        // rule_id 用 OUT-14（不复用 OUT-09）：OUT-09 已是 outbound.toml 里的 Slack Token
+        // 规则；此处代码构建的 BIP39 检测此前硬编码 "OUT-09" 与之撞号，污染审计 / 指纹 /
+        // fail-closed 注册表（借了 Slack 规则的 fail_closed=true）。改用独立 OUT-14。
+        // BIP39 是代码构建检测（非 toml 加载规则），不进 critical_lock 注册表——但本处置
+        // 为 auto_redact，redact 应用无条件（不查 dry_run / is_fail_closed，见 daemon.rs
+        // redact_hits 收集），与标杆 OUT-01（auto_redact、亦无 fail_closed）语义一致。
+        //
+        // 处置 = auto_redact（不弹窗硬阻断）：助记词属高频出站脱敏类（硬约束 #13
+        // "出站脱敏不打断工作流"），命中后静默改写为占位符 + 状态栏通知 + 转发上游，
+        // 而非 Block（426 硬阻断会打断 crypto 开发者正常工作流）。secret 在转发前已脱敏，
+        // 安全不变量不变（明文永不出站）。
         let wl = sieve_rules::wordlist::wordlist_index();
         let tokens: Vec<&str> = input.split_whitespace().collect();
         let candidates = sieve_rules::bip39::candidate_bip39_windows(&tokens, wl);
@@ -481,17 +528,29 @@ impl<E: MatchEngine + Send + Sync + 'static> OutboundEngine for OutboundAdapter<
             if sieve_rules::bip39::verify_checksum(&window, wl) {
                 let window_text = window.join(" ");
                 let evidence_truncated = redact_evidence(&window_text);
-                let fp = fingerprint("OUT-09", &window_text);
+                let fp = fingerprint("OUT-14", &window_text);
+                // 精确 span：auto_redact 按 span 字节范围替换，必须只覆盖助记词窗口本身，
+                // 否则整条消息会被替成占位符（过度脱敏，毁掉用户原文）。在原 input 中
+                // 定位窗口（单空格分隔的常见情形）；异常空白找不到时回退整段 span
+                // （过度脱敏但安全，明文助记词仍不出站）。
+                let (span_start, span_end) = match input.find(&window_text) {
+                    Some(off) => (
+                        body_byte_offset + off,
+                        body_byte_offset + off + window_text.len(),
+                    ),
+                    None => (body_byte_offset, body_byte_offset + input.len()),
+                };
                 detections.push(Detection {
                     id: Uuid::new_v4(),
-                    rule_id: "OUT-09".to_string(),
+                    rule_id: "OUT-14".to_string(),
                     severity: Severity::Critical,
-                    action: Action::Block,
+                    action: Action::Redact {
+                        placeholder: "[REDACTED:OUT-14]".to_string(),
+                    },
                     source,
-                    // span 为整个输入范围的近似（无精确字节偏移）
                     span: ContentSpan {
-                        start: body_byte_offset,
-                        end: body_byte_offset + input.len(),
+                        start: span_start,
+                        end: span_end,
                     },
                     evidence_truncated,
                     fingerprint: fp,
