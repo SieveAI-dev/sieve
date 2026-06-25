@@ -60,6 +60,13 @@
 - **HIPS 超时决策回传幂等性核实（GUI 审查 D-3）。** 核实 daemon `decision_response` 处理已按
   `request_id` 幂等（`pending.remove`）：GUI 倒计时 fail-closed 回传的 `deny, by_user=false` 与
   daemon 自身 oneshot 兜底超时不会对同一请求双重处置。在 SPEC-005 §6.2.1 注 ③ 锁定此契约。
+- **dogfood billing/archive 测试 feature gate 修复（功能用户故事测试基线）。** 5 个 feature-gated
+  e2e 测试（4 个 billing 需 `usage`、1 个 archive 需 `audit-crypto`）此前无 `cfg` gate：默认
+  `cargo nextest --workspace`（CLAUDE.md 标准命令）下 `sieve_binary()` 用的二进制未编入对应功能 →
+  daemon 不建 usage.db / 归档 → 断言 hard fail（确定性 5 红），污染标准测试命令的 CI 信号、可能掩盖
+  真实回归。现加 `#[cfg_attr(not(feature=...), ignore)]`：默认 feature 优雅 skip（测试仍编译，不引入
+  dead-code），`--features usage,audit-crypto` 下正常跑。默认全量基线由 860 passed/5 failed 转为
+  860 passed/6 skipped/0 failed。
 
 ### Changed (契约锁定 / 文档，GUI 审查 D-2 / D-3 / D-4)
 

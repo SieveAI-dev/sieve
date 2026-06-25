@@ -286,6 +286,10 @@ async fn phase_a_outbound_out01_auto_redact_forwards_redacted() {
 /// 绝不出现原始 `sk-ant-api03-` 明文；用 `sieve audit decrypt`（口令解锁私钥）解开后，
 /// 内容是脱敏后的 `[REDACTED:OUT-01]` 占位符——证明 daemon 喂给归档的是脱敏后内容。
 #[tokio::test]
+#[cfg_attr(
+    not(feature = "audit-crypto"),
+    ignore = "需 --features audit-crypto：daemon 二进制须编入加密归档功能，否则不建归档"
+)]
 async fn phase_a_full_archive_stores_ciphertext_only_no_plaintext() {
     if !outbound_rules_path().exists() || !inbound_rules_path().exists() {
         eprintln!("SKIP phase_a_full_archive_stores_ciphertext_only_no_plaintext: 规则文件不存在（需安装签名规则包），跳过");
@@ -436,6 +440,10 @@ async fn phase_a_full_archive_stores_ciphertext_only_no_plaintext() {
 /// 独立 token 核算检出超额 → `usage.db` 落 `overbilled` 记录（严格本地）。这是「relay 虚报
 /// 被检出」回归的 daemon 级端到端验证。
 #[tokio::test]
+#[cfg_attr(
+    not(feature = "usage"),
+    ignore = "需 --features usage：daemon 二进制须编入 billing 核算，否则不建 usage.db"
+)]
 async fn phase_a_billing_detects_relay_usage_inflation() {
     if !outbound_rules_path().exists() || !inbound_rules_path().exists() {
         eprintln!("SKIP phase_a_billing_detects_relay_usage_inflation: 规则文件不存在（需安装签名规则包），跳过");
@@ -668,6 +676,10 @@ fn openai_billing_req() -> String {
 /// Route 2/4 · **Anthropic SSE**：relay 在 `message_start.usage.input_tokens` +
 /// `message_delta.usage.output_tokens` 虚报 → SSE 观测器累计后检出。
 #[tokio::test]
+#[cfg_attr(
+    not(feature = "usage"),
+    ignore = "需 --features usage：daemon 二进制须编入 billing 核算，否则不建 usage.db"
+)]
 async fn phase_a_billing_anthropic_sse_overbilled() {
     let payload = responses::anthropic_sse_bytes_with_usage("hi", 80_000, 80_000);
     let mock = spawn_mock_streaming_upstream("text/event-stream", move |_req| {
@@ -686,6 +698,10 @@ async fn phase_a_billing_anthropic_sse_overbilled() {
 
 /// Route 3/4 · **OpenAI JSON**：relay 在顶层 `usage.prompt_tokens/completion_tokens` 虚报。
 #[tokio::test]
+#[cfg_attr(
+    not(feature = "usage"),
+    ignore = "需 --features usage：daemon 二进制须编入 billing 核算，否则不建 usage.db"
+)]
 async fn phase_a_billing_openai_json_overbilled() {
     let mock = spawn_mock_upstream(|_req| async {
         responses::openai_json_response_with_usage("hi", 80_000, 80_000)
@@ -704,6 +720,10 @@ async fn phase_a_billing_openai_json_overbilled() {
 /// Route 4/4 · **OpenAI SSE**：relay 在末尾 usage chunk（`choices:[]` + `usage`）虚报。
 /// 依赖 `OpenAiSseParser` 把 usage-only chunk 归一化为 `MessageDelta`（usage 观测扩展）。
 #[tokio::test]
+#[cfg_attr(
+    not(feature = "usage"),
+    ignore = "需 --features usage：daemon 二进制须编入 billing 核算，否则不建 usage.db"
+)]
 async fn phase_a_billing_openai_sse_overbilled() {
     let payload = responses::openai_sse_bytes_with_usage("hi", 80_000, 80_000);
     let mock = spawn_mock_streaming_upstream("text/event-stream", move |_req| {
