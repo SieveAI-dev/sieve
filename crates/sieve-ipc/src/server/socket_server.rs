@@ -838,18 +838,23 @@ async fn handle_connection(stream: UnixStream, ctx: ConnectionContext) -> Result
 
     // SPEC-005 §3：连接建立后第一条出站消息必须是 sieve.hello notification。
     if let Some(builder) = hello_builder {
-        let paused = {
+        // SPEC-005 §3.2（D-5 修复）：握手不能只取 paused 布尔而丢弃截止时间，
+        // 否则 client 握手进入暂停态却拿不到 until → 状态降级、菜单栏假装正常。
+        // 取过期过滤后的 until 快照，paused 由其 is_some() 派生，二者天然一致。
+        let paused_until_value = {
             let snap = paused_until.load();
-            match snap.as_ref().as_ref() {
-                Some(until) => *until > Utc::now(),
-                None => false,
-            }
+            snap.as_ref()
+                .as_ref()
+                .copied()
+                .filter(|until| *until > Utc::now())
         };
+        let paused = paused_until_value.is_some();
         let uptime_seconds = (Utc::now() - builder.started_at).num_seconds().max(0) as u64;
         let params = crate::protocol::HelloParams {
             protocol_version: "v2".to_owned(),
             daemon_version: builder.daemon_version,
             paused,
+            paused_until: paused_until_value,
             preset: builder.preset,
             uptime_seconds,
             audit_db_user_version: builder.audit_db_user_version,
@@ -1919,6 +1924,62 @@ mod tests {
             params["daemon_boot_id"],
             boot_id.to_string(),
             "daemon_boot_id 必须与注入值一致"
+        );
+    }
+
+    /// SPEC-005 §3.2（D-5 回归）：daemon 处暂停态时握手 hello 必须带 `paused_until`，
+    /// 不能只发 `paused: true` 而丢弃截止时间——否则 client 握手进入暂停态却拿不到
+    /// until，状态降级、菜单栏假装正常。修复前握手只取 paused 布尔，本测试会失败。
+    #[tokio::test]
+    async fn hello_carries_paused_until_when_paused() {
+        use tokio::io::{AsyncBufReadExt, BufReader as TokioBufReader};
+        use tokio::net::UnixStream;
+
+        let dir = tempdir().expect("tempdir");
+        let socket_path = dir.path().join("ipc.sock");
+        let (server, listener) = IpcServer::bind(socket_path.clone()).expect("bind");
+        let server = Arc::new(server);
+
+        // daemon 进入暂停态，截止时间在未来 30 分钟。
+        let until = Utc::now() + chrono::Duration::minutes(30);
+        server.set_paused_until(Some(until));
+        server
+            .set_hello_builder(HelloBuilder {
+                daemon_boot_id: Uuid::now_v7(),
+                daemon_version: "0.0.0-test".to_owned(),
+                audit_db_user_version: 2,
+                started_at: Utc::now(),
+                preset: "default".to_owned(),
+            })
+            .await;
+
+        let srv = Arc::clone(&server);
+        tokio::spawn(async move { srv.run(listener).await });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        let stream = UnixStream::connect(&socket_path).await.expect("connect");
+        let mut lines = TokioBufReader::new(stream).lines();
+        let first_line = tokio::time::timeout(Duration::from_secs(2), lines.next_line())
+            .await
+            .expect("timeout waiting for sieve.hello")
+            .expect("io error")
+            .expect("connection closed before hello");
+
+        let val: serde_json::Value =
+            serde_json::from_str(&first_line).expect("hello must be valid JSON");
+        let params = val.get("params").expect("hello must have params");
+        assert_eq!(params["paused"], true, "暂停态握手 paused 必须为 true");
+        let pu = params
+            .get("paused_until")
+            .and_then(|v| v.as_str())
+            .expect("暂停态握手必须带 paused_until 字符串（D-5）");
+        let parsed = DateTime::parse_from_rfc3339(pu)
+            .expect("paused_until 必须是 RFC3339")
+            .with_timezone(&Utc);
+        assert!(parsed > Utc::now(), "paused_until 应为未来时间");
+        assert!(
+            pu.ends_with('Z'),
+            "paused_until 必须 Z 后缀（SPEC-005 §4A）"
         );
     }
 

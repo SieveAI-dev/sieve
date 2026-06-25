@@ -11,17 +11,36 @@ use sieve_ipc::wire::{MergedRequestDecisionWire, RequestDecisionWire};
 
 // ── sieve.hello ──────────────────────────────────────────────────────────────
 
-/// sieve.hello full fixture 可反序列化。
+/// sieve.hello full fixture 可反序列化 + 双向稳定（SPEC-005 §14.1）。
+///
+/// D-5：暂停态握手必须带 `paused_until`，且与 `paused` 配对。双向稳定断言守护
+/// fixture == daemon 序列化输出：`paused_until` 若忘改 fixture、或序列化格式偏离
+/// §4A（毫秒 + Z 后缀），都会在此失败。
 #[test]
 fn hello_full_fixture_deserializes() {
     let json = include_str!("fixtures/v2/sieve.hello/full.json");
     let val: serde_json::Value = serde_json::from_str(json).expect("parse hello/full.json");
     let params = val.get("params").expect("params field").clone();
-    let _hello: HelloParams =
-        serde_json::from_value(params).expect("deserialize HelloParams from full fixture");
+    let hello: HelloParams =
+        serde_json::from_value(params.clone()).expect("deserialize HelloParams from full fixture");
+    assert!(hello.paused, "full fixture 应为暂停态");
+    assert!(
+        hello.paused_until.is_some(),
+        "暂停态握手必须带 paused_until（D-5）"
+    );
+
+    // §14.1 双向稳定：序列化回 Value 必须与 fixture params 逐字段一致
+    //（含 paused_until 的 §4A 毫秒+Z 形态）。
+    let reserialized = serde_json::to_value(&hello).expect("serialize HelloParams");
+    assert_eq!(
+        reserialized, params,
+        "hello full fixture 双向不稳定——fixture 与 daemon 序列化输出漂移（SPEC-005 §14.1）"
+    );
 }
 
 /// sieve.hello minimal fixture 可反序列化。
+///
+/// minimal 省略 `paused_until` → `#[serde(default)]` 落到 `None`（向后兼容旧 daemon）。
 #[test]
 fn hello_minimal_fixture_deserializes() {
     let json = include_str!("fixtures/v2/sieve.hello/minimal.json");
@@ -30,6 +49,10 @@ fn hello_minimal_fixture_deserializes() {
     let hello: HelloParams =
         serde_json::from_value(params).expect("deserialize HelloParams from minimal fixture");
     assert_eq!(hello.protocol_version, "v2");
+    assert_eq!(
+        hello.paused_until, None,
+        "缺字段时 paused_until 必须默认 None（serde default 向后兼容）"
+    );
 }
 
 // ── sieve.set_paused ─────────────────────────────────────────────────────────
