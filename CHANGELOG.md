@@ -27,6 +27,15 @@
   序列化把字符串值里的 `"` 转义成 `\"`，使依赖引号的 Critical pattern（如 IN-CR-02-EVAL
   `eval\s*["(\$]` 匹配 `eval "$(...)"`）被转义符破坏而绕过。现改为递归扫描反转义后的原始
   字符串值（保留序列化扫描作兜底，按 fingerprint 去重），关闭该 Critical 规则绕过。
+- **修复 OpenAI SSE tool_call 首帧无 id/name 时的入站检测绕过。** `OpenAiSseParser` 此前仅在
+  tool_call 分片带 `id` 或 `function.name` 时才发 `ContentBlockStart` 开 aggregator block。
+  若首帧只带 `arguments`（OpenAI 流式下多 tool_call 续传、中转站重组分片、或恶意上游故意构造），
+  则不开 block → 后续 `InputJsonDelta` 被 aggregator 静默丢弃 → `finish_reason=tool_calls` 时
+  该 index 不在 `started_blocks` 不发 `ContentBlockStop` → 永不产出 `CompletedToolCall` →
+  `on_tool_use_complete` 不触发 → tool_use Critical 检测（IN-CR-02/03/04/05）被整段绕过，危险
+  工具调用零检测透传。现改为「id / name / arguments 任一」即开 block，保证 finish 必发 Stop：
+  partial_json 解析成功走检测、失败走 aggregator fail-closed。守护工程硬约束「所有入站能力必须
+  经过 content-type 路由矩阵测试」（`.cursorrules §二 #16`）。含 SSE→aggregator 端到端回归测试。
 
 ### Changed
 

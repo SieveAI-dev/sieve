@@ -13,7 +13,7 @@
 //! | OpenAI 字段 | 产出 `SseEvent` |
 //! |------------|----------------|
 //! | `delta.content` 非空 | `ContentBlockDelta { delta: TextDelta }` |
-//! | `delta.tool_calls[*]` 首次出现（含 id/name）| `ContentBlockStart { content_block: ToolUse }` |
+//! | `delta.tool_calls[*]` 首次出现（id/name/arguments 任一）| `ContentBlockStart { content_block: ToolUse }` |
 //! | `delta.tool_calls[*].function.arguments` 增量 | `ContentBlockDelta { delta: InputJsonDelta }` |
 //! | `finish_reason="tool_calls"` | 对所有已开 block 发 `ContentBlockStop`，再发 `MessageStop` |
 //! | `finish_reason` 其他非 null 值 | `MessageStop` |
@@ -143,33 +143,48 @@ impl OpenAiSseParser {
             for tc in tool_calls {
                 let tc_index = tc.index;
 
-                // 首次出现此 index 且带有 id 或 function.name → 发 ContentBlockStart
-                if !self.started_blocks.contains(&tc_index) {
-                    let has_id = tc.id.is_some();
-                    let has_name = tc.function.as_ref().and_then(|f| f.name.as_ref()).is_some();
-                    if has_id || has_name {
-                        let id = tc.id.as_deref().unwrap_or("").to_owned();
-                        let name = tc
-                            .function
-                            .as_ref()
-                            .and_then(|f| f.name.as_deref())
-                            .unwrap_or("")
-                            .to_owned();
-                        events.push(SseEvent::ContentBlockStart {
-                            index: tc_index,
-                            content_block: serde_json::json!({
-                                "type": "tool_use",
-                                "id": id,
-                                "name": name,
-                                "input": {}
-                            }),
-                        });
-                        self.started_blocks.insert(tc_index);
-                    }
+                // arguments 片段（先取，用于「是否开 block」判定 + 后续 InputJsonDelta）
+                let partial_json = extract_arguments(&tc);
+                let has_args = partial_json
+                    .as_deref()
+                    .map(|s| !s.is_empty())
+                    .unwrap_or(false);
+
+                // 首次出现此 index：只要带 id / name / arguments 任一即发 ContentBlockStart。
+                //
+                // 安全修复（四路由对等）：此前仅在「有 id 或 name」时才开 block。但 OpenAI
+                // 流式下 tool_call 首帧可能只带 arguments 续传（多 tool_call 后续工具、中转站
+                // 重组分片、或恶意上游故意构造）。若不开 block，aggregator 无对应条目 →
+                // 后续 InputJsonDelta 被静默丢弃 → finish 时该 index 不在 started_blocks
+                // 不发 ContentBlockStop → 永不产出 CompletedToolCall → on_tool_use_complete
+                // 不触发 → Critical tool_use 检测（IN-CR-02/03/04/05）被整段绕过。开 block 后
+                // finish 必发 Stop：partial_json 解析成功走检测、失败走 aggregator fail-closed。
+                if !self.started_blocks.contains(&tc_index)
+                    && (tc.id.is_some()
+                        || tc.function.as_ref().and_then(|f| f.name.as_ref()).is_some()
+                        || has_args)
+                {
+                    let id = tc.id.as_deref().unwrap_or("").to_owned();
+                    let name = tc
+                        .function
+                        .as_ref()
+                        .and_then(|f| f.name.as_deref())
+                        .unwrap_or("")
+                        .to_owned();
+                    events.push(SseEvent::ContentBlockStart {
+                        index: tc_index,
+                        content_block: serde_json::json!({
+                            "type": "tool_use",
+                            "id": id,
+                            "name": name,
+                            "input": {}
+                        }),
+                    });
+                    self.started_blocks.insert(tc_index);
                 }
 
                 // arguments 片段 → InputJsonDelta
-                if let Some(partial_json) = extract_arguments(&tc) {
+                if let Some(partial_json) = partial_json {
                     if !partial_json.is_empty() {
                         events.push(SseEvent::ContentBlockDelta {
                             // 用 tool_call index 做 block index，便于 aggregator 跨 chunk 对齐
@@ -671,6 +686,63 @@ mod tests {
         assert_eq!(
             completed[0].input.get("cmd").and_then(|v| v.as_str()),
             Some("ls")
+        );
+    }
+
+    // ─── 安全回归：tool_call 首帧无 id/name（仅 arguments）仍须被聚合，不得绕过检测 ───
+    // 恶意 / 中转站上游可构造首帧只含 arguments 的 tool_call SSE。修复前 parser 仅在
+    // 「有 id 或 name」时开 block → aggregator 静默丢弃后续 delta → finish 不发 Stop →
+    // 无 CompletedToolCall → on_tool_use_complete 不触发 → Critical tool_use 检测被整段
+    // 绕过。本测试锁死：危险 tool_call 必产出 CompletedToolCall 交检测。修复前 completed=0。
+    #[test]
+    fn openai_tool_call_first_chunk_without_id_still_aggregated() {
+        use crate::tool_use_aggregator::Aggregator;
+
+        let mut p = OpenAiSseParser::new();
+        let mut agg = Aggregator::new();
+
+        // 首帧只带 arguments（无 id、无 function.name）—— 危险命令首片
+        let chunk1 = r#"{"id":"x","object":"chat.completion.chunk","created":0,"model":"gpt-4","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"command\":\"rm -rf"}}]},"finish_reason":null}]}"#;
+        let chunk2 = r#"{"id":"x","object":"chat.completion.chunk","created":0,"model":"gpt-4","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":" /\"}"}}]},"finish_reason":null}]}"#;
+        let chunk3 = r#"{"id":"x","object":"chat.completion.chunk","created":0,"model":"gpt-4","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}"#;
+
+        let mut all_events = Vec::new();
+        for chunk in [chunk1, chunk2, chunk3] {
+            all_events.extend(p.feed(&make_data(chunk)).unwrap());
+        }
+
+        // 修复关键：即便首帧无 id/name，也必须开 block 并在 finish 发 Stop。
+        assert!(
+            all_events
+                .iter()
+                .any(|e| matches!(e, SseEvent::ContentBlockStart { index: 0, .. })),
+            "首帧无 id/name 也必须发 ContentBlockStart，否则 tool_call 绕过检测: {all_events:?}"
+        );
+        assert!(
+            all_events
+                .iter()
+                .any(|e| matches!(e, SseEvent::ContentBlockStop { index: 0 })),
+            "finish 必须发 ContentBlockStop: {all_events:?}"
+        );
+
+        // Aggregator 必须产出 CompletedToolCall（交 on_tool_use_complete 做 Critical 检测）
+        let mut completed = Vec::new();
+        for event in &all_events {
+            if let Ok(Some(tool)) = agg.process(event) {
+                completed.push(tool);
+            }
+        }
+        assert_eq!(
+            completed.len(),
+            1,
+            "首帧无 id/name 的 tool_call 必须产出 CompletedToolCall（修复前为 0，被绕过）: {all_events:?}"
+        );
+        // id/name 缺失用空串占位，但危险 arguments 完整保留供检测扫描
+        assert_eq!(completed[0].id, "");
+        assert_eq!(completed[0].name, "");
+        assert_eq!(
+            completed[0].input.get("command").and_then(|v| v.as_str()),
+            Some("rm -rf /")
         );
     }
 
