@@ -1,6 +1,6 @@
 //! 入站规则匹配节点（Week 3 起实现）。
 //!
-//! 关联 PRD §5.2 入站检测 P0 表 + UCSB 论文 4 类攻击分类。
+//! 关联入站检测 P0 表 + UCSB 论文 4 类攻击分类。
 
 use crate::address_guard::{check_substitution, extract_eth_addresses};
 use crate::detection::{fingerprint, Action, ContentSource, DefaultOnTimeout, Detection, Severity};
@@ -45,7 +45,7 @@ pub trait InboundEngine: Send + Sync {
 pub struct SessionState {
     /// 当前会话中已见过的 ETH 地址集合（用于 IN-CR-01 地址替换检测）。
     pub addresses_seen: HashSet<String>,
-    /// 行为序列窗口（PRD v2.0 §5.7 + §9 #15 Phase B beta）。
+    /// 行为序列窗口（Phase B beta）。
     /// 默认关闭：调用方通过 cargo feature `sequence_detection` 启用本字段。
     #[cfg(feature = "sequence_detection")]
     pub sequence_window: crate::sequence::ToolUseSequence,
@@ -78,7 +78,6 @@ pub struct InboundFilter {
     /// 来源 channel（来自 `X-Sieve-Source-Channel` 请求头）。
     ///
     /// 用于 IN-GEN-06 运行时提级：不可信外部 channel → severity Critical。
-    /// PRD v1.5 §4.5。
     source_channel: Option<String>,
     /// IN-CR-01 地址替换检测配置（修 R3-#5）。
     address_guard_config: AddressGuardConfig,
@@ -113,14 +112,14 @@ impl InboundFilter {
 
     /// 设置来源 channel（来自 `X-Sieve-Source-Channel` 请求头）。
     ///
-    /// 须在处理 SSE 流前调用；用于 IN-GEN-06 提级逻辑（PRD v1.5 §4.5）。
+    /// 须在处理 SSE 流前调用；用于 IN-GEN-06 提级逻辑。
     pub fn set_source_channel(&mut self, channel: Option<String>) {
         self.source_channel = channel;
     }
 
-    /// 把 tool_use 完成事件记入序列窗口（PRD v2.0 §5.7.4 双路径不变量）。
+    /// 把 tool_use 完成事件记入序列窗口（双路径不变量）。
     ///
-    /// daemon 必须从 SSE + JSON 两条路径同时调本方法，否则违反 PRD §9 #16。
+    /// daemon 必须从 SSE + JSON 两条路径同时调本方法，否则违反四路由对等。
     /// 默认 feature 未启用时本方法是 no-op，调用方代码不需要 cfg gate。
     ///
     /// # Errors
@@ -153,7 +152,7 @@ impl InboundFilter {
         Ok(())
     }
 
-    /// 在当前序列窗口跑 IN-SEQ-* 检测（PRD §5.7.2）。
+    /// 在当前序列窗口跑 IN-SEQ-* 检测。
     ///
     /// 默认 feature 未启用时返回空 Vec。
     ///
@@ -181,7 +180,7 @@ impl InboundFilter {
     /// 须在入站 SSE 检测（[`StreamingPipelineNode::observe_event`]）开始前调用，
     /// 否则首轮地址替换（prompt 地址 A → 响应地址 B）会漏报 IN-CR-01。
     ///
-    /// 关联 PRD §4.2 真实攻击场景 / P0-3 修复。
+    /// 关联真实攻击场景 / P0-3 修复。
     ///
     /// # Errors
     /// session mutex 中毒时返回 [`SieveCoreError`]。
@@ -198,7 +197,7 @@ impl InboundFilter {
 
     /// 过滤掉 sieveignore 中已知的 fingerprint。
     ///
-    /// PRD §9 #3 #8：Critical severity 永远不被过滤——
+    /// Critical severity 永远不被过滤——
     /// `.sieveignore` 白名单仅对 High / Medium / Low 有效。
     fn filter_sieveignore(&self, dets: Vec<Detection>) -> Vec<Detection> {
         dets.into_iter()
@@ -210,7 +209,7 @@ impl InboundFilter {
 
     /// IN-GEN-06 运行时提级：source_channel 属于不可信外部 channel 时，
     /// 将命中 IN-GEN-06 的 Detection severity 从 High 提级为 Critical，
-    /// 并在 Detection.source_channel 中记录来源（PRD v1.5 §4.5）。
+    /// 并在 Detection.source_channel 中记录来源。
     ///
     /// 提级条件：
     /// - rule_id == "IN-GEN-06"
@@ -242,7 +241,7 @@ impl InboundFilter {
 
     /// 扫描一段 assistant 响应文本：IN-GEN-* 文本规则 + IN-CR-01 地址替换检测。
     ///
-    /// **四路由对等核心**（ADR-025 / PRD §9 #16）：SSE 路径的
+    /// **四路由对等核心**：SSE 路径的
     /// [`StreamingPipelineNode::observe_event`] 与两条非流式 JSON 路径（daemon
     /// `handle_anthropic_json_inbound` / `handle_openai_json_inbound`）都调本方法，
     /// 确保 `observe_event` 类入站能力（响应文本扫描 + IN-CR-01 地址替换）在四条
@@ -272,7 +271,7 @@ impl InboundFilter {
             if let Some(orig) = check_substitution(&session.addresses_seen, &addr) {
                 let fp = fingerprint("IN-CR-01", &format!("{orig}->{addr}"));
                 // R3-#5：按 TOML 配置路由到 HoldForDecision（GUI 弹窗 60s 倒计时），
-                // 而非直接 fail-closed Block，确保 PRD §4.2 场景 B 的人眼对比机会。
+                // 而非直接 fail-closed Block，确保场景 B 的人眼对比机会。
                 // fail-closed 语义保留：default_on_timeout=Block（GUI 不响应时仍 block）。
                 // 非流式 JSON 路径无 keep-alive，daemon 侧把 HoldForDecision 降级为
                 // fail-closed Block（handle_*_json_inbound）。
@@ -312,8 +311,8 @@ impl StreamingPipelineNode for InboundFilter {
     }
 
     fn observe_event(&mut self, event: &SseEvent) -> SieveCoreResult<Vec<Detection>> {
-        // SSE 文本 delta → 共享文本检测核心（与两条非流式 JSON 路径同一实现，ADR-025
-        // / PRD §9 #16 四路由对等）。非文本事件无入站文本可扫，返回空命中。
+        // SSE 文本 delta → 共享文本检测核心（与两条非流式 JSON 路径同一实现，
+        // 四路由对等）。非文本事件无入站文本可扫，返回空命中。
         if let SseEvent::ContentBlockDelta {
             delta: SseDelta::TextDelta { text },
             ..
@@ -500,7 +499,7 @@ mod tests {
 
     /// seed_known_addresses_from_text 预注入 prompt 地址，首轮地址替换可被 IN-CR-01 检测。
     ///
-    /// 关联 P0-3 / PRD §4.2：prompt 地址 A + SSE 仅出现地址 B → 命中。
+    /// 关联 P0-3：prompt 地址 A + SSE 仅出现地址 B → 命中。
     #[test]
     fn seed_from_prompt_enables_first_round_address_substitution_detection() {
         let mut f = InboundFilter::new(Arc::new(MockEngine), Arc::new(HashSet::new()));
@@ -524,7 +523,7 @@ mod tests {
         );
     }
 
-    /// PRD §9 #3 #8：Critical detection 不得被 .sieveignore 压制。
+    /// Critical detection 不得被 .sieveignore 压制。
     /// 验证 IN-CR-02（危险 shell）和 IN-CR-05（签名工具调用）在加入 sieveignore 后仍然命中。
     #[test]
     fn sieveignore_does_not_suppress_critical() {
@@ -611,7 +610,7 @@ mod tests {
 
     /// IN-GEN-06 + source_channel=None → severity 保持 High（不提级）。
     ///
-    /// PRD v1.5 §4.5：仅不可信外部 channel 才提级 Critical。
+    /// 仅不可信外部 channel 才提级 Critical。
     #[test]
     fn in_gen_06_no_channel_stays_high() {
         let mut f = InboundFilter::new(Arc::new(MockGen06Engine), Arc::new(HashSet::new()));
@@ -635,7 +634,7 @@ mod tests {
 
     /// IN-GEN-06 + source_channel=whatsapp → severity 提级为 Critical。
     ///
-    /// PRD v1.5 §4.5：WhatsApp 在不可信 channel 列表中，触发提级。
+    /// WhatsApp 在不可信 channel 列表中，触发提级。
     #[test]
     fn in_gen_06_untrusted_channel_escalates_to_critical() {
         let mut f = InboundFilter::new(Arc::new(MockGen06Engine), Arc::new(HashSet::new()));
@@ -658,7 +657,7 @@ mod tests {
     }
 }
 
-/// 序列窗口集成测试（PRD §5.7.4 双路径不变量 + §9 #15 no-op 验证）。
+/// 序列窗口集成测试（双路径不变量 + no-op 验证）。
 ///
 /// 仅在 `sequence_detection` feature 启用时编译。
 #[cfg(all(test, feature = "sequence_detection"))]
@@ -700,7 +699,7 @@ mod sequence_integration_tests {
         assert!(hits.is_empty());
     }
 
-    /// PRD §5.7.4 双路径不变量：SSE + JSON 两条路径的调用共享同一序列窗口，
+    /// 双路径不变量：SSE + JSON 两条路径的调用共享同一序列窗口，
     /// 合并后能触发 IN-SEQ-01-RECON-EXFIL。
     #[test]
     fn double_path_invariant_sse_and_json_share_window() {
@@ -849,7 +848,8 @@ mod sequence_integration_tests {
             .unwrap();
         let hits = filter.detect_sequence_hits().unwrap();
         assert!(
-            hits.iter().any(|h| h.rule_id == "IN-SEQ-06-CROSS-AGENT-SECRET"),
+            hits.iter()
+                .any(|h| h.rule_id == "IN-SEQ-06-CROSS-AGENT-SECRET"),
             "actor-a reads secret, actor-b exfils should trigger IN-SEQ-06"
         );
     }
@@ -871,7 +871,9 @@ mod sequence_integration_tests {
             .unwrap();
         let hits = filter.detect_sequence_hits().unwrap();
         assert!(
-            !hits.iter().any(|h| h.rule_id == "IN-SEQ-06-CROSS-AGENT-SECRET"),
+            !hits
+                .iter()
+                .any(|h| h.rule_id == "IN-SEQ-06-CROSS-AGENT-SECRET"),
             "same actor should not trigger IN-SEQ-06"
         );
     }
@@ -896,7 +898,8 @@ mod sequence_integration_tests {
             .unwrap();
         let hits = filter.detect_sequence_hits().unwrap();
         assert!(
-            hits.iter().any(|h| h.rule_id == "IN-SEQ-07-CLIPBOARD-SECRET"),
+            hits.iter()
+                .any(|h| h.rule_id == "IN-SEQ-07-CLIPBOARD-SECRET"),
             "read secret → pbcopy should trigger IN-SEQ-07"
         );
     }
@@ -917,7 +920,8 @@ mod sequence_integration_tests {
             .unwrap();
         let hits = filter.detect_sequence_hits().unwrap();
         assert!(
-            hits.iter().any(|h| h.rule_id == "IN-SEQ-08-PUBLIC-ARTIFACT"),
+            hits.iter()
+                .any(|h| h.rule_id == "IN-SEQ-08-PUBLIC-ARTIFACT"),
             "read secret → write dist/ should trigger IN-SEQ-08"
         );
     }

@@ -1,12 +1,12 @@
-//! Week 5 CLI 子命令模块（ADR-015 / SPEC-003）。
+//! Week 5 CLI 子命令模块（关联 SPEC-003）。
 //!
 //! - `setup`：自动配置 Claude Code 环境（仅 macOS）
 //! - `doctor`：诊断 Sieve 安装状态（仅 macOS）
 //! - `uninstall`：干净回滚 setup 改动（仅 macOS）
 //!
-//! ADR-028 新增：
-//! - `decisions`：headless decision CLI（TODO-4）
-//! - `audit`：unix-pipeable 审计查询（TODO-5）
+//! headless 决策接口新增：
+//! - `decisions`：headless decision CLI
+//! - `audit`：unix-pipeable 审计查询
 //!
 //! 加密审计 / 本地用量核算新增：
 //! - `audit_keys`：full 档加密审计密钥生命周期（keygen / rotate-key / decrypt，可选特性）

@@ -1,18 +1,18 @@
-//! 加密审计归档（`full` 档，ADR-037 / SPEC-009）。
+//! 加密审计归档（`full` 档，SPEC-009）。
 //!
 //! **write-only logging**：daemon 只持 age **recipient 公钥**，对每条归档记录做混合加密
 //! （`age::encrypt` = 随机 file key + ChaCha20-Poly1305 内容加密 + X25519 wrap 给公钥）。
 //! 机器运行时被攻陷也**解不开历史归档**——本机无私钥。
 //!
-//! **红线（ADR-037 决策 2）**：归档单元只消费**脱敏后内容**（出站 `seg_result.texts` /
+//! **红线**：归档单元只消费**脱敏后内容**（出站 `seg_result.texts` /
 //! `new_body`）。本模块的 [`ArchiveWriter::append`] 把收到的字节**原样加密**——它无法判断
 //! 输入是否脱敏，红线靠**调用点只传脱敏后内容**兑现（daemon hook + 回归测试守护）。
 //!
-//! **防篡改（ADR-037 决策 4）**：每条记录含 `prev_hash`（上条 hash）+ 单调 `seq`，构成
+//! **防篡改**：每条记录含 `prev_hash`（上条 hash）+ 单调 `seq`，构成
 //! 段内哈希链——中间删改/重排/截断会断链。残余局限：挡不住「末尾追加伪造」（持公钥的
 //! daemon 可续链），只保证历史不可悄悄改写。
 //!
-//! **保留期（ADR-037 决策 5）**：超期段整段删除（归档上唯一允许的变更）。
+//! **保留期**：超期段整段删除（归档上唯一允许的变更）。
 //!
 //! ## 接通状态（已全部接线，2026-06-20）
 //!
@@ -169,7 +169,7 @@ impl ArchiveWriter {
         format!("archive-{tag}.jsonl")
     }
 
-    /// 清理超期段（ADR-037 决策 5）：删除 mtime 早于 `retention_days` 的整段文件。
+    /// 清理超期段：删除 mtime 早于 `retention_days` 的整段文件。
     /// `retention_days == 0` 表示永久保留（no-op）。返回被删除的段文件名。
     pub fn purge_expired(&self, retention_days: u32) -> Result<Vec<String>> {
         if retention_days == 0 {

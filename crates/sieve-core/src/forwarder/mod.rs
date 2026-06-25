@@ -3,7 +3,7 @@
 //! TLS：rustls 0.23 + aws-lc-rs provider + webpki-roots（reproducible build 友好）。
 //! ALPN：h2 + http/1.1 都协商，Anthropic 默认走 h2。
 //!
-//! 关联 PRD §6.1 + ADR-006（reproducible build，webpki-roots 避免系统证书依赖）。
+//! 关联 reproducible build（webpki-roots 避免系统证书依赖）。
 
 use crate::error::{SieveCoreError, SieveCoreResult};
 use http_body_util::BodyExt;
@@ -40,7 +40,7 @@ pub struct Forwarder {
     /// 例：`https://api.anthropic.com` → `""`；
     /// `https://api.deepseek.com/anthropic` → `"/anthropic"`；
     /// `https://api.deepseek.com/anthropic/` → `"/anthropic"`。
-    /// `rewrite_uri` 时拼接到 client 请求 path 之前（ADR-026）。
+    /// `rewrite_uri` 时拼接到 client 请求 path 之前。
     upstream_path_prefix: String,
 }
 
@@ -74,7 +74,7 @@ impl Forwarder {
         let path_prefix = url.path().trim_end_matches('/').to_owned();
 
         // webpki-roots：编译期内嵌根证书，不依赖系统证书 store。
-        // reproducible build 友好，见 ADR-006。
+        // reproducible build 友好。
         let root_store =
             rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
 
@@ -119,7 +119,7 @@ impl Forwarder {
     /// 重写客户端请求 URI 到上游：scheme + authority + 上游 path 前缀 + 请求 path/query。
     ///
     /// 上游 URL 含 path 前缀时（如 `https://api.deepseek.com/anthropic`），
-    /// 前缀会被拼接到 client 请求 path 之前——ADR-026 修复 v1.x 丢弃前缀的 bug。
+    /// 前缀会被拼接到 client 请求 path 之前——修复 v1.x 丢弃前缀的 bug。
     ///
     /// # Errors
     /// URI 重组失败时返回 [`SieveCoreError::Forwarder`]。
@@ -184,7 +184,7 @@ mod tests {
         assert_eq!(new.to_string(), "https://api.anthropic.com/");
     }
 
-    // ── ADR-026: upstream path prefix 修复 ──────────────────────────────
+    // ── upstream path prefix 修复 ──────────────────────────────
 
     #[test]
     fn rewrite_uri_with_path_prefix() {

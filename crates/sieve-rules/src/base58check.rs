@@ -1,10 +1,10 @@
-//! Base58Check 校验和验证（关联 ADR-042：OUT-12 Bitcoin WIF / OUT-13 BIP-32 扩展私钥）。
+//! Base58Check 校验和验证（OUT-12 Bitcoin WIF / OUT-13 BIP-32 扩展私钥）。
 //!
-//! 与 BIP39 checksum 同一设计哲学（PRD §9 #4）：仅校验和通过的候选才动作，
+//! 与 BIP39 checksum 同一设计哲学：仅校验和通过的候选才动作，
 //! 把「看起来像私钥」收窄到「数学上是合法 Base58Check 序列化」，大幅降误报。
 //!
 //! Base58Check 编码：payload 尾接 `SHA256(SHA256(payload))[..4]` 校验和，整体 Base58 编码。
-//! 本模块纯本地算术，无网络 IO（sieve-rules 禁网络，ADR-024）。
+//! 本模块纯本地算术，无网络 IO（sieve-rules 禁网络）。
 
 use sha2::{Digest, Sha256};
 
@@ -45,7 +45,7 @@ fn base58_decode(s: &str) -> Option<Vec<u8>> {
 /// 验证候选串是否为合法 Base58Check 编码
 /// （尾 4 字节校验和 == `SHA256(SHA256(payload))[..4]`）。
 ///
-/// 关联 ADR-042：OUT-12（WIF）/ OUT-13（BIP-32 xprv）的 second-pass 校验和门。
+/// OUT-12（WIF）/ OUT-13（BIP-32 xprv）的 second-pass 校验和门。
 /// 返回 `true` 仅当：Base58 解码成功、解码长度 ≥ 5、尾 4 字节校验和匹配。
 pub fn verify_base58check(candidate: &str) -> bool {
     let decoded = match base58_decode(candidate) {

@@ -1,8 +1,8 @@
-//! 用户规则文件加载（PRD v2.0 §5.5.1 §5.5.4）。
+//! 用户规则文件加载。
 //!
 //! 负责从 `~/.sieve/rules/user.toml` 加载用户规则，并做文件系统安全校验。
 //!
-//! # 文件系统安全约束（PRD §5.5.3-C）
+//! # 文件系统安全约束
 //!
 //! - 文件权限必须 `0600`（owner-only），目录权限 `0700`
 //! - 拒绝符号链接（no-follow symlink，防 `ln -s /etc/passwd` 攻击）
@@ -13,7 +13,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-/// 规则扫描方向（PRD v2.0 §5.5）。
+/// 规则扫描方向。
 ///
 /// 控制用户规则应用于哪一侧的流量：
 /// - `Outbound`：仅扫出站请求（user prompt + system prompt）
@@ -36,7 +36,7 @@ impl Default for RuleDirection {
     }
 }
 
-/// 用户规则文件顶层结构（PRD §5.5.4 user.toml schema）。
+/// 用户规则文件顶层结构（user.toml schema）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UserRulesFile {
@@ -62,7 +62,7 @@ impl Default for UserRulesFile {
     }
 }
 
-/// 单条用户规则（PRD §5.5.4）。
+/// 单条用户规则。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UserRuleEntry {
@@ -76,15 +76,15 @@ pub struct UserRuleEntry {
     pub severity: String,
     /// 处置动作（用户规则只允许 warn/mark/ask，禁止 block）。
     pub action: String,
-    /// 快速预过滤关键词（必填且非空，PRD §5.5.3-B）。
+    /// 快速预过滤关键词（必填且非空）。
     pub keywords: Vec<String>,
-    /// 允许豁免的停用词列表（每个 >= 4 字节，PRD §5.5.3-B）。
+    /// 允许豁免的停用词列表（每个 >= 4 字节）。
     #[serde(default)]
     pub allowlist_stopwords: Vec<String>,
-    /// 处置形式（用户规则禁止 hook_terminal，PRD §5.5.3-A）。
+    /// 处置形式（用户规则禁止 hook_terminal）。
     #[serde(default)]
     pub disposition: Option<String>,
-    /// 规则扫描方向（PRD v2.0 §5.5）。
+    /// 规则扫描方向。
     ///
     /// 缺省为 `Both`（两侧都扫），向后兼容无此字段的旧 user.toml。
     #[serde(default)]
@@ -108,13 +108,13 @@ fn default_enabled() -> bool {
 ///
 /// 返回空的 [`UserRulesFile`]（不报错），允许 daemon 在没有用户规则文件时正常启动。
 ///
-/// # 安全校验（PRD §5.5.3-C）
+/// # 安全校验
 ///
 /// 1. 拒绝符号链接
 /// 2. 文件权限必须 `0600`
 /// 3. 目录权限必须 `0700`（如果目录存在）
 pub fn load_user_rules(path: &Path) -> PolicyResult<UserRulesFile> {
-    // 文件不存在 → 返回空 UserRulesFile，daemon 正常启动（PRD §5.5.2.1）
+    // 文件不存在 → 返回空 UserRulesFile，daemon 正常启动
     if !path.exists() {
         tracing::debug!(
             "user rules file not found at {:?}, using empty ruleset",
@@ -123,7 +123,7 @@ pub fn load_user_rules(path: &Path) -> PolicyResult<UserRulesFile> {
         return Ok(UserRulesFile::default());
     }
 
-    // No-follow symlink 校验（PRD §5.5.3-C）
+    // No-follow symlink 校验
     let meta = path.symlink_metadata()?;
     if meta.file_type().is_symlink() {
         return Err(PolicyError::SymlinkRejected(format!(
@@ -132,7 +132,7 @@ pub fn load_user_rules(path: &Path) -> PolicyResult<UserRulesFile> {
         )));
     }
 
-    // 文件权限 0600 校验（仅 Unix，PRD §5.5.3-C）
+    // 文件权限 0600 校验（仅 Unix）
     check_file_permissions(path, &meta)?;
 
     // 目录权限 0700 校验
@@ -181,7 +181,7 @@ fn check_dir_permissions(dir: &Path, meta: &std::fs::Metadata) -> PolicyResult<(
     Ok(())
 }
 
-/// 非 Unix 平台：跳过权限校验（Windows 推 Phase 3，ADR-006 Tier 2）。
+/// 非 Unix 平台：跳过权限校验（Windows 推 Phase 3，Tier 2）。
 #[cfg(not(unix))]
 fn check_file_permissions(_path: &Path, _meta: &std::fs::Metadata) -> PolicyResult<()> {
     Ok(())

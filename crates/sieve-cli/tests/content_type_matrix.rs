@@ -1,4 +1,4 @@
-//! PRD §9 #16 content-type 路由矩阵端到端测试（PRD v2.0 Week 6）。
+//! content-type 路由矩阵端到端测试。
 //!
 //! 覆盖 4 类组合：
 //! | 协议      | 响应模式              | 验证要点                                    |
@@ -10,7 +10,7 @@
 //!
 //! 每类组合至少 1 个测试，命中一个简单 IN-CR-* 规则（IN-CR-02 危险 shell / IN-CR-05 签名工具）。
 //!
-//! **审计 caller 字段路径验证**（PRD §5.6.1）：
+//! **审计 caller 字段路径验证**：
 //! - audit schema v2 含 caller_pid / caller_exe 两列（均允许 NULL）
 //! - Phase A stub：caller_pid = NULL, caller_exe = NULL（peer_addr_to_pid 返回 None）
 //! - 验证 audit 数据库存在、schema 含新列（不验证非 NULL 值，因为 v2.0 Phase A stub）
@@ -253,7 +253,7 @@ dry_run = false
         .arg("--config")
         .arg(config_file.path())
         .env("SIEVE_LOG", "warn")
-        // ADR-030: 测试禁止触发真实 updates.sieveai.dev 联网 + telemetry 上报
+        // 测试禁止触发真实 updates.sieveai.dev 联网 + telemetry 上报
         .env("SIEVE_NO_UPDATE", "1")
         .env("SIEVE_NO_TELEMETRY", "1")
         .env("SIEVE_HOME", sieve_home.path())
@@ -364,7 +364,7 @@ fn decode_chunked(input: &[u8]) -> Vec<u8> {
 
 // ─── audit 字段路径验证辅助 ──────────────────────────────────────────────────
 
-/// 验证 audit DB（若存在）包含 caller_pid / caller_exe 列（schema v2，PRD §5.6.1）。
+/// 验证 audit DB（若存在）包含 caller_pid / caller_exe 列（schema v2）。
 ///
 /// Phase A stub：caller_pid 和 caller_exe 允许为 NULL。
 /// 不验证行存在（daemon 当前未在 daemon.rs 中写 audit 行，Week 7 接入后补）。
@@ -404,7 +404,7 @@ fn verify_audit_schema_has_caller_columns(db_path: &std::path::Path) {
 /// IN-CR-05-EVM 命中（HoldForDecision）→ 无 IPC → fail-closed → sieve_blocked 注入。
 ///
 /// 注：IN-CR-02（rm -rf）是 HookMark 不截流，必须用 IN-CR-05（签名工具 GuiPopup）
-/// 才能触发截流行为。关联 PRD §5.2 IN-CR-05-EVM。
+/// 才能触发截流行为。关联 IN-CR-05-EVM。
 #[tokio::test]
 async fn content_type_matrix_anthropic_sse() {
     // IN-CR-05-EVM 触发 payload：tool_use name = eth_signTransaction（不可逆签名操作）
@@ -600,7 +600,7 @@ async fn content_type_matrix_openai_sse() {
 ///
 /// 注：IN-CR-02（rm -rf）是 HookMark 不截流，IN-CR-05（签名工具 GuiPopup）才截流。
 /// handle_openai_json_inbound 里 GuiPopup 命中时直接 fail-closed 阻断（无 keep-alive 机制）。
-/// 关联 PRD §5.2 IN-CR-05-EVM / ADR-014 §双层防御。
+/// 关联 IN-CR-05-EVM / 双层防御。
 #[tokio::test]
 async fn content_type_matrix_openai_json() {
     // IN-CR-05-EVM 触发 payload：choices[].message.tool_calls 含 eth_signTransaction
@@ -663,7 +663,7 @@ async fn content_type_matrix_openai_json() {
 /// 验证 audit DB schema v2 含 caller_pid / caller_exe 列（纯 SQLite 单元测试）。
 ///
 /// 此测试不需要 daemon，直接创建 schema 并验证列存在。
-/// 关联 PRD §5.6.1 v2.0 schema 迁移。
+/// 关联 v2.0 schema 迁移。
 #[test]
 fn audit_schema_v2_has_caller_columns() {
     use rusqlite::params;
@@ -800,7 +800,7 @@ fn audit_schema_v2_caller_columns_accept_non_null() {
     );
 }
 
-// ─── IN-CR-01 地址替换：JSON 两路由文本扫描覆盖（ADR-025 / PRD §9 #16）────────────
+// ─── IN-CR-01 地址替换：JSON 两路由文本扫描覆盖 ────────────
 //
 // v1.5.4 同类 P0 修复：IN-CR-01 走 InboundFilter::observe_event（响应文本类），此前
 // 只挂 SSE，两条 JSON(stream=false) 路由 by-construction 不设防。下面两个测试用

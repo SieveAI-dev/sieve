@@ -1,4 +1,4 @@
-//! 结构化特征提取（PRD v2.0 §5.7.1）。
+//! 结构化特征提取。
 //!
 //! 输入：tool_name + tool_input JSON Value
 //! 输出：[`super::ToolUseRecord`]（不含 timestamp，调用方填）
@@ -8,7 +8,7 @@
 use super::ToolUseRecord;
 use serde_json::Value;
 
-/// 工具类型（PRD §5.7.1）。
+/// 工具类型。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ToolClass {
     /// Bash / Run / Exec / Terminal 等 shell 类工具。
@@ -24,7 +24,7 @@ pub enum ToolClass {
     Other,
 }
 
-/// 路径分类（PRD §5.7.1）。
+/// 路径分类。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PathCategory {
     /// .ssh / *_rsa / .aws / keystore / mnemonic / .gnupg / .netrc / keychain。
@@ -41,11 +41,11 @@ pub enum PathCategory {
     Other,
 }
 
-/// secret 识别置信度（PRD §5.7.1）。
+/// secret 识别置信度。
 ///
 /// 三级置信用于压低序列链规则误报面：仅关键词 / 路径命中为 `Heuristic`；
-/// 当单次检测命中 OUT-* 脱敏规则（含 BIP39 / WIF / xprv 的 checksum 校验，
-/// 见 PRD §9 #4）时提级为 `ChecksumConfirmed`（高置信），允许链规则短路中间步。
+/// 当单次检测命中 OUT-* 脱敏规则（含 BIP39 / WIF / xprv 的 checksum 校验）
+/// 时提级为 `ChecksumConfirmed`（高置信），允许链规则短路中间步。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum SecretConfidence {
     /// 无 secret 特征。
@@ -241,10 +241,10 @@ fn detect_secret_source(input_str: &str) -> bool {
         || s.contains("session")
 }
 
-/// 计算 secret 识别置信度（PRD §5.7.1）。
+/// 计算 secret 识别置信度。
 ///
 /// - 命中任一 OUT-* 脱敏规则（rule_hits）→ `ChecksumConfirmed`（OUT-* 含 BIP39/WIF/xprv
-///   checksum 校验，PRD §9 #4，是相对纯关键词的高置信升维）。
+///   checksum 校验，是相对纯关键词的高置信升维）。
 /// - 否则路径分类属敏感类别（SensitiveSecret/Wallet/DotEnv）或命中 secret 源关键词
 ///   → `Heuristic`。
 /// - 其余 → `None`。
@@ -258,7 +258,9 @@ fn compute_secret_confidence(
     }
     let path_is_secret = matches!(
         path_category,
-        Some(PathCategory::SensitiveSecret) | Some(PathCategory::Wallet) | Some(PathCategory::DotEnv)
+        Some(PathCategory::SensitiveSecret)
+            | Some(PathCategory::Wallet)
+            | Some(PathCategory::DotEnv)
     );
     if path_is_secret || detect_secret_source(input_str) {
         return SecretConfidence::Heuristic;
@@ -526,7 +528,11 @@ mod tests {
         assert!(rec.archive_mech, "tar should set archive_mech");
         assert!(rec.encode_mech, "base64 should set encode_mech");
         // 命中 OUT-* 的 record → ChecksumConfirmed
-        let rec2 = extract_record("Read", &json!({"file_path": "x"}), vec!["OUT-04".to_string()]);
+        let rec2 = extract_record(
+            "Read",
+            &json!({"file_path": "x"}),
+            vec!["OUT-04".to_string()],
+        );
         assert_eq!(rec2.secret_confidence, SecretConfidence::ChecksumConfirmed);
     }
 

@@ -15,7 +15,7 @@ use crate::{
 /// 连接服务端 socket，发送 JSON-RPC response（模拟 GUI 完成决策后的回调）。
 /// 不在生产主路径使用——主路径的 GUI 是独立进程（sieve-gui-macos）。
 ///
-/// 关联：ADR-013 §3（协议传输）。
+/// 协议传输层。
 pub struct IpcClient {
     socket_path: std::path::PathBuf,
 }
@@ -110,7 +110,7 @@ impl IpcClient {
 ///
 /// 失败静默丢弃（daemon 可能未运行；用户可手动重启 daemon 生效）。
 ///
-/// 关联：PRD v2.0 §5.5.5（编辑器关闭后 lint + atomic backup + IPC reload）+ ADR-013。
+/// 关联：编辑器关闭后 lint + atomic backup + IPC reload 流程。
 pub async fn send_reload_user_rules_oneshot(
     socket_path: &Path,
     trigger_id: Option<Uuid>,

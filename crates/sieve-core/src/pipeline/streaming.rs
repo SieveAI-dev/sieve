@@ -1,4 +1,4 @@
-//! 入站流式 Pipeline 节点 trait（关联 PRD §6.2 Pipeline 节点 ⑦）。
+//! 入站流式 Pipeline 节点 trait（关联 Pipeline 节点 ⑦）。
 //!
 //! Week 3 起 InboundFilter 实现本 trait；sieve-cli 通过 Arc<dyn StreamingPipelineNode>
 //! 将其注入到流式代理处理循环中。

@@ -1,6 +1,6 @@
-//! 行为序列 kill chain 检测（PRD v2.0 §5.7.2）。
+//! 行为序列 kill chain 检测。
 //!
-//! 8 条规则全部 severity = High，**仅 StatusBar 通知**（PRD §9 #15 不引入 Block 路径）：
+//! 8 条规则全部 severity = High，**仅 StatusBar 通知**（不引入 Block 路径）：
 //!
 //! - IN-SEQ-01-RECON-EXFIL: FileRead+SensitiveSecret 之后 network_egress
 //! - IN-SEQ-02-CLEANUP-AFTER-ATTACK: Shell+network_egress 之后 cleanup_mech
@@ -11,14 +11,14 @@
 //! - IN-SEQ-07-CLIPBOARD-SECRET: secret 之后写入剪贴板
 //! - IN-SEQ-08-PUBLIC-ARTIFACT: secret 之后写入/发布到公共产物路径
 //!
-//! 升级为 Block 路径需满足 ADR-022 三条件（4 周 ≥50 样本 + FP<0.5% + 新 ADR）。
+//! 升级为 Block 路径需满足三条件（4 周 ≥50 样本 + FP<0.5% + 新决策记录）。
 
 use super::feature::{PathCategory, SecretConfidence, ToolClass};
 use super::{ToolUseRecord, ToolUseSequence};
 
-/// 序列检测命中（PRD §5.7.2）。
+/// 序列检测命中。
 ///
-/// severity 固定为 High，处置为 StatusBar 通知（PRD §9 #15 禁止升级为 Block）。
+/// severity 固定为 High，处置为 StatusBar 通知（禁止升级为 Block）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SequenceHit {
     /// 规则 ID（IN-SEQ-01 / IN-SEQ-02 / IN-SEQ-03）。
@@ -638,7 +638,8 @@ mod tests {
         });
         let hits = detect_kill_chains(&seq);
         assert!(
-            hits.iter().any(|h| h.rule_id == "IN-SEQ-06-CROSS-AGENT-SECRET"),
+            hits.iter()
+                .any(|h| h.rule_id == "IN-SEQ-06-CROSS-AGENT-SECRET"),
             "A reads secret, B exfils → IN-SEQ-06"
         );
     }
@@ -661,7 +662,9 @@ mod tests {
         });
         let hits = detect_kill_chains(&seq);
         assert!(
-            !hits.iter().any(|h| h.rule_id == "IN-SEQ-06-CROSS-AGENT-SECRET"),
+            !hits
+                .iter()
+                .any(|h| h.rule_id == "IN-SEQ-06-CROSS-AGENT-SECRET"),
             "missing actor should not trigger IN-SEQ-06"
         );
     }
@@ -686,7 +689,9 @@ mod tests {
         });
         let hits = detect_kill_chains(&seq);
         assert!(
-            !hits.iter().any(|h| h.rule_id == "IN-SEQ-06-CROSS-AGENT-SECRET"),
+            !hits
+                .iter()
+                .any(|h| h.rule_id == "IN-SEQ-06-CROSS-AGENT-SECRET"),
             "same actor should not trigger IN-SEQ-06"
         );
     }
@@ -709,7 +714,8 @@ mod tests {
         });
         let hits = detect_kill_chains(&seq);
         assert!(
-            hits.iter().any(|h| h.rule_id == "IN-SEQ-07-CLIPBOARD-SECRET"),
+            hits.iter()
+                .any(|h| h.rule_id == "IN-SEQ-07-CLIPBOARD-SECRET"),
             "secret→clipboard should trigger IN-SEQ-07"
         );
     }
@@ -732,7 +738,8 @@ mod tests {
         });
         let hits = detect_kill_chains(&seq);
         assert!(
-            hits.iter().any(|h| h.rule_id == "IN-SEQ-08-PUBLIC-ARTIFACT"),
+            hits.iter()
+                .any(|h| h.rule_id == "IN-SEQ-08-PUBLIC-ARTIFACT"),
             "secret→public artifact should trigger IN-SEQ-08"
         );
     }

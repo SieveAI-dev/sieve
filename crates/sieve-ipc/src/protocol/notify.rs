@@ -19,7 +19,7 @@ use super::rules::PresetOverride;
 ///
 /// JSON-RPC 2.0 method = `"sieve.notify_status_bar"`，fire-and-forget（无 id 字段）。
 ///
-/// 关联：PRD v2.0 §5.7（行为序列 StatusBar 通知）+ §5.4.3（GUI 接口预留）+ ADR-013。
+/// 关联：行为序列 StatusBar 通知 + GUI 接口预留。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StatusBarNotify {
     /// 全局唯一通知 ID（UUIDv7，便于追踪 + 去重）。
@@ -43,15 +43,15 @@ pub struct StatusBarNotify {
 
 /// 状态栏通知类型。
 ///
-/// 关联：PRD v2.0 §5.7.2（SequenceHit）+ §9 #13（OutboundRedacted）+ §9 #14（UserRules*）+ SPEC-005 §5.9（HookTerminal）。
+/// 关联：SequenceHit + OutboundRedacted + UserRules* + SPEC-005 §5.9（HookTerminal）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NotifyKind {
-    /// 行为序列检测命中（PRD §5.7.2）。
+    /// 行为序列检测命中。
     SequenceHit,
-    /// 出站自动脱敏（OUT-01~05/12，PRD §9 #13）。
+    /// 出站自动脱敏（OUT-01~05/12）。
     OutboundRedacted,
-    /// 用户规则文件加载失败（PRD §9 #14 fail-safe，daemon 仍正常启动）。
+    /// 用户规则文件加载失败（fail-safe，daemon 仍正常启动）。
     UserRulesLoadFailed,
     /// 用户规则 reload 成功（sieve rules edit 后 daemon 接收到 reload 通知并成功加载）。
     UserRulesReloaded,
@@ -68,7 +68,7 @@ pub enum NotifyKind {
 
 /// `sieve.preset_changed` 通知（daemon → GUI fan-out）。
 ///
-/// 关联：ADR-013 §S.3 / SPEC-002 §9.2。
+/// 关联：SPEC-002 §9.2。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PresetChangedNotify {
     pub mode: String,
@@ -90,7 +90,7 @@ pub struct PresetChangedNotify {
 /// `sieve.paused_changed` 通知（daemon → GUI fan-out）。
 ///
 /// `applies_to` **永远不包含** Critical 锁规则的 disposition——暂停不影响内置 Critical 拦截。
-/// 关联：ADR-013 §S.3 / SPEC-002 §9.1。
+/// 关联：SPEC-002 §9.1。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PausedChangedNotify {
     pub paused: bool,

@@ -20,7 +20,7 @@ pub enum DecisionOutcome {
 /// 写入前在 `<base>/locks/<request_id>.lock` 加独占写锁。
 ///
 /// Critical 规则 `remember` 永远 `false`，由调用方（main.rs）强制传入 false。
-/// 关联：SPEC-001 §3.3（决策文件写入）、ADR-014（Critical 不可记住）。
+/// 关联：SPEC-001 §3.3（决策文件写入）；Critical 不可记住。
 pub fn write_decision(
     request_id: Uuid,
     outcome: &DecisionOutcome,

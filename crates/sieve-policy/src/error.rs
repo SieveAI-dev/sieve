@@ -1,4 +1,4 @@
-//! sieve-policy 错误类型（PRD v2.0 §5.5 §5.4.2）。
+//! sieve-policy 错误类型。
 //!
 //! 库 crate 使用 `thiserror`，禁止 `anyhow`（CLAUDE.md Rust 规范）。
 
@@ -9,13 +9,13 @@ use thiserror::Error;
 pub enum PolicyError {
     /// 文件权限不符合要求（须 0600 for file / 0700 for dir）。
     ///
-    /// 关联 PRD §5.5.3-C：no-follow symlink + 文件权限校验。
+    /// 关联：no-follow symlink + 文件权限校验。
     #[error("file permissions error: {0}")]
     FilePermissions(String),
 
     /// 符号链接被拒绝（no-follow symlink 策略）。
     ///
-    /// 防止 `ln -s /etc/passwd ~/.sieve/rules/user.toml` 攻击向量（PRD §5.5.3-C）。
+    /// 防止 `ln -s /etc/passwd ~/.sieve/rules/user.toml` 攻击向量。
     #[error("symlink rejected: {0}")]
     SymlinkRejected(String),
 
@@ -30,7 +30,7 @@ pub enum PolicyError {
         violations: Vec<String>,
     },
 
-    /// 灰名单条目 fingerprint 不一致（防止文件被人为修改，PRD §5.4.2）。
+    /// 灰名单条目 fingerprint 不一致（防止文件被人为修改）。
     #[error("graylist fingerprint mismatch: stored={stored}, computed={computed}")]
     FingerprintMismatch {
         /// 文件中存储的 fingerprint。
@@ -39,7 +39,7 @@ pub enum PolicyError {
         computed: String,
     },
 
-    /// 尝试将 Critical/fail-closed 规则加入灰名单（PRD §5.4.2 Critical 锁）。
+    /// 尝试将 Critical/fail-closed 规则加入灰名单（Critical 锁）。
     #[error("critical rule cannot be graylisted: {rule_id}")]
     CriticalRuleNotGraylistable {
         /// 被拒绝的规则 ID。

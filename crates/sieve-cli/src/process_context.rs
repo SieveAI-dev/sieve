@@ -3,7 +3,7 @@
 // 每处 unsafe block 均附 SAFETY 注释说明不变式（见下方函数）。
 #![allow(unsafe_code)]
 
-//! 进程上下文反查模块（PRD v2.0 §5.6 / §6.6 / Phase A 数据准备）。
+//! 进程上下文反查模块（Phase A 数据准备）。
 //!
 //! 通过 PID 反查 caller 进程信息（exe 路径 + ppid），供 Phase B 行为序列分析使用。
 //! Phase A 仅采集数据，不做行为分析。
@@ -31,7 +31,7 @@ use std::time::{Duration, Instant};
 
 use lru::LruCache;
 
-/// caller 进程信息（PRD v2.0 §5.6）。
+/// caller 进程信息。
 ///
 /// `cwd` 字段推 v2.1，Phase A 不采集。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,7 +85,7 @@ fn peer_cache() -> &'static Mutex<LruCache<(SocketAddr, SocketAddr), PeerCacheEn
 /// - cache 未命中或已过期：调用系统 API 查询，失败静默返回 `None`
 /// - 任何情况都不会 panic 或阻塞调用方
 ///
-/// 关联 PRD v2.0 §5.6 / §6.6.1
+/// 关联进程上下文反查需求
 pub fn lookup_caller(pid: i32) -> Option<CallerInfo> {
     // 先查 cache
     {
@@ -129,7 +129,7 @@ pub fn lookup_caller(pid: i32) -> Option<CallerInfo> {
 ///
 /// 仅 macOS 实现真实查询；其他平台返回 `None`（与 v2.0 Phase A stub 行为一致）。
 ///
-/// 关联：PRD v2.0 §5.6 / §6.6 / OQ-V20-02。
+/// 关联：OQ-V20-02。
 pub fn lookup_caller_by_socket_addr(local: SocketAddr, remote: SocketAddr) -> Option<i32> {
     // 先查 peer cache（key 以 daemon 视角存，即原始 local/remote）
     {
@@ -155,7 +155,7 @@ pub fn lookup_caller_by_socket_addr(local: SocketAddr, remote: SocketAddr) -> Op
 
 /// 一次性反查：从 socket 4-tuple 找 PID 后再调 [`lookup_caller`] 拿完整 [`CallerInfo`]。
 ///
-/// 关联：PRD v2.0 §5.6 / §6.6 / OQ-V20-02。
+/// 关联：OQ-V20-02。
 pub fn lookup_caller_by_peer(local: SocketAddr, remote: SocketAddr) -> Option<CallerInfo> {
     let pid = lookup_caller_by_socket_addr(local, remote)?;
     lookup_caller(pid)
@@ -263,7 +263,7 @@ unsafe fn read_ipv6_at(buf: &[u8], offset: usize) -> [u8; 16] {
 /// caller 侧视角：daemon accept 的 local=daemon addr, remote=caller ephemeral addr；
 /// caller 进程的 socket：local=caller ephemeral addr, remote=daemon addr。
 ///
-/// 关联：PRD v2.0 §5.6 / §6.6 / OQ-V20-02
+/// 关联：OQ-V20-02
 #[cfg(target_os = "macos")]
 fn find_pid_by_socket_addr(daemon_local: SocketAddr, daemon_remote: SocketAddr) -> Option<i32> {
     // caller 侧 4-tuple：local=daemon_remote(caller ephemeral), remote=daemon_local
@@ -494,7 +494,7 @@ fn query_system(_pid: i32) -> Option<CallerInfo> {
 }
 
 /// 非 macOS 平台不支持 socket 反查，统一返回 `None`。
-/// Linux 实现推 Phase 2/3 ADR。
+/// Linux 实现推 Phase 2/3。
 #[cfg(not(target_os = "macos"))]
 fn find_pid_by_socket_addr(_daemon_local: SocketAddr, _daemon_remote: SocketAddr) -> Option<i32> {
     None

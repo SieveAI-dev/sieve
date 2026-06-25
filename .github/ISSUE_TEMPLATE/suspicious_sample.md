@@ -1,14 +1,14 @@
 ---
 name: 可疑样本提交
-about: 提交在中转站 / LLM 输出中发现的可疑攻击样本（PRD §8.1 公开渠道）
+about: 提交在中转站 / LLM 输出中发现的可疑攻击样本（公开渠道）
 title: "[SAMPLE] "
 labels: sample, intel
-assignees: doskey
+assignees:
 ---
 
 ## ⚠️ 提交前必读
 
-**Sieve 不通过产品上传任何样本**（PRD §11.2）。你在这里提交的内容是**公开的**——会被维护者评估、公开讨论，并可能转化为 Sieve 规则进入下一版规则库。
+**Sieve 不通过产品上传任何样本**（产品不联网外传任何流量内容）。你在这里提交的内容是**公开的**——会被维护者评估、公开讨论，并可能转化为 Sieve 规则进入下一版规则库。
 
 ### ❌ 严禁贴出
 
@@ -22,13 +22,13 @@ assignees: doskey
 - 攻击者修改后的 tool_call / 地址 / 代码（脱敏后）
 - 中转站入口 URL（如已知是攻击源）
 - 攻击模式描述
-- UCSB 论文 / Pink Drainer 等已公开攻击的复现样本
+- 已公开披露的真实攻击（学术论文 / 公开事件报告）的复现样本
 
 ---
 
 ## 攻击类型
 
-- [ ] 中转站修改 tool_call（PRD §1.2 第 1 句）
+- [ ] 中转站修改 tool_call
 - [ ] 地址替换攻击（IN-CR-01）
 - [ ] 危险工具调用（IN-CR-02 / IN-GEN-01-03：`rm -rf /` / `curl|sh` / `eval(base64)`）
 - [ ] 签名钓鱼（IN-CR-05：EIP-712 数字化绕过 / typed data 滥用）
@@ -36,7 +36,7 @@ assignees: doskey
 - [ ] 持久化机制（IN-CR-04：crontab / launchd / systemd / shell rc）
 - [ ] Markdown 图片 exfil（IN-GEN-04）
 - [ ] Prompt injection（IN-GEN-05：`<|im_start|>` / `[INST]` / `Ignore previous`）
-- [ ] Drainer 合约（Pink Drainer / Inferno / 其他）
+- [ ] Drainer 合约（钱包资产盗取合约）
 - [ ] Solidity / Vyper 后门（合约层）
 - [ ] npm / pip typosquat
 - [ ] 其他:
@@ -67,7 +67,7 @@ assignees: doskey
 - 处置等级（Critical / High / Medium / Low）：
 - 是否被 fail-closed 阻断：
 
-如果**未被捕获**，这是最有价值的样本——会直接驱动新规则加入 PRD §5.2 Phase 2 表。
+如果**未被捕获**，这是最有价值的样本——会直接驱动新规则纳入后续规则库。
 
 ## 致谢偏好
 

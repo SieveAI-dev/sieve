@@ -2,11 +2,11 @@
 
 # Contributing to Sieve
 
-Thanks for your interest in contributing. Sieve is a **fully local, crypto-native LLM-traffic security proxy** — a single Rust binary that sits between your AI coding agent (Claude Code / Codex CLI / Cursor) and the upstream model API (Anthropic / OpenAI / relays). It inspects traffic in both directions: redacting secrets on the way out, and blocking dangerous tool calls on the way in (fail-closed), to force a moment of cognitive friction before irreversible actions (signing, transfers, deploys).
+Thanks for your interest in contributing. Sieve is a **fully local, crypto-native LLM-traffic security proxy** — a single Rust binary that sits between your AI coding agent (Claude Code / OpenClaw / Hermes / Codex CLI) and the upstream model API (Anthropic / OpenAI / relays). It inspects traffic in both directions: redacting secrets on the way out, and blocking dangerous tool calls on the way in (fail-closed), to force a moment of cognitive friction before irreversible actions (signing, transfers, deploys).
 
 Because Sieve is a **security product**, contributions are held to a higher bar than a typical project: the detection engine runs **100% locally**, the trust boundary is narrow and explicit, and a set of hard constraints (below) is non-negotiable. Please read this whole document before opening a PR.
 
-> **Project status:** the repository is **public** and in **pre-GA closed beta** (invite-only testers). Source is public so the trust story is *verifiable, not merely asserted*.
+> **Project status:** the repository is **public** and in **early preview (0.1.0-alpha)**. Source is public so the trust story is *verifiable, not merely asserted*.
 
 ---
 
@@ -68,7 +68,7 @@ Sieve ships with an **extensive test suite** (unit, integration, and end-to-end)
 
 ## Fuzzing
 
-**Any PR that touches SSE parsing, detection rules, or tool-call decisioning MUST include fuzz coverage.** This is a hard constraint (PRD §9 #5) — *a PR without fuzz coverage for these paths will not be merged.*
+**Any PR that touches SSE parsing, detection rules, or tool-call decisioning MUST include fuzz coverage.** This is one of the project's hard constraints — *a PR without fuzz coverage for these paths will not be merged.*
 
 Run the relevant targets with the nightly toolchain:
 
@@ -84,7 +84,7 @@ cargo +nightly fuzz run inbound_filter
 
 ## Hard constraints (do not relax)
 
-Sieve enforces **16 non-negotiable engineering constraints** (PRD §9), mirrored in [`CLAUDE.md`](./CLAUDE.md) and [`.cursorrules`](./.cursorrules). They are *not* optimization knobs — each one is "get it wrong and the product is dead." A few that contributors hit most often:
+Sieve enforces a set of **non-negotiable engineering constraints**, documented in full in [`CLAUDE.md`](./CLAUDE.md) and [`.cursorrules`](./.cursorrules). They are *not* optimization knobs — each one is "get it wrong and the product is dead." A few that contributors hit most often:
 
 - **Detection inference is 100% local** — there is **no networked verifier**. The only permitted outbound traffic is: (1) the upstream LLM API the user explicitly called, (2) the update manifest check (`updates.sieveai.dev`, ~4×/day, 5 fields, can be disabled), and (3) rule-body fetches (`cdn.sieveai.dev`). Never send a token, key, prompt, or response anywhere to be "checked."
 - **Fail-closed High-Risk Tool Policy Gate** — Critical tool calls (signing / shell / sensitive paths) require human confirmation and **cannot be disabled in any mode**, including YOLO mode.
@@ -92,7 +92,7 @@ Sieve enforces **16 non-negotiable engineering constraints** (PRD §9), mirrored
 - **No protocol-layer lying** — never forge `tool_use` / `stop_reason` / `id` / `usage` / `type`. Injecting a self-reported `sieve_blocked` SSE event is allowed; impersonating the model is not.
 - **No local CA / MITM**, **outbound redaction must not interrupt the workflow** (auto-redact + status-bar notice, no modal storms), and **user rules are fail-safe** (they can never override or suppress a system Critical).
 
-The full list lives in **[`CLAUDE.md` → "不可放宽的硬约束"](./CLAUDE.md)** and **[`.cursorrules` §二](./.cursorrules)**. **If your change touches any of these, stop and open a discussion first** — relaxing a hard constraint requires explicit maintainer sign-off and an ADR.
+The full list lives in **[`CLAUDE.md` → "不可放宽的硬约束"](./CLAUDE.md)** and **[`.cursorrules` §二](./.cursorrules)**. **If your change touches any of these, stop and open a discussion first** — relaxing a hard constraint requires explicit maintainer sign-off and a documented decision.
 
 ---
 

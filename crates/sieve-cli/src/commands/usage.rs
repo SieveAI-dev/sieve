@@ -1,4 +1,4 @@
-//! `sieve usage` 子命令（ADR-038 / SPEC-010）——本地 token 用量与超额计费查询。
+//! `sieve usage` 子命令（关联 SPEC-010）——本地 token 用量与超额计费查询。
 //!
 //! **隐私红线**：只读 `~/.sieve/usage.db`（严格本地、永不上传）。本模块是**只读查询
 //! 路径**，与 `billing::usage_store`（写入）分离，无任何出站。

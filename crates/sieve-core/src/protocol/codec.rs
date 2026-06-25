@@ -3,7 +3,7 @@
 //!
 //! 网关上游分层（A1）：新增一个上游 = 实现一个 [`ProviderCodec`]，daemon 出站编排不再重复
 //! provider 专属逻辑。检测核心（`OutboundFilter` + 脱敏）只调用 [`DecodedRequest`] 的
-//! provider 无关方法。关联 ADR-004（Anthropic 优先统一接口）/ ADR-018（OpenAI 协议适配）。
+//! provider 无关方法。关联 Anthropic 优先统一接口 / OpenAI 协议适配。
 
 use crate::error::{SieveCoreError, SieveCoreResult};
 use crate::protocol::anthropic::{AnthropicMessage, AnthropicRequest};

@@ -1,9 +1,9 @@
-//! 超额计费异常检测（ADR-038 决策 1/2 / SPEC-010 §6）。
+//! 超额计费异常检测（SPEC-010 §6）。
 //!
 //! **目标不是逐 token 精确对账，而是超额计费异常检测**：乘 1.5 = 多报 50%，远高于
 //! 任何 tokenizer 噪声（±5~10%），藏不住。只需够「抓系统性虚报」。
 //!
-//! 信任分级（ADR-038 决策 1）：
+//! 信任分级：
 //! - `Official`（官方直连）：`usage` 权威，**不核算**。
 //! - `Relay`（中转）：`usage` 视为未经验证声明，独立核算 + 交叉比对，偏差超容差报警。
 //!
@@ -98,7 +98,7 @@ fn signed_deviation_pct(independent: u64, claimed: u64) -> f64 {
     (claimed as f64 - independent as f64) / independent as f64 * 100.0
 }
 
-/// 核心裁决（ADR-038 决策 1/2）。纯函数、无 IO、无网络——可完整单测。
+/// 核心裁决。纯函数、无 IO、无网络——可完整单测。
 ///
 /// - `enabled`：`[billing_check].enabled`
 /// - `trust`：上游信任级（仅 `Relay` 核算）
@@ -154,7 +154,7 @@ mod tests {
         }
     }
 
-    // ── 红线回归测试：relay 虚报必须被检出（ADR-038 / Phase 2 必带）─────────
+    // ── 红线回归测试：relay 虚报必须被检出（Phase 2 必带）─────────
 
     #[test]
     fn relay_inflating_by_1_5x_is_detected() {

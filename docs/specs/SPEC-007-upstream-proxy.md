@@ -2,7 +2,7 @@
 
 > Version: v0.1 — 2026-06-07
 > 状态：Stable（已实现并验证）
-> 关联 PRD：§9 #2/#12
+> 相关硬约束：完全本地运行（唯一允许出站）、不装本地 CA 做 MITM
 > 决策记录：本 spec §9
 
 ---
@@ -20,7 +20,7 @@
 agent → sieve(本地) → 【直连 api.anthropic.com 失败】
 ```
 
-唯一现状解法是开全局 TUN 透明代理劫持 sieve 直连——不稳定、并非所有用户可用。结果：受限网络用户开箱即用不了；dogfood 第一跳即断。
+唯一现状解法是开全局 TUN 透明代理劫持 sieve 直连——不稳定、并非所有用户可用。结果：受限网络用户开箱即用不了。
 
 ### 目标
 1. daemon 转发上游可经配置的 HTTP CONNECT / SOCKS5 代理出网
@@ -77,14 +77,14 @@ target api.anthropic.com:443
  → hyper Client 发请求
 ```
 
-实现：把现有 `HttpsConnectorBuilder::new()…wrap_connector(HttpConnector)` 的底层 `HttpConnector` 换成自定义 `ProxyConnector`（实现 `tower::Service<Uri>`，返回到 target 的 TCP stream）。**TLS 仍由 hyper-rustls 在隧道之上做——端到端到上游，代理只见密文**（不解密、不装 CA，符合 PRD §9 #12）。
+实现：把现有 `HttpsConnectorBuilder::new()…wrap_connector(HttpConnector)` 的底层 `HttpConnector` 换成自定义 `ProxyConnector`（实现 `tower::Service<Uri>`，返回到 target 的 TCP stream）。**TLS 仍由 hyper-rustls 在隧道之上做——端到端到上游，代理只见密文**（不解密、不装 CA，符合不装本地 CA 做 MITM 的硬约束）。
 
 `Forwarder::new` 签名增加 proxy 参数（解析后的 `ProxyConfig` enum：`Direct | Http(url) | Socks5(url)`）。
 
 ## §5 协议实现与依赖
 
 - **SOCKS5**：`tokio-socks`（成熟、tokio 原生；自写 SOCKS5 握手易错）。新增依赖，过 cargo-deny。
-- **HTTP CONNECT**：自写（~50 行：发 `CONNECT host:port HTTP/1.1` + 可选 `Proxy-Authorization: Basic` + 读状态行至 `200` + 透传），不引第三方 HTTP-proxy crate（控供应链，PRD §9 #6 pinned deps）。
+- **HTTP CONNECT**：自写（~50 行：发 `CONNECT host:port HTTP/1.1` + 可选 `Proxy-Authorization: Basic` + 读状态行至 `200` + 透传），不引第三方 HTTP-proxy crate（控供应链，pinned deps）。
 - 连接超时复用现有上游超时配置。
 
 ## §6 错误处理
@@ -97,7 +97,7 @@ target api.anthropic.com:443
 
 `sieve-updater` 的 manifest（updates.sieveai.dev）与规则下载（cdn.sieveai.dev）请求复用同一 `ProxyConfig`：
 - 至少支持 env `ALL_PROXY`/`HTTPS_PROXY` + 全局 config `proxy`
-- 否则受限网络下更新检查 / 装机遥测同样不可用
+- 否则受限网络下更新检查同样不可用
 
 ## §8 测试矩阵
 
@@ -119,8 +119,8 @@ target api.anthropic.com:443
 **决策**：sieve 主动支持配置的上游代理（HTTP CONNECT + SOCKS5），不依赖系统透明代理。
 
 **硬约束分析**：
-- **PRD §9 #2（唯一允许出站）**：代理是传输层隧道，出站**目的地不变**（仍仅上游 LLM / sieveai.dev）。代理本身是用户自己配置的本地/可信出口，不构成「联网做 verifier」。✔
-- **PRD §9 #12（不装本地 CA 做 MITM）**：TLS 端到端到上游，sieve 不解密、不注入 CA；代理（若远程）仅见 SNI 目标、不见 TLS 内容。✔
+- **完全本地运行（唯一允许出站）**：代理是传输层隧道，出站**目的地不变**（仍仅上游 LLM / sieveai.dev）。代理本身是用户自己配置的本地/可信出口，不构成「联网做 verifier」。✔
+- **不装本地 CA 做 MITM**：TLS 端到端到上游，sieve 不解密、不注入 CA；代理（若远程）仅见 SNI 目标、不见 TLS 内容。✔
 - **与 network jail 约束的区分**：network jail 约束承诺「不修改系统 HTTP_PROXY / 系统代理设置」。本 spec 是 sieve **自身主动走配置的代理**，不碰系统设置，二者不冲突。
 - **隐私提示**：经远程代理时代理可见「你在连 api.anthropic.com」（SNI/目标 IP），不可见 prompt/response。文档须提示用户使用可信代理（本地 Shadowrocket/Clash 出口为佳）。
 

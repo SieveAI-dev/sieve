@@ -1,4 +1,4 @@
-# ADR-003: 完全本地,出站只到 api.anthropic.com 和 cdn.sieveai.dev
+# 完全本地,出站只到 api.anthropic.com 和 cdn.sieveai.dev
 # 此文件由 cargo-deny 在 CI 中检查
 
 [graph]
@@ -9,7 +9,7 @@ yanked = "deny"
 ignore = [
     # RUSTSEC-2026-0173: proc-macro-error2 无人维护（unmaintained，非漏洞）。
     # 传递链：age 0.11 → i18n-embed-fl 0.9.4 → proc-macro-error2（编译期 proc-macro 辅助库，
-    # 不进运行时二进制）。`age` 是 [ADR-037] 明确选定的加密库（write-only logging 标准实现，
+    # 不进运行时二进制）。`age` 是明确选定的加密库（write-only logging 标准实现，
     # 避免手搓密码学），其 fluent 本地化错误消息强制依赖 i18n-embed-fl，无法经 feature 甩掉。
     # 官方公告「无安全升级可用」。待 age / i18n-embed-fl 迁移离开 proc-macro-error2 后移除本豁免。
     "RUSTSEC-2026-0173",

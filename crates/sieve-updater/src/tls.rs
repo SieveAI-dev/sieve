@@ -1,6 +1,6 @@
 //! 更新通道共享 TLS client 构造（manifest fetch + rules download 复用）。
 //!
-//! **安全不变量（PRD §9 #2 / ADR-030）**：GA/release 二进制**无条件** `https_only()`，
+//! **安全不变量**：GA/release 二进制**无条件** `https_only()`，
 //! 唯一允许的出站是 `updates.sieveai.dev` / `cdn.sieveai.dev` 的 TLS。
 //!
 //! 为支持 hermetic 集成测试（把 updater 指向 localhost mock 而不做 TLS 握手），

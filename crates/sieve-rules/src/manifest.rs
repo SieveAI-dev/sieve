@@ -1,4 +1,4 @@
-//! 规则包 manifest（关联 ADR-002 / data-model.md / PRD v1.4 §5.3 §5.4）。
+//! 规则包 manifest（关联规则包验签设计 + 处置数据模型）。
 
 use serde::{Deserialize, Serialize};
 
@@ -40,14 +40,14 @@ pub struct RuleEntry {
     /// 允许放行的停用词列表（命中后检查，任一出现则不定级 Critical）。
     #[serde(default)]
     pub allowlist_stopwords: Vec<String>,
-    /// 处置形式（PRD v1.4 §5.4.1）。
+    /// 处置形式。
     ///
     /// `None` 表示 TOML 未显式写，调用 [`RuleEntry::effective_disposition`] 获取
     /// 按 severity 保守推断的值：Critical → [`Disposition::GuiPopup`]，
     /// 其他 → [`Disposition::StatusBar`]。
     #[serde(default)]
     pub disposition: Option<Disposition>,
-    /// 是否 fail-closed（强制不可关、不可永久白名单、dry-run 仍 enforce；关联 ADR-007）。
+    /// 是否 fail-closed（强制不可关、不可永久白名单、dry-run 仍 enforce）。
     ///
     /// `None` 表示规则未显式声明，调用 [`RuleEntry::effective_fail_closed`] 获取按
     /// severity 推断的值：[`Severity::Critical`] → `true`，其他 → `false`。
@@ -59,13 +59,13 @@ pub struct RuleEntry {
     /// 等待 GUI/hook 决策的超时秒数（`None` = 不超时，适用于 AutoRedact / StatusBar）。
     #[serde(default)]
     pub timeout_seconds: Option<u32>,
-    /// 超时后的默认处置（PRD v1.4 §5.4.2）。
+    /// 超时后的默认处置。
     #[serde(default = "default_on_timeout_block")]
     pub default_on_timeout: DefaultOnTimeout,
 }
 
 impl RuleEntry {
-    /// 返回规则的最终处置形式（PRD v1.4 §5.4.1）。
+    /// 返回规则的最终处置形式。
     ///
     /// TOML 未显式写 `disposition` 时，按 severity 保守推断：
     /// - [`Severity::Critical`] → [`Disposition::GuiPopup`]
@@ -77,10 +77,10 @@ impl RuleEntry {
         })
     }
 
-    /// 返回规则是否 fail-closed（关联 ADR-007 §2 / PRD §9 #3 #8）。
+    /// 返回规则是否 fail-closed。
     ///
     /// 显式写 `fail_closed` 时直接用；未写时按 severity 推断：
-    /// [`Severity::Critical`] → `true`（Critical 在所有版本不可关，PRD §9 #8），其他 → `false`。
+    /// [`Severity::Critical`] → `true`（Critical 在所有版本不可关），其他 → `false`。
     ///
     /// fail-closed 语义：命中后强制 Block（即使 dry-run）、不可永久白名单（灰名单拒绝）、
     /// 强制走人工决策路径。用户规则严重度被 lint 限制在 High 以下，故 `effective_fail_closed`
@@ -91,7 +91,7 @@ impl RuleEntry {
     }
 }
 
-/// 规则触发后的处置形式（PRD v1.4 §5.4.1 / ADR-016）。
+/// 规则触发后的处置形式。
 ///
 /// 决定命中后产物如何到达用户：自动改写、GUI 弹窗、hook 拦截还是静默通知。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -108,7 +108,7 @@ pub enum Disposition {
     StatusBar,
 }
 
-/// 规则超时后的默认处置（PRD v1.4 §5.4.2）。
+/// 规则超时后的默认处置。
 ///
 /// 当 GUI 弹窗或 hook 等待超过 `timeout_seconds` 后触发此动作。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -136,7 +136,7 @@ pub enum Severity {
     Medium,
     /// 高危。
     High,
-    /// 严重（PRD §9 FP < 0.5% 公理 12）。
+    /// 严重（FP < 0.5% 硬约束）。
     Critical,
 }
 
@@ -209,7 +209,7 @@ mod tests {
     }
 
     // -------------------------------------------------------------------------
-    // PRD v1.4 §5.4 新字段测试
+    // 处置字段新增测试
     // -------------------------------------------------------------------------
 
     /// 旧格式 TOML（无 disposition / timeout_seconds / default_on_timeout）

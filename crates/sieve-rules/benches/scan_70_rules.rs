@@ -1,4 +1,4 @@
-//! 70 条系统规则全量扫描 benchmark（PRD v2.0 §6.3.2 独立测试 baseline）。
+//! 70 条系统规则全量扫描 benchmark（独立测试 baseline）。
 //!
 //! 目标：5KB 输入 P99 < 1ms。
 //!

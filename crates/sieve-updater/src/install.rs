@@ -1,4 +1,4 @@
-//! Atomic rules bundle installation (ADR-030 §5, SPEC-006 §3.3).
+//! Atomic rules bundle installation (SPEC-006 §3.3).
 
 use std::path::{Path, PathBuf};
 
@@ -9,7 +9,7 @@ use crate::signature::{verify_sha256, verify_signature_with_key};
 
 /// Verifies, decompresses, and atomically installs a rules bundle payload.
 ///
-/// ADR-030 / SPEC-006 §3.3 flow:
+/// SPEC-006 §3.3 flow:
 /// 1. `verify_sha256(payload, expected_sha256)` — content integrity check.
 /// 2. `verify_signature_with_key(payload, signature, trusted_key)` — ed25519
 ///    check against the injected trust root (WARN + skip when `trusted_key`

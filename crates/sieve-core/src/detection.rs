@@ -10,7 +10,7 @@ use uuid::Uuid;
 /// 与 `sieve_rules::manifest::DefaultOnTimeout` 语���完全一致；
 /// engine_adapter 在构造 `Detection` 时从 `RuleEntry.default_on_timeout` 转换。
 ///
-/// 关联：PRD v1.4 §5.4.2、R3-#5 修复（IN-CR-01 disposition 配置生效）。
+/// 关联：R3-#5 修复（IN-CR-01 disposition 配置生效）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DefaultOnTimeout {
@@ -22,7 +22,7 @@ pub enum DefaultOnTimeout {
     Allow,
 }
 
-/// 严重等级（关联 PRD §5.1 / §9 公理 12 Critical FP < 0.5%）。
+/// 严重等级（关联出站检测表 / Critical FP < 0.5% 公理）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
@@ -32,15 +32,15 @@ pub enum Severity {
     Medium,
     /// 高风险，需确认。
     High,
-    /// 严重风险，强制阻断（FP < 0.5%，PRD §9 公理 12）。
+    /// 严重风险，强制阻断（FP < 0.5% 公理）。
     Critical,
 }
 
-/// 命中处置动作（关联 PRD v1.4 §5.4 / ADR-016 二维处置矩阵）。
+/// 命中处置动作（关联二维处置矩阵）。
 ///
 /// v1.4 重构：按 `Disposition` 路由，废弃 `WarnConfirm`。
-/// - `HookMark`：Hook 类命中，写 IPC pending 文件，SSE 流原样转发（ADR-014 §Hook 路径）。
-/// - `HoldForDecision`：GUI 类命中，hold 住 SSE 流等待用户决策（ADR-014 §GUI 路径）。
+/// - `HookMark`：Hook 类命中，写 IPC pending 文件，SSE 流原样转发（Hook 路径）。
+/// - `HoldForDecision`：GUI 类命中，hold 住 SSE 流等待用户决策（GUI 路径）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Action {
@@ -53,11 +53,11 @@ pub enum Action {
     },
     /// Hook 类：写 IPC pending 文件，SSE 流原样转发（IN-CR-02~04、IN-GEN-01~03）。
     ///
-    /// 关联 ADR-014 §Hook 路径、SPEC-001。
+    /// 关联 Hook 路径、SPEC-001。
     HookMark,
     /// GUI 类：hold 住 SSE 流，通过 IpcServer 等待用户决策（IN-CR-01/05、IN-GEN-04）。
     ///
-    /// 关联 ADR-014 §GUI 路径、SPEC-002。
+    /// 关联 GUI 路径、SPEC-002。
     HoldForDecision {
         /// 请求唯一标识（UUIDv4），用于 IPC 匹配。
         request_id: uuid::Uuid,
@@ -75,7 +75,7 @@ pub enum Action {
     SilentLog,
 }
 
-/// 命中内容来源（关联 PRD §6.2 Pipeline 节点）。
+/// 命中内容来源（关联 Pipeline 节点）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ContentSource {
@@ -113,14 +113,14 @@ pub struct Detection {
     /// 用于 IN-GEN-06 运行时提级逻辑：当 source_channel 属于不可信外部 channel
     /// （WhatsApp / Slack / Telegram / Discord / iMessage 等）时，severity 提级为 Critical。
     ///
-    /// PRD v1.5 §4.5 / §5.2；`serde(default)` 保证旧序列化格式向后兼容。
+    /// `serde(default)` 保证旧序列化格式向后兼容。
     #[serde(default)]
     pub source_channel: Option<String>,
     /// 嵌套调用链深度（来自 `X-Sieve-Origin` 请求头，解析后计数）。
     ///
     /// 0 = 直接调用；> 0 = 经过中间层转发。超过阈值（如 3）时可作为额外风险信号。
     ///
-    /// PRD v1.5 §4.5；`serde(default)` 保证向后兼容。
+    /// `serde(default)` 保证向后兼容。
     #[serde(default)]
     pub origin_chain_depth: usize,
 }

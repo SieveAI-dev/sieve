@@ -9,7 +9,7 @@
 //! `dispatch` 及 hold/hook 子模块仅在 `forwarder` feature 下编译（依赖 bytes + tokio async），
 //! 与 `cargo fuzz --no-default-features` 场景隔离。
 //!
-//! 关联：ADR-014（双层防御）、ADR-016（二维处置矩阵）、PRD v1.4 §6.1 §6.7。
+//! 关联：双层防御、二维处置矩阵。
 
 pub mod inbound;
 pub mod outbound;
@@ -101,7 +101,7 @@ mod dispatch_impl {
 
     /// `dispatch` 的返回值，指示 daemon 下一步动作。
     ///
-    /// 关联 ADR-016 二维处置矩阵 / ADR-014 双层防御路径。
+    /// 关联二维处置矩阵 / 双层防御路径。
     #[derive(Debug)]
     pub enum DispatchResult {
         /// 透传原样 body / SSE 流（无任何命中，或 StatusBar 静默）。
@@ -123,7 +123,7 @@ mod dispatch_impl {
     /// # 路由优先级（高 → 低）
     /// `Block` > `HoldForDecision`（GuiPopup）> `HookMark`（HookTerminal）> `Redact`（AutoRedact）> `MarkOnly`
     ///
-    /// 关联：ADR-016 §dispatch 路由、ADR-014 §双层防御。
+    /// 关联：dispatch 路由、双层防御。
     pub async fn dispatch(
         _direction: Direction,
         detections: Vec<Detection>,
@@ -239,7 +239,7 @@ mod dispatch_impl {
 
             let outcome = inbound_hold::hold_and_decide(ipc, ipc_req, ka_tx, "inbound").await?;
             return match outcome {
-                // `remember` / `context_hint` 由 daemon 消费写灰名单（PRD §5.4.2），
+                // `remember` / `context_hint` 由 daemon 消费写灰名单，
                 // dispatch 层只做放行 / 拒绝路由，不处理灰名单逻辑。
                 HoldOutcome::Allow { .. } | HoldOutcome::RedactAndAllow { .. } => {
                     Ok(DispatchResult::AllowAfterHold)

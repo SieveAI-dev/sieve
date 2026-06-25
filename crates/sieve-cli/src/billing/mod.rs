@@ -1,9 +1,9 @@
-//! 超额计费检测（ADR-038 / SPEC-010）。
+//! 超额计费检测（SPEC-010）。
 //!
 //! 把「中转站不可信」从口号变成可量化戳穿的能力：作为代理，Sieve 双向原始字节都有，
 //! 对 `Relay` 上游独立核算 token、与 relay 声明的 `usage` 交叉比对，偏差超容差报警。
 //!
-//! **设计姿态（ADR-038 裁定）**：
+//! **设计姿态**：
 //! - 默认全关（`[billing_check].enabled = false`），不开启零行为变化、零开销。
 //! - **本模块纯本地、零网络**——估算用 bundled tiktoken / cl100k proxy，记录落本地
 //!   `usage.db`。`count_tokens` 官方直连是独立 opt-in 开关（默认关，本增量未接入），
@@ -37,7 +37,7 @@ pub use detector::NotCheckedReason;
 use crate::config::Trust;
 use std::sync::Arc;
 
-/// daemon 全局超额计费观测器（ADR-038）：绑定一次性构造的估算器 + 本地 usage 存储 + 容差。
+/// daemon 全局超额计费观测器：绑定一次性构造的估算器 + 本地 usage 存储 + 容差。
 ///
 /// 在 daemon 启动时按 `[billing_check].enabled` 构造一次（`TokenEstimator::new` 加载 BPE
 /// 词表开销大），以 `Arc` 透传到响应观测点。**纯本地、零网络**（呼应隐私红线）。
@@ -104,7 +104,7 @@ pub struct Assessment {
     pub record: UsageRecord,
 }
 
-/// 每请求的超额计费观测上下文（ADR-038）。在请求处理时构造（含已算好的 input token
+/// 每请求的超额计费观测上下文。在请求处理时构造（含已算好的 input token
 /// 数），随请求带到响应观测点完成核算。仅 `Relay` 上游 + `enabled` 时为 `Some`。
 pub struct BillingContext {
     pub observer: Arc<BillingObserver>,

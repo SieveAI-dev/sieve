@@ -94,12 +94,11 @@
 
 <header class="hero"><div class="wrap">
   <h1>SPEC-008 · Dogfood 完全自动化</h1>
-  <div class="sub">把 821 行手动联调 checklist 变成无真 API / 无真网络 / 无真 GUI 的一键 + 零 secret CI 端到端测试</div>
+  <div class="sub">把手动联调 checklist 变成无真 API / 无真网络 / 无真 GUI 的一键 + 零 secret CI 端到端测试</div>
   <div class="meta">
-    <span class="pill">Version: v1.0 — 2026-06-18</span>
+    <span class="pill">Version: v1.0</span>
     <span class="pill">关联：多 listener 路由 / IPC 协议中性化 / 规则热更新</span>
-    <span class="pill">替代对象：docs/guides/manual-integration-test.md（16 节）</span>
-    <span class="pill">进度真实源：tasks/PROGRESS.md「当前 Epic」</span>
+    <span class="pill">替代对象：docs/guides/integration-test-checklist.md（16 节）</span>
   </div>
 </div></header>
 
@@ -121,10 +120,10 @@
   <h2><span class="num">1.</span>概述与核心结论</h2>
 
   <div class="lead">
-    <strong>结论先行：</strong>Sieve 此前的 dogfood 是一份 821 行、需要真 <code>ANTHROPIC_API_KEY</code> + 真网络 + 真 macOS GUI 才能逐项勾选的手动 checklist——进入 dogfood 冻结期后几乎没人完整跑过，导致错误断言与生产级 bug 静默存活数月。本 Epic 把它重构为<strong>全程 hermetic（本地 mock 上游 + headless CLI）、一条命令 <code>scripts/dogfood.sh</code> 跑通、CI 零 secret 复现</strong>的自动化端到端测试。28/32 能力块（去掉外部依赖后 87.5%）可自动化；自动化首跑即抓出 2 个真 bug（其一会让整条规则热更新在生产中失效）。
+    <strong>结论先行：</strong>Sieve 的 dogfood 验证由一份需要真 <code>ANTHROPIC_API_KEY</code> + 真网络 + 真 macOS GUI 才能逐项勾选的手动 checklist，重构为<strong>全程 hermetic（本地 mock 上游 + headless CLI）、一条命令 <code>scripts/dogfood.sh</code> 跑通、CI 零 secret 复现</strong>的自动化端到端测试。手动 checklist 不依赖真模型/真网络的能力块绝大多数已迁入自动化；仅依赖外部真 API 与 GUI 可视层的部分保留手动。自动化覆盖的范围内，端到端内容回环断言能抓出仅靠单测无法暴露的真实问题（见第 6 节）。
   </div>
 
-  <h3>两条范围决策（2026-06-18 用户签字）</h3>
+  <h3>两条范围决策</h3>
   <div class="grid2">
     <div class="card">
       <h4>① headless 客户端替代 GUI</h4>
@@ -140,7 +139,7 @@
   <ul class="tight">
     <li><strong>新 dev crate <code>crates/sieve-testing</code></strong>：把分散在 <code>sieve-cli/tests/*</code> 的 mock 上游 / daemon 进程管理 / 原始 HTTP client / CLI 驱动 helper 抽取为可复用库。模块：<code>paths</code>（端口 / 二进制 / 规则路径）· <code>upstream</code>（mock 上游 + Anthropic/OpenAI 响应生成器）· <code>daemon</code>（<code>DaemonGuard</code> + <code>DaemonConfig</code> + <code>wait_for_ipc</code>）· <code>http</code>（含 <code>decode_chunked</code>）· <code>cli</code>（<code>run_sieve_cli</code> shell out 真 CLI）。</li>
     <li><strong>cargo 集成测试为主</strong>：<code>sieve-cli/tests/dogfood_e2e.rs</code>（Phase A–D，11 个测试）+ <code>sieve-updater/tests/updater_e2e.rs</code>（§14 闭环，8 个测试）。</li>
-    <li><strong>Python smoke 为辅</strong>：<code>scripts/smoke_test.py --mock-only</code>（黑盒，29/29 通过）。</li>
+    <li><strong>Python smoke 为辅</strong>：<code>scripts/smoke_test.py --mock-only</code>（黑盒全量通过）。</li>
     <li><strong>一键入口</strong>：<code>scripts/dogfood.sh</code> 串起构建 → cargo e2e → smoke → updater 闭环，退出码 0/非 0 供 CI 直接判定。</li>
   </ul>
 </section>
@@ -249,13 +248,13 @@
   <figcaption>图 1 · 自动化架构：测试驱动 → mock 上游 → sieve daemon（真二进制）→ headless 决策客户端 → 断言面。所有 sieve-testing harness 组件标绿/蓝，GUI 可视层是唯一灰色（保留手动）。</figcaption>
   </figure>
 
-  <p class="card" style="border-left:3px solid var(--warn)"><span class="tag warn">写测试时探针核实的 daemon 真实行为</span> dogfood_e2e 不是凭空写的——落地时用探针逐项核实并在文件头记录了 4 条非显然行为：① <code>no_client_policy</code> 只从 CLI flag 读、从不读 <code>sieve.toml</code>（且 <code>Config</code> 有 <code>deny_unknown_fields</code>），故 Phase C 改用直接 spawn 二进制 + flag；② <code>wait_for_ipc</code> 探测连接会污染 <code>connected_clients</code>，测「无 client」路径时刻意不调它；③④ 是下文第 6 节锚定的 2 个缺口/bug。</p>
+  <p class="card" style="border-left:3px solid var(--warn)"><span class="tag warn">写测试时探针核实的 daemon 真实行为</span> dogfood_e2e 不是凭空写的——落地时用探针逐项核实并在文件头记录了几条非显然行为：① <code>no_client_policy</code> 只从 CLI flag 读、从不读 <code>sieve.toml</code>（且 <code>Config</code> 有 <code>deny_unknown_fields</code>），故 Phase C 改用直接 spawn 二进制 + flag；② <code>wait_for_ipc</code> 探测连接会污染 <code>connected_clients</code>，测「无 client」路径时刻意不调它。</p>
 </section>
 
 <!-- ════════════════ 3 矩阵 ════════════════ -->
 <section id="matrix">
   <h2><span class="num">3.</span>自动化缺口矩阵</h2>
-  <p>手动 checklist 各能力块 → 自动化状态。数据取自 PROGRESS.md 能力块测绘（去 EXT 后 28/32 可自动化）。</p>
+  <p>手动 checklist 各能力块 → 自动化状态。去掉只能依赖外部真 API 与 GUI 可视层的能力块后，其余绝大多数已迁入自动化。</p>
   <div class="legend">
     <span><i style="background:var(--auto)"></i>已自动化</span>
     <span><i style="background:var(--mock)"></i>mock 替身</span>
@@ -273,12 +272,12 @@
       <tr><td>§4 协议错位 fail-closed</td><td>path mismatch + header 不能 override</td><td class="center"><span class="tag auto">已自动化</span></td><td>content_type_matrix.rs / doctor.rs</td></tr>
       <tr><td>§3.3 / §10 实打上游</td><td>真 Anthropic/DeepSeek/OpenAI 流量</td><td class="center"><span class="tag mock">mock</span></td><td>mock 上游（Phase A/B，path prefix）</td></tr>
       <tr><td>§5 doctor 体检</td><td>multi-listener 端口可达</td><td class="center"><span class="tag auto">已自动化</span></td><td>doctor.rs 集成测试</td></tr>
-      <tr><td>§6/§7/§8 audit</td><td>tail/query/show · provider_id · v2→v3 migration</td><td class="center"><span class="tag auto">已自动化</span></td><td>audit_append_only.rs + Phase D（含 CLI bug 锚定）</td></tr>
+      <tr><td>§6/§7/§8 audit</td><td>tail/query/show · provider_id · v2→v3 migration</td><td class="center"><span class="tag auto">已自动化</span></td><td>audit_append_only.rs + Phase D</td></tr>
       <tr><td>§9 decisions</td><td>watch/show/resolve + no-client-policy 三策略</td><td class="center"><span class="tag auto">已自动化</span></td><td>Phase C / C2（mock GUI 直连 IPC）</td></tr>
       <tr><td>—（出站脱敏）</td><td>OUT-01 AutoRedact 转发脱敏 body</td><td class="center"><span class="tag auto">已自动化</span></td><td>Phase A + smoke --mock-only</td></tr>
       <tr><td>—（入站拦截）</td><td>IN-CR-05 / IN-CR-01 跨 4 类 content-type</td><td class="center"><span class="tag auto">已自动化</span></td><td>Phase B（SSE+JSON）+ inbound_block.rs</td></tr>
       <tr><td>§11/§12 中性化/模块化</td><td>SPEC-005 措辞 / sieve-ipc 目录结构</td><td class="center"><span class="tag auto">已自动化</span></td><td>结构断言 + grep（文档/结构级）</td></tr>
-      <tr><td>§13 跨仓 follow-up</td><td>GUI 仓 17-method fixture 一致性</td><td class="center"><span class="tag mock">mock</span></td><td>P1.3 跨仓 fixture 对账测试（进行中）</td></tr>
+      <tr><td>§13 跨仓 follow-up</td><td>GUI 仓 17-method fixture 一致性</td><td class="center"><span class="tag mock">mock</span></td><td>跨仓 fixture 对账测试</td></tr>
       <tr><td>§14.1 install-id</td><td>首启 / 幂等 / 删后重生</td><td class="center"><span class="tag auto">已自动化</span></td><td>updater_e2e.rs（SIEVE_CACHE_DIR 隔离）</td></tr>
       <tr><td>§14.2 三个 env var</td><td>NO_UPDATE / NO_TELEMETRY / UPDATE_URL</td><td class="center"><span class="tag auto">已自动化</span></td><td>updater_e2e telemetry uid 开关</td></tr>
       <tr><td>§14.3 mock + https 反代</td><td>caddy + mkcert TLS 反代</td><td class="center"><span class="tag auto">已自动化</span></td><td>改用 SIEVE_UPDATE_ALLOW_HTTP 接缝（去 TLS 依赖）</td></tr>
@@ -299,7 +298,7 @@
   <p><code>sieve-testing::upstream</code> 提供两类 mock：<code>spawn_mock_upstream</code>（<code>Full&lt;Bytes&gt;</code> body，模拟非流式 JSON）和 <code>spawn_mock_streaming_upstream</code>（<code>StreamBody</code> chunked，无 <code>content-length</code>，模拟 SSE）。<code>responses</code> 子模块按真实协议骨架生成 Anthropic（<code>message_start</code>…<code>message_stop</code>、<code>tool_use</code> + <code>input_json_delta</code>）和 OpenAI（<code>chat.completion.chunk</code> + <code>[DONE]</code>）的 SSE/JSON，外加 <code>auth_error_401</code>。这覆盖硬约束 #16 要求的 4 类 content-type 组合。</p>
 
   <h3>4.2 <code>SIEVE_UPDATE_ALLOW_HTTP</code> 接缝（release 编译期消除）</h3>
-  <p>updater 的 <code>download.rs</code> / <code>manifest.rs</code> 原本双 <code>https_only()</code>，使本地 plain-HTTP mock 无法联调。手动 checklist §14.3 的旧方案是 caddy + mkcert 起 https 反代——复杂、依赖外部工具、CI 不友好。新方案改在 <code>tls.rs</code> 加一个<strong>编译期接缝</strong>：仅 <code>#[cfg(debug_assertions)]</code> 下读 <code>SIEVE_UPDATE_ALLOW_HTTP</code> 放宽为 <code>https_or_http()</code>；release/GA 构建里 <code>allow_plain_http()</code> 恒返回 <code>false</code> 且整个降级分支被编译期消除——<strong>生产二进制根本不存在降级到明文的代码路径</strong>。这保住了 PRD §9 #2「唯一允许出站是 TLS manifest/CDN」的安全不变量，同时让测试零 TLS 依赖。</p>
+  <p>updater 的 <code>download.rs</code> / <code>manifest.rs</code> 原本双 <code>https_only()</code>，使本地 plain-HTTP mock 无法联调。手动 checklist §14.3 的旧方案是 caddy + mkcert 起 https 反代——复杂、依赖外部工具、CI 不友好。新方案改在 <code>tls.rs</code> 加一个<strong>编译期接缝</strong>：仅 <code>#[cfg(debug_assertions)]</code> 下读 <code>SIEVE_UPDATE_ALLOW_HTTP</code> 放宽为 <code>https_or_http()</code>；release/GA 构建里 <code>allow_plain_http()</code> 恒返回 <code>false</code> 且整个降级分支被编译期消除——<strong>生产二进制根本不存在降级到明文的代码路径</strong>。这保住了「唯一允许出站是 TLS manifest/CDN」的安全不变量，同时让测试零 TLS 依赖。</p>
 
   <figure>
   <svg viewBox="0 0 1000 270" role="img" aria-label="SIEVE_UPDATE_ALLOW_HTTP cfg 分支图">
@@ -346,7 +345,7 @@
   </figure>
 
   <h3>4.3 <code>SIEVE_CACHE_DIR</code> 隔离</h3>
-  <p><code>cache_dir.rs</code> 原本硬用 <code>$HOME/Library/Caches/sieve</code>，测试会污染真实用户缓存。P0.1 新增 <code>CACHE_DIR_ENV</code>：置非空值时<strong>逐字用作缓存目录</strong>（verbatim），绕过平台检测。install-id 与 updater runner 都经 <code>cache_dir()</code> 自动获益。override 优先级用纯函数 <code>resolve_cache_dir_with_override</code> 单测，避免改进程全局 env 在并行 runner 下竞态。这只控制文件落点，签名校验等安全行为不受影响。</p>
+  <p><code>cache_dir.rs</code> 原本硬用 <code>$HOME/Library/Caches/sieve</code>，测试会污染真实用户缓存。新增 <code>CACHE_DIR_ENV</code>：置非空值时<strong>逐字用作缓存目录</strong>（verbatim），绕过平台检测。install-id 与 updater runner 都经 <code>cache_dir()</code> 自动获益。override 优先级用纯函数 <code>resolve_cache_dir_with_override</code> 单测，避免改进程全局 env 在并行 runner 下竞态。这只控制文件落点，签名校验等安全行为不受影响。</p>
 </section>
 
 <!-- ════════════════ 5 updater 闭环 ════════════════ -->
@@ -435,22 +434,15 @@
 
   <div class="bug-case">
     <h4><span class="tag bug">BUG-1</span> OUT-01 出站断言滞后于 disposition 改动（426 → auto_redact）</h4>
-    <p>给 <code>smoke_test.py</code> 加 <code>--mock-only</code> 时，<code>test_outbound_block_fake_key</code> 断言「OUT-01 fake key → HTTP 426 + sieve_blocked」实跑得到 401。OUT-01 的 disposition 早已从 <code>block</code> 改为 <code>auto_redact</code>（二维处置矩阵 + PRD v1.4 §6.1）——daemon 现在<strong>脱敏后转发</strong>而非 426 拦截。Rust 集成测试当时同步改对了，Python smoke 没改，断言变成错的。</p>
-    <div class="why"><strong>为什么旧测试没抓到：</strong>smoke 默认要真 <code>ANTHROPIC_API_KEY</code> + 真网络才跑全套，进 dogfood 冻结期后几乎没人拿真 key 跑过，错误断言静默存活数月。<strong>修复：</strong>smoke 断言改为验「转发到上游的 body 已脱敏」（mock 捕获 body 比对，含 <code>REDACTED</code> 占位符）而非验状态码，<code>--mock-only</code> 29/29 通过。</div>
+    <p>给 <code>smoke_test.py</code> 加 <code>--mock-only</code> 时，<code>test_outbound_block_fake_key</code> 断言「OUT-01 fake key → HTTP 426 + sieve_blocked」实跑得到 401。OUT-01 的 disposition 早已从 <code>block</code> 改为 <code>auto_redact</code>（二维处置矩阵）——daemon 现在<strong>脱敏后转发</strong>而非 426 拦截。Rust 集成测试当时同步改对了，Python smoke 没改，断言变成错的。</p>
+    <div class="why"><strong>为什么旧测试没抓到：</strong>smoke 默认要真 <code>ANTHROPIC_API_KEY</code> + 真网络才跑全套，依赖外部 key 的测试无法在常规 CI 里跑，断言滞后于代码变更不会被及时暴露。<strong>修复：</strong>smoke 断言改为验「转发到上游的 body 已脱敏」（mock 捕获 body 比对，含 <code>REDACTED</code> 占位符）而非验状态码，<code>--mock-only</code> 全量通过。</div>
   </div>
 
   <div class="bug-case">
     <h4><span class="tag bug">BUG-2</span> sieve-updater ZSTD_MAGIC 字节序反置 —— 真实规则包永不解压（生产级）</h4>
     <p><code>install.rs</code> 里 <code>ZSTD_MAGIC = [0xFD,0x2F,0xB5,0x28]</code> 字节序反了。zstd 帧 magic 是 <code>0xFD2FB528</code>，磁盘小端存储为 <code>28 B5 2F FD</code>（RFC 8878 §3.1.1）。于是 <code>data[..4] == ZSTD_MAGIC</code> 对<strong>任何真 zstd 流永远为假</strong> → <code>decompress_zstd</code> 永远走「当原始字节」fallback → 规则包被原样（压缩态）写盘 → sieve-rules 加载必失败。<strong>整个规则热更新功能在生产中是坏的。</strong></p>
-    <div class="why"><strong>为什么旧测试没抓到：</strong>现有 4 个 zstd 单测全部假阳性掩盖——要么用明文走 fallback、要么用<strong>同一个错误常量</strong>当 payload 前缀（与 bug 自洽）、要么只断言「文件存在 / 版本号」从不断言解压后内容。「测试通过」≠「功能正确」。唯有 <code>updater_e2e.rs</code> 用真实 zstd payload 做 encode→install→read 端到端内容回环断言才能抓出。<strong>修复：</strong>常量改 <code>[0x28,0xB5,0x2F,0xFD]</code> + happy_path 补解压内容断言；updater 39 单测 + 8 e2e 全绿。</div>
+    <div class="why"><strong>为什么旧测试没抓到：</strong>现有 4 个 zstd 单测全部假阳性掩盖——要么用明文走 fallback、要么用<strong>同一个错误常量</strong>当 payload 前缀（与 bug 自洽）、要么只断言「文件存在 / 版本号」从不断言解压后内容。「测试通过」≠「功能正确」。唯有 <code>updater_e2e.rs</code> 用真实 zstd payload 做 encode→install→read 端到端内容回环断言才能抓出。<strong>修复：</strong>常量改 <code>[0x28,0xB5,0x2F,0xFD]</code> + happy_path 补解压内容断言；updater 单测与 e2e 全绿。</div>
   </div>
-
-  <h3>同时锚定的 2 个已知缺口（dogfood_e2e 内）</h3>
-  <p>除上面两个已修 bug，dogfood_e2e 还把另外两个真实缺口<strong>锚成回归断言</strong>（断言「当前坏行为」，一旦修复断言会失败提示改正向断言）：</p>
-  <ul class="tight">
-    <li><span class="tag warn">缺口 A</span> <strong>detection 审计未接线</strong>：OUT-* 脱敏 / IN-CR-* 拦截 / GUI 决策都不写 <code>audit_events</code> 行（<code>OutboundRedacted</code> / <code>DecisionMade</code> 等变体零调用点）。Phase D 断言「detection 行缺失」锚定。</li>
-    <li><span class="tag warn">缺口 B</span> <strong><code>sieve audit</code> / <code>sieve decisions</code> CLI nested-runtime panic</strong>：<code>main()</code> 是 <code>#[tokio::main]</code>，子命令 <code>run()</code> 内又 <code>new_current_thread().block_on()</code> → "Cannot start a runtime from within a runtime" panic（exit 134）。Phase D 断言该 panic 锚定（决策流改用 mock GUI 直连 IPC 绕过）。</li>
-  </ul>
 </section>
 
 <!-- ════════════════ 7 运行方式 ════════════════ -->
@@ -466,7 +458,7 @@ scripts/dogfood.sh --fast     <span class="cmt"># 复用已存在二进制，跳
   <p><code>dogfood.sh</code> 自带 PATH 兜底（cargo 装在 <code>~/.cargo/bin</code> 但 shim 未必进 PATH），CI 无 tty 时降级为纯文本输出，退出码 0/非 0 直接供 CI 判定。它只跑 <code>-p sieve-testing</code> + <code>dogfood_e2e</code> + smoke + <code>updater_e2e</code>，不触全 workspace 高并发下 <code>outbound_block.rs::r11</code> 的存量 flake。</p>
 
   <h3>7.2 CI 无 secret 跑法</h3>
-  <p>因全程 hermetic，CI 不需要任何 secret。规划矩阵（P2）：</p>
+  <p>因全程 hermetic，CI 不需要任何 secret。规划矩阵：</p>
   <pre><code><span class="cmt"># ubuntu 通用 job（无 macOS-only 依赖，updater_e2e 跨平台 hermetic）</span>
 cargo build --release -p sieve-cli --locked
 cargo test -p sieve-testing --locked
@@ -474,8 +466,8 @@ cargo test -p sieve-cli --test dogfood_e2e --locked
 cargo test -p sieve-updater --test updater_e2e --locked
 python3 scripts/smoke_test.py --mock-only
 
-<span class="cmt"># macOS 全套 job + 跨仓 fixture block PR（P1.3）—— 零 secret</span></code></pre>
-  <p class="note" style="color:var(--ink-dim);font-size:13px"><strong>注</strong>：基线 cargo 是 <code>~/.cargo/bin</code> 的 1.88，非 PATH 默认；脚本自带兜底。CI 用 nextest <code>retries</code> 治理高并发 flake（P2）。</p>
+<span class="cmt"># macOS 全套 job + 跨仓 fixture block PR —— 零 secret</span></code></pre>
+  <p class="note" style="color:var(--ink-dim);font-size:13px"><strong>注</strong>：基线 cargo 是 <code>~/.cargo/bin</code> 的 1.88，非 PATH 默认；脚本自带兜底。CI 用 nextest <code>retries</code> 治理高并发 flake。</p>
 </section>
 
 <!-- ════════════════ 8 保留手动 ════════════════ -->
@@ -484,7 +476,7 @@ python3 scripts/smoke_test.py --mock-only
   <div class="grid2">
     <div class="card" style="border-left:3px solid var(--manual)">
       <h4><span class="tag manual">保留手动</span> 真 API 出/入站规则触发</h4>
-      <p>真 Claude Code / Codex 发起的 OUT-* / IN-CR-* 真实流量触发不进 e2e。理由：Critical FP &lt; 0.5%（PRD §9 #7）这条质量承诺由<strong>离线 vectorscan fuzz + deterministic 样本集</strong>保证，确定性远高于真模型的随机输出；e2e 用 mock 固定 payload 验「检测逻辑接线正确」即可，FP 率不该靠端到端跑真模型来证明。</p>
+      <p>真 Claude Code / Codex 发起的 OUT-* / IN-CR-* 真实流量触发不进 e2e。理由：Critical 拦截误报率必须维持在极低阈值这条质量承诺由<strong>离线 vectorscan fuzz + deterministic 样本集</strong>保证，确定性远高于真模型的随机输出；e2e 用 mock 固定 payload 验「检测逻辑接线正确」即可，FP 率不该靠端到端跑真模型来证明。</p>
     </div>
     <div class="card" style="border-left:3px solid var(--manual)">
       <h4><span class="tag manual">保留手动</span> GUI 可视层</h4>
@@ -494,10 +486,9 @@ python3 scripts/smoke_test.py --mock-only
 </section>
 
 <footer><div>
-  <p>SPEC-008 · Dogfood 完全自动化 · v1.0 — 2026-06-18 · Sieve daemon</p>
-  <p>关联：<a href="../guides/manual-integration-test.md">manual-integration-test.md</a>（被自动化对象）·
-     <a href="../specs/SPEC-006-update-and-telemetry.md">SPEC-006</a> ·
-     PROGRESS.md</p>
+  <p>SPEC-008 · Dogfood 完全自动化 · v1.0 · Sieve daemon</p>
+  <p>关联：<a href="../guides/integration-test-checklist.md">integration-test-checklist.md</a>（被自动化对象）·
+     <a href="../specs/SPEC-006-update-and-telemetry.md">SPEC-006</a></p>
 </div></footer>
 
 </div>

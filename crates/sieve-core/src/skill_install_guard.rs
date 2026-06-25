@@ -1,4 +1,4 @@
-//! IN-CR-06 OpenClaw 动态 skill 安装检测（PRD v1.5 §4.6）。
+//! IN-CR-06 OpenClaw 动态 skill 安装检测。
 //!
 //! ## 设计说明
 //!
@@ -18,13 +18,13 @@
 //! - 完善 manifest 解析：提取 `source_url`、`author`、`permissions` 到 Detection details
 //! - 接入黑名单查询（source domain 黑名单、权限级别评分）
 //!
-//! 关联：PRD v1.5 §4.6 / ADR-016（处置矩阵）。
+//! 关联：处置矩阵。
 
 use crate::detection::{fingerprint, Action, ContentSource, Detection, Severity};
 use crate::protocol::unified_message::ContentSpan;
 use uuid::Uuid;
 
-/// 不可信外部 channel 列表（PRD v1.5 §4.5）。
+/// 不可信外部 channel 列表。
 ///
 /// 当 IN-GEN-06 命中且 `source_channel` 在此列表中时，severity 从 High 提级为 Critical。
 ///
@@ -155,7 +155,7 @@ fn extract_manifest_summary(body: &serde_json::Value) -> String {
 ///
 /// 补充 manifest source URL 黑名单查询。
 ///
-/// PRD v1.5 §4.6；关联 ADR-016。
+/// 关联处置矩阵。
 pub fn check_openclaw_skill_install(
     path: &str,
     body: &serde_json::Value,

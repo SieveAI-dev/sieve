@@ -9,7 +9,7 @@
 //! 因此本模块的"fail-closed 兜底"也只能**尽力输出 block JSON**——一旦 Hermes 已超时，
 //! 本进程输出什么都可能无效。系统真正的 fail-closed 不变量由 daemon 网关 `inbound_hold`
 //! 保证，本 hook 仅作 UX 层（终端可见 + 拿到执行边界的确切 tool 调用）。详见
-//! ADR-014 §6 勘误（2026-06-22）与 memory `project_openclaw_hermes_have_hooks`。
+//! Hermes fail-OPEN 语义勘误（2026-06-22）与 memory `project_openclaw_hermes_have_hooks`。
 //!
 //! 契约（官方文档 hermes-agent.nousresearch.com/docs/user-guide/features/hooks 核实）：
 //! - stdin：JSON `{ tool_name, tool_input, session_id }`
@@ -85,7 +85,7 @@ pub fn emit_hermes_decision(verdict: &CodexVerdict) -> HermesOutput {
 /// fail-closed 兜底：daemon 不可达 / 解析失败 / 超时等错误路径，**尽力**输出 block JSON。
 ///
 /// ⚠️ Hermes fail-OPEN：若错误源于已超过 Hermes 的 hook timeout，则 Hermes 可能已放行，
-/// 本输出未必生效。真正的 fail-closed 由 daemon 网关 `inbound_hold` 兜底（ADR-014 §6）。
+/// 本输出未必生效。真正的 fail-closed 由 daemon 网关 `inbound_hold` 兜底。
 /// `reason` 同时进 `stderr` 便于排障。
 pub fn emit_hermes_fail_closed(reason: &str) -> HermesOutput {
     HermesOutput {

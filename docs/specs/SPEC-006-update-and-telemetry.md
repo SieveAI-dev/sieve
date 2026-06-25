@@ -1,8 +1,8 @@
 # SPEC-006: Sieve 更新通道与遥测协议
 
 > Version: v0.1 — 2026-05-05
-> Status: **Draft**（待 TODO-7~12 代码落地后升 Frozen）
-> 关联 PRD：sieve-prd-v2.0.md §9 硬约束 #2
+> Status: **Draft**（待相关代码落地后升 Frozen）
+> 关联核心约束：绝不联网做远端 verifier（更新通道是唯一允许的非上游出站）
 
 ---
 
@@ -22,7 +22,7 @@
 - crate 边界约束
 
 **本 SPEC 不描述**：
-- 服务端实现（待 TODO-15 Cloudflare Workers 落地后独立规格）
+- 服务端实现（更新服务端独立规格，计划中）
 - 规则文件格式（`sieve-rules` crate 负责）
 - 规则热加载（属于 `sieve-policy` crate 职责）
 
@@ -347,17 +347,17 @@ loop {
 
 ```rust
 /// 编译期硬编码的 ed25519 公钥（trusted pubkey）。
-/// Phase 1 GA 前填入真实公钥（TODO-14 GCP KMS 落地后更新）。
+/// GA 前填入真实公钥（由签名基础设施产出后更新）。
 /// 当前为 None 占位——签名校验在公钥为 None 时 WARN + 跳过（不静默通过）。
-const TRUSTED_PUBKEY: Option<&[u8]> = None; // TODO-14: 替换为真实公钥字节
+const TRUSTED_PUBKEY: Option<&[u8]> = None; // 替换为真实公钥字节
 ```
 
-**公钥未配置时的行为**（开发阶段 / TODO-14 落地前）：
+**公钥未配置时的行为**（公钥填入前）：
 
 ```
 if TRUSTED_PUBKEY.is_none() {
     tracing::warn!(
-        "updater: ed25519 public key not configured (TODO-14), \
+        "updater: ed25519 public key not configured, \
          skipping signature verification — DO NOT ship to production"
     );
     // 跳过 ed25519 校验，仅做 sha256 校验
@@ -365,7 +365,7 @@ if TRUSTED_PUBKEY.is_none() {
 }
 ```
 
-> **重要**：公钥未配置时 WARN + 跳过校验，绝不静默通过。GA 前必须填入真实公钥（TODO-14）。
+> **重要**：公钥未配置时 WARN + 跳过校验，绝不静默通过。GA 前必须填入真实公钥。
 
 ### 5.3 与二进制签名体系的关系
 
@@ -605,11 +605,11 @@ manifest 请求是「绝对禁止 telemetry」反模式的**唯一允许例外**
 
 - `cache_dir()` 失败 → log error + rules 更新禁用（install-id 仍可用，遥测照常）
 - `create_dir_secure(rules_dir)` 失败 → `UpdaterError::Io` → log error + 等下个周期
-- install-id 写入失败 → 每次启动重新生成（不持久化），接受高估 DAU 的统计噪声
+- install-id 写入失败 → 每次启动重新生成（不持久化），接受去重计数的统计噪声
 
 ---
 
-## 11. 服务端日志 Schema（参考，实现待 TODO-15）
+## 11. 服务端日志 Schema（参考，服务端实现计划中）
 
 服务端仅持久化以下匿名字段（详见 [data-model.md §X 服务端日志](../design/data-model.md)）：
 

@@ -17,8 +17,7 @@
 //! - chain_depth ≥ 5 → 直接 426；chain_depth ≥ 2 → 所有命中强制 GuiPopup；
 //! - `X-Sieve-Source-Channel` header 解析 → DecisionRequest.source_channel。
 //!
-//! 关联：PRD v1.5 §6.1 §4.5 §4.6 / ADR-018（OpenAI 协议）/ ADR-019（multi-agent header）/
-//!        ADR-013（IPC）/ ADR-014（双层防御）/ ADR-016（处置矩阵）。
+//! 关联：OpenAI 协议 / multi-agent header / IPC / 双层防御 / 处置矩阵。
 
 use anyhow::{anyhow, Context, Result};
 use bytes::Bytes;
@@ -93,9 +92,9 @@ mod archive_facade {
 /// 加密归档写入器句柄：`audit-crypto` 开时为真写入器，关时恒为 `None`（占位）。
 type ArchiveWriterHandle = Option<std::sync::Arc<archive_facade::ArchiveWriter>>;
 
-// ── v2.0：请求上下文（PRD v2.0 §5.6 / §5.6.1）──────────────────────────────
+// ── v2.0：请求上下文 ──────────────────────────────
 
-/// 每请求上下文：caller 进程信息 + audit 存储句柄 + listener 元信息（PRD v2.0 §5.6 / §5.6.1；ADR-026）。
+/// 每请求上下文：caller 进程信息 + audit 存储句柄 + listener 元信息。
 ///
 /// 合并为一个结构体以减少函数参数数量（clippy too_many_arguments）。
 /// `clone()` 开销：Arc clone + Option clone + 标量 copy，均为 O(1)。
@@ -103,12 +102,12 @@ type ArchiveWriterHandle = Option<std::sync::Arc<archive_facade::ArchiveWriter>>
 struct RequestCtx {
     /// 调用方进程信息（v2.0 Phase A：macOS 真实反查；其他平台 None）。
     caller: Option<crate::process_context::CallerInfo>,
-    /// 审计存储句柄（SQLite append-only，PRD §5.6.1）。
+    /// 审计存储句柄（SQLite append-only）。
     audit: Arc<crate::audit::AuditStore>,
-    /// 本次连接所在 listener 的协议声明（ADR-026 §决策 4）。
+    /// 本次连接所在 listener 的协议声明。
     /// proxy_inner 用此字段做协议错位 fail-closed 校验。
     listener_protocol: crate::config::Protocol,
-    /// 本次连接所在 listener 的 provider_id（ADR-026 §决策 5）。
+    /// 本次连接所在 listener 的 provider_id。
     /// 透传到审计 / IPC 事件 / 日志，标注本次请求命中哪个上游。
     /// Stage E 落地审计 schema 后会被消费；当前仅在错位拒绝日志中使用。
     #[allow(dead_code)]
@@ -146,9 +145,9 @@ impl RequestCtx {
     }
 }
 
-// ── ADR-026：multi-listener 元信息 ──────────────────────────────────────────
+// ── multi-listener 元信息 ──────────────────────────────────────────
 
-/// 单 listener 运行时元信息（ADR-026 §决策 1）。
+/// 单 listener 运行时元信息。
 ///
 /// 把 [`crate::config::UpstreamListener`] 配置升级成运行时形态：
 /// - `forwarder` 已 build（含连接池），accept_loop 直接复用
@@ -157,7 +156,7 @@ impl RequestCtx {
 /// `Clone` 开销：3 × Arc clone + 1 × String clone + 标量 copy，全部 O(1)/O(n_short)。
 #[derive(Clone)]
 struct ListenerSpec {
-    /// 监听端口（127.0.0.1:port，ADR-003 完全本地）。
+    /// 监听端口（127.0.0.1:port，完全本地）。
     port: u16,
     /// 上游转发器（含连接池，rustls TLS）。
     forwarder: Arc<Forwarder>,
@@ -167,23 +166,23 @@ struct ListenerSpec {
     protocol: crate::config::Protocol,
     /// A3 配置化路由表：非标准 path → 出站 provider 映射。空表时按「标准路径 + protocol」解析。
     routes: Arc<Vec<crate::config::RouteRule>>,
-    /// 上游信任级别（ADR-038）：`Official` 直连 usage 权威、不核算；`Relay` 须独立核算。
+    /// 上游信任级别：`Official` 直连 usage 权威、不核算；`Relay` 须独立核算。
     /// 按 host 派生（`UpstreamListener::resolved_trust`），透传到超额计费观测器。
     trust: crate::config::Trust,
 }
 
-// ── v2.0：灰名单辅助（PRD v2.0 §5.4.2）─────────────────────────────────────
+// ── v2.0：灰名单辅助 ─────────────────────────────────────
 
-/// 计算 `DecisionRequest.allow_remember`（PRD v2.0 §5.4.2 / §5.4.3）。
+/// 计算 `DecisionRequest.allow_remember`。
 ///
 /// fail-closed Critical 规则（`is_fail_closed` 返回 true）**必须强制 false**，
 /// 禁止用户通过 GUI Remember 将其加入灰名单。
 /// 非 Critical 规则可以为 `true`，允许用户选择"记住此决策"。
 ///
 /// 多条 detection 时：任一 detection 的 rule_id 在 fail-closed 名单中 → 整批返回 `false`。
-/// （最保守策略，PRD §9 #3 / #14）
+/// （最保守策略）
 ///
-/// 关联：PRD v2.0 §5.4.2 灰名单 schema、§5.4.3 GUI 接口、sieve_ipc::DecisionRequest::allow_remember。
+/// 关联：灰名单 schema、GUI 接口、sieve_ipc::DecisionRequest::allow_remember。
 fn compute_allow_remember(rule_ids: &[&str]) -> bool {
     // 任意一条 rule_id 在 fail-closed 名单中 → 整批不可 remember
     !rule_ids
@@ -198,11 +197,11 @@ fn detection_rule_ids<'a>(detections: &'a [&sieve_core::Detection]) -> Vec<&'a s
     detections.iter().map(|d| d.rule_id.as_str()).collect()
 }
 
-/// 暂停状态感知的 `request_decision`（SPEC-002 §9.1 + ADR-028 TODO-4 no-client policy）。
+/// 暂停状态感知的 `request_decision`（SPEC-002 §9.1 + no-client policy）。
 ///
 /// 行为：
 /// 1. 若有任意 detection 命中 `critical_lock::FAIL_CLOSED_RULES` → 照常弹窗（暂停 / no-client policy 不影响 Critical）。
-/// 2. 若 IPC server 无 client 连接（GUI 未在线 / CLI 未订阅）→ 按 `no_client_policy` 快速处置（ADR-028 §3）：
+/// 2. 若 IPC server 无 client 连接（GUI 未在线 / CLI 未订阅）→ 按 `no_client_policy` 快速处置：
 ///    - `AutoBlock`：直接 Deny（fail-closed，默认）
 ///    - `AutoWarn`：直接 Allow（低风险 headless）
 ///    - `HoldAndFailClosed`：继续走原逻辑（等超时，v1.x 行为）
@@ -210,7 +209,7 @@ fn detection_rule_ids<'a>(detections: &'a [&sieve_core::Detection]) -> Vec<&'a s
 ///    写 `AuditEvent::AutoDecidedPaused`，返回合成 response（`by_user=false`）。
 /// 4. 否则 → 直接调 `IpcServer::request_decision`。
 ///
-/// 关联：PRD v2.0 §9 #3 #8（Critical 不可暂停）、SPEC-002 §9.1（paused 弹窗矩阵）、ADR-028 §3。
+/// 关联：Critical 不可暂停、SPEC-002 §9.1（paused 弹窗矩阵）。
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn gated_request_decision(
     ipc: &Arc<sieve_ipc::IpcServer>,
@@ -227,14 +226,14 @@ pub(crate) async fn gated_request_decision(
         .iter()
         .any(|d| sieve_rules::critical_lock::is_fail_closed(&d.rule_id));
 
-    // ADR-028 TODO-4：无 client 连接时按 no_client_policy 快速处置。
-    // Critical 规则不受此策略影响（fail-closed 硬约束，PRD §9 #3 #8）。
+    // 无 client 连接时按 no_client_policy 快速处置。
+    // Critical 规则不受此策略影响（fail-closed 硬约束）。
     if !any_critical && ipc.connected_clients() == 0 {
         match no_client_policy {
             crate::cli::NoClientPolicy::AutoBlock => {
                 tracing::info!(
                     provider_id,
-                    "no client connected → auto-block (ADR-028 no_client_policy=auto-block)"
+                    "no client connected → auto-block (no_client_policy=auto-block)"
                 );
                 spawn_decision_audit(
                     audit,
@@ -251,14 +250,14 @@ pub(crate) async fn gated_request_decision(
                     decided_at: chrono::Utc::now(),
                     by_user: false,
                     remember: false,
-                    context_hint: Some("auto-block: no client connected (ADR-028)".to_owned()),
+                    context_hint: Some("auto-block: no client connected".to_owned()),
                     ui_phase_when_clicked: None,
                 });
             }
             crate::cli::NoClientPolicy::AutoWarn => {
                 tracing::info!(
                     provider_id,
-                    "no client connected → auto-warn allow (ADR-028 no_client_policy=auto-warn)"
+                    "no client connected → auto-warn allow (no_client_policy=auto-warn)"
                 );
                 spawn_decision_audit(
                     audit,
@@ -275,7 +274,7 @@ pub(crate) async fn gated_request_decision(
                     decided_at: chrono::Utc::now(),
                     by_user: false,
                     remember: false,
-                    context_hint: Some("auto-warn: no client connected (ADR-028)".to_owned()),
+                    context_hint: Some("auto-warn: no client connected".to_owned()),
                     ui_phase_when_clicked: None,
                 });
             }
@@ -283,7 +282,7 @@ pub(crate) async fn gated_request_decision(
                 // v1.x 行为：继续走 request_decision（等超时，fail-closed 通过 default_on_timeout）
                 tracing::debug!(
                     provider_id,
-                    "no client connected → hold-and-fail-closed (ADR-028 no_client_policy=hold-and-fail-closed)"
+                    "no client connected → hold-and-fail-closed (no_client_policy=hold-and-fail-closed)"
                 );
             }
         }
@@ -372,7 +371,7 @@ pub(crate) async fn gated_request_decision(
 }
 
 /// 为一次决策结果写 `DecisionMade` 审计事件（fire-and-forget，不阻塞请求热路径，
-/// PRD §9 性能预算 P99<20ms）。沿用 daemon 控制面 spawn-audit 模式。
+/// 性能预算 P99<20ms）。沿用 daemon 控制面 spawn-audit 模式。
 ///
 /// `decision`：`"allow"` / `"deny"` / `"redact_and_allow"`。`by_user`：true=用户点击，
 /// false=超时/系统自动（no-client policy 等）。取首个 detection 作为主关联规则。
@@ -415,12 +414,12 @@ fn spawn_decision_audit(
     });
 }
 
-/// 入站 Critical 拦截写审计（fail-closed 自动 block，无用户决策；PRD §9 #3）。
+/// 入站 Critical 拦截写审计（fail-closed 自动 block，无用户决策）。
 ///
 /// 接线背景：入站 block 路径（SSE + JSON、Anthropic + OpenAI）此前一律不落 audit
 /// （真机 dogfood 抓出，2026-06-18）。每条 detection 写一条 InboundBlocked 事件，
 /// 仅含元数据（rule_id / severity / path_label / caller），零 secret 落盘。
-/// fire-and-forget：tokio::spawn 不阻塞热路径（PRD §9 性能预算）。
+/// fire-and-forget：tokio::spawn 不阻塞热路径（性能预算）。
 fn spawn_inbound_blocked_audit(
     audit: &Arc<crate::audit::AuditStore>,
     provider_id: &str,
@@ -453,7 +452,7 @@ fn spawn_inbound_blocked_audit(
     }
 }
 
-/// 写灰名单条目，二次校验 Critical 锁（PRD v2.0 §5.4.2 二次校验）。
+/// 写灰名单条目，二次校验 Critical 锁。
 ///
 /// 调用时机：daemon 收到 `DecisionResponse { decision=Allow, remember=true }` 之后。
 ///
@@ -461,7 +460,7 @@ fn spawn_inbound_blocked_audit(
 /// 1. `is_fail_closed(rule_id) == true` → 写 `AuditEvent::GraylistCriticalRejected` + 返回（不写灰名单）
 /// 2. `add_entry` 失败 → 写 `AuditEvent::GraylistAddFailed` + warn（fail-soft，不影响本次 Allow 决策）
 ///
-/// 关联：PRD v2.0 §5.4.2「Critical 锁约束」三道防线、§5.4.3 GUI 接口。
+/// 关联：「Critical 锁约束」三道防线、GUI 接口。
 ///
 /// # 参数
 /// - `rule_id`：命中的规则 ID
@@ -472,7 +471,7 @@ fn spawn_inbound_blocked_audit(
 /// - `source_agent_str`：source_agent 字符串表示
 /// - `context_hint`：用户在 GUI 输入的备注（来自 DecisionResponse.context_hint）
 /// - `audit_event_id`：本次 audit 事件 ID（v4 UUID 字符串）
-/// - `audit_store`：审计存储句柄（v2.1 接入，PRD §5.4.2）
+/// - `audit_store`：审计存储句柄（v2.1 接入）
 /// - `caller`：调用方进程信息（v2.0 Phase A）
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::too_many_arguments)]
@@ -497,13 +496,13 @@ fn try_write_graylist(
             .map(|p| p.display().to_string()),
     };
 
-    // 二次校验 Critical 锁（防 GUI 端绕过，PRD §5.4.2 第三道防线）
+    // 二次校验 Critical 锁（防 GUI 端绕过，第三道防线）
     if sieve_rules::critical_lock::is_fail_closed(rule_id) {
         tracing::error!(
             rule_id,
             "二次校验失败：fail-closed Critical 规则不可 remember，忽略灰名单写入 + audit ERROR"
         );
-        // v2.1：写 GraylistCriticalRejected audit 事件（PRD §5.4.2）
+        // v2.1：写 GraylistCriticalRejected audit 事件
         let event = crate::audit::AuditEvent::GraylistCriticalRejected {
             rule_id: rule_id.to_string(),
             request_id: audit_event_id.to_string(),
@@ -573,7 +572,7 @@ fn try_write_graylist(
     if let Err(e) = sieve_policy::graylist::add_entry(&graylist_dir, entry) {
         // add_entry 失败不影响本次决策（用户已 Allow，仍 forward）——fail-soft
         tracing::warn!(error = %e, rule_id, fingerprint, "灰名单写入失败（warn only，不影响本次 Allow 决策）");
-        // v2.1：写 GraylistAddFailed audit 事件（PRD §5.4.2）
+        // v2.1：写 GraylistAddFailed audit 事件
         let event = crate::audit::AuditEvent::GraylistAddFailed {
             rule_id: rule_id.to_string(),
             error: e.to_string(),
@@ -595,9 +594,9 @@ fn try_write_graylist(
 /// 查询灰名单，命中时返回 `true`（表示应直接 Allow，跳过 IPC 弹窗）。
 ///
 /// fail-closed：查询失败（文件损坏 / 权限错）→ warn + 返回 `false`，走正常 IPC 流程。
-/// PRD §9 #14 禁止 fail-open。
+/// 禁止 fail-open。
 ///
-/// 关联：PRD v2.0 §5.4.2 灰名单 schema、§5.4.3 GUI 接口预留。
+/// 关联：灰名单 schema、GUI 接口预留。
 ///
 /// # 参数说明
 /// 同 `try_write_graylist`，但 `matched_text` 允许来自任意命中片段（首条 detection）。
@@ -645,14 +644,14 @@ fn check_graylist_hit(
         Ok(Some(_)) => false, // decision 不是 allow，走正常流程
         Ok(None) => false,    // 未命中
         Err(e) => {
-            // 查询失败（文件损坏 / 权限错）→ fail-closed（PRD §9 #14）
+            // 查询失败（文件损坏 / 权限错）→ fail-closed
             tracing::warn!(error = %e, rule_id, "灰名单查询失败，fail-closed 走正常 IPC 流程");
             false
         }
     }
 }
 
-/// caller PID 反查 stub（PRD v2.0 §5.6 / §6.6 Phase A MVP）。
+/// caller PID 反查 stub（Phase A MVP）。
 ///
 /// TCP peer_addr → PID 在 macOS 上需要 `proc_listpidspath` + 跨进程权限，
 /// 工程量超出 Week 6 范围。本期保持 stub 返回 `None`，
@@ -663,17 +662,17 @@ fn check_graylist_hit(
 /// 非 macOS 或失败时静默返回 `None`（不影响主流程）。
 /// 30 秒 LRU cache 保证热路径 P99 < 1µs。
 ///
-/// 关联：PRD v2.0 §5.6 / §6.6 / OQ-V20-02。
+/// 关联：OQ-V20-02。
 fn peer_addr_to_pid(local: std::net::SocketAddr, peer: std::net::SocketAddr) -> Option<i32> {
     crate::process_context::lookup_caller_by_socket_addr(local, peer)
 }
 
-// ── multi-agent header 解析（ADR-019）────────────────────────────────────────
+// ── multi-agent header 解析 ────────────────────────────────────────
 // 修 R8-#1：改用 sieve_ipc::parse_origin_header，支持 3 段（无签名）和 4 段（含签名）格式。
 // 旧实现用 rsplitn(2, ':') 在 4 段时把 base64 签名当 chain_depth 导致解析失败 → fail-open，
 // 攻击者可在签名字段写入合法 chain_depth 数值绕过 chain_depth ≥ 2 的 GuiPopup 升级。
 // 新实现委托给 sieve_ipc::parse_origin_header（splitn(4, ':')），正确处理两种格式。
-// 关联：ADR-019 §Header 格式规范、PRD v1.5 §6.5。
+// 关联：Header 格式规范。
 
 /// 从已解析的 origin header 构造 `origin_chain`（`Vec<OriginHop>`）。
 ///
@@ -681,7 +680,7 @@ fn peer_addr_to_pid(local: std::net::SocketAddr, peer: std::net::SocketAddr) -> 
 /// chain_depth = 0 → 空 chain（用户直接调用，无委托链）。
 /// chain_depth ≥ 1 → 添加一个表示发送方的 OriginHop。
 ///
-/// 关联：ADR-019 §origin_chain 构造、PRD v1.5 §4.6。
+/// 关联：origin_chain 构造。
 fn build_origin_chain(
     source_agent: sieve_ipc::protocol::SourceAgent,
     chain_depth: usize,
@@ -699,7 +698,7 @@ fn build_origin_chain(
 /// 解析 `X-Sieve-Source-Channel` header（OpenClaw 跨通道标识）。
 ///
 /// 缺 header 或值为空 → `None`（非 OpenClaw 来源）。
-/// 关联：PRD v1.5 §4.5 场景 E、IN-GEN-06。
+/// 关联：场景 E、IN-GEN-06。
 fn parse_source_channel(headers: &http::HeaderMap) -> Option<String> {
     headers
         .get("x-sieve-source-channel")
@@ -717,7 +716,7 @@ fn parse_source_channel(headers: &http::HeaderMap) -> Option<String> {
 /// 修 R8-#1：改用 `sieve_ipc::parse_origin_header` 支持 3 段/4 段格式。
 /// `ChainTooDeep` 错误时返回实际 chain_depth（让调用方触发 426，保持 fail-closed 语义）。
 ///
-/// 关联：ADR-019 §解析策略、PRD v1.5 §6.5。
+/// 关联：multi-agent header 解析策略。
 fn extract_origin_metadata(
     headers: &http::HeaderMap,
 ) -> (
@@ -762,21 +761,21 @@ type ResponseBody = BoxBody<Bytes, Box<dyn std::error::Error + Send + Sync>>;
 /// `filter` 是出站规则引擎包装；`inbound_engine` + `inbound_sieveignore` 用于每连接构造
 /// [`InboundFilter`]（每连接独立实例，共享 engine Arc）。
 /// `cfg.dry_run` 决定是否实际拦截。
-/// `audit_store` 透传到所有请求处理路径，供 audit 写入使用（PRD §5.6.1）。
+/// `audit_store` 透传到所有请求处理路径，供 audit 写入使用。
 ///
 /// v1.4：启动时绑定 IpcServer Unix socket，accept loop 在后台 spawn。
-/// v2.0：透传 `audit_store: Arc<AuditStore>`；启动 reload listener task（PRD §5.5.5）。
+/// v2.0：透传 `audit_store: Arc<AuditStore>`；启动 reload listener task。
 /// v2.1：新增 `outbound_layered` + `inbound_layered`，reload listener 调用 `swap_user` 完成
-///       zero-downtime hot swap，无需重启 daemon（PRD §5.5.5）。
+///       zero-downtime hot swap，无需重启 daemon。
 ///
 /// # Errors
 /// bind 端口失败或 Forwarder 初始化失败时返回错误。
 #[allow(clippy::too_many_arguments)]
-/// daemon::run 扩展参数（ADR-028 TODO-4 no-client policy）。
+/// daemon::run 扩展参数（no-client policy）。
 ///
 /// 单独用结构体封装，避免函数参数过多（clippy too_many_arguments）。
 pub struct DaemonRunOpts {
-    /// 无 client 接 IPC 时的兜底策略（ADR-028 §3）。
+    /// 无 client 接 IPC 时的兜底策略。
     pub no_client_policy: crate::cli::NoClientPolicy,
 }
 
@@ -813,7 +812,7 @@ pub async fn run(
     let dry_run = cfg.dry_run;
     let no_client_policy = opts.no_client_policy;
 
-    // ADR-026 §决策 1+2：把 cfg.upstreams 升级成运行时 ListenerSpec 数组。
+    // 把 cfg.upstreams 升级成运行时 ListenerSpec 数组。
     // 单 listener 配置（旧 sieve.toml）走 Config::resolved_upstreams 兼容映射，
     // 在此处统一表现为 Vec<ListenerSpec>。
     // 任一 forwarder 初始化失败 → fail-fast（避免半启动状态）。
@@ -850,13 +849,13 @@ pub async fn run(
         specs
     };
 
-    // ADR-038：构造超额计费观测器（仅 [billing_check].enabled 时 Some；纯本地、零网络）。
+    // 构造超额计费观测器（仅 [billing_check].enabled 时 Some；纯本地、零网络）。
     // TokenEstimator::new 加载 BPE 词表开销大，启动一次性构造、Arc 透传。
     let billing_observer = build_billing_observer(&cfg)?;
 
-    // ADR-037 full 档：构造加密审计归档写入器（write-only logging，daemon 只持公钥、
+    // full 档：构造加密审计归档写入器（write-only logging，daemon 只持公钥、
     // 结构上不可解密）。仅 `audit.level = full` 时为 Some；recipient 不可解析 → fail-fast
-    // （config 校验已查 age1 前缀格式）。启动时清理超期段（保留期，ADR-037 决策 5）。
+    // （config 校验已查 age1 前缀格式）。启动时清理超期段（保留期）。
     let archive_writer = build_archive_writer(&cfg)?;
 
     // R11-#1：加载 OpenClaw 上游路由表（~/.sieve/upstream-routes.json）。
@@ -948,7 +947,7 @@ pub async fn run(
 
     // v2.1 §S.4：启动控制面 handler（GUI → daemon 8 个方法 + 3 个广播）。
     //
-    // 关联：ADR-013 Supplement 2026-05-02 / SPEC-002 §9。
+    // 关联：SPEC-002 §9。
     if let Some(ref ipc_srv) = ipc_server {
         let runtime_state = Arc::new(crate::daemon_control_plane::RuntimeState {
             paused_until: arc_swap::ArcSwap::from_pointee(None),
@@ -959,7 +958,7 @@ pub async fn run(
             started_at: chrono::Utc::now(),
             listen: sieve_ipc::ListenSnapshot {
                 addr: cfg.bind_addr.clone(),
-                // ADR-026 兼容：旧 listen 单字段 = listeners[0]，即 cfg.resolved_upstreams()[0].port
+                // 兼容：旧 listen 单字段 = listeners[0]，即 cfg.resolved_upstreams()[0].port
                 port: listener_specs.first().map(|s| s.port).unwrap_or(cfg.port),
             },
             listeners: listener_specs
@@ -1026,7 +1025,7 @@ pub async fn run(
                     );
                     let store = Arc::clone(&audit_for_oversize);
                     tokio::spawn(async move {
-                        // ADR-026 Stage E：oversize 是 IPC 帧事件，无 listener 上下文 → SYSTEM_PROVIDER_ID
+                        // oversize 是 IPC 帧事件，无 listener 上下文 → SYSTEM_PROVIDER_ID
                         if let Err(e) = store.append(event, crate::audit::SYSTEM_PROVIDER_ID).await
                         {
                             tracing::warn!(error = %e, "audit write for oversize frame failed");
@@ -1047,7 +1046,7 @@ pub async fn run(
         );
     }
 
-    // v2.1 §5.5.5：启动 reload listener（zero-downtime hot swap，PRD §9 #14 fail-safe）。
+    // v2.1：启动 reload listener（zero-downtime hot swap，fail-safe）。
     // daemon 监听 IpcServer::reload_rx 的用户规则 reload 请求：
     // 1. 重新读 user.toml + lint + 编译出站/入站 UserEngine
     // 2. 成功 → atomic swap_user（LayeredEngine zero-downtime hot reload，无需重启）
@@ -1060,7 +1059,7 @@ pub async fn run(
             let user_rules_path_for_reload = sieve_ipc::paths::sieve_home()
                 .ok()
                 .map(|h| h.join("rules").join("user.toml"));
-            // 持有 Arc 引用以在 reload 时原子替换用户引擎（PRD §5.5.5 hot swap）
+            // 持有 Arc 引用以在 reload 时原子替换用户引擎（hot swap）
             let outbound_layered_for_reload = Arc::clone(&outbound_layered);
             let inbound_layered_for_reload = Arc::clone(&inbound_layered);
             tokio::spawn(async move {
@@ -1079,7 +1078,7 @@ pub async fn run(
         }
     }
 
-    // ADR-030: start the update-check + telemetry beacon task.
+    // start the update-check + telemetry beacon task.
     // The task is detached — its failure never affects the daemon.
     {
         let env_overrides = sieve_updater::env::from_env();
@@ -1104,7 +1103,7 @@ pub async fn run(
                 url = %url,
                 telemetry = !no_telemetry,
                 interval_secs = interval,
-                "starting updater task (ADR-030)"
+                "starting updater task"
             );
 
             // 系统规则热重载链（c 方向）：updater 装入新签名包 → on_rules_installed 钩子
@@ -1141,7 +1140,7 @@ pub async fn run(
         }
     }
 
-    // ADR-026 §决策 3：多 listener bind + spawn。任一 bind 失败 → fail-fast
+    // 多 listener bind + spawn。任一 bind 失败 → fail-fast
     // （半启动状态会让 doctor 输出混淆，违反"完全本地"的明确性承诺）。
     let mut bound: Vec<(TcpListener, ListenerSpec)> = Vec::with_capacity(listener_specs.len());
     for spec in listener_specs {
@@ -1286,7 +1285,7 @@ fn build_billing_observer(cfg: &Config) -> Result<BillingObserverHandle> {
     Ok(None)
 }
 
-/// 构造每请求超额计费观测上下文（ADR-038）。
+/// 构造每请求超额计费观测上下文。
 ///
 /// 仅 `billing` 为 `Some`（`[billing_check].enabled`）**且** `trust == Relay`（中转，
 /// `usage` 不可信）时返回 `Some`；`Official` 直连 `usage` 权威、不核算。输入 token 用
@@ -1331,7 +1330,7 @@ fn build_billing_context(
     None
 }
 
-/// 在响应观测点 spawn 超额计费核算（ADR-038，fire-and-forget）。
+/// 在响应观测点 spawn 超额计费核算（fire-and-forget）。
 ///
 /// `billing_ctx` 为 `None`（非 Relay / 未启用）时 no-op。`completion` 为补全全文（独立
 /// output 计数）；`claimed` 为 relay 声明的 `(input, output)` tokens（`None` = 无声明）。
@@ -1390,7 +1389,7 @@ fn spawn_billing_observation(
 ) {
 }
 
-/// SSE 流式超额计费累计器（ADR-038）：跨 chunk 累计 completion 文本 + relay 声明的 usage，
+/// SSE 流式超额计费累计器：跨 chunk 累计 completion 文本 + relay 声明的 usage，
 /// 流自然结束后用于交叉比对。
 ///
 /// - **completion**：所有 `ContentBlockDelta { TextDelta }`（两 SSE parser 统一发此事件）。
@@ -1488,7 +1487,7 @@ fn archive_redacted_outbound(
 ) {
 }
 
-/// 单 listener 永久 accept loop（ADR-026 §决策 3）。
+/// 单 listener 永久 accept loop。
 ///
 /// 每个 listener 独立 spawn 一份本函数，共享 filter / IPC / audit / inbound engine 等
 /// daemon 单例。listener 自身 + 对应的 [`ListenerSpec`]（含 forwarder / protocol /
@@ -1527,7 +1526,7 @@ async fn accept_loop(
             }
         };
 
-        // v2.0 Phase A：caller PID 反查（PRD §5.6 / §6.6 / OQ-V20-02）。
+        // v2.0 Phase A：caller PID 反查（OQ-V20-02）。
         let caller_info: Option<crate::process_context::CallerInfo> =
             peer_addr_to_pid(listen_addr, peer).and_then(crate::process_context::lookup_caller);
         tracing::trace!(
@@ -1606,14 +1605,14 @@ async fn accept_loop(
     }
 }
 
-/// 重新读取、lint 并编译用户规则，返回可立即 swap 的两个方向引擎（PRD §5.5.5 v2.1）。
+/// 重新读取、lint 并编译用户规则，返回可立即 swap 的两个方向引擎（v2.1）。
 ///
 /// 返回 `(outbound_engine, inbound_engine, rule_count)`，方向引擎均为 `Option<UserEngine>`：
 /// - `None` 表示该方向无规则（文件不存在、或该方向 0 条），LayeredEngine 退化为纯系统引擎
 /// - `Some(engine)` 即编译通过的用户引擎，调用方直接调用 `swap_user` 生效
 ///
 /// 任何错误（lint 违规 / SIEVE_HOME 未设置）返回 `Err`（fail-safe：daemon 保留旧引擎）。
-/// 用户规则 reload 一次的结果（PRD §5.5.5 / ADR-013 §S.4 reload_config）。
+/// 用户规则 reload 一次的结果（reload_config）。
 #[derive(Debug, Clone)]
 pub(crate) struct ReloadOutcome {
     /// 当前调用方未消费 `success` 字段（成功 / 失败可由 `user_rules_errors.is_empty()` 间接判定），
@@ -1633,7 +1632,7 @@ pub(crate) struct ReloadOutcome {
 /// - 成功 → swap_user + 推 `NotifyKind::UserRulesReloaded` + 写 audit success
 /// - 失败 → 不动当前引擎 + 推 `NotifyKind::UserRulesLoadFailed` + 写 audit failure
 ///
-/// 关联：PRD v2.0 §5.5.5 / §9 #14 fail-safe。
+/// 关联：用户规则 reload / fail-safe。
 pub(crate) fn perform_user_rules_reload(
     user_rules_path: Option<&std::path::Path>,
     outbound_layered: &Arc<
@@ -1655,7 +1654,7 @@ pub(crate) fn perform_user_rules_reload(
     let trigger_id_str = trigger_id.map(|id| id.to_string());
     tracing::info!(
         trigger_id = ?trigger_id_str,
-        "执行用户规则 reload（PRD §5.5.5）"
+        "执行用户规则 reload"
     );
 
     let reload_result = reload_user_engines(user_rules_path);
@@ -1664,7 +1663,7 @@ pub(crate) fn perform_user_rules_reload(
             Ok((outbound_eng, inbound_eng, count)) => {
                 outbound_layered.swap_user(outbound_eng);
                 inbound_layered.swap_user(inbound_eng);
-                tracing::info!(rule_count = count, "用户规则 hot swap 完成（PRD §5.5.5）");
+                tracing::info!(rule_count = count, "用户规则 hot swap 完成");
                 (
                     sieve_ipc::protocol::NotifyKind::UserRulesReloaded,
                     format!("用户规则已 hot reload（{count} 条）"),
@@ -1707,7 +1706,7 @@ pub(crate) fn perform_user_rules_reload(
     };
     let audit_clone = Arc::clone(audit);
     tokio::spawn(async move {
-        // ADR-026 Stage E：UserRulesReloaded 是 daemon 系统级事件，无 listener 上下文
+        // UserRulesReloaded 是 daemon 系统级事件，无 listener 上下文
         if let Err(e) = audit_clone
             .append(event, crate::audit::SYSTEM_PROVIDER_ID)
             .await
@@ -1833,7 +1832,7 @@ fn reload_user_engines(
 }
 /// 请求入口：捕获 `proxy_inner` 的所有错误，转换为 502 Bad Gateway 响应。
 ///
-/// v2.0：新增 `ctx`（caller + audit_store，PRD §5.6 / §5.6.1）参数。
+/// v2.0：新增 `ctx`（caller + audit_store）参数。
 #[allow(clippy::too_many_arguments)]
 async fn proxy(
     forwarder: Arc<Forwarder>,
@@ -1883,14 +1882,14 @@ async fn proxy(
 
 /// 核心代理逻辑。
 ///
-/// 路径分发（v1.5，ADR-018 + ADR-019）：
+/// 路径分发（v1.5）：
 /// - POST /v1/messages → Anthropic 路径（collect body → 出站扫描 → 426 / 脱敏转发 / 入站 SSE tee 检测）
 /// - POST /v1/chat/completions → OpenAI 路径（同等出站扫描，走 OpenAI schema 解析）
 /// - 其他路径 → 流式透传（Week 1 行为）
 ///
 /// 公共预处理（两条 LLM 路径都执行）：
 /// 1. 解析 `X-Sieve-Origin` → source_agent / origin_chain / chain_depth
-/// 2. chain_depth ≥ 5 → 直接 426 拒绝（ADR-019 §嵌套深度限制）
+/// 2. chain_depth ≥ 5 → 直接 426 拒绝（嵌套深度限制）
 /// 3. 解析 `X-Sieve-Source-Channel` → source_channel（OpenClaw 跨通道）
 /// 4. chain_depth ≥ 2 → 所有命中强制升级为 GuiPopup disposition
 ///
@@ -1900,7 +1899,7 @@ async fn proxy(
 ///
 /// 转发到上游前**移除** `X-Sieve-Provider` header（内部路由 header，不透传给上游）。
 ///
-/// 关联：PRD v1.5 §6.1 / ADR-018（OpenAI 协议）/ ADR-019（multi-agent header）。
+/// 关联：OpenAI 协议 / multi-agent header。
 #[allow(clippy::too_many_arguments)]
 async fn proxy_inner(
     forwarder: Arc<Forwarder>,
@@ -1947,7 +1946,7 @@ async fn proxy_inner(
     let path = parts.uri.path().to_string();
     let method = parts.method.clone();
 
-    // ── ADR-026 §决策 4：listener 协议错位 fail-closed 检查 ───────────────────
+    // ── listener 协议错位 fail-closed 检查 ───────────────────
     //
     // listener 声明的协议与请求 path 隐含的协议不一致时立即 400 拒绝，不进入路径分发。
     // 仅检查 LLM endpoint（/v1/messages 与 /v1/chat/completions）；其他 path（健康
@@ -1955,10 +1954,10 @@ async fn proxy_inner(
     //
     // listener_protocol == Auto（legacy upstream_url / 省略 protocol 字段的 [[upstream]]）
     // 不匹配下列任一条件，按请求 path 自适应放行，保留 v1.x 单 upstream 双协议能力
-    // （ADR-026 §决策 1 向后兼容 + PRD §9 #16/#9）。仅显式声明 anthropic/openai 才错位拒绝。
+    // （向后兼容 + 双协议）。仅显式声明 anthropic/openai 才错位拒绝。
     //
     // 即便请求带 X-Sieve-Provider header（已在前面 routing 选择 forwarder），listener
-    // 协议依然是硬约束——header routing 不能 override（PRD §9 #3 fail-closed 一致性）。
+    // 协议依然是硬约束——header routing 不能 override（fail-closed 一致性）。
     // A3：用 endpoint 路由解析器（仅按 path 取标准路径的隐含 provider，listener_protocol=Auto）
     // 判错位——path 隐含协议与 listener 显式声明冲突即 fail-closed 400（行为同旧硬编码）。
     // 错位检查只看「标准路径隐含协议」，不受用户 routes 表影响（传 &[]）——
@@ -1978,17 +1977,17 @@ async fn proxy_inner(
             path = %path,
             listener_protocol = ?ctx.listener_protocol,
             provider_id = %ctx.listener_provider_id,
-            "ADR-026 protocol mismatch: path 隐含协议与 listener 声明冲突, rejecting"
+            "protocol mismatch: path 隐含协议与 listener 声明冲突, rejecting"
         );
         return Ok(build_protocol_mismatch_400(&path, ctx.listener_protocol));
     }
 
     // ── v1.5：公共 header 解析（所有 LLM 路径）────────────────────────────────
 
-    // 1. X-Sieve-Origin → source_agent / origin_chain / chain_depth（ADR-019）
+    // 1. X-Sieve-Origin → source_agent / origin_chain / chain_depth
     let (source_agent, origin_chain, chain_depth) = extract_origin_metadata(&parts.headers);
 
-    // 2. chain_depth ≥ 5 → 直接 426（ADR-019 §嵌套深度限制，attack mode）
+    // 2. chain_depth ≥ 5 → 直接 426（嵌套深度限制，attack mode）
     if chain_depth >= 5 {
         tracing::warn!(
             chain_depth,
@@ -1997,7 +1996,7 @@ async fn proxy_inner(
         return Ok(build_426_nested_rejection(chain_depth));
     }
 
-    // 3. X-Sieve-Source-Channel（OpenClaw 跨通道，PRD v1.5 §4.5）
+    // 3. X-Sieve-Source-Channel（OpenClaw 跨通道）
     let source_channel = parse_source_channel(&parts.headers);
 
     // ── 路径分类（白名单 collect，修 R7-#2）─────────────────────────────────────
@@ -2017,7 +2016,7 @@ async fn proxy_inner(
     //   R6-#4 的死代码问题（所有 POST 都 collect 以确保 body 检测跑到）接受为已知
     //   trade-off，以安全性（no DoS vector）换取检测完备性的妥协在注释中显式标注。
     //
-    // 关联：sieve_core::skill_install_guard、PRD v1.5 §4.6、ADR-016。
+    // 关联：sieve_core::skill_install_guard、二维处置矩阵。
 
     // A3：用 endpoint 路由解析器（含 listener protocol，支持「异路径中转站」）确定出站分派；
     // 标准路径按 path、非标准路径按 listener 显式声明的 protocol（配置驱动，零代码改动）。
@@ -2074,7 +2073,7 @@ async fn proxy_inner(
             sieve_core::detection::ContentSource::InboundToolUseInput,
         );
 
-        // chain_depth ≥ 2 → 强制 GuiPopup（ADR-019）
+        // chain_depth ≥ 2 → 强制 GuiPopup
         if chain_depth >= 2 {
             for d in &mut skill_detections {
                 if matches!(d.action, Action::HookMark) {
@@ -2118,7 +2117,7 @@ async fn proxy_inner(
                     })
                     .collect();
 
-                // v2.0：计算 allow_remember（PRD §5.4.2）
+                // v2.0：计算 allow_remember
                 let skill_rule_ids: Vec<&str> = skill_detections
                     .iter()
                     .map(|d| d.rule_id.as_str())
@@ -2156,7 +2155,7 @@ async fn proxy_inner(
                         sieve_ipc::DecisionAction::Allow
                         | sieve_ipc::DecisionAction::RedactAndAllow => {
                             tracing::info!("IN-CR-06 GUI: Allow → 转发原 body");
-                            // v2.0：remember=true 时写灰名单（PRD §5.4.2 二次校验）
+                            // v2.0：remember=true 时写灰名单（二次校验）
                             if resp.remember && allow_remember {
                                 if let Some(d) = skill_detections.first() {
                                     let agent_str = format!("{:?}", source_agent).to_lowercase();
@@ -2216,7 +2215,7 @@ async fn proxy_inner(
         // 3. 提取文本段 → 逐段扫描
         let texts = decoded.extract_text_content();
 
-        // ADR-038：构造超额计费观测上下文（仅 Relay 上游 + billing 启用时为 Some）。
+        // 构造超额计费观测上下文（仅 Relay 上游 + billing 启用时为 Some）。
         // 输入 token 在请求侧用文本段独立估算（纯本地计数，不落盘原文、不外泄）。
         let billing_ctx = build_billing_context(
             &billing,
@@ -2261,7 +2260,7 @@ async fn proxy_inner(
             all_detections.extend(hits);
         }
 
-        // 4. chain_depth ≥ 2 → HookMark 升级为 HoldForDecision（强制 GUI 弹窗，ADR-019）
+        // 4. chain_depth ≥ 2 → HookMark 升级为 HoldForDecision（强制 GUI 弹窗）
         // 修 R9-#2：chain_depth ≥ 2 时 HookMark + Redact 都升级为 HoldForDecision。
         if chain_depth >= 2 {
             tracing::info!(
@@ -2291,7 +2290,7 @@ async fn proxy_inner(
 
         // 5. 决策：
         //    a. AutoRedact（Action::Redact）→ 脱敏 body bytes 后转发
-        //    b. fail-closed Critical Block → 426（PRD §9 #3）
+        //    b. fail-closed Critical Block → 426
         //    c. 非 fail-closed Critical Block：dry_run=true 时仅 warn，dry_run=false 时 426
         //    d. GuiPopup（Action::HoldForDecision）→ hold HTTP 长连接等 GUI 决策（R2-#1）
         //    e. 其余 → 透传
@@ -2347,15 +2346,15 @@ async fn proxy_inner(
         //   Deny → 426 拒绝
         //   超时 → 按 default_on_timeout（OUT-06/08 = Redact，OUT-07/09/10 = Block）
         //
-        // 关联：PRD v1.4 §5.4.2 出站超时策略表、ADR-016（二维处置矩阵）。
+        // 关联：出站超时策略表、二维处置矩阵。
         let hold_detections_outbound: Vec<&sieve_core::Detection> = all_detections
             .iter()
             .filter(|d| matches!(d.action, Action::HoldForDecision { .. }))
             .collect();
 
         if !hold_detections_outbound.is_empty() {
-            // v2.0 §5.4.2：决策前先查灰名单（PRD §5.4.2 灰名单命中 → 直接 Allow，不调 IPC）
-            // fail-closed：查询失败 → 走正常 IPC 流程（PRD §9 #14 禁止 fail-open）
+            // 决策前先查灰名单（灰名单命中 → 直接 Allow，不调 IPC）
+            // fail-closed：查询失败 → 走正常 IPC 流程（禁止 fail-open）
             let agent_str_out = format!("{:?}", source_agent).to_lowercase();
             let graylist_hit = hold_detections_outbound.first().is_some_and(|d| {
                 check_graylist_hit(
@@ -2409,7 +2408,7 @@ async fn proxy_inner(
                     })
                     .collect();
 
-                // v2.0：计算 allow_remember（PRD §5.4.2）
+                // v2.0：计算 allow_remember
                 let outbound_rule_ids = detection_rule_ids(&hold_detections_outbound);
                 let allow_remember = compute_allow_remember(&outbound_rule_ids);
 
@@ -2419,7 +2418,7 @@ async fn proxy_inner(
                     timeout_seconds,
                     default_on_timeout,
                     detections: ipc_detections,
-                    // v1.5：注入 multi-agent 元数据（ADR-019）
+                    // v1.5：注入 multi-agent 元数据
                     source_agent,
                     origin_chain: origin_chain.clone(),
                     source_channel: source_channel.clone(),
@@ -2446,7 +2445,7 @@ async fn proxy_inner(
                     Ok(resp) => match resp.decision {
                         sieve_ipc::DecisionAction::Allow => {
                             tracing::info!("OUTBOUND GUI: Allow → 转发原 body");
-                            // v2.0：remember=true 时写灰名单（PRD §5.4.2）
+                            // v2.0：remember=true 时写灰名单
                             if resp.remember && allow_remember {
                                 if let Some(d) = hold_detections_outbound.first() {
                                     let agent_str = format!("{:?}", source_agent).to_lowercase();
@@ -2594,9 +2593,9 @@ async fn proxy_inner(
                 "OUTBOUND AUTO-REDACT"
             );
 
-            // audit：OutboundRedacted（fire-and-forget，不阻塞热路径，PRD §9 性能预算）。
+            // audit：OutboundRedacted（fire-and-forget，不阻塞热路径，性能预算）。
             // 此前出站脱敏从不落 audit（headless dogfood e2e 抓出，2026-06-18）。
-            // raw_json=None：脱敏事件**不持久化原文**（含 secret，PRD §5.6.1 / §9 #13）。
+            // raw_json=None：脱敏事件**不持久化原文**（含 secret）。
             if let Some(d) = all_detections
                 .iter()
                 .find(|d| matches!(d.action, Action::Redact { .. }))
@@ -2628,10 +2627,10 @@ async fn proxy_inner(
             let new_body = Bytes::from(new_body_bytes);
             let new_len = new_body.len();
 
-            // ADR-037 full 档：归档脱敏后的出站内容（fire-and-forget，off hot path）。
+            // full 档：归档脱敏后的出站内容（fire-and-forget，off hot path）。
             // 红线：只存脱敏后 new_body——原始 secret 已被 redact_segments 替换为占位符，
             // 绝不落原始 body。spawn_blocking（age 加密 + 文件 IO 是同步阻塞），失败仅 warn
-            // 不阻断 forward（审计可靠性问题不得变可用性事故，ADR-007）。
+            // 不阻断 forward（审计可靠性问题不得变可用性事故）。
             archive_redacted_outbound(&archive, &new_body, "anthropic");
 
             // 更新 Content-Length header
@@ -2714,7 +2713,7 @@ async fn proxy_inner(
         .await;
     }
 
-    // ── OpenAI Chat Completions 路径（v1.5，ADR-018）────────────────────────────
+    // ── OpenAI Chat Completions 路径（v1.5）────────────────────────────
     if is_chat_completions_post {
         // body 已在 POST 预收集块中 collect，直接取出
         let ProxyRequestBody::Collected(body_bytes) = proxy_body else {
@@ -2768,7 +2767,7 @@ async fn proxy_inner(
 /// 5. Block / GuiPopup / 透传 决策（与 Anthropic 路径相同）
 /// 6. stream=true → `forward_with_openai_inbound_inspection`（修 R6-#2）
 ///
-/// 关联：ADR-018 §路由、ADR-019 §chain_depth 升级、PRD v1.5 §6.1。
+/// 关联：路由、chain_depth 升级。
 #[allow(clippy::too_many_arguments)]
 async fn proxy_openai(
     forwarder: Arc<Forwarder>,
@@ -2812,7 +2811,7 @@ async fn proxy_openai(
     // 2. 提取文本段 → 逐段扫描
     let texts = decoded.extract_text_content();
 
-    // ADR-038：构造超额计费观测上下文（仅 Relay 上游 + billing 启用时）。
+    // 构造超额计费观测上下文（仅 Relay 上游 + billing 启用时）。
     let billing_ctx = build_billing_context(
         &billing,
         listener_trust,
@@ -2851,8 +2850,8 @@ async fn proxy_openai(
     }
 
     // 4. chain_depth ≥ 2 → 所有命中（含 HookTerminal disposition）强制升级为 GuiPopup
-    //    （ADR-019 §chain_depth 升级策略）
-    // 4. chain_depth ≥ 2 → HookMark + Redact 升级为 HoldForDecision（强制 GUI 弹窗，ADR-019）
+    //    （chain_depth 升级策略）
+    // 4. chain_depth ≥ 2 → HookMark + Redact 升级为 HoldForDecision（强制 GUI 弹窗）
     //
     // 修 R9-#2：OpenAI 路径之前只升级 HookMark，Action::Redact 仍静默脱敏。
     // 与 Anthropic 路径对称修复：嵌套调用时 Redact 也需 GUI 确认。
@@ -2924,7 +2923,7 @@ async fn proxy_openai(
 
     if !hold_detections.is_empty() {
         // v2.0 §5.4.2：出站 OpenAI GuiPopup 路径——决策前先查灰名单（与 Anthropic 路径对称）
-        // fail-closed：查询失败 → 走正常 IPC 流程（PRD §9 #14 禁止 fail-open）
+        // fail-closed：查询失败 → 走正常 IPC 流程（禁止 fail-open）
         let agent_str_openai_out = format!("{:?}", source_agent).to_lowercase();
         let graylist_hit_openai = hold_detections.first().is_some_and(|d| {
             check_graylist_hit(
@@ -2963,7 +2962,7 @@ async fn proxy_openai(
                 },
             );
 
-            // chain_depth ≥ 2 时在弹窗标题里显示完整 origin_chain 信息（ADR-019）
+            // chain_depth ≥ 2 时在弹窗标题里显示完整 origin_chain 信息
             let chain_note = if chain_depth >= 2 {
                 format!("（嵌套调用 depth={chain_depth}）")
             } else {
@@ -2983,7 +2982,7 @@ async fn proxy_openai(
                 })
                 .collect();
 
-            // v2.0：计算 allow_remember（PRD §5.4.2）
+            // v2.0：计算 allow_remember
             let openai_outbound_rule_ids = detection_rule_ids(&hold_detections);
             let allow_remember = compute_allow_remember(&openai_outbound_rule_ids);
 
@@ -3019,7 +3018,7 @@ async fn proxy_openai(
                 Ok(resp) => match resp.decision {
                     sieve_ipc::DecisionAction::Allow => {
                         tracing::info!("OUTBOUND GUI (openai): Allow → 转发原 body");
-                        // v2.0：remember=true 时写灰名单（PRD §5.4.2）
+                        // v2.0：remember=true 时写灰名单
                         if resp.remember && allow_remember {
                             if let Some(d) = hold_detections.first() {
                                 let agent_str = format!("{:?}", source_agent).to_lowercase();
@@ -3204,7 +3203,7 @@ async fn proxy_openai(
         let new_body = bytes::Bytes::from(new_body_bytes);
         let new_len = new_body.len();
 
-        // ADR-037 full 档：归档脱敏后的出站内容（OpenAI 路径，红线只存脱敏后 new_body）。
+        // full 档：归档脱敏后的出站内容（OpenAI 路径，红线只存脱敏后 new_body）。
         archive_redacted_outbound(&archive, &new_body, "openai");
 
         let mut new_parts = parts.clone();
@@ -3301,11 +3300,11 @@ async fn proxy_openai(
 /// - `Action::HoldForDecision` → hold 流 + keep-alive，等用户决策
 /// - 其余 → 透传
 ///
-/// 关联：ADR-014 §双层防御、ADR-016 §dispatch 路由、PRD v1.4 §6.7。
+/// 关联：双层防御、dispatch 路由。
 /// Multi-agent 元数据，从 `X-Sieve-Origin` / `X-Sieve-Source-Channel` 解析而来。
 ///
 /// 在入站路径和出站路径构造 `DecisionRequest` 时注入，供 GUI / hook 显示来源信息。
-/// 关联：ADR-019 §字段定义、PRD v1.5 §6.5。
+/// 关联：字段定义。
 #[derive(Clone)]
 struct MultiAgentMeta {
     source_agent: sieve_ipc::protocol::SourceAgent,
@@ -3340,7 +3339,7 @@ async fn forward_with_inbound_inspection(
     use http_body_util::Full;
 
     // 修 A2-#2：把 source_channel 注入 InboundFilter，使 IN-GEN-06 运行时提级逻辑
-    // 能感知来源 channel（PRD v1.5 §4.5）。必须在 SSE 检测开始前调用。
+    // 能感知来源 channel。必须在 SSE 检测开始前调用。
     inbound_filter.set_source_channel(meta.source_channel.clone());
 
     let new_uri = forwarder
@@ -3415,7 +3414,7 @@ async fn forward_with_inbound_inspection(
         let meta = inbound_meta;
         let mut parser = SseParser::new();
         let mut aggregator = Aggregator::new();
-        // ADR-038：仅 billing 启用（billing_ctx=Some）时累计 SSE usage + completion。
+        // 仅 billing 启用（billing_ctx=Some）时累计 SSE usage + completion。
         let mut billing_acc = billing_ctx
             .as_ref()
             .map(|_| BillingSseAccumulator::default());
@@ -3446,7 +3445,7 @@ async fn forward_with_inbound_inspection(
                         }
                     };
 
-                    // ADR-038：累计本批 SSE usage + completion（Anthropic SSE 观测）。
+                    // 累计本批 SSE usage + completion（Anthropic SSE 观测）。
                     if let Some(acc) = billing_acc.as_mut() {
                         acc.observe_events(&events);
                     }
@@ -3467,9 +3466,9 @@ async fn forward_with_inbound_inspection(
 
                     // 修 #4（fail-closed 被绕过修复）：Block 检查必须在 Hold 之前。
                     // 原代码 Hold allow 后 continue 会跳过 Block 检查，导致同批同时含
-                    // Block + Hold 时，用户 GUI allow 可绕过 Critical fail-closed（PRD §9 #3）。
+                    // Block + Hold 时，用户 GUI allow 可绕过 Critical fail-closed。
                     // 新顺序：1. Block（有 block 立即截流）→ 2. Hook → 3. Hold
-                    // 关联：ADR-014 §双层防御、PRD §9 #3。
+                    // 关联：双层防御。
 
                     // 1. Block 类：注入 sieve_blocked 并截流（fail-closed 优先）
                     if !blocking.is_empty() {
@@ -3558,7 +3557,7 @@ async fn forward_with_inbound_inspection(
                                 })
                                 .collect();
 
-                            // v2.0：计算 allow_remember（PRD §5.4.2）
+                            // v2.0：计算 allow_remember
                             let inbound_sse_rule_ids: Vec<&str> =
                                 hold_detections.iter().map(|d| d.rule_id.as_str()).collect();
                             let allow_remember = compute_allow_remember(&inbound_sse_rule_ids);
@@ -3569,7 +3568,7 @@ async fn forward_with_inbound_inspection(
                                 timeout_seconds,
                                 default_on_timeout: sieve_ipc::DefaultOnTimeout::Block,
                                 detections: ipc_detections,
-                                // v1.5：注入 multi-agent 元数据（ADR-019）
+                                // v1.5：注入 multi-agent 元数据
                                 source_agent: meta.source_agent,
                                 origin_chain: meta.origin_chain.clone(),
                                 source_channel: meta.source_channel.clone(),
@@ -3600,7 +3599,7 @@ async fn forward_with_inbound_inspection(
                                     // 修 R2-#3：用户允许后，补发缓存的触发帧（hold 前未发），
                                     // 然后继续转发后续 SSE。
 
-                                    // v2.0 §5.4.2：remember=true 时写灰名单（PRD §5.4.2）
+                                    // remember=true 时写灰名单
                                     if remember && allow_remember {
                                         let agent_str =
                                             format!("{:?}", meta.source_agent).to_lowercase();
@@ -3688,7 +3687,7 @@ async fn forward_with_inbound_inspection(
 
         // 流结束（EOF / 提前断流），flush parser 解析残留未闭合 event
         let flushed = parser.flush();
-        // ADR-038：累计 flush 残留 events（流尾 usage / 末段文本可能在此）。
+        // 累计 flush 残留 events（流尾 usage / 末段文本可能在此）。
         if let Some(acc) = billing_acc.as_mut() {
             acc.observe_events(&flushed);
         }
@@ -3739,7 +3738,7 @@ async fn forward_with_inbound_inspection(
         // 修 #5（flush 阶段 hold 丢失修复）：
         // flush 路径的 HoldForDecision 命中不能静默丢弃。
         // 此时流已断无法 hold + IPC 通知 GUI，必须 fail-closed。
-        // 关联：ADR-014 §双层防御、PRD §9 #3。
+        // 关联：双层防御。
         if !flush_hold_detections.is_empty() {
             tracing::warn!(
                 count = flush_hold_detections.len(),
@@ -3759,7 +3758,7 @@ async fn forward_with_inbound_inspection(
             let _ = tx.send(Ok(hyper::body::Frame::data(blocked_payload))).await;
         }
 
-        // ADR-038：流处理结束 → 超额计费观测（completion + relay usage 已跨 chunk 累计）。
+        // 流处理结束 → 超额计费观测（completion + relay usage 已跨 chunk 累计）。
         // 仅在流自然走到结尾时触发；中途被拦截 return 的流不观测（无完整 usage，可接受缺口）。
         if let (Some(bctx), Some(acc)) = (billing_ctx, billing_acc) {
             let claimed = acc.claimed();
@@ -3786,7 +3785,7 @@ async fn forward_with_inbound_inspection(
 /// R6-#3 RESOLVED：OpenAiSseParser 已支持 ContentBlockStart/Stop（含 tool_call 首帧），
 /// Aggregator 的 tool_use 完整检测能力已经生效。
 ///
-/// 关联：ADR-018 §流式解析 / PRD v1.5 §6.1 / R6-#2。
+/// 关联：流式解析 / R6-#2。
 #[allow(clippy::too_many_arguments)]
 async fn forward_with_openai_inbound_inspection(
     forwarder: Arc<Forwarder>,
@@ -3876,7 +3875,7 @@ async fn forward_with_openai_inbound_inspection(
         let meta = inbound_meta;
         let mut parser = OpenAiSseParser::new();
         let mut aggregator = Aggregator::new();
-        // ADR-038：仅 billing 启用时累计 OpenAI SSE usage + completion。
+        // 仅 billing 启用时累计 OpenAI SSE usage + completion。
         let mut billing_acc = billing_ctx
             .as_ref()
             .map(|_| BillingSseAccumulator::default());
@@ -3907,7 +3906,7 @@ async fn forward_with_openai_inbound_inspection(
                         }
                     };
 
-                    // ADR-038：累计本批 SSE usage + completion（OpenAI SSE 观测）。
+                    // 累计本批 SSE usage + completion（OpenAI SSE 观测）。
                     if let Some(acc) = billing_acc.as_mut() {
                         acc.observe_events(&events);
                     }
@@ -4004,7 +4003,7 @@ async fn forward_with_openai_inbound_inspection(
                                 })
                                 .collect();
 
-                            // v2.0：计算 allow_remember（PRD §5.4.2）
+                            // v2.0：计算 allow_remember
                             let openai_sse_rule_ids: Vec<&str> =
                                 hold_detections.iter().map(|d| d.rule_id.as_str()).collect();
                             let allow_remember = compute_allow_remember(&openai_sse_rule_ids);
@@ -4128,7 +4127,7 @@ async fn forward_with_openai_inbound_inspection(
 
         // 流结束（EOF / 提前断流），flush parser 解析残留
         let flushed = parser.flush();
-        // ADR-038：累计 flush 残留 events（流尾 usage / 末段文本可能在此）。
+        // 累计 flush 残留 events（流尾 usage / 末段文本可能在此）。
         if let Some(acc) = billing_acc.as_mut() {
             acc.observe_events(&flushed);
         }
@@ -4194,7 +4193,7 @@ async fn forward_with_openai_inbound_inspection(
             let _ = tx.send(Ok(hyper::body::Frame::data(blocked_payload))).await;
         }
 
-        // ADR-038：流处理结束 → 超额计费观测（OpenAI SSE）。
+        // 流处理结束 → 超额计费观测（OpenAI SSE）。
         if let (Some(bctx), Some(acc)) = (billing_ctx, billing_acc) {
             let claimed = acc.claimed();
             spawn_billing_observation(Some(bctx), acc.completion, claimed);
@@ -4216,7 +4215,7 @@ async fn forward_with_openai_inbound_inspection(
 ///
 /// v1.4 变更：不再把所有 Critical 都返回 blocking；HookMark 和 HoldForDecision 单独处理。
 ///
-/// 关联 ADR-016 §dispatch 路由、ADR-014 §双层防御。
+/// 关联 dispatch 路由、双层防御。
 /// 修 R8-#2：新增 `chain_depth` 参数，实现入站 SSE HookMark 在 chain_depth ≥ 2 时
 /// 升级为 HoldForDecision（GuiPopup），与出站路径和 IN-CR-06 路径的升级策略一致。
 ///
@@ -4227,15 +4226,15 @@ async fn forward_with_openai_inbound_inspection(
 /// 修法：chain_depth ≥ 2 时把 HookMark detection 的 action 替换为 HoldForDecision，
 /// 移入 hold_detections 而非 hook_detections，从而走 GUI hold 分支。
 ///
-/// 关联 ADR-019 §chain_depth 升级策略、PRD v1.5 §6.5。
-/// PRD v2.0 §5.7.4 双路径不变量：从 SSE / JSON 任一路径完成 tool_use 后调本 helper
+/// 关联 chain_depth 升级策略。
+/// 双路径不变量：从 SSE / JSON 任一路径完成 tool_use 后调本 helper
 /// 把 record 加入序列窗口并跑 IN-SEQ-* 启发式。
 ///
-/// 默认 cargo feature `sequence_detection` 关闭时（GA 默认形态，PRD §9 #15），
+/// 默认 cargo feature `sequence_detection` 关闭时（GA 默认形态），
 /// `record_tool_use_into_sequence` 与 `detect_sequence_hits` 均为 no-op，本函数零开销。
 ///
-/// 命中通过 IPC broadcast StatusBar 通知 + audit 写入（PRD §5.7 / §9 #15）。
-/// **不引入新 Block 路径**（PRD §9 #15 硬约束）。
+/// 命中通过 IPC broadcast StatusBar 通知 + audit 写入。
+/// **不引入新 Block 路径**（硬约束）。
 ///
 /// v2.0：新增 `ipc_server` / `audit_store` / `caller` 参数，接入 StatusBar + audit。
 /// feature `sequence_detection` 关闭时 detect_sequence_hits 是 no-op，
@@ -4265,7 +4264,7 @@ fn record_into_sequence_and_detect(
                     path = path_label,
                     rule_id = %h.rule_id,
                     description = %h.description,
-                    "IN-SEQ-* sequence detection hit (StatusBar notify, no block per PRD §9 #15)"
+                    "IN-SEQ-* sequence detection hit (StatusBar notify, no block)"
                 );
 
                 // v2.0 §5.7：IPC StatusBar 通知（单向广播，no-block）
@@ -4282,7 +4281,7 @@ fn record_into_sequence_and_detect(
                     srv.broadcast_status_bar(notify);
                 }
 
-                // v2.0 §5.7：audit 写入（fail-soft，PRD §5.6.1）
+                // v2.0：audit 写入（fail-soft）
                 let event = crate::audit::AuditEvent::SequenceHit {
                     rule_id: h.rule_id.clone(),
                     description: h.description.clone(),
@@ -4334,7 +4333,7 @@ fn classify_inbound_detections(
         match aggregator.process(evt) {
             Ok(Some(tool)) => match inbound_filter.on_tool_use_complete(&tool) {
                 Ok(hits) => {
-                    // PRD §5.7.4 双路径不变量：SSE 路径接入序列窗口（feature off 时是 no-op）
+                    // 双路径不变量：SSE 路径接入序列窗口（feature off 时是 no-op）
                     record_into_sequence_and_detect(
                         inbound_filter,
                         &tool,
@@ -4421,7 +4420,7 @@ fn classify_inbound_detections(
 /// 修 R7-#3：加 `meta` 参数，DecisionRequest 中填入真实 multi-agent 元数据，
 /// hook/GUI 读 pending 文件时不再丢失来源信息（之前硬编码 Unknown + 空 chain）。
 ///
-/// 关联 PRD §9 #3（Critical 不可关）、ADR-014 §Hook 路径、SPEC-001 §3.1、ADR-019。
+/// 关联 Critical 不可关、Hook 路径、SPEC-001 §3.1。
 fn write_hook_pending_or_fail_closed(
     d: &sieve_core::Detection,
     meta: &MultiAgentMeta,
@@ -4437,7 +4436,7 @@ fn write_hook_pending_or_fail_closed(
 /// 修 R7-#3：`meta` 参数携带 source_agent / origin_chain / source_channel，
 /// 注入 `DecisionRequest` 使 hook 端能展示完整来源信息。
 ///
-/// 关联 SPEC-001 §3.1、ADR-014 §Hook 路径、ADR-019。
+/// 关联 SPEC-001 §3.1、Hook 路径。
 fn write_hook_pending_to(
     d: &sieve_core::Detection,
     sieve_home: &std::path::Path,
@@ -4468,7 +4467,7 @@ fn write_hook_pending_to(
         origin_chain: meta.origin_chain.clone(),
         source_channel: meta.source_channel.clone(),
         explicit_chain_depth: explicit_depth,
-        // v2.0：Hook 类规则 allow_remember 按 fail-closed 清单计算（PRD §5.4.2）
+        // v2.0：Hook 类规则 allow_remember 按 fail-closed 清单计算
         // Hook 类规则（IN-CR-02~04、IN-GEN-01/03）均在 FAIL_CLOSED_RULES 中，
         // 正常情况下此值为 false；保持动态计算以兼容未来用户自定义规则。
         allow_remember: compute_allow_remember(&[d.rule_id.as_str()]),
@@ -4604,7 +4603,7 @@ async fn handle_json_inbound(
     ctx: RequestCtx,
     billing_ctx: BillingCtxHandle,
 ) -> Result<Response<ResponseBody>> {
-    // ADR-026 Stage E：listener_provider_id 透传到 record_into_sequence_and_detect；
+    // listener_provider_id 透传到 record_into_sequence_and_detect；
     // listener_protocol 在 JSON 路径已由外层校验，此处无消费者。
     let RequestCtx {
         caller,
@@ -4633,7 +4632,7 @@ async fn handle_json_inbound(
         }
     };
 
-    // ADR-038：超额计费观测（relay 声明 usage + 独立估算 output 交叉比对，写 usage.db，永不上传）。
+    // 超额计费观测（relay 声明 usage + 独立估算 output 交叉比对，写 usage.db，永不上传）。
     spawn_billing_observation(
         billing_ctx,
         codec.completion_text(&resp_json),
@@ -4646,7 +4645,7 @@ async fn handle_json_inbound(
     for completed in codec.extract_tool_calls(&resp_json) {
         match inbound_filter.on_tool_use_complete(&completed) {
             Ok(hits) => {
-                // PRD §5.7.4 双路径不变量：JSON 路径接入序列窗口。
+                // 双路径不变量：JSON 路径接入序列窗口。
                 record_into_sequence_and_detect(
                     &inbound_filter,
                     &completed,
@@ -4672,7 +4671,7 @@ async fn handle_json_inbound(
         }
     }
 
-    // 入站文本扫描（IN-GEN-* + IN-CR-01 地址替换）——ADR-025 / PRD §9 #16 四路由对等。
+    // 入站文本扫描（IN-GEN-* + IN-CR-01 地址替换）——四路由对等。
     let assistant_text = codec.completion_text(&resp_json);
     if !assistant_text.is_empty() {
         match inbound_filter.scan_assistant_text(&assistant_text) {
@@ -4855,12 +4854,12 @@ async fn forward_streaming(
 
 /// 构造因嵌套调用过深（chain_depth ≥ 5）的 426 Upgrade Required 响应。
 ///
-/// 构造协议错位拒绝响应（ADR-026 §决策 4）。
+/// 构造协议错位拒绝响应。
 ///
 /// listener 声明的协议与请求 path 隐含的协议不一致时，daemon fail-closed 拒绝，
 /// 返回 400 Bad Request + sieve_blocked event payload。
 /// 例：Anthropic listener 收到 `/v1/chat/completions` → 400。
-/// 关联：ADR-026 §决策 4、PRD §9 #3 fail-closed、ADR-007。
+/// 关联：协议错位拒绝决策、fail-closed。
 /// 构造 500 响应——仅用于「类型不变量被违反」的不可达 BUG 兜底，把原热路径
 /// `.expect()` 的 panic（= DoS 向量）降级为明确的 500 + error log。正常控制流
 /// 永不命中（请求体两态在 collect 块就已确定，见 proxy_inner 的 `ProxyRequestBody`）。
@@ -4953,7 +4952,7 @@ fn build_protocol_mismatch_400(
             ),
             "en": format!(
                 "Sieve rejected request: listener configured for {} protocol but request path {} \
-                 implies a different protocol. ADR-026 enforces strict listener-protocol matching.",
+                 implies a different protocol. Sieve enforces strict listener-protocol matching.",
                 listener_proto_str, path
             ),
         }
@@ -4970,7 +4969,7 @@ fn build_protocol_mismatch_400(
 }
 
 /// 攻击模式检测：超过 5 层 agent 嵌套调用视为异常，直接拒绝。
-/// 关联：ADR-019 §嵌套深度限制、PRD v1.5 §6.5。
+/// 关联：嵌套深度限制。
 fn build_426_nested_rejection(chain_depth: usize) -> Response<ResponseBody> {
     let body_json = serde_json::json!({
         "type": "sieve_blocked",
@@ -4999,7 +4998,7 @@ fn build_426_nested_rejection(chain_depth: usize) -> Response<ResponseBody> {
         .unwrap_or_else(|_| Response::new(empty_body()))
 }
 
-/// 构造 426 Upgrade Required 拦截响应（ADR-008 候选）。
+/// 构造 426 Upgrade Required 拦截响应。
 fn build_426_response(detections: &[sieve_core::Detection]) -> Response<ResponseBody> {
     let blocked_at = epoch_secs_string();
     let detections_json: Vec<serde_json::Value> = detections
@@ -5109,7 +5108,7 @@ fn build_cap_detection(rule_id: &str, fingerprint_key: &str) -> sieve_core::Dete
 
 /// 判定上游响应的 `Content-Type` 是否为 JSON（非流式），用于入站检测的 transport 路由。
 ///
-/// 比裸 `starts_with("application/json")` 更稳健（守护 ADR-025 四路由不变量）：媒体类型按
+/// 比裸 `starts_with("application/json")` 更稳健（守护四路由不变量）：媒体类型按
 /// RFC 9110 §8.3.1 大小写不敏感，容忍前导空格与 `; charset=…` 参数，且精确匹配 media-type
 /// token（不会把 `application/jsonl` / `application/json-seq` 误判为 JSON）。非规范大小写的
 /// `Application/JSON` 不再被误当作 SSE 而绕过 JSON 路径入站检测。
@@ -5130,7 +5129,7 @@ mod tests {
     use sieve_core::protocol::unified_message::ContentSpan;
     use uuid::Uuid;
 
-    /// A0.1：content-type 路由判定的稳健性（守护 ADR-025 四路由不变量）。
+    /// A0.1：content-type 路由判定的稳健性（守护四路由不变量）。
     #[test]
     fn is_json_media_type_matches_canonical_and_variants() {
         // 命中 JSON（非流式）→ 走 handle_*_json_inbound
@@ -5253,7 +5252,7 @@ mod tests {
     /// happy path：base 目录可写 → 返回 Ok，pending 文件存在。
     ///
     /// 验证 HookMark 写成功后调用方可继续转发 SSE 流，不触发 fail-closed。
-    /// 关联 PRD §9 #3、SPEC-001 §3.1。
+    /// 关联 SPEC-001 §3.1。
     #[test]
     fn hook_pending_write_happy_path() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -5284,7 +5283,7 @@ mod tests {
     /// fail-closed：base 指向不可写路径 → 返回 Err（调用方应注入 sieve_blocked 截流）。
     ///
     /// 确认 Hook pending 写失败必须返回 Err，禁止 fail-open。
-    /// 关联 PRD §9 #3 fail-closed 硬约束、ADR-007（fail-closed 语义）。
+    /// 关联 fail-closed 硬约束、fail-closed 语义。
     #[test]
     fn hook_pending_write_fails_on_unwritable_base() {
         // /dev/null 在 macOS/Linux 上是字符设备，不是目录，create_dir_all 必然失败
@@ -5509,7 +5508,7 @@ mod tests {
     /// 手动构造 4 段 header（agent:uuid:depth:base64sig），签名用 88 字节全零 base64
     /// （parse_origin_header 只解 base64，不验签，全零是合法输入）。
     ///
-    /// 关联：ADR-019 §Header 格式规范、R8-#1。
+    /// 关联：Header 格式规范、R8-#1。
     #[test]
     fn r8_1_extract_origin_metadata_4seg_with_signature() {
         // 64 字节全零 → base64 = 88 字符（有效 base64，parse_origin_header 只 decode 不验签）
@@ -5574,7 +5573,7 @@ mod tests {
     /// 直接构造 all_hits 并测试分类逻辑的最简办法是直接复现分类代码（白盒）。
     /// 下面的测试完全重现 classify 内部的分类决策，断言升级结果正确。
     ///
-    /// 关联：ADR-019 §chain_depth 升级策略、R8-#2。
+    /// 关联：chain_depth 升级策略、R8-#2。
     #[test]
     fn r8_2_chain_depth_2_hookmark_upgraded_to_hold() {
         // 构造一个含 HookMark 的 Detection，模拟规则命中

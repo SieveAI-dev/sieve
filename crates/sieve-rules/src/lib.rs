@@ -1,6 +1,6 @@
 //! Sieve rules library
 //!
-//! Phase 1: vectorscan 多模式正则 + Ed25519 规则包验签（关联 ADR-001 / ADR-002）。
+//! Phase 1: vectorscan 多模式正则 + Ed25519 规则包验签。
 //! Week 2: 完整规则引擎 + BIP39 checksum + placeholder 黑名单 + toml loader。
 //!
 //! crate 边界：**禁止任何网络 IO**（.cursorrules §3.3）。

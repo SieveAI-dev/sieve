@@ -647,12 +647,19 @@ def test_outbound_redact_fake_key(
         # 关键安全断言：转发到上游的 body 里原始 key 已被脱敏（不再出现）。
         forwarded = b"".join(_MOCK_RECEIVED)
         assert_eq("上游收到已转发请求", True, len(_MOCK_RECEIVED) >= 1, stats)
-        assert_eq(
-            "转发 body 已脱敏（原始 key 不出现）",
-            False,
-            fake_key.encode() in forwarded,
-            stats,
-        )
+        # 脱敏断言依赖 OUT-01 出站规则。规则包不随开源引擎内置（由签名规则包下发，
+        # 引擎无包时空集 fail-safe 透传），无包时 daemon 无从脱敏，跳过该断言
+        # （与 Rust 集成测试的 skip-when-absent 一致）；规则文件就位的完整环境才断言。
+        rules_file = REPO_ROOT / "crates" / "sieve-rules" / "rules" / "outbound.toml"
+        if rules_file.exists():
+            assert_eq(
+                "转发 body 已脱敏（原始 key 不出现）",
+                False,
+                fake_key.encode() in forwarded,
+                stats,
+            )
+        else:
+            print(dim("  ⊘ 跳过脱敏断言:出站规则包未随引擎内置，daemon 空集 fail-safe 透传"))
     else:
         print(dim(f"    实际 status: {status}（真模式无法窥探上游 body，脱敏由 mock 模式断言）"))
 

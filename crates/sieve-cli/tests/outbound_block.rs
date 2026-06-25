@@ -195,7 +195,7 @@ dry_run = {}
         .arg("--config")
         .arg(config_file.path())
         .env("SIEVE_LOG", "warn")
-        // ADR-030: 测试禁止触发真实 updates.sieveai.dev 联网 + telemetry 上报
+        // 测试禁止触发真实 updates.sieveai.dev 联网 + telemetry 上报
         .env("SIEVE_NO_UPDATE", "1")
         .env("SIEVE_NO_TELEMETRY", "1")
         .env("SIEVE_HOME", effective_home)
@@ -273,9 +273,9 @@ fn plain_http_client() -> Client<HttpConnector, Full<Bytes>> {
 ///
 /// OUT-01 有 disposition=auto_redact，修 #2（disposition 优先于 enforce_action）后：
 /// fail-closed 名单里的 OUT-01 不再直接 Block，而是先脱敏再转发。
-/// 验证 PRD v1.4 §6.1（AutoRedact 路径）。
+/// 验证 AutoRedact 路径。
 ///
-/// 关联 PRD §5.1 OUT-01 / ADR-016（二维处置矩阵）。
+/// 关联 OUT-01 / 二维处置矩阵。
 #[tokio::test]
 async fn fake_anthropic_key_auto_redacted_and_forwarded() {
     // 1. 启动 mock 上游（OUT-01 AutoRedact → sieve 脱敏后转发，计数器应为 1）
@@ -357,7 +357,7 @@ async fn fake_anthropic_key_auto_redacted_and_forwarded() {
 ///
 /// 修 #2（disposition 优先）后，OUT-01 走 AutoRedact 路径；
 /// dry_run 只影响 Block 路径（是否拦截），不影响 AutoRedact（始终脱敏）。
-/// 验证 PRD v1.4 §6.1（AutoRedact 路径）、ADR-016（二维处置矩阵）。
+/// 验证 AutoRedact 路径、二维处置矩阵。
 #[tokio::test]
 async fn dry_run_auto_redact_still_redacts() {
     let upstream_call_count = Arc::new(AtomicUsize::new(0));
@@ -413,7 +413,7 @@ async fn dry_run_auto_redact_still_redacts() {
 
 /// benign 消息（无 Critical 命中）→ 正常透传，返回上游 200。
 ///
-/// 关联 PRD §9 #7：Critical 拦截 FP < 0.5%。
+/// 关联 Critical 拦截 FP < 0.5%。
 #[tokio::test]
 async fn benign_message_passes_through() {
     let upstream_call_count = Arc::new(AtomicUsize::new(0));
@@ -566,7 +566,7 @@ fn pem_key_body() -> String {
 /// OUT-07 GuiPopup hold：GUI Deny → 客户端收到 426，上游未被调用。
 ///
 /// 验证 R2-#1 修复：daemon 出站路径正确处理 HoldForDecision action。
-/// 关联：PRD v1.4 §5.4.2（出站超时策略表）、ADR-016（二维处置矩阵）。
+/// 关联：出站超时策略表、二维处置矩阵。
 #[tokio::test]
 async fn outbound_gui_popup_deny_returns_426() {
     let upstream_call_count = Arc::new(AtomicUsize::new(0));

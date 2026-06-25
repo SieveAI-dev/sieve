@@ -1,4 +1,4 @@
-//! BIP39 pipeline 测试（关联 PRD §9 #4 差异化点）。
+//! BIP39 pipeline 测试（Sieve 差异化点）。
 //!
 //! 验证：
 //! - 标准助记词 verify_checksum 通过
@@ -43,7 +43,7 @@ fn bip39_valid_24_words_passes_checksum() {
 
 /// 24 词全在词表但最后一词换成 checksum 错误的词（zoo），不得通过。
 ///
-/// PRD §9 #4 差异化点：仅词表命中不足以定级 Critical。
+/// 差异化点：仅词表命中不足以定级 Critical。
 #[test]
 fn bip39_24_words_wrong_checksum_fails() {
     // abandon×23 + zoo（zoo 在词表中，但 checksum 不对）
@@ -57,7 +57,7 @@ fn bip39_24_words_wrong_checksum_fails() {
     // checksum 应当失败
     assert!(
         !verify_checksum(&words, wordlist_index()),
-        "abandon×23 + zoo 的 checksum 应失败（PRD §9 #4 差异化点）"
+        "abandon×23 + zoo 的 checksum 应失败（差异化点）"
     );
 }
 
@@ -149,7 +149,7 @@ fn bip39_pipeline_valid_mnemonic_detected() {
 
 /// abandon×23 + zoo（全在词表但 checksum 错）经链路不产生 Critical。
 ///
-/// PRD §9 #4 差异化点：仅词表命中不足以定级 Critical。
+/// 差异化点：仅词表命中不足以定级 Critical。
 #[test]
 fn bip39_pipeline_wrong_checksum_not_detected() {
     let mut tokens: Vec<&str> = std::iter::repeat_n("abandon", 23).collect();
@@ -159,8 +159,5 @@ fn bip39_pipeline_wrong_checksum_not_detected() {
     // 有候选（全在词表），但没有一个通过 checksum
     assert!(!candidates.is_empty(), "应有候选（所有词在词表）");
     let any_valid = candidates.iter().any(|w| verify_checksum(w, wl));
-    assert!(
-        !any_valid,
-        "abandon×23+zoo 全部候选 checksum 应失败（PRD §9 #4）"
-    );
+    assert!(!any_valid, "abandon×23+zoo 全部候选 checksum 应失败");
 }

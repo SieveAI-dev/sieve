@@ -1,4 +1,4 @@
-//! Critical 规则强制 fail-closed 的运行时分类注册表（关联 ADR-007 / ADR-014 / PRD v1.4 §5.4）。
+//! Critical 规则强制 fail-closed 的运行时分类注册表（双层防御 + 处置矩阵）。
 //!
 //! ## 语义说明
 //!
@@ -14,7 +14,7 @@
 //! 热替换装入新规则后旧 fail-closed ID 仍保留——这只会**过度保护**（已删规则不会再命中），
 //! 对安全无害。无规则包时注册表为空，`is_fail_closed` 恒 `false`（与空集 fail-safe 一致）。
 //!
-//! 变更分类逻辑需走 ADR（关联 ADR-007 §2 / ADR-014 §"disposition 矩阵"）。
+//! 变更分类逻辑需走架构决策评审（fail-closed 语义 + disposition 矩阵）。
 
 use crate::manifest::{Action, Disposition, RuleEntry};
 use arc_swap::ArcSwap;

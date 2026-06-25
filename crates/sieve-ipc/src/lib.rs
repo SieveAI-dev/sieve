@@ -1,7 +1,7 @@
 // sieve-ipc: JSON-RPC 2.0 over Unix socket + pending/decision 文件协议库。
 //
 // 供 sieve-cli（主代理）调用，向 GUI（sieve-gui-macos）或 hook（sieve-hook）
-// 传递决策请求并等待响应。关联：ADR-013（IPC 协议）、ADR-014（双层防御）。
+// 传递决策请求并等待响应。
 
 pub mod client;
 pub mod decision_file;
@@ -56,7 +56,7 @@ mod tests {
 
     /// StatusBarNotify SequenceHit kind round-trip 序列化。
     ///
-    /// 关联：PRD v2.0 §5.7.2（行为序列 StatusBar 通知）、ADR-013。
+    /// 关联：行为序列 StatusBar 通知。
     #[test]
     fn status_bar_notify_serde_round_trip() {
         let notify = StatusBarNotify {
@@ -537,7 +537,7 @@ mod file_tests {
 
 #[cfg(test)]
 mod socket_tests {
-    //! 验证双向 JSON-RPC over Unix socket 通信模型（ADR-013 §3）。
+    //! 验证双向 JSON-RPC over Unix socket 通信模型。
     //!
     //! 测试用 IpcClient::auto_respond / 手动 socket 连接模拟真实 GUI 客户端行为，
     //! 不再使用旧的 inject_decision 绕过 socket 层。
@@ -925,7 +925,7 @@ mod socket_tests {
 
     /// broadcast_status_bar：单 GUI 连接，broadcast 后正常收到 notify。
     ///
-    /// 关联：PRD v2.0 §5.7、PRD v2.1 §5.4.3、ADR-013。
+    /// 关联：行为序列 StatusBar 通知 + 多 GUI 客户端支持。
     #[tokio::test]
     async fn broadcast_status_bar_to_gui_client() {
         let tmp = tempfile::tempdir().unwrap();
@@ -970,7 +970,7 @@ mod socket_tests {
 
     /// 无 GUI 客户端连接时，broadcast_status_bar 静默丢弃，不返回错误。
     ///
-    /// 关联：PRD v2.1 §5.4.3、ADR-013。
+    /// 关联：多 GUI 客户端支持。
     #[tokio::test]
     async fn broadcast_status_bar_no_gui_clients_silently_drops() {
         let tmp = tempfile::tempdir().unwrap();
@@ -998,7 +998,7 @@ mod socket_tests {
     /// 3 个 GUI 客户端同时连接，broadcast 后**全部 3 个**都收到相同 notify。
     ///
     /// 验证 fan-out 语义：单次 broadcast_status_bar 投递到所有已注册 sender。
-    /// 关联：PRD v2.1 §5.4.3（多 GUI 客户端支持）、ADR-013。
+    /// 关联：多 GUI 客户端支持。
     #[tokio::test]
     async fn broadcast_status_bar_to_three_gui_clients() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1054,7 +1054,7 @@ mod socket_tests {
     ///
     /// 验证 lazy 清理策略：A 断开后 sender 不立即移除，而是在下次 broadcast 的
     /// try_send 返回 Closed 时才从 Vec 移除。
-    /// 关联：PRD v2.1 §5.4.3、ADR-013。
+    /// 关联：多 GUI 客户端支持。
     #[tokio::test]
     async fn broadcast_after_gui_disconnect_drops_dead_writers() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1134,7 +1134,7 @@ mod socket_tests {
 
     /// send_reload_user_rules_oneshot → daemon mock IpcServer 能从 reload_rx 取到 ReloadUserRules。
     ///
-    /// 关联：PRD v2.0 §5.5.5、ADR-013。
+    /// 关联：编辑器关闭后 lint + atomic backup + IPC reload 流程。
     #[tokio::test]
     async fn send_reload_user_rules_round_trip() {
         let tmp = tempfile::tempdir().unwrap();

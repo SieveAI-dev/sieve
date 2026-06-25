@@ -2,7 +2,7 @@
 
 > Version: v1.0 — 2026-04-28
 > Status: Stable
-> 关联 PRD：v2.0 §6.6、§10.1 Week 5（v1.4 引入）
+> 关联：一键安装 / 配置注入能力（v1.4 引入）
 
 ---
 
@@ -29,7 +29,7 @@ sieve setup is macOS only in Phase 1. Linux and Windows support is planned for P
 
 并以 exit code 2 退出。
 
-实现：`#[cfg(not(target_os = "macos"))]` 的 `fn check_platform()` 在子命令入口处调用（不用 compile-time cfg 排除，以便 CI 多平台编译通过，见 todo.md Q5 推荐 A）。
+实现：`#[cfg(not(target_os = "macos"))]` 的 `fn check_platform()` 在子命令入口处调用（不用 compile-time cfg 排除，以便 CI 多平台编译通过）。
 
 ---
 
@@ -382,7 +382,7 @@ Sieve 已卸载。
 | 排除项 | 原因 |
 |--------|------|
 | 修改 `~/.zshrc` / `~/.bashrc` | PATH 由 `.dmg` 安装包处理，setup 不做 shell 配置 |
-| 安装本地 CA 证书 | Sieve 不做 TLS 拦截，无需 CA（PRD §9 第 12 条：不装本地 CA）|
+| 安装本地 CA 证书 | Sieve 不做 TLS 拦截，无需 CA（核心约束：不装本地 CA 做 MITM）|
 | 修改系统代理设置（network proxy）| 使用 `ANTHROPIC_BASE_URL` 环境变量定向，不劫持系统流量 |
 | 需要 `sudo` 权限的任何操作 | 所有文件写在用户目录下（`~/.claude/`、`~/Library/LaunchAgents/`、`~/.sieve/`），均无需 root |
 | 修改 Cursor / Windsurf / Zed 配置 | Phase 1 仅 Claude Code；其他 agent 支持留给 Phase 2 |

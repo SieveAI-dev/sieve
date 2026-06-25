@@ -1,8 +1,8 @@
-//! 用户规则加载 + fail-safe 集成测试（PRD v2.0 §5.5 + §9 #14）。
+//! 用户规则加载 + fail-safe 集成测试。
 //!
 //! 测试 `sieve_policy` 加载管道在 5 类 corruption 场景下的行为：
 //! 失败时返回 `Err`，调用方（main.rs `load_user_engine_fail_safe`）将其降级为 `None`，
-//! daemon 必须正常启动，系统规则不受影响（PRD §9 #14 fail-safe）。
+//! daemon 必须正常启动，系统规则不受影响（fail-safe）。
 //!
 //! 测试策略：直接调用 `sieve_policy` 公开 API，验证加载管道（load → lint → compile）
 //! 在各类 corruption 下的行为，不依赖 main.rs 私有函数。
@@ -129,7 +129,7 @@ fn corruption_1_toml_syntax_error_returns_err() {
 
 #[test]
 fn corruption_2_lint_violation_critical_severity_returns_err() {
-    // severity = "critical" 是用户规则不允许的（PRD §5.5.3-A）
+    // severity = "critical" 是用户规则不允许的
     // lint 应报 ForbiddenSeverityActionDisposition
     let tmp = TempDir::new().unwrap();
     let content = r#"
@@ -190,7 +190,7 @@ fn corruption_3_wrong_file_permissions_returns_err() {
 
 #[test]
 fn corruption_4_nonexistent_path_returns_err() {
-    // 文件不存在 → load_user_rules 返回空 UserRulesFile（PRD §5.5.2.1 fail-safe 行为）
+    // 文件不存在 → load_user_rules 返回空 UserRulesFile（fail-safe 行为）
     // run_load_pipeline 对空规则返回 Err（等价于"无用户规则，用系统规则"）
     let nonexistent = Path::new("/tmp/__sieve_test_nonexistent_dir__/rules/user.toml");
 
@@ -219,7 +219,7 @@ fn valid_user_rules_compiles_ok_and_matches() {
     use sieve_rules::engine::MatchEngine;
     assert_eq!(engine.rule_count(), 1, "应编译 1 条用户规则");
 
-    // 验证规则能命中（rule_id 应携带 user: 前缀，PRD §5.5.2.1）
+    // 验证规则能命中（rule_id 应携带 user: 前缀）
     let hits = engine.scan(b"sk-internal-abc123").unwrap();
     assert!(!hits.is_empty(), "规则应命中目标文本");
     assert!(

@@ -1,4 +1,4 @@
-//! 本地 token 用量记录存储（ADR-038 决策 4 / SPEC-010 §7）。
+//! 本地 token 用量记录存储（SPEC-010 §7）。
 //!
 //! **隐私红线**：token 用量正是 README 发誓「从不上传」的那个 usage record。
 //! 本 store **严格本地**（`~/.sieve/usage.db`，0600，append-only），**无任何出站路径**

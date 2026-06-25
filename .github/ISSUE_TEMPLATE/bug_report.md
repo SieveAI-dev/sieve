@@ -3,7 +3,7 @@ name: Bug 报告
 about: 报告 Sieve 自身的功能缺陷（非安全漏洞 — 安全漏洞走 SECURITY.md）
 title: "[BUG] "
 labels: bug
-assignees: doskey
+assignees:
 ---
 
 > ⚠️ **如果是安全漏洞**（供应链 / fail-closed 失效 / 数据泄漏 / 检测绕过），请走 [SECURITY.md](../../SECURITY.md) email 渠道，**不要在这里公开**。
@@ -36,7 +36,7 @@ sieve --version    # 贴完整输出（含 SHA-256 + rules version）
 
 请贴 `~/.sieve/logs/sieve.log` 的相关片段。
 
-> ⚠️ **不要贴原始 prompt 内容** —— 只贴 fingerprint / rule_id / 时间戳。Sieve 不存原文，你也不应该把原文贴到公开 issue（PRD §11.2）。
+> ⚠️ **不要贴原始 prompt 内容** —— 只贴 fingerprint / rule_id / 时间戳。Sieve 不存原文，你也不应该把原文贴到公开 issue。
 
 ```
 （脱敏后的日志）

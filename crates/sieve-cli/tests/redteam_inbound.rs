@@ -1,11 +1,11 @@
-//! ADR-043 红队 bypass 测试集——入站方向（response-side）。
+//! 红队 bypass 测试集——入站方向（response-side）。
 //!
 //! **这是已知攻击手法的回归基线，不是检测能力的完备性证明。**
 //! 红队集只驱动攻击样本并断言期望处置，**不新增任何检测规则**；
 //! 检测规则定义由签名规则包提供、随更新通道分发。规则包缺失时本测试
 //! 优雅 SKIP（打印 SKIP 并 return），绝不 panic / fail——这是公开仓的预期态。
 //!
-//! 覆盖（ADR-043 §验收标准 content-type 路由覆盖矩阵）：
+//! 覆盖（验收标准 content-type 路由覆盖矩阵）：
 //! - 入站地址替换（IN-CR-01）× 四路由：
 //!   | M-1 Anthropic SSE | M-2 Anthropic JSON | M-3 OpenAI SSE | M-4 OpenAI JSON |
 //!   每条断言响应含 `sieve_blocked` + 命中 `IN-CR-01`。
@@ -250,7 +250,7 @@ dry_run = false
         .arg("--config")
         .arg(config_file.path())
         .env("SIEVE_LOG", "warn")
-        // ADR-030: 测试禁止触发真实更新检查联网 + telemetry 上报
+        // 测试禁止触发真实更新检查联网 + telemetry 上报
         .env("SIEVE_NO_UPDATE", "1")
         .env("SIEVE_NO_TELEMETRY", "1")
         .env("SIEVE_HOME", sieve_home.path())

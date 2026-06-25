@@ -1,4 +1,4 @@
-//! Vectorscan 多模式正则引擎（关联 ADR-001 / ADR-002 / PRD §6.4）。
+//! Vectorscan 多模式正则引擎。
 //!
 //! Phase 1 用 block mode（出站请求一次性扫描）；Week 3 起 stream mode 处理 SSE 流式。
 //!
@@ -21,7 +21,7 @@ use vectorscan_rs::{BlockDatabase, BlockScanner, Flag, Pattern, Scan};
 mod system;
 pub use system::SystemEngine;
 
-/// 扫描方向（PRD v2.0 §6.3.1）。
+/// 扫描方向。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
     /// 入站（model → user，拦截危险 tool_use 输出）。
@@ -30,16 +30,16 @@ pub enum Direction {
     Outbound,
 }
 
-/// 上游协议类型（PRD v2.0 §6.3.1）。
+/// 上游协议类型。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Protocol {
     /// Anthropic Messages API。
     Anthropic,
-    /// OpenAI Chat Completions API（Phase 2，ADR-018）。
+    /// OpenAI Chat Completions API（Phase 2）。
     OpenAI,
 }
 
-/// 扫描内容类型（PRD v2.0 §6.3.1）。
+/// 扫描内容类型。
 ///
 /// 让规则引擎知道自己在哪条路径生效，v1.5.4 P0 教训之一。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,7 +54,7 @@ pub enum ContentKind {
     RequestBody,
 }
 
-/// 扫描请求上下文（PRD v2.0 §6.3.1）。
+/// 扫描请求上下文。
 ///
 /// 相比裸 `&[u8]`，携带路由上下文与业务上下文，用于 fingerprint 计算、
 /// 灰名单查询、序列窗口（Phase B）。内部全为引用/Copy，实现 [`Clone`]。
@@ -72,11 +72,11 @@ pub struct ScanRequest<'a> {
     pub tool_name: Option<&'a str>,
     /// 调用方 Agent 标识（如 `"claude-code"` / `"openclaw"`）。
     pub source_agent: Option<&'a str>,
-    /// 调用方进程可执行路径（进程上下文，PRD §5.6）。
+    /// 调用方进程可执行路径（进程上下文）。
     pub caller_exe: Option<&'a std::path::Path>,
 }
 
-/// 一次扫描的汇总报告（PRD v2.0 §6.3.1）。
+/// 一次扫描的汇总报告。
 #[derive(Debug)]
 pub struct ScanReport {
     /// 所有命中列表。
@@ -102,11 +102,11 @@ pub struct MatchHit {
     ///
     /// 由 [`VectorscanEngine::scan`] 在构造命中时从规则字段填充，使
     /// [`LayeredEngine`] 合并短路无需查全局名单即可判定「系统 Critical 命中」
-    /// （显式数据流，关联 ADR-007 fail-closed）。用户引擎的命中恒为 `false`。
+    /// （显式数据流，fail-closed）。用户引擎的命中恒为 `false`。
     pub fail_closed: bool,
 }
 
-/// 多模式匹配引擎 trait（PRD v2.0 §6.3.1）。
+/// 多模式匹配引擎 trait。
 ///
 /// v2.0 扩展：保留原 `scan(&[u8])` 向后兼容接口，新增带上下文的
 /// `scan_with_context(ScanRequest)` 及引擎元信息方法。
@@ -114,7 +114,7 @@ pub trait MatchEngine: Send + Sync {
     /// 对输入字节流执行多模式匹配，返回所有命中（向后兼容接口）。
     fn scan(&self, input: &[u8]) -> SieveRulesResult<Vec<MatchHit>>;
 
-    /// 带上下文的扫描（v2.0 新增，PRD §6.3.1）。
+    /// 带上下文的扫描（v2.0 新增）。
     ///
     /// 默认实现委托给 [`MatchEngine::scan`]，携带耗时统计与引擎元信息。
     /// [`LayeredEngine`] 等组合引擎会覆盖此方法以实现合并逻辑。
@@ -145,7 +145,7 @@ pub trait MatchEngine: Send + Sync {
     }
 }
 
-/// 合并系统规则与用户规则的分层引擎（PRD v2.0 §6.3.1）。
+/// 合并系统规则与用户规则的分层引擎。
 ///
 /// # 合并顺序（严格保证，不可调整）
 ///
@@ -153,9 +153,9 @@ pub trait MatchEngine: Send + Sync {
 /// 2. 系统规则命中任意 fail-closed（Critical）规则 → 立即返回，不评估用户规则
 /// 3. 否则追加用户规则命中（用户规则命中的 `rule_id` 已携带 `user:` 前缀，由 UserEngine 保证）
 ///
-/// 此顺序保证用户规则无法 suppress 系统 Critical 命中（PRD §9 #3 + §5.5.2.1）。
+/// 此顺序保证用户规则无法 suppress 系统 Critical 命中。
 ///
-/// # Hot Swap（PRD §5.5.5 / v2.1 zero-downtime reload）
+/// # Hot Swap（v2.1 zero-downtime reload）
 ///
 /// `user` 字段由 [`arc_swap::ArcSwap`] 包装，允许 daemon reload listener 通过
 /// [`LayeredEngine::swap_user`] 原子替换用户引擎，无需重启 daemon：
@@ -164,7 +164,7 @@ pub trait MatchEngine: Send + Sync {
 /// - 正在进行中的 scan 持有旧 `Arc<U>`，结束后旧引擎自动释放（引用计数归零）。
 pub struct LayeredEngine<S: MatchEngine, U: MatchEngine> {
     system: S,
-    /// 原子可替换的用户引擎（PRD §5.5.5 hot reload）。
+    /// 原子可替换的用户引擎（hot reload）。
     ///
     /// `ArcSwap<Option<Arc<U>>>` 允许：
     /// - `None`：无用户规则，纯系统引擎模式
@@ -181,7 +181,7 @@ impl<S: MatchEngine, U: MatchEngine> LayeredEngine<S, U> {
         }
     }
 
-    /// Atomic swap 用户规则引擎（PRD §5.5.5 zero-downtime hot reload）。
+    /// Atomic swap 用户规则引擎（zero-downtime hot reload）。
     ///
     /// daemon reload listener 调用此方法替换 user engine，无需重启 daemon。
     /// 调用完成后所有后续 [`LayeredEngine::scan`] 调用立即使用新引擎；
@@ -247,9 +247,9 @@ impl<S: MatchEngine, U: MatchEngine> MatchEngine for LayeredEngine<S, U> {
         // 第一层：系统规则全量扫描
         let mut report = self.system.scan_with_context(req)?;
 
-        // 系统规则命中任意 fail-closed（Critical）规则 → 立即返回（PRD §6.3.1 合并顺序 #1）。
+        // 系统规则命中任意 fail-closed（Critical）规则 → 立即返回（合并顺序 #1）。
         // 用 MatchHit 自带的 fail_closed 标志（VectorscanEngine::scan 从规则字段填充），
-        // 显式数据流，不查全局名单（关联 ADR-007）。
+        // 显式数据流，不查全局名单。
         if report.hits.iter().any(|h| h.fail_closed) {
             return Ok(report);
         }
@@ -320,7 +320,7 @@ impl VectorscanEngine {
         let db = BlockDatabase::new(patterns)
             .map_err(|e| SieveRulesError::Engine(format!("compile vectorscan db: {e}")))?;
 
-        // 注册规则分类（fail-closed / hook / gui）进运行时注册表（ADR-007）。
+        // 注册规则分类（fail-closed / hook / gui）进运行时注册表。
         // accumulate：出站 / 入站 / 热替换引擎分别注册各自规则，替代历史硬编码 ID 名单。
         crate::critical_lock::register_rules(&rules);
 
@@ -396,7 +396,7 @@ impl MatchEngine for VectorscanEngine {
 
     fn compiled_pattern_size_bytes(&self) -> usize {
         // vectorscan_rs 暂未暴露 `hs_database_size()`，无法精确测量 compiled DB 体积；
-        // 返回 0 作占位，由 lint 阶段编译时间 100ms 上限（PRD §5.5.3-B）兜底间接限流。
+        // 返回 0 作占位，由 lint 阶段编译时间 100ms 上限兜底间接限流。
         // 上游暴露 API 后此处与 sieve-policy/src/lint.rs 同步补 1MB 真值校验
         //（跟踪：tasks/v2-pending.md TODO-EXT-1）。
         0
@@ -709,7 +709,7 @@ mod tests {
     }
 
     // -------------------------------------------------------------------------
-    // v2.1 hot swap 测试（PRD §5.5.5 zero-downtime reload）
+    // v2.1 hot swap 测试（zero-downtime reload）
     // -------------------------------------------------------------------------
 
     /// swap_user 能原子替换用户引擎，scan 立即看到新规则。

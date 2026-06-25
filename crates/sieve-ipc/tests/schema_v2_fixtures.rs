@@ -81,7 +81,7 @@ fn health_response_minimal_deserializes() {
     // SPEC-005 §9.5：minimal fixture 省略 listeners，#[serde(default)] 解析为空 vec。
     assert!(
         health.listeners.is_empty(),
-        "minimal fixture 省略 listeners 时应回落为空 vec（ADR-026 向后兼容）"
+        "minimal fixture 省略 listeners 时应回落为空 vec（向后兼容）"
     );
 }
 
@@ -97,7 +97,7 @@ fn health_response_full_deserializes_and_roundtrips() {
     let result = val.get("result").unwrap().clone();
     let health: HealthResult = serde_json::from_value(result.clone()).unwrap();
 
-    // ADR-026 multi-listener：full fixture 列出 2 个 listener，含 provider_id + protocol。
+    // multi-listener：full fixture 列出 2 个 listener，含 provider_id + protocol。
     assert_eq!(health.listeners.len(), 2, "full fixture 应含 2 个 listener");
     assert_eq!(health.listeners[0].provider_id, "anthropic");
     assert_eq!(health.listeners[0].protocol, "anthropic");

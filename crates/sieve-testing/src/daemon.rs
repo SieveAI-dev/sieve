@@ -142,7 +142,7 @@ impl DaemonGuard {
 /// - 写临时 `sieve.toml`：`upstream_url` / `port` / `bind_addr=127.0.0.1` / 绝对规则路径 /
 ///   `tls_verify_upstream=false` / `dry_run`；可选 `no_client_policy` 与 `extra_toml`。
 /// - `SIEVE_HOME`：`cfg.sieve_home` 优先，否则自动建 tempdir 隔离（防污染真实 `~/.sieve`）。
-/// - 默认注入 `SIEVE_LOG=warn` / `SIEVE_NO_UPDATE=1` / `SIEVE_NO_TELEMETRY=1`（ADR-030 禁联网），
+/// - 默认注入 `SIEVE_LOG=warn` / `SIEVE_NO_UPDATE=1` / `SIEVE_NO_TELEMETRY=1`（禁联网），
 ///   `cfg.env` 可覆盖。
 ///
 /// # Panics
@@ -226,7 +226,7 @@ dry_run = {}
     cmd
         // 默认值（可被 cfg.env 覆盖，因 Command::env 后写覆盖前写）。
         .env("SIEVE_LOG", "warn")
-        // ADR-030: 测试禁止触发真实 updates.sieveai.dev 联网 + telemetry 上报。
+        // 测试禁止触发真实 updates.sieveai.dev 联网 + telemetry 上报。
         .env("SIEVE_NO_UPDATE", "1")
         .env("SIEVE_NO_TELEMETRY", "1")
         .env("SIEVE_HOME", &effective_home)

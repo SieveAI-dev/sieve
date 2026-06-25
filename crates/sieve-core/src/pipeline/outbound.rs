@@ -1,6 +1,6 @@
 //! 出站规则匹配节点（Week 2 起实现）。
 //!
-//! 关联 PRD §5.1 出站检测 P0 表 + ADR-002 纯规则引擎。
+//! 关联出站检测 P0 表 + 纯规则引擎。
 //!
 //! Week 2 由 sieve-cli 在启动时把 sieve-rules 的 VectorscanEngine 适配到
 //! [`OutboundEngine`] trait，避免 sieve-core 直接依赖 sieve-rules（见 .cursorrules §3.3）。

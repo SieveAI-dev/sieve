@@ -1,4 +1,4 @@
-//! 系统规则 + 用户规则（LayeredEngine）benchmark（PRD v2.0 §6.3.2 压力测试）。
+//! 系统规则 + 用户规则（LayeredEngine）benchmark（压力测试）。
 //!
 //! 目标：70 系统规则 + 30 用户规则，LayeredEngine overhead < 20%。
 //!

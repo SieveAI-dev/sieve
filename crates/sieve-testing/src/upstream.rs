@@ -229,7 +229,7 @@ pub mod responses {
         json_200(anthropic_json_bytes(text))
     }
 
-    /// Anthropic JSON 响应，**自定义 `usage`**（ADR-038 超额计费检测测试：模拟 relay 虚报
+    /// Anthropic JSON 响应，**自定义 `usage`**（超额计费检测测试：模拟 relay 虚报
     /// token 用量——声明值远高于内容实际）。
     #[must_use]
     pub fn anthropic_json_response_with_usage(
@@ -381,7 +381,7 @@ pub mod responses {
         openai_sse_raw(&refs)
     }
 
-    /// Anthropic 流式 SSE，**自定义 usage**（ADR-038 超额计费检测测试）：`message_start` 带
+    /// Anthropic 流式 SSE，**自定义 usage**（超额计费检测测试）：`message_start` 带
     /// `input_tokens`、`message_delta` 带 `output_tokens`，模拟 relay 虚报。
     #[must_use]
     pub fn anthropic_sse_bytes_with_usage(
@@ -416,7 +416,7 @@ pub mod responses {
         anthropic_sse_raw(&events)
     }
 
-    /// OpenAI 流式 SSE，**自定义 usage**（ADR-038）：content chunk + finish chunk + 末尾
+    /// OpenAI 流式 SSE，**自定义 usage**（超额计费检测测试）：content chunk + finish chunk + 末尾
     /// usage chunk（`choices:[]` + `usage:{prompt_tokens, completion_tokens}`，即 include_usage）。
     #[must_use]
     pub fn openai_sse_bytes_with_usage(
@@ -436,7 +436,7 @@ pub mod responses {
         openai_sse_raw(&[&content, &finish, &usage])
     }
 
-    /// OpenAI 非流式 JSON 响应，**自定义 usage**（ADR-038），返回完整 `Response<Full<Bytes>>`。
+    /// OpenAI 非流式 JSON 响应，**自定义 usage**（超额计费检测测试），返回完整 `Response<Full<Bytes>>`。
     #[must_use]
     pub fn openai_json_response_with_usage(
         text: &str,

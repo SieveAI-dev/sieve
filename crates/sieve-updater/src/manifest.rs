@@ -1,4 +1,4 @@
-//! Manifest schema + HTTP fetch (ADR-030 §3 服务端响应格式 + §5.4).
+//! Manifest schema + HTTP fetch（服务端响应格式 + 客户端拉取）.
 
 use http::Uri;
 use http_body_util::BodyExt;
@@ -11,12 +11,12 @@ use crate::error::UpdaterError;
 
 /// Top-level manifest returned by `updates.sieveai.dev/v1/manifest`.
 ///
-/// ADR-030 §3: the server may omit unknown future fields; unknown fields
+/// The server may omit unknown future fields; unknown fields
 /// are silently ignored here (`#[serde(deny_unknown_fields)]` is intentionally
 /// NOT used so that forward-compatible additions don't break older clients).
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Manifest {
-    /// Schema version (ADR-030 §3).
+    /// Schema version.
     pub schema: u32,
 
     /// Rules bundle update info.
@@ -31,7 +31,7 @@ pub struct Manifest {
     pub next_check_after_seconds: Option<u64>,
 }
 
-/// Information about the available rules bundle update (ADR-030 §3).
+/// Information about the available rules bundle update.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RulesInfo {
     /// Semantic version string (e.g. `"2025-05-01.1"`).
@@ -46,7 +46,7 @@ pub struct RulesInfo {
     pub signature: String,
 }
 
-/// Information about the available client (daemon) update (ADR-030 §3).
+/// Information about the available client (daemon) update.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ClientInfo {
     /// Latest available version string.
@@ -59,7 +59,7 @@ pub struct ClientInfo {
 
 // ── Fetch parameters ─────────────────────────────────────────────────────────
 
-/// Query parameters sent with every manifest request (ADR-030 §3).
+/// Query parameters sent with every manifest request.
 #[derive(Debug, Clone)]
 pub struct ManifestParams {
     /// Current client version string (e.g. `"0.1.0-alpha"`).
@@ -78,7 +78,7 @@ pub struct ManifestParams {
 
 /// Fetches the update manifest from `url` with the given parameters.
 ///
-/// ADR-030 §5.4:
+/// Fetch guarantees:
 /// - TLS 1.2+ enforced by hyper-rustls (webpki roots, https_only).
 /// - No cookies, no Authorization header.
 /// - User-Agent: `sieve-updater/<v>`.

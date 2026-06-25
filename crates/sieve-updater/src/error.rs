@@ -1,10 +1,10 @@
-//! Error types for sieve-updater (ADR-030 §5 客户端实现).
+//! Error types for sieve-updater（客户端实现）.
 
 use thiserror::Error;
 
 /// All errors that can occur inside sieve-updater.
 ///
-/// ADR-030 §5 mandates thiserror (no anyhow in lib crates).
+/// Lib crates mandate thiserror (no anyhow).
 #[derive(Debug, Error)]
 pub enum UpdaterError {
     /// The current operating system is not supported.

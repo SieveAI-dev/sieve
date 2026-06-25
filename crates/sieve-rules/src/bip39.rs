@@ -1,4 +1,4 @@
-//! BIP39 SHA-256 checksum 验证（关联 PRD §9 #4 差异化点）。
+//! BIP39 SHA-256 checksum 验证（Sieve 差异化点）。
 //!
 //! 仅验证 checksum，不验证词列表完整性——调用方应已用 wordlist 过滤过未知词。
 //!
@@ -18,7 +18,7 @@ use std::collections::HashMap;
 ///
 /// 返回每个候选窗口的 token Vec；调用方再对每个 Vec 调 `verify_checksum`。
 ///
-/// 关联 PRD §9 #4 差异化点：只有全部在词表 **且** checksum 通过的才定级 Critical。
+/// 差异化点：只有全部在词表 **且** checksum 通过的才定级 Critical。
 pub fn candidate_bip39_windows<'a>(
     tokens: &'a [&'a str],
     wordlist_index: &HashMap<&'static str, usize>,

@@ -4,7 +4,7 @@
 // 在 TTY 显示危险摘要并等待用户确认。
 //
 // 启动时延目标 < 50ms（依赖仅 serde_json + fd-lock + clap，无 tokio / vectorscan）。
-// 关联：SPEC-001（hook 文件协议）、SPEC-002（弹窗行为规范）、ADR-014（双层防御）。
+// 关联：SPEC-001（hook 文件协议）、SPEC-002（弹窗行为规范）、双层防御。
 
 use std::io::{self, BufRead, Read, Write};
 use std::path::PathBuf;
@@ -41,7 +41,7 @@ const CODEX_INTERNAL_DEADLINE_SECS: u64 = 50;
 /// Hermes hook `timeout` 默认 60s / 上限 300s（`~/.hermes/config.yaml`）。本 deadline 必须
 /// **严格小于** Hermes 配置的 `timeout`：到点前主动输出 block JSON。注意 Hermes **fail-open**——
 /// 超时不会被 Hermes 当成 block（仅 warn 后放行），故本 deadline 只为"尽力赶在放行前发 block"，
-/// 真正 fail-closed 由 daemon 网关 `inbound_hold` 兜底（ADR-014 §6）。
+/// 真正 fail-closed 由 daemon 网关 `inbound_hold` 兜底。
 const HERMES_INTERNAL_DEADLINE_SECS: u64 = 50;
 
 /// sieve-hook: PreToolUse 安全确认 hook（Phase 1 macOS）。
@@ -76,7 +76,7 @@ enum Command {
     /// Hermes pre_tool_call hook：读 stdin 工具调用 JSON，经 daemon 判危，按 Hermes 契约输出。
     ///
     /// ⚠️ Hermes **fail-OPEN**：退出码不 block，决策经 stdout `{"decision":"block"}` 传达；
-    /// 超时即放行。本子命令固定 `exit 0`，真正 fail-closed 由网关 `inbound_hold` 兜底（ADR-014 §6）。
+    /// 超时即放行。本子命令固定 `exit 0`，真正 fail-closed 由网关 `inbound_hold` 兜底。
     Hermes {
         /// sieve home 目录；未传则读 $SIEVE_HOME，默认 $HOME/.sieve。
         #[arg(long)]
@@ -218,7 +218,7 @@ fn emit_codex(out: CodexOutput) -> i32 {
 /// → 按 Hermes 契约输出 stdout JSON。**任何错误路径一律 `emit_hermes_fail_closed`（尽力 block JSON）。**
 ///
 /// ⚠️ Hermes **fail-OPEN**：退出码无效、超时即放行；本进程固定 `exit 0`，真正 fail-closed
-/// 由 daemon 网关 `inbound_hold` 兜底（ADR-014 §6）。
+/// 由 daemon 网关 `inbound_hold` 兜底。
 fn run_hermes_command(sieve_home: Option<PathBuf>) -> i32 {
     let base = match resolve_sieve_home(sieve_home) {
         Some(b) => b,

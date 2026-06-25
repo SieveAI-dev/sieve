@@ -247,7 +247,7 @@ fn spawn_daemon_with_policy(upstream_url: &str, policy: &str) -> Option<PolicyDa
 /// Phase A：OUT-01 AutoRedact —— mock plain 上游记录收到的 body，daemon（默认 auto_redact）
 /// 收到含 fake key 的请求 → 脱敏后转发上游 → 200，且上游 body 里原始 key 已被替换。
 ///
-/// 关联 PRD §6.1 AutoRedact 路径 / OUT-01 / 硬约束 #13。
+/// 关联 AutoRedact 路径 / OUT-01 / 硬约束 #13。
 #[tokio::test]
 async fn phase_a_outbound_out01_auto_redact_forwards_redacted() {
     let upstream_body: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
@@ -281,7 +281,7 @@ async fn phase_a_outbound_out01_auto_redact_forwards_redacted() {
     );
 }
 
-/// Phase A · ADR-037 full 档：daemon 开启加密审计归档（write-only logging）后，含 OUT-01
+/// Phase A · full 档：daemon 开启加密审计归档（write-only logging）后，含 OUT-01
 /// 密钥的出站请求 → 脱敏后转发 + **加密归档段落盘**。红线断言：归档段文件**只含密文**，
 /// 绝不出现原始 `sk-ant-api03-` 明文；用 `sieve audit decrypt`（口令解锁私钥）解开后，
 /// 内容是脱敏后的 `[REDACTED:OUT-01]` 占位符——证明 daemon 喂给归档的是脱敏后内容。
@@ -432,7 +432,7 @@ async fn phase_a_full_archive_stores_ciphertext_only_no_plaintext() {
     let _ = proc.wait();
 }
 
-/// Phase A · ADR-038：billing daemon（relay 上游）收到 relay **虚高 usage** 的 JSON 响应 →
+/// Phase A · billing daemon（relay 上游）收到 relay **虚高 usage** 的 JSON 响应 →
 /// 独立 token 核算检出超额 → `usage.db` 落 `overbilled` 记录（严格本地）。这是「relay 虚报
 /// 被检出」回归的 daemon 级端到端验证。
 #[tokio::test]
@@ -540,11 +540,11 @@ async fn phase_a_billing_detects_relay_usage_inflation() {
     let _ = proc.wait();
 }
 
-// ── ADR-038 × ADR-025：超额计费检测【四路径全覆盖】（同触发=relay usage 虚报，渲染 4 种 wire）──
+// ── 超额计费检测【四路径全覆盖】（同触发=relay usage 虚报，渲染 4 种 wire）──
 //
 // phase_a_billing_detects_relay_usage_inflation（上）= Route Anthropic JSON。
 // 下面补齐 Anthropic SSE / OpenAI JSON / OpenAI SSE，确保 billing 观测器不是 JSON-only
-// （ADR-025 v1.5.4 P0 教训：每个入站特性必须四路径证明）。
+// （v1.5.4 P0 教训：每个入站特性必须四路径证明）。
 
 /// 起一个开启超额计费检测的 daemon（relay 上游=mock；127.0.0.1 非官方 host → relay）。
 struct BillingDaemon {
@@ -702,7 +702,7 @@ async fn phase_a_billing_openai_json_overbilled() {
 }
 
 /// Route 4/4 · **OpenAI SSE**：relay 在末尾 usage chunk（`choices:[]` + `usage`）虚报。
-/// 依赖 `OpenAiSseParser` 把 usage-only chunk 归一化为 `MessageDelta`（ADR-038 扩展）。
+/// 依赖 `OpenAiSseParser` 把 usage-only chunk 归一化为 `MessageDelta`（usage 观测扩展）。
 #[tokio::test]
 async fn phase_a_billing_openai_sse_overbilled() {
     let payload = responses::openai_sse_bytes_with_usage("hi", 80_000, 80_000);
@@ -726,7 +726,7 @@ async fn phase_a_billing_openai_sse_overbilled() {
 /// Phase B-1：Anthropic SSE —— 上游返回含 `eth_signTransaction` tool_use 的流式响应 →
 /// daemon 注入 `sieve_blocked` + IN-CR-05 rule_id（IN-CR-05-EVM，Critical fail-closed）。
 ///
-/// 关联 PRD §5.2 IN-CR-05 / 硬约束 #16（content-type 路由矩阵）。
+/// 关联 IN-CR-05 / 硬约束 #16（content-type 路由矩阵）。
 #[tokio::test]
 async fn phase_b_inbound_anthropic_sse_blocks_signing_tool() {
     let payload =
@@ -762,7 +762,7 @@ async fn phase_b_inbound_anthropic_sse_blocks_signing_tool() {
 /// Phase B-2：Anthropic 非流式 JSON —— 含 `eth_signTransaction` tool_use 的 JSON 响应被
 /// 替换为含 `sieve_blocked` + IN-CR-05。覆盖硬约束 #16 的 Anthropic JSON 组合。
 ///
-/// 关联 lessons.md 2026-04-27（非流式 JSON 入站漏检漏洞）/ PRD §5.2 IN-CR-05。
+/// 关联 lessons.md 2026-04-27（非流式 JSON 入站漏检漏洞）/ IN-CR-05。
 #[tokio::test]
 async fn phase_b_inbound_anthropic_json_blocks_signing_tool() {
     let json_body = serde_json::json!({
@@ -824,7 +824,7 @@ async fn phase_b_inbound_anthropic_json_blocks_signing_tool() {
 /// Phase B-3：OpenAI SSE —— prompt seed 地址 A，上游 SSE 仅含近似地址 B（Levenshtein=1）→
 /// IN-CR-01 截流注入 sieve_blocked。覆盖 OpenAI SSE 组合 + 地址替换算法路径。
 ///
-/// 关联 R9-#1 / PRD §4.2 IN-CR-01 / ADR-018。
+/// 关联 R9-#1 / IN-CR-01 / OpenAI 协议路径分发。
 #[tokio::test]
 async fn phase_b_inbound_openai_sse_blocks_address_substitution() {
     // prompt 含地址 A（...1234A），SSE 仅含地址 B（...1234B，末字符 A→B，Levenshtein=1）。
@@ -875,9 +875,9 @@ async fn phase_b_inbound_openai_sse_blocks_address_substitution() {
 /// Phase B-3b：OpenAI 非流式 JSON —— `choices[].message.tool_calls` 含 `eth_signTransaction`
 /// 的 JSON 响应被替换为含 `sieve_blocked` + IN-CR-05，且该入站 block 落 audit（inbound/blocked）。
 ///
-/// 补 ADR-025 content-type 矩阵 openai_json 路径的 audit 覆盖——此前 OpenAI 入站 block 测试
+/// 补 content-type 矩阵 openai_json 路径的 audit 覆盖——此前 OpenAI 入站 block 测试
 /// 只有 SSE 路径，JSON 路径无 block 审计断言（重蹈「只挂一条路径」P0 漏洞风险）。
-/// 关联硬约束 #16 / handle_openai_json_inbound / PRD §5.2 IN-CR-05-EVM。
+/// 关联硬约束 #16 / handle_openai_json_inbound / IN-CR-05-EVM。
 #[tokio::test]
 async fn phase_b_inbound_openai_json_blocks_signing_tool() {
     // IN-CR-05-EVM 触发 payload：choices[].message.tool_calls 含 eth_signTransaction。
@@ -946,7 +946,7 @@ async fn phase_b_inbound_openai_json_blocks_signing_tool() {
 
 /// Phase B-4（反例）：benign Anthropic SSE（无攻击 payload）→ 正常透传，无 sieve_blocked。
 ///
-/// 关联 PRD §9 #7（Critical 拦截 FP < 0.5%）。
+/// 关联 Critical 拦截 FP < 0.5%。
 #[tokio::test]
 async fn phase_b_inbound_benign_sse_passes_through() {
     let payload = responses::anthropic_sse_bytes(&["Hello, ", "how can I help you today?"]);
@@ -991,7 +991,7 @@ async fn phase_b_inbound_benign_sse_passes_through() {
 /// - `auto-warn`            → 200（Allow 放行）
 /// - `hold-and-fail-closed` → 200（无 GUI 立即 fallback 到 default_on_timeout=redact → 脱敏 200）
 ///
-/// 关联 ADR-028 §3（no_client_policy）。
+/// 关联 no_client_policy。
 #[tokio::test]
 async fn phase_c_three_policies_diverge_on_noncritical() {
     // 每个 policy 独立 mock 上游 + 独立 daemon（独立 SIEVE_HOME + 端口）。
@@ -1032,7 +1032,7 @@ async fn phase_c_three_policies_diverge_on_noncritical() {
 /// Phase C-2：**Critical**（OUT-07 PEM，fail-closed）不受 no_client_policy 影响 —— 三策略
 /// 全部 426。验证硬约束 #3 #8（Critical 强制走 IPC，不被 auto-allow / auto-warn 放行）。
 ///
-/// 关联 PRD §9 #3 #8 / ADR-028 §3（`!any_critical` 守卫）/ critical_lock::FAIL_CLOSED_RULES。
+/// 关联硬约束 #3 #8 / `!any_critical` 守卫 / critical_lock::FAIL_CLOSED_RULES。
 #[tokio::test]
 async fn phase_c_critical_ignores_policy_always_426() {
     for policy in ["auto-block", "auto-warn", "hold-and-fail-closed"] {
@@ -1123,7 +1123,7 @@ async fn mock_gui_respond(
 /// 这是 dogfood「headless CLI 当决策客户端」的核心闭环（任务允许用直连 IPC 方式替代
 /// `sieve decisions resolve`——后者因 nested-runtime bug panic 不可用，见文件头注释 §4）。
 ///
-/// 关联 R2-#1（出站 HoldForDecision）/ ADR-016 / ADR-028 §3。
+/// 关联 R2-#1（出站 HoldForDecision）/ 二维处置矩阵 / no_client_policy。
 #[tokio::test]
 async fn phase_c2_mock_gui_deny_returns_426() {
     let upstream_hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -1207,7 +1207,7 @@ async fn phase_c2_mock_gui_allow_forwards_to_upstream() {
 /// （headless dogfood e2e 抓出，2026-06-18）；已于同日接线：`gated_request_decision` 写
 /// `DecisionMade`（所有 gui_popup 决策 + no-client-policy）、出站脱敏写 `OutboundRedacted`。
 ///
-/// 关联 PRD §5.6.1（审计）/ ADR-026 Stage E（provider_id 列）。
+/// 关联审计数据模型 / provider_id 列。
 #[tokio::test]
 async fn phase_d_detection_audit_wired_and_queryable() {
     let mock = spawn_mock_upstream(|_req| async { responses::anthropic_json_response("ok") }).await;
@@ -1363,7 +1363,7 @@ async fn phase_d_detection_audit_wired_and_queryable() {
 /// 本测试断言：CLI 干净退出（无 nested-runtime panic）、stdout 是合法 jsonl（可空）。
 /// detection 行的正向验证见 [`phase_d_detection_audit_wired_and_queryable`]。
 ///
-/// 关联 ADR-028 TODO-5（`sieve audit` CLI）。
+/// 关联 `sieve audit` CLI。
 #[tokio::test]
 async fn phase_d_audit_cli_runs_without_nested_runtime_panic() {
     let mock = spawn_mock_upstream(|_req| async { responses::anthropic_json_response("ok") }).await;

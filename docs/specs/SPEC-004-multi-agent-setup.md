@@ -2,7 +2,7 @@
 
 > Version: v1.0 — 2026-04-28
 > Status: Stable
-> 关联 PRD：v2.0 §6.6 §6.7 §10 Week 6（v1.5 引入）
+> 关联：多 agent 一键安装与调用链能力（v1.5 引入）
 
 ---
 
@@ -24,7 +24,7 @@
 - `sieve doctor --agent <name>` 的多 agent 检查项
 - `setup.log` 的 multi-agent 扩展字段
 
-**不覆盖**：OpenAI 协议解析细节、X-Sieve-Origin header 协议细节、检测规则算法（属 PRD §5.2 和各规则 SPEC 范围）。
+**不覆盖**：OpenAI 协议解析细节、X-Sieve-Origin header 协议细节、检测规则算法（属检测规则与各规则 SPEC 范围）。
 
 ### 1.3 三家 agent 特性对比
 
@@ -299,7 +299,7 @@ delegation:
 
 - Hermes 委托 Claude Code 子进程时，`delegation.base_url` 指向 Sieve，子进程 LLM 请求经过 Sieve
 - X-Sieve-Origin header 在 Phase 1 后期由 Sieve daemon 端根据请求特征推断调用链
-- PRD §6.7 场景 F（完整调用链显示）推迟到 Phase 1 后期实现
+- 完整调用链显示场景推迟到 Phase 1 后期实现
 
 **后续**：Phase 1 后期可给 Hermes 提 PR 支持 delegation.env_vars 字段，不阻塞 GA。
 
@@ -479,5 +479,5 @@ exit 2。
 | ~~**TBD-03**~~ | ~~OpenClaw daemon 状态检查命令~~ | **已解决**：`openclaw doctor` 命令存在（AGENTS.md 明确记录为"Rebrand/migration/config warnings"诊断命令）。`openclaw status` 存在但面向 chat session 内部使用 | 二进制未找到时跳过检查，输出 None | ✅ Week 8 确认 doctor exit code 语义 |
 | ~~**TBD-04**~~ | ~~Hermes provider 列表查询命令~~ | **已解决（降级）**：`hermes config providers list` 命令**不存在**。实际命令为 `hermes config`（查看）和 `hermes config check`（验证）。依据：hermes-agent.nousresearch.com/docs/user-guide/configuration | 用 `hermes config check` 替代；未找到时跳过，daemon_running = None | ✅ Week 8 确认 config check exit code |
 | ~~**TBD-05**~~ | ~~OpenClaw 是否支持注入自定义 HTTP header~~ | **已解决（部分）**：OpenClaw 支持 `models.providers.<id>.headers` 字段注入自定义 HTTP header。`X-Sieve-Source-Channel: "openclaw"` 静态写入配置。**限制**：值为静态字符串，无法动态反映 WhatsApp/Slack 具体 channel | IN-GEN-06 获得 channel 来源信号（openclaw），无法区分子 channel；可接受 | ✅ Week 8 确认 OpenClaw 是否在转发请求时保留 headers 字段 |
-| ~~**TBD-06**~~ | ~~Hermes 是否透传 `ANTHROPIC_DEFAULT_HEADERS`~~ | **已解决（降级）**：Hermes delegation 子进程**不**继承父进程环境变量。`ANTHROPIC_DEFAULT_HEADERS` 注入不可行。**降级方案**：`delegation.base_url` 指向 Sieve，子进程流量经过 Sieve。X-Sieve-Origin header 在 Phase 1 后期由 Sieve daemon 端推断 | PRD §6.7 场景 F（完整调用链显示）退化为 Phase 1 后期实现 | ✅ Week 8 确认 delegation.base_url 对所有子进程生效 |
+| ~~**TBD-06**~~ | ~~Hermes 是否透传 `ANTHROPIC_DEFAULT_HEADERS`~~ | **已解决（降级）**：Hermes delegation 子进程**不**继承父进程环境变量。`ANTHROPIC_DEFAULT_HEADERS` 注入不可行。**降级方案**：`delegation.base_url` 指向 Sieve，子进程流量经过 Sieve。X-Sieve-Origin header 在 Phase 1 后期由 Sieve daemon 端推断 | 完整调用链显示场景退化为 Phase 1 后期实现 | ✅ Week 8 确认 delegation.base_url 对所有子进程生效 |
 | **TBD-07** | `sieve uninstall --purge` 是否适用于 multi-agent 场景（沿用 SPEC-003 TBD-1） | 倾向 Phase 1 不实现 | — | Phase 2 评估 |

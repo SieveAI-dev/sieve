@@ -6,11 +6,11 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Sieve IPC: JSON-RPC 2.0 over Unix socket + pending/decision file protocol (ADR-013)"
+description = "Sieve IPC: JSON-RPC 2.0 over Unix socket + pending/decision file protocol"
 publish = false
 
 [features]
-# ADR-034 GA 编译期密钥 gate：启用时 `SIEVE_ORIGIN_PUBLIC_KEY` 全零占位触发编译失败，
+# GA 编译期密钥 gate：启用时 `SIEVE_ORIGIN_PUBLIC_KEY` 全零占位触发编译失败，
 # 阻止 X-Sieve-Origin 验签 fail-open 进入 GA 二进制。默认（alpha）不启用，行为不变。
 ga_keys = []
 
@@ -24,7 +24,7 @@ chrono = { workspace = true }
 arc-swap = { workspace = true }
 tracing = { workspace = true }
 fd-lock = { workspace = true }
-# Ed25519 签名验证（X-Sieve-Origin header 防伪造，关联 ADR-019）。
+# Ed25519 签名验证（X-Sieve-Origin header 防伪造）。
 # sieve-rules 已引入相同版本，保持一致避免重复编译。
 # rand_core feature：暴露 SigningKey::generate，测试侧密钥生成需要。
 ed25519-dalek = { version = "2", default-features = false, features = ["std", "rand_core"] }

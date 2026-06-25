@@ -1,7 +1,7 @@
 //! 上游代理配置与 connector（SPEC-007）。
 //!
 //! `ProxyConfig` 描述「到 target 的 TCP 怎么建」：直连 / HTTP CONNECT / SOCKS5。
-//! TLS 始终由上层 hyper-rustls 在隧道之上做——代理只见密文，不 MITM（PRD §9 #12）。
+//! TLS 始终由上层 hyper-rustls 在隧道之上做——代理只见密文，不 MITM。
 //! 代理连接失败时返回明确错误，**绝不静默回退直连**（SPEC-007 §6）。
 
 use crate::error::{SieveCoreError, SieveCoreResult};

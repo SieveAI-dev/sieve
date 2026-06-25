@@ -1,15 +1,15 @@
 //! 命令行解析（clap）。
 //!
-//! 设计约束（ADR-007）：**禁止任何 --disable-critical / --yolo flag**。
+//! 设计约束：**禁止任何 --disable-critical / --yolo flag**。
 //! 安全行为（YOLO mode 拦截 / Critical 不可关）由 sieve-core / sieve-rules 强制，
 //! 不暴露给 CLI。
 //!
-//! Week 5 新增（ADR-015 / SPEC-003）：`setup` / `doctor` / `uninstall` 子命令，
+//! Week 5 新增（SPEC-003）：`setup` / `doctor` / `uninstall` 子命令，
 //! 仅 macOS Phase 1 支持；非 macOS 编译进友好错误 stub。
 //!
 //! Week 6 新增（SPEC-004 §2）：`--agent` / `--all-detected` / `--all` 多 agent 参数。
 //!
-//! ADR-028 新增：
+//! 新增：
 //! - `decisions`：headless decision CLI（TODO-4）
 //! - `audit`：unix-pipeable 审计查询（TODO-5）
 //! - `sieve start --no-client-policy`：无 client 在线时的兜底策略
@@ -17,7 +17,7 @@
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-/// Sieve LLM 流量代理命令行入口（PRD §6.1）。
+/// Sieve LLM 流量代理命令行入口。
 #[derive(Debug, Parser)]
 #[command(name = "sieve", version, about = "Sieve LLM traffic proxy")]
 pub struct Cli {
@@ -38,11 +38,11 @@ pub enum Command {
         /// 仅记录命中，不实际拦截（覆盖 config.dry_run 为 true）。
         ///
         /// flag 出现即为 true；不出现时沿用 config.toml 中的 dry_run 值。
-        /// 禁止添加 --no-dry-run 等关闭安全机制的 flag（ADR-007）。
+        /// 禁止添加 --no-dry-run 等关闭安全机制的 flag。
         #[arg(long)]
         dry_run: bool,
 
-        /// 无 client 接 IPC 时的兜底策略（ADR-028 TODO-4）。
+        /// 无 client 接 IPC 时的兜底策略（TODO-4）。
         ///
         /// 默认 `auto-block`（保守 fail-closed）；其他选项：
         /// - `auto-warn`：标记 warn 自动放行
@@ -55,31 +55,31 @@ pub enum Command {
     /// 自动配置 AI agent 环境（仅 macOS Phase 1）。
     ///
     /// 修改 `~/.claude/settings.json`，注册 launchd plist，写审计 setup 日志。
-    /// 关联：ADR-015 / SPEC-003 §setup / SPEC-004 §2。
+    /// 关联：SPEC-003 §setup / SPEC-004 §2。
     Setup(SetupArgs),
     /// 诊断 Sieve 安装状态（仅 macOS Phase 1）。
     ///
     /// 检查 settings.json / hook / daemon / launchd / canary 共 5 项。
-    /// 关联：ADR-015 / SPEC-003 §doctor / SPEC-004 §6。
+    /// 关联：SPEC-003 §doctor / SPEC-004 §6。
     Doctor(DoctorArgs),
     /// 干净回滚 setup 的所有改动（仅 macOS Phase 1）。
     ///
     /// 从备份目录恢复原文件，卸载 launchd plist。
-    /// 关联：ADR-015 / SPEC-003 §uninstall / SPEC-004 §2.3。
+    /// 关联：SPEC-003 §uninstall / SPEC-004 §2.3。
     Uninstall(UninstallArgs),
-    /// 用户规则管理（PRD v2.0 §5.5）。
+    /// 用户规则管理（v2.0）。
     ///
     /// 维护 `~/.sieve/rules/user.toml`：编辑、列出、禁用、启用。
     /// daemon hot-reload 推 Week 6（v2.0 Phase A 仅 ship 文件级操作）。
     Rules(RulesArgs),
 
-    /// 决策面 CLI（headless 工作流，ADR-028 TODO-4）。
+    /// 决策面 CLI（headless 工作流，TODO-4）。
     ///
     /// 在 GUI 不在线时通过 CLI 订阅 / 查看 / 解决待决策事件。
     /// CLI 跟 GUI 共用同一组 IPC 方法，不引入特权 endpoint。
     Decisions(DecisionsArgs),
 
-    /// 审计日志查询（unix-pipeable，ADR-028 TODO-5）。
+    /// 审计日志查询（unix-pipeable，TODO-5）。
     ///
     /// 直接读 `~/.sieve/audit.db` SQLite，输出 jsonl 格式方便接 jq / fluentd。
     Audit(AuditArgs),
@@ -120,7 +120,7 @@ pub enum UsageCommand {
     },
 }
 
-/// `sieve rules` 参数（PRD v2.0 §5.5.2）。
+/// `sieve rules` 参数。
 #[derive(clap::Args, Debug)]
 pub struct RulesArgs {
     /// 子命令。
@@ -128,7 +128,7 @@ pub struct RulesArgs {
     pub command: RulesCommand,
 }
 
-/// `sieve rules` 子命令枚举（PRD v2.0 §5.5.2，Phase A MVP 4 个）。
+/// `sieve rules` 子命令枚举（Phase A MVP 4 个）。
 #[derive(Debug, Subcommand)]
 pub enum RulesCommand {
     /// 调用 `$EDITOR`（fallback vim/nano）编辑 user.toml；
@@ -174,7 +174,7 @@ impl std::fmt::Display for AgentKind {
     }
 }
 
-/// `sieve setup` 参数（ADR-015 / SPEC-003 §setup / SPEC-004 §2.1）。
+/// `sieve setup` 参数（SPEC-003 §setup / SPEC-004 §2.1）。
 #[derive(clap::Args, Debug)]
 pub struct SetupArgs {
     /// 指定要配置的 agent（可重复；默认 = claude）。
@@ -214,7 +214,7 @@ pub struct DoctorArgs {
     pub all: bool,
 }
 
-/// `sieve uninstall` 参数（ADR-015 / SPEC-003 §uninstall / SPEC-004 §2.3）。
+/// `sieve uninstall` 参数（SPEC-003 §uninstall / SPEC-004 §2.3）。
 #[derive(clap::Args, Debug)]
 pub struct UninstallArgs {
     /// 只回滚指定 agent 的改动。与 `--all` 互斥。
@@ -235,9 +235,9 @@ pub struct UninstallArgs {
     pub yes: bool,
 }
 
-// ── ADR-028 新增类型 ─────────────────────────────────────────────────────────
+// ── 新增类型 ─────────────────────────────────────────────────────────
 
-/// 无 client 接 IPC 时的兜底策略（ADR-028 TODO-4）。
+/// 无 client 接 IPC 时的兜底策略（TODO-4）。
 ///
 /// daemon 在 IPC server 没有 client 连接时（或 decision request 超时无人响应）按此策略走。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -250,7 +250,7 @@ pub enum NoClientPolicy {
     HoldAndFailClosed,
 }
 
-/// `sieve decisions` 参数（ADR-028 TODO-4）。
+/// `sieve decisions` 参数（TODO-4）。
 #[derive(clap::Args, Debug)]
 pub struct DecisionsArgs {
     /// 子命令。
@@ -321,7 +321,7 @@ pub enum OutputFormat {
     Pretty,
 }
 
-/// `sieve audit` 参数（ADR-028 TODO-5）。
+/// `sieve audit` 参数（TODO-5）。
 #[derive(clap::Args, Debug)]
 pub struct AuditArgs {
     /// 子命令。

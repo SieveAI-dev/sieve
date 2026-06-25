@@ -325,7 +325,7 @@ async fn passthrough_preserves_request_headers() {
 
 /// 验证 SSE 流式 body 字节级一致：多 event 粘包 + Content-Type 头保留。
 ///
-/// 对应 PRD §9 第 5 条 fuzz 约束的手工验证版本（完整 fuzz 见 fuzz/ 目录）。
+/// 对应 SSE 边界 fuzz 约束的手工验证版本（完整 fuzz 见 fuzz/ 目录）。
 #[tokio::test]
 async fn passthrough_preserves_sse_chunk_boundaries() {
     // 模拟 Anthropic SSE 典型响应：5 个 event，多行粘在一个 HTTP chunk 里

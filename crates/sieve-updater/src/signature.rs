@@ -17,7 +17,7 @@ pub const TRUSTED_PUBKEY: Option<[u8; 32]> = Some([
     0xe1, 0xce, 0x65, 0x1e, 0xfd, 0x5a, 0x80, 0xa6, 0x3a, 0xd1, 0x8d, 0xc0, 0x20, 0xd7, 0x4c, 0x04,
 ]);
 
-/// ADR-034 GA 编译期密钥 gate。
+/// GA 编译期密钥 gate。
 ///
 /// 启用 `ga_keys` feature（GA release build）时，若 [`TRUSTED_PUBKEY`] 仍为占位
 /// `None`，则**编译失败**——阻止 fail-open 的规则签名校验进入 GA 二进制，兑现
@@ -26,7 +26,7 @@ pub const TRUSTED_PUBKEY: Option<[u8; 32]> = Some([
 #[cfg(feature = "ga_keys")]
 const _: () = assert!(
     TRUSTED_PUBKEY.is_some(),
-    "ga_keys feature enabled but TRUSTED_PUBKEY is None — GA build must embed a real Ed25519 verifying key (ADR-034)"
+    "ga_keys feature enabled but TRUSTED_PUBKEY is None — GA build must embed a real Ed25519 verifying key"
 );
 
 /// Verifies an Ed25519 signature over `data`.
@@ -47,7 +47,7 @@ pub fn verify_signature(data: &[u8], sig_str: &str) -> Result<(), UpdaterError> 
 ///
 /// 抽出 `trusted_pubkey` 参数让调用方（[`crate::install::install_rules`]）显式注入信任根，
 /// 生产固定传 [`TRUSTED_PUBKEY`]（已嵌入真公钥，验签 fail-closed 生效），测试以确定性测试
-/// 密钥注入 `Some(测试公钥)` 覆盖 fail-closed 分支。生产语义不变（ADR-034）。
+/// 密钥注入 `Some(测试公钥)` 覆盖 fail-closed 分支。生产语义不变。
 pub(crate) fn verify_signature_with_key(
     data: &[u8],
     sig_str: &str,
@@ -148,7 +148,7 @@ mod tests {
         );
     }
 
-    /// ADR-034: 信任根已嵌入真公钥——`TRUSTED_PUBKEY = Some(真根)`，验签 fail-closed
+    /// 信任根已嵌入真公钥——`TRUSTED_PUBKEY = Some(真根)`，验签 fail-closed
     /// 生效（不再是占位 `None` 的 skip+warn）。守护：改回 `None` 会让此测试红；
     /// `ga_keys` 启用时文件顶部 const 断言在编译期同样保证非 `None`。
     #[test]
@@ -159,7 +159,7 @@ mod tests {
         );
     }
 
-    // ── Some(真公钥) fail-closed 分支回归（ADR-034）──────────────────────────────
+    // ── Some(真公钥) fail-closed 分支回归 ──────────────────────────────
     //
     // 生产 TRUSTED_PUBKEY 已是 Some(真根)，Some 分支即生产路径。这组单测用确定性
     // 测试密钥（from_bytes，不依赖 rng）注入 verify_signature_with_key 的 Some 分支，
