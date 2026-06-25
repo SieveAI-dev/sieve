@@ -29,13 +29,23 @@ jobs:
   # Tier 1 失败 → release 中止（hard gate）
   # Phase 1 仅 macOS；Linux target 推 Phase 2
   #
-  # ⚠️ GA 真公钥就位前：下方两步 `cargo build --release` 当前【不带】
-  #    --features ga_keys。占位密钥阶段这是对的（带上会被 const assert E0080
-  #    打挂 release build）。真 ed25519 公钥（signature.rs TRUSTED_PUBKEY /
-  #    origin_header.rs SIEVE_ORIGIN_PUBLIC_KEY）就位后，两步 build 都【必须】
-  #    加 --features ga_keys，否则占位硬兜底被旁路、规则验签 + X-Sieve-Origin
-  #    验签 fail-open 进入 GA 发布产物。同步把 ci.yml 的 ga-keys-gate job 从
-  #    expect-FAIL 反转为 expect-PASS。
+  # 🔒 可复现构建必须串行（-j1）：fat-LTO 的符号合并顺序由并行编译完成顺序播种，
+  #    多核并行下同源两次干净构建产出双值 SHA-256（实测约 3:1），触发下方「SHA-256
+  #    比对」exit 1 中止 release。-j1 强制确定性合并顺序（与 scripts/repro-build.sh
+  #    一致）。codegen-units=1 只消前端切分、消不掉 LTO 后端的并行 tiebreak；lto=off
+  #    亦收敛但牺牲优化，故保留 fat-LTO + 串行。
+  #
+  # ℹ️ ga_keys 验签 gate 暂未正式激活（产品决策，2026-06-25）：真 ed25519 公钥
+  #    已就位（signature.rs TRUSTED_PUBKEY / origin_header.rs SIEVE_ORIGIN_PUBLIC_KEY
+  #    均为真值，非占位），实测 `cargo build --features ga_keys` 已可编译通过（不再
+  #    E0080）。当前两步 build 暂不加 --features ga_keys —— 因信任根公钥日后可能更
+  #    换，过早锁进 GA 产物会抬高换钥成本（已装用户更新验签会被绑死）。激活时机 =
+  #    首个 release 流程、信任根定稿时，届时：① 两步 build 加 --features ga_keys
+  #    （编译期防呆，确保占位密钥永不混入 GA）；② 同步把 ci.yml 的 ga-keys-gate
+  #    job 反转为 expect-PASS。
+  #    注：规则更新验签当前【已 fail-closed 生效】（公钥已嵌入，与 ga_keys 无关，
+  #    ga_keys 仅作编译期防呆）；X-Sieve-Origin 完整签名链是 Phase-1-GA 待实现功能
+  #    （当前 chain_depth 提供尽力而为的嵌套深度防御），非接线遗漏。
   # ─────────────────────────────────────────────────────────────
   reproducible-build:
     name: Reproducible build (${{ matrix.target }})
@@ -74,7 +84,7 @@ jobs:
           SOURCE_DATE_EPOCH: ${{ env.SOURCE_DATE_EPOCH }}
           RUSTFLAGS: "-D warnings --remap-path-prefix=$HOME=/build --remap-path-prefix=$GITHUB_WORKSPACE=/src"
         run: |
-          cargo build --release --locked --target ${{ matrix.target }} -p sieve-cli
+          cargo build -j1 --release --locked --target ${{ matrix.target }} -p sieve-cli
           cp target/${{ matrix.target }}/release/sieve sieve-build1
           shasum -a 256 sieve-build1 | tee sha256-build1.txt
 
@@ -85,7 +95,7 @@ jobs:
           RUSTFLAGS: "-D warnings --remap-path-prefix=$HOME=/build --remap-path-prefix=$GITHUB_WORKSPACE=/src"
         run: |
           cargo clean
-          cargo build --release --locked --target ${{ matrix.target }} -p sieve-cli
+          cargo build -j1 --release --locked --target ${{ matrix.target }} -p sieve-cli
           cp target/${{ matrix.target }}/release/sieve sieve-build2
           shasum -a 256 sieve-build2 | tee sha256-build2.txt
 
