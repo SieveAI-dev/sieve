@@ -493,14 +493,44 @@ impl AuditEvent {
 /// 当前 schema 版本（v3：加 provider_id 列）。
 const CURRENT_SCHEMA_VERSION: u32 = 3;
 
-/// 打开数据库后执行一次 schema 迁移。
+/// 幂等补列：仅当 `audit_events` 实表缺 `col` 时才 `ALTER TABLE ADD COLUMN`。
 ///
-/// - 全新 DB（user_version = 0）：CREATE TABLE 已含全部最新列，直接设版本号。
-/// - v1 老 DB（user_version = 1）：`ALTER TABLE ADD COLUMN`（caller_pid/exe + provider_id），不重写表。
-/// - v2 老 DB（user_version = 2）：仅加 provider_id 列。
-/// - v3 及以上：跳过。
+/// SQLite 无 `ADD COLUMN IF NOT EXISTS`，对已存在列再 ALTER 会 "duplicate column
+/// name" 报错并毒化整个迁移事务，故必须先查 `PRAGMA table_info` 实列。这是迁移
+/// 以「实表列」为真相源（而非 user_version 整数）的基石（见 [`migrate`]）。
 ///
-/// 迁移在事务内执行，失败自动回滚。
+/// # Errors
+/// `PRAGMA table_info` 或 `ALTER TABLE` 执行失败时返回错误。
+fn ensure_column(conn: &Connection, col: &str, col_ddl: &str) -> Result<()> {
+    let exists = conn
+        .prepare("PRAGMA table_info(audit_events)")?
+        .query_map([], |r| r.get::<_, String>(1))?
+        .filter_map(std::result::Result::ok)
+        .any(|name| name == col);
+    if !exists {
+        conn.execute_batch(&format!(
+            "ALTER TABLE audit_events ADD COLUMN {col} {col_ddl};"
+        ))
+        .with_context(|| format!("补列 {col} 失败"))?;
+    }
+    Ok(())
+}
+
+/// 打开数据库后执行一次 schema 迁移，把 `audit_events` 升到 [`CURRENT_SCHEMA_VERSION`]。
+///
+/// 以「实表列」为真相源逐列补齐，而非用 `PRAGMA user_version` 整数推断结构。
+///
+/// 历史教训：`user_version = 0` 有两种语义截然不同的来源——
+/// (A) 全新库，`CREATE TABLE` 刚建出完整 v3 表；(B) pre-f7f794d 早期遗留库，表已
+/// 存在但只有 9 个 v1 列，且当时代码从不写 user_version 故停在 SQLite 默认 0。旧实现
+/// 的 `current == 0` 快速路径把 (B) 误判为 (A)，盲目 stamp version=3 却跳过 ADD COLUMN
+/// → 表缺列 + 版本号永久说谎 + 之后每次 append（固定 11 列 INSERT）全失败。改为实列
+/// 驱动后：全新库三个 `ensure_column` 都是 no-op（CREATE 已建全列），遗留库（v0/v1/v2）
+/// 按需补缺列，两者都收敛到 v3。未来加列照抄一行 `ensure_column` 即可，迁移不会再因
+/// 忘记递增/盖错版本而漂移。
+///
+/// 迁移在单一事务内执行，任一步失败整体回滚（`ALTER TABLE` 与 `PRAGMA user_version`
+/// 均受 SQLite 事务保护）。
 ///
 /// # Errors
 /// SQLite 执行失败时返回错误。
@@ -514,48 +544,37 @@ fn migrate(conn: &Connection) -> Result<()> {
         return Ok(());
     }
 
-    if current == 0 {
-        // 全新数据库：CREATE TABLE 已包含 caller_pid / caller_exe / provider_id；
-        // 直接将版本号设为最新。
+    // BEGIN IMMEDIATE 而非延迟 BEGIN：迁移含「先读 table_info（SHARED）再写 ALTER/PRAGMA
+    // （需把锁升级到 RESERVED）」，延迟 BEGIN 的读后升级是 SQLite 最易死锁/SQLITE_BUSY 的路径。
+    // 前置 IMMEDIATE 直接拿 RESERVED 写锁，规避升级争用（与兄弟方法 delete_all_events 一致）。
+    conn.execute_batch("BEGIN IMMEDIATE;")
+        .context("开启 schema 迁移事务失败")?;
+
+    // ALTER TABLE ADD COLUMN 在 SQLite 中是 O(1)（不重写表）；新列对现有行为 NULL 或
+    // 取 DEFAULT，不触发 NOT NULL 失败；BEFORE UPDATE/DELETE 触发器基于行操作，ADD
+    // COLUMN 不使其失效（append-only 不变量安全）。列顺序对应 v1→v2→v3 历史增量，但
+    // 不再依赖 version 分支精确性——存在即跳过。
+    let migrated = (|| -> Result<()> {
+        ensure_column(conn, "caller_pid", "INTEGER")?;
+        ensure_column(conn, "caller_exe", "TEXT")?;
+        ensure_column(conn, "provider_id", "TEXT NOT NULL DEFAULT 'unknown'")?;
         conn.execute_batch(&format!("PRAGMA user_version = {CURRENT_SCHEMA_VERSION};"))
             .context("设置 user_version 失败")?;
-        return Ok(());
+        Ok(())
+    })();
+
+    match migrated {
+        Ok(()) => {
+            conn.execute_batch("COMMIT;")
+                .context("提交 schema 迁移事务失败")?;
+            Ok(())
+        }
+        Err(e) => {
+            // 回滚尽力而为；即便回滚失败也返回原始迁移错误（诊断价值更高）。
+            let _ = conn.execute_batch("ROLLBACK;");
+            Err(e)
+        }
     }
-
-    if current == 1 {
-        // v1 → v2：加 caller_pid + caller_exe。
-        // ALTER TABLE ADD COLUMN 在 SQLite 中是 O(1) 操作（不重写表），
-        // 新列对现有行为 NULL，不触发 NOT NULL 约束失败（列定义无 NOT NULL）。
-        // BEFORE UPDATE/DELETE 触发器基于行操作，ADD COLUMN 不失效触发器。
-        conn.execute_batch(
-            "BEGIN;
-             ALTER TABLE audit_events ADD COLUMN caller_pid INTEGER;
-             ALTER TABLE audit_events ADD COLUMN caller_exe TEXT;
-             PRAGMA user_version = 2;
-             COMMIT;",
-        )
-        .context("v1→v2 schema 迁移失败")?;
-    }
-
-    // 此处 current 已经被前一段升到 2，统一走 v2 → v3 分支。
-    let after_v1: u32 = conn
-        .query_row("PRAGMA user_version", [], |r| r.get(0))
-        .context("读取 PRAGMA user_version 失败")?;
-
-    if after_v1 == 2 {
-        // v2 → v3：加 provider_id 列。
-        // 新列默认 'unknown' 兼容旧记录；
-        // 之后所有 audit.append 都会显式传 provider_id（来自 listener 元信息）。
-        conn.execute_batch(
-            "BEGIN;
-             ALTER TABLE audit_events ADD COLUMN provider_id TEXT NOT NULL DEFAULT 'unknown';
-             PRAGMA user_version = 3;
-             COMMIT;",
-        )
-        .context("v2→v3 schema 迁移失败（provider_id）")?;
-    }
-
-    Ok(())
 }
 
 // ─────────────────────────── AuditStore ────────────────────────────────────
@@ -585,6 +604,12 @@ impl AuditStore {
         let conn = Connection::open(path)
             .with_context(|| format!("打开审计数据库 {} 失败", path.display()))?;
 
+        // busy_timeout：默认 0 → 锁争用立即 SQLITE_BUSY。daemon 启动 migrate 时若恰有
+        // `sieve audit` 读连接持 SHARED 锁，migrate 的写锁升级会瞬时失败 → init 失败 →
+        // daemon fail-closed 起不来。给 5s 重试窗口让启动期争用收敛。
+        conn.busy_timeout(std::time::Duration::from_secs(5))
+            .context("设置 busy_timeout 失败")?;
+
         // 建表（全新 DB）或幂等（已存在时跳过）
         conn.execute_batch(CREATE_TABLE_DDL)
             .context("创建 audit_events 表失败")?;
@@ -602,11 +627,19 @@ impl AuditStore {
         })
     }
 
-    /// 返回当前 SQLite schema 版本（PRAGMA user_version）。
+    /// 返回实库 `PRAGMA user_version`（而非编译期常量），供 sieve.hello 握手通知填充
+    /// `audit_db_user_version` 字段（SPEC-005 §3）。
     ///
-    /// 供 sieve.hello 握手通知填充 `audit_db_user_version` 字段（SPEC-005 §3）。
+    /// 读实库而非返回 [`CURRENT_SCHEMA_VERSION`]：正常流程下 init 迁移成功后实库必达常量值，
+    /// 但旧 daemon 打开未来版本库（user_version > CURRENT，migrate 早退不动库）时，握手必须
+    /// 上报真实版本而非常量，否则 GUI/审计据此判断 schema 会被误导。
+    /// 读取失败（极罕见）回退到 [`CURRENT_SCHEMA_VERSION`]，不让握手因此失败。
     pub fn schema_version(&self) -> u32 {
-        CURRENT_SCHEMA_VERSION
+        self.conn
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap_or(CURRENT_SCHEMA_VERSION)
     }
 
     /// 删除所有审计事件行，保留表结构（`sieve.purge_history` SPEC-005 §11B 专用）。
@@ -1003,6 +1036,91 @@ mod tests {
             cols.contains(&"provider_id".to_string()),
             "全新 DB 应含 provider_id 列（v3），实际列：{cols:?}"
         );
+    }
+
+    /// 回归（pre-f7f794d 遗留库迁移）：user_version=0 的「遗留库」——表已存在但只有
+    /// 9 个 v1 列（pre-f7f794d 早期构建从不写 user_version，停在 SQLite 默认 0）。
+    /// 旧 migrate 的 `current == 0` 快速路径把它误判为「CREATE 刚建好的全列库」，
+    /// 盲目 stamp version=3 却不跑 ADD COLUMN → 表缺列 + 版本号永久说谎 →
+    /// 之后每次 append（固定 11 列 INSERT）都因 "no column named caller_pid" 失败，
+    /// 表现为「审计写入全部失败」。修复后 migrate 以实表列为真相源逐列补齐。
+    #[tokio::test]
+    async fn migrate_legacy_v0_table_backfills_missing_columns() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("legacy_v0.db");
+
+        // 播种遗留库：只含 9 个 v1 列，且不设 user_version（停在默认 0）。
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE audit_events (
+                    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp_rfc3339 TEXT NOT NULL,
+                    direction         TEXT NOT NULL,
+                    rule_id           TEXT NOT NULL,
+                    severity          TEXT NOT NULL,
+                    disposition       TEXT NOT NULL,
+                    decision          TEXT,
+                    request_id        TEXT NOT NULL,
+                    raw_json          TEXT
+                );
+                INSERT INTO audit_events
+                    (timestamp_rfc3339, direction, rule_id, severity, disposition, decision, request_id, raw_json)
+                VALUES ('2026-01-01T00:00:00Z','outbound','OUT-01','Critical','redact',NULL,'legacy-req',NULL);",
+            )
+            .unwrap();
+            let v: u32 = conn
+                .query_row("PRAGMA user_version", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(v, 0, "遗留库应停在 user_version=0（前置版本管理从不写它）");
+        }
+
+        // 走完整公共路径：CREATE TABLE IF NOT EXISTS（对遗留表 no-op）+ migrate + triggers。
+        let store = AuditStore::init(&db_path).expect("init on legacy v0 db failed");
+
+        let conn = Connection::open(&db_path).unwrap();
+
+        // (a) 版本收敛到 3。
+        let ver: u32 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(ver, 3, "迁移后 user_version 应升到 v3");
+
+        // (b) 三列被补齐。
+        let cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(audit_events)")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        for c in ["caller_pid", "caller_exe", "provider_id"] {
+            assert!(
+                cols.contains(&c.to_string()),
+                "遗留库迁移后应含 {c} 列，实际：{cols:?}"
+            );
+        }
+
+        // (c) 旧行 provider_id 取默认 'unknown'。
+        let pid: String = conn
+            .query_row(
+                "SELECT provider_id FROM audit_events WHERE request_id = 'legacy-req'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(pid, "unknown", "补列后旧行 provider_id 应为默认 'unknown'");
+
+        // (d) 核心断言：append 不再因缺列失败（修复前这里 "no column named caller_pid"）。
+        store
+            .append(make_event(2), "test-provider")
+            .await
+            .expect("append after legacy-v0 migration must succeed");
+
+        let count: u32 = conn
+            .query_row("SELECT COUNT(*) FROM audit_events", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 2, "遗留行 + 新 append 行共 2 条");
     }
 
     /// caller_pid / caller_exe 非 NULL 时写入后读出应一致。
