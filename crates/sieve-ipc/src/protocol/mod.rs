@@ -28,8 +28,8 @@ pub use audit::{PurgeHistoryRequest, PurgeHistoryResult};
 
 pub use decision::{
     CancelReason, DecisionAction, DecisionRequest, DecisionResponse, DefaultOnTimeout,
-    DetectionPayload, Disposition, OriginHop, RequestDecisionCanceledNotify, Severity, SourceAgent,
-    UiPhase,
+    DetectionPayload, Disposition, MergedDecisionAction, MergedDecisionResponse, OriginHop,
+    PerIssueDecision, RequestDecisionCanceledNotify, Severity, SourceAgent, UiPhase,
 };
 
 pub use handshake::{HelloParams, ReloadUserRules};

@@ -291,6 +291,89 @@ pub struct DecisionResponse {
     pub ui_phase_when_clicked: Option<UiPhase>,
 }
 
+/// 多 issue 合并请求的整体决策标签（SPEC-005 §6.2.2）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MergedDecisionAction {
+    AllDeny,
+    AllAllow,
+    Partial,
+}
+
+/// 多 issue 响应中的单项决策。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PerIssueDecision {
+    pub issue_id: String,
+    pub decision: DecisionAction,
+    pub remember: bool,
+    #[serde(default)]
+    pub context_hint: Option<String>,
+}
+
+/// GUI 对 merged request_decision 的响应（SPEC-005 §6.2.2）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MergedDecisionResponse {
+    pub request_id: Uuid,
+    pub merged_decision: MergedDecisionAction,
+    pub per_issue: Vec<PerIssueDecision>,
+    #[serde(serialize_with = "crate::ts_serde::serialize_utc_millis")]
+    pub decided_at: DateTime<Utc>,
+    #[serde(default)]
+    pub by_user: bool,
+    #[serde(default)]
+    pub ui_phase_when_clicked: Option<UiPhase>,
+}
+
+impl MergedDecisionResponse {
+    /// 兼容当前 pipeline 的整体动作：
+    /// - 全拒绝/全允许直接映射；
+    /// - partial 采用 RedactAndAllow，保守脱敏所有 hold detection 后继续转发。
+    pub fn into_aggregate(self) -> DecisionResponse {
+        // fail-closed 聚合：任何 per_issue 被拒 → 整批 Deny，绝不让被拒项降级。旧实现把
+        // Partial 一律映射 RedactAndAllow，而入站把 RedactAndAllow 当 Allow → 多 issue 入站
+        // 弹窗里用户拒掉 Critical(IN-CR-*)、放行 non-critical 时，被拒的 Critical 会被静默
+        // 降级并转发危险 tool call（违反核心安全不变量：Critical 决策任何情况不得降级；且是
+        // 「解码失败→超时→Block→Deny」旧行为的安全回归）。
+        // into_aggregate 不知方向，但「any Deny → Deny」对入站（拦截危险调用）与出站（拒绝即
+        // 拦截不泄露）都 fail-closed。仅当无任何 Deny（混合 Allow + RedactAndAllow）时才保守
+        // RedactAndAllow（出站脱敏转发 / 入站无危险项放行）。这也兜底 GUI 误报 merged_decision
+        // 标签（如 AllAllow 却夹带 Deny per_issue）——信任更保守的 per_issue Deny。
+        let any_deny = self
+            .per_issue
+            .iter()
+            .any(|issue| issue.decision == DecisionAction::Deny);
+        let decision = if any_deny {
+            DecisionAction::Deny
+        } else {
+            match self.merged_decision {
+                MergedDecisionAction::AllDeny => DecisionAction::Deny,
+                MergedDecisionAction::AllAllow => DecisionAction::Allow,
+                MergedDecisionAction::Partial => DecisionAction::RedactAndAllow,
+            }
+        };
+        // 聚合为 Deny 时绝不 remember（不记住拒绝；避免含 Critical 的批次因某个 non-critical
+        // 勾选 remember 而误持久化）；其余按 per_issue 的 Allow+remember 折叠。
+        let remember = decision != DecisionAction::Deny
+            && self
+                .per_issue
+                .iter()
+                .any(|issue| issue.decision == DecisionAction::Allow && issue.remember);
+        let context_hint = self
+            .per_issue
+            .iter()
+            .find_map(|issue| issue.context_hint.clone());
+        DecisionResponse {
+            request_id: self.request_id,
+            decision,
+            decided_at: self.decided_at,
+            by_user: self.by_user,
+            remember,
+            context_hint,
+            ui_phase_when_clicked: self.ui_phase_when_clicked,
+        }
+    }
+}
+
 /// `sieve.request_decision_canceled` 取消原因。
 ///
 /// 关联：SPEC-002 §9.3 / §9.4。
