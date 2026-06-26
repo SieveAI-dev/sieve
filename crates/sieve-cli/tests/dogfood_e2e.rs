@@ -1137,6 +1137,105 @@ async fn mock_gui_respond(
     Ok(())
 }
 
+/// 出站脱敏广播回归 harness：mock GUI 连 IPC，只订阅、收集所有 `sieve.notify_status_bar`
+/// 通知帧的 params，经 channel 送回主测试。与 [`mock_gui_respond`] 不同——不回决策，
+/// 专测 daemon 是否把出站脱敏经 IPC 广播给 GUI。
+async fn mock_gui_collect_notifies(
+    socket_path: &Path,
+    ready_tx: tokio::sync::oneshot::Sender<()>,
+    notify_tx: tokio::sync::mpsc::UnboundedSender<serde_json::Value>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    use tokio::net::UnixStream;
+
+    let mut stream = None;
+    for _ in 0..200 {
+        match UnixStream::connect(socket_path).await {
+            Ok(s) => {
+                stream = Some(s);
+                break;
+            }
+            Err(_) => tokio::time::sleep(Duration::from_millis(100)).await,
+        }
+    }
+    let stream = stream.ok_or("IPC socket not ready after 20s")?;
+    // 让 IPC server 完成 handle_connection spawn + gui_writer 注册。
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let _ = ready_tx.send(());
+
+    let (reader, _writer) = stream.into_split();
+    let mut lines = BufReader::new(reader).lines();
+    while let Some(line) = lines.next_line().await? {
+        let line = line.trim().to_owned();
+        if line.is_empty() {
+            continue;
+        }
+        let rpc: serde_json::Value = match serde_json::from_str(&line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if rpc.get("method").and_then(|m| m.as_str()) == Some("sieve.notify_status_bar") {
+            if let Some(params) = rpc.get("params") {
+                let _ = notify_tx.send(params.clone());
+            }
+        }
+    }
+    Ok(())
+}
+
+/// 出站脱敏 IPC 广播回归：出站 OUT-01 AutoRedact 命中后，daemon 必须经 IPC 向 GUI
+/// 广播 `sieve.notify_status_bar{kind:outbound_redacted}`。修复前 daemon 只写 audit、从不
+/// 广播 → GUI recentHits/toast 永空。断言 mock GUI 收到该 notify，rule_id==OUT-01，且
+/// notify 不含原文 secret（脱敏红线，与 audit raw_json=None 同口径）。
+#[tokio::test]
+async fn outbound_autoredact_broadcasts_status_bar_notify() {
+    let mock = spawn_mock_upstream(|_req| async move {
+        responses::anthropic_json_response("ok-from-upstream")
+    })
+    .await;
+
+    let Some(guard) = spawn_daemon(DaemonConfig::new(mock.url())) else {
+        return;
+    };
+    let socket = guard.ipc_socket();
+
+    // mock GUI 连 IPC，订阅并收集 status_bar 通知（不回决策，只观察广播）。
+    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<()>();
+    let (notify_tx, mut notify_rx) = tokio::sync::mpsc::unbounded_channel::<serde_json::Value>();
+    let collect_task = tokio::spawn(async move {
+        let _ = mock_gui_collect_notifies(&socket, ready_tx, notify_tx).await;
+    });
+    let _ = tokio::time::timeout(Duration::from_secs(15), ready_rx).await;
+
+    // 发含 OUT-01 secret 的出站请求 → 脱敏命中 → 应广播 outbound_redacted。
+    let (status, _h, _b) = post_json(&guard.base_url(), "/v1/messages", out01_key_body()).await;
+    assert_eq!(status, 200, "OUT-01 脱敏后应转发 200");
+
+    // 断言收到 outbound_redacted notify（修复前这里 5s 超时——daemon 从不广播即红）。
+    let notify = tokio::time::timeout(Duration::from_secs(5), notify_rx.recv())
+        .await
+        .expect("应在 5s 内收到 sieve.notify_status_bar（修复前永不到达 → 超时即红）")
+        .expect("notify channel 不应提前关闭");
+
+    assert_eq!(
+        notify.get("kind").and_then(|k| k.as_str()),
+        Some("outbound_redacted"),
+        "应为出站脱敏通知 kind=outbound_redacted，实际：{notify}"
+    );
+    assert_eq!(
+        notify.get("rule_id").and_then(|r| r.as_str()),
+        Some("OUT-01"),
+        "notify rule_id 应为 OUT-01，实际：{notify}"
+    );
+    // 脱敏红线：notify 整体（title/detail/rule_id）绝不含原文 secret。
+    assert!(
+        !notify.to_string().contains("sk-ant-api03"),
+        "notify 绝不含原文 secret：{notify}"
+    );
+
+    collect_task.abort();
+}
+
 /// Phase C2（完整决策流）：mock GUI 连 IPC 当决策客户端 → 出站 OUT-07 hold 等决策 →
 /// GUI 回 Deny → 被 hold 的请求返回 426，上游未被调用。
 ///

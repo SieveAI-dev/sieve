@@ -2614,6 +2614,24 @@ async fn proxy_inner(
                         tracing::warn!(error = %e, "audit append OutboundRedacted failed");
                     }
                 });
+
+                // IPC：向 GUI 广播出站脱敏状态栏通知（SPEC-005 §7.3 outbound_redacted）。
+                // 此前出站脱敏只落 audit、从不广播 → GUI recentHits/toast 永空。入站命中
+                // （序列/热重载）都走 broadcast_status_bar，出站漏发是纯遗漏，现对齐入站
+                // 范式：fire-and-forget，无 client 时静默丢弃，不阻塞热路径。
+                // 红线：title/detail 仅含计数与 redacted_summary（rule_id 摘要，如 "OUT-01"），
+                // 绝不含原文 secret（与 audit raw_json=None 同口径）。
+                if let Some(ref ipc) = ipc {
+                    ipc.broadcast_status_bar(sieve_ipc::protocol::StatusBarNotify {
+                        notify_id: uuid::Uuid::now_v7(),
+                        created_at: chrono::Utc::now(),
+                        kind: sieve_ipc::protocol::NotifyKind::OutboundRedacted,
+                        title: format!("已脱敏 {} 处敏感信息", seg_result.redacted_count),
+                        detail: Some(seg_result.redacted_summary.clone()),
+                        rule_id: Some(d.rule_id.clone()),
+                        auto_dismiss_seconds: 5,
+                    });
+                }
             }
 
             // 经 codec 把脱敏后文本写回并重序列化（A1 ProviderCodec）
@@ -3189,6 +3207,21 @@ async fn proxy_openai(
                     tracing::warn!(error = %e, "audit append OutboundRedacted (openai) failed");
                 }
             });
+
+            // IPC：与 Anthropic 路径对称，向 GUI 广播出站脱敏状态栏通知。
+            // 两个 provider 落点必须同时发，只补一侧会重建当初 audit 已消除的不对称。
+            // 红线同上：detail 仅含 redacted_summary（rule_id 摘要），不含原文 secret。
+            if let Some(ref ipc) = ipc {
+                ipc.broadcast_status_bar(sieve_ipc::protocol::StatusBarNotify {
+                    notify_id: uuid::Uuid::now_v7(),
+                    created_at: chrono::Utc::now(),
+                    kind: sieve_ipc::protocol::NotifyKind::OutboundRedacted,
+                    title: format!("已脱敏 {} 处敏感信息", seg_result.redacted_count),
+                    detail: Some(seg_result.redacted_summary.clone()),
+                    rule_id: Some(d.rule_id.clone()),
+                    auto_dismiss_seconds: 5,
+                });
+            }
         }
 
         let new_body_bytes = decoded.apply_redacted_texts(&texts, &seg_result.texts)?;
