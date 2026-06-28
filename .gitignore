@@ -66,6 +66,9 @@ rules-v*.tar.zst
 rules-v*.sig
 rules-v*.changelog.md
 
+# 本地测试用规则包符号链接（指向工作区外，仅本地，绝不入库；对 symlink 条目与潜在真目录均生效）
+/crates/sieve-rules/rules
+
 # Sigstore 签名产物（CI 在 release 时生成，本地构建时如有也不入库）
 *.sigstore
 *.bundle.json
