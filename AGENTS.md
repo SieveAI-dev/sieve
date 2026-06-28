@@ -181,6 +181,6 @@ cargo bench -p sieve-rules
 
 ## 全局规则继承
 
-用户级 [~/.Codex/AGENTS.md](~/.Codex/AGENTS.md) 已设定通用规则：沟通风格、工作流（规划 / 验证 / Bug 修复 / 经验沉淀）、子代理调度策略、Python/JS/Shell 规范、Git 提交规范（含禁止 AI 签名）、文档管理 v2.0 + DOCS-STANDARD 引用、RTK 命令代理。
+用户级 [~/.Codex/AGENTS.md](~/.Codex/AGENTS.md) 已设定通用规则：沟通风格、工作流（规划 / 验证 / Bug 修复 / 经验沉淀）、子代理调度策略、Python/JS/Shell 规范、Git 提交规范（含禁止 AI 签名）、文档管理 v2.0 + DOCS-STANDARD 引用。
 
 **本文只补 Sieve 项目特有约束，不重复全局内容。** 如冲突，按 .cursorrules 优先。
