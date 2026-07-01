@@ -137,6 +137,12 @@ pub struct RequestDecisionWire {
     /// `X-Sieve-Origin` header 真实嵌套深度；null 时回退到 `origin_chain.length`。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub explicit_chain_depth: Option<u32>,
+    /// 触发本次决策的 listener 上游 provider_id（多 listener 路由，ADR-026）。
+    ///
+    /// v2.x 向后兼容新增字段；旧 client 静默忽略。供 `decisions watch --provider-id`
+    /// 与 `list_pending` 按上游过滤。null 或缺失时无来源上游信息（单 listener / 系统内部）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
 }
 
 // ── 多 issue 合并 wire 形态（§6.1.2）────────────────────────────────────────
@@ -172,6 +178,9 @@ pub struct MergedRequestDecisionWire {
     pub source_channel: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub explicit_chain_depth: Option<u32>,
+    /// 触发本次决策的 listener 上游 provider_id（多 listener 路由，ADR-026）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
     /// issue 明细数组（§6.1.2）。
     pub issues: Vec<IssueWire>,
 }
@@ -193,10 +202,12 @@ impl RequestDecisionWireKind {
     /// 将内部 `DecisionRequest` 转换为 wire DTO。
     ///
     /// `direction` 参数：`"inbound"` / `"outbound"`，调用方根据上下文传入。
+    /// `provider_id` 参数：触发本次决策的 listener 上游 provider_id（多 listener 路由，
+    /// ADR-026）；单 listener / 系统内部路径传 `None`。
     ///
     /// **严重等级比较顺序**（SPEC-005 §6.1.2）：
     /// `critical > high > medium > low`（按枚举 discriminant 反向）
-    pub fn from_request(req: &DecisionRequest, direction: &str) -> Self {
+    pub fn from_request(req: &DecisionRequest, direction: &str, provider_id: Option<&str>) -> Self {
         if req.detections.len() <= 1 {
             let (rule_id, title, severity, disposition, context, recommendation) =
                 if let Some(d) = req.detections.first() {
@@ -245,6 +256,7 @@ impl RequestDecisionWireKind {
                 origin_chain: req.origin_chain.clone(),
                 source_channel: req.source_channel.clone(),
                 explicit_chain_depth: req.explicit_chain_depth.map(|d| d as u32),
+                provider_id: provider_id.map(str::to_owned),
             })
         } else {
             // 多 issue：按 §6.1.2 聚合规则
@@ -307,6 +319,7 @@ impl RequestDecisionWireKind {
                 origin_chain: req.origin_chain.clone(),
                 source_channel: req.source_channel.clone(),
                 explicit_chain_depth: req.explicit_chain_depth.map(|d| d as u32),
+                provider_id: provider_id.map(str::to_owned),
                 issues,
             })
         }
@@ -402,7 +415,7 @@ mod tests {
             Severity::Critical,
             Disposition::GuiPopup,
         )]);
-        let wire = RequestDecisionWireKind::from_request(&req, "inbound");
+        let wire = RequestDecisionWireKind::from_request(&req, "inbound", None);
         let val = wire.to_value().expect("serialize");
 
         assert_eq!(val["rule_id"], "IN-CR-05", "rule_id must be top-level");
@@ -431,7 +444,7 @@ mod tests {
             make_detection("IN-CR-05", Severity::Critical, Disposition::GuiPopup),
             make_detection("IN-GEN-04", Severity::High, Disposition::GuiPopup),
         ]);
-        let wire = RequestDecisionWireKind::from_request(&req, "inbound");
+        let wire = RequestDecisionWireKind::from_request(&req, "inbound", None);
         let val = wire.to_value().expect("serialize");
 
         assert_eq!(val["merged"], true, "merged must be true for multi-issue");
@@ -458,7 +471,7 @@ mod tests {
             Severity::High,
             Disposition::GuiPopup,
         )]);
-        let wire = RequestDecisionWireKind::from_request(&req, "inbound");
+        let wire = RequestDecisionWireKind::from_request(&req, "inbound", None);
         let val = wire.to_value().expect("serialize");
 
         let json_str = serde_json::to_string(&val).expect("to_string");
@@ -480,7 +493,7 @@ mod tests {
             Severity::Critical,
             Disposition::HookTerminal,
         )]);
-        let wire = RequestDecisionWireKind::from_request(&req, "inbound");
+        let wire = RequestDecisionWireKind::from_request(&req, "inbound", None);
         let val = wire.to_value().expect("serialize");
         let ts = val["received_at_daemon"].as_str().expect("must be string");
 
@@ -509,7 +522,7 @@ mod tests {
             "high",
         );
         let req = make_req(vec![d]);
-        let wire = RequestDecisionWireKind::from_request(&req, "inbound");
+        let wire = RequestDecisionWireKind::from_request(&req, "inbound", None);
         let val = wire.to_value().expect("serialize");
 
         let rec = val
@@ -527,7 +540,7 @@ mod tests {
             Severity::Critical,
             Disposition::GuiPopup,
         )]);
-        let wire = RequestDecisionWireKind::from_request(&req, "inbound");
+        let wire = RequestDecisionWireKind::from_request(&req, "inbound", None);
         let val = wire.to_value().expect("serialize");
 
         assert!(
@@ -554,7 +567,7 @@ mod tests {
             "medium",
         );
         let req = make_req(vec![d1, d2]);
-        let wire = RequestDecisionWireKind::from_request(&req, "inbound");
+        let wire = RequestDecisionWireKind::from_request(&req, "inbound", None);
         let val = wire.to_value().expect("serialize");
 
         assert_eq!(val["merged"], true);
@@ -592,7 +605,7 @@ mod tests {
         );
         let d2 = make_detection("IN-GEN-04", Severity::High, Disposition::GuiPopup); // no recommendation
         let req = make_req(vec![d1, d2]);
-        let wire = RequestDecisionWireKind::from_request(&req, "inbound");
+        let wire = RequestDecisionWireKind::from_request(&req, "inbound", None);
         let val = wire.to_value().expect("serialize");
 
         let issues = val["issues"].as_array().expect("issues must be array");

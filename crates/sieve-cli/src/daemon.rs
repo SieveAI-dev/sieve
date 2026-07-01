@@ -292,7 +292,9 @@ pub(crate) async fn gated_request_decision(
         // 捕获 detection / request_id（req 即将被 move 进 request_decision）。
         let detections = req.detections.clone();
         let request_id = req.request_id;
-        let resp = ipc.request_decision(req, timeout, direction).await;
+        let resp = ipc
+            .request_decision(req, timeout, direction, Some(provider_id))
+            .await;
         if let Ok(ref r) = resp {
             let decision = match r.decision {
                 sieve_ipc::DecisionAction::Allow => "allow",
@@ -3615,6 +3617,7 @@ async fn forward_with_inbound_inspection(
                                 ipc_req,
                                 ka_tx,
                                 "inbound",
+                                Some(listener_provider_id.as_str()),
                             )
                             .await;
 
@@ -4060,6 +4063,7 @@ async fn forward_with_openai_inbound_inspection(
                                 ipc_req,
                                 ka_tx,
                                 "inbound",
+                                Some(listener_provider_id.as_str()),
                             )
                             .await;
 

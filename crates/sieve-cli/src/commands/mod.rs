@@ -17,6 +17,7 @@ pub mod audit;
 pub mod audit_keys;
 pub mod decisions;
 pub mod doctor;
+pub mod ipc_client;
 pub mod rules;
 pub mod setup;
 pub mod uninstall;

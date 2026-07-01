@@ -1,112 +1,50 @@
 //! `sieve decisions` 子命令实现（headless decision CLI）。
 //!
-//! 在 GUI 不在线时通过 CLI 订阅 / 查看 / 解决待决策事件。
-//! CLI 跟 GUI 共用同一组 IPC 方法（`sieve.request_decision` / `sieve.health`），
-//! **不引入特权 endpoint**。
+//! 在 GUI 不在线时通过 CLI 查看 / 订阅 / 解决待决策事件。
+//! CLI 跟 GUI 共用同一组 IPC 方法（`sieve.list_pending` / `sieve.resolve_decision` /
+//! `sieve.request_decision` push），**不引入特权 endpoint**。
 //!
-//! ## IPC 客户端实现策略
+//! ## A 方案授权（决策授权模型）
 //!
-//! 直接用 raw JSON-RPC over `tokio::net::UnixStream` 连 `~/.sieve/ipc.sock`，
-//! 用 `serde_json::to_string` / `serde_json::from_str` 编解码 ndjson 帧。
-//! 避开 sieve-ipc 内部模块（可能被并行 agent 重构），只引用 `sieve_ipc::paths`。
+//! `resolve` 对 daemon 侧判定为 `Critical` 的 pending 一律静默 deny（headless 不批准
+//! 不可逆动作，摩擦要求人在场）；`High` 及以下允许 headless 批准。判定在 daemon 端按
+//! daemon 侧计算的 `max_severity` 做，**不信 CLI 自报**。`remember` 恒为 false。
+//!
+//! IPC 客户端封装见 [`crate::commands::ipc_client`]。
 
 use anyhow::{anyhow, Context, Result};
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::UnixStream;
 use uuid::Uuid;
 
 use crate::cli::{DecisionsArgs, DecisionsCommand, Severity};
-
-// ─────────────────────────── Raw IPC helper ────────────────────────────────
-
-/// 解析 duration 字符串 sieve home 路径。
-fn ipc_socket_path() -> Result<PathBuf> {
-    let home = sieve_ipc::paths::sieve_home().context("获取 sieve home 失败")?;
-    Ok(home.join("ipc.sock"))
-}
-
-/// 发送一条 JSON-RPC call，等待对应 id 的 response，返回 `result` 字段（JSON Value）。
-async fn rpc_call(
-    stream: &mut UnixStream,
-    method: &str,
-    params: serde_json::Value,
-    call_id: &str,
-) -> Result<serde_json::Value> {
-    let req = serde_json::json!({
-        "jsonrpc": "2.0",
-        "method": method,
-        "params": params,
-        "id": call_id,
-    });
-    let mut payload = serde_json::to_string(&req)?;
-    payload.push('\n');
-    stream
-        .write_all(payload.as_bytes())
-        .await
-        .context("写 IPC socket 失败")?;
-
-    // 读响应行（ndjson，每行一条消息）
-    let (reader, _) = stream.split();
-    let mut lines = BufReader::new(reader).lines();
-    while let Some(line) = lines.next_line().await.context("读 IPC socket 失败")? {
-        let line = line.trim().to_owned();
-        if line.is_empty() {
-            continue;
-        }
-        let val: serde_json::Value = serde_json::from_str(&line)
-            .with_context(|| format!("解析 IPC 响应 JSON 失败: {line}"))?;
-        // 匹配 id
-        if val.get("id").and_then(|v| v.as_str()) == Some(call_id) {
-            if let Some(err) = val.get("error") {
-                return Err(anyhow!("IPC 错误响应: {err}"));
-            }
-            return val
-                .get("result")
-                .cloned()
-                .ok_or_else(|| anyhow!("IPC 响应缺少 result 字段: {val}"));
-        }
-        // 非目标 id 的消息（hello / notify 等）直接跳过
-    }
-    Err(anyhow!("IPC 连接关闭，未收到 id={call_id} 的响应"))
-}
+use crate::commands::ipc_client;
 
 // ─────────────────────────── 协议 DTO（inline 定义，避免依赖 sieve-ipc 内部）─
 
-/// `sieve.health` 响应中我们关心的字段子集。
-#[derive(Debug, Deserialize)]
-struct HealthSnapshot {
-    #[serde(default)]
-    ipc: IpcSnapshotSubset,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct IpcSnapshotSubset {
-    #[serde(default)]
-    total_decisions_inflight: u32,
-}
-
-/// `sieve.request_decision` notification 中的 detection 条目。
+/// `sieve.request_decision` push notification / `list_pending` 中的 detection 摘要。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DetectionItem {
     pub rule_id: String,
     pub severity: String,
+    #[serde(default)]
     pub disposition: String,
     pub title: String,
+    #[serde(default)]
     pub one_line_summary: String,
     #[serde(default)]
     pub details: serde_json::Value,
 }
 
-/// 从 `sieve.request_decision` notification 中提取的 pending decision。
+/// 从 `sieve.request_decision` notification 中提取的 pending decision（watch 用）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingDecision {
     pub request_id: Uuid,
-    pub created_at: DateTime<Utc>,
+    pub created_at: DateTimeString,
     pub timeout_seconds: u32,
     pub default_on_timeout: String,
+    #[serde(default)]
     pub detections: Vec<DetectionItem>,
     #[serde(default)]
     pub source_agent: String,
@@ -114,6 +52,246 @@ pub struct PendingDecision {
     pub source_channel: Option<String>,
     #[serde(default)]
     pub direction: Option<String>,
+    /// listener 上游 provider_id（多 listener 路由；`watch --provider-id` 据此过滤）。
+    #[serde(default)]
+    pub provider_id: Option<String>,
+}
+
+/// wire 时间戳（字符串透传，避免 chrono 解析耦合）。
+type DateTimeString = String;
+
+// ─────────────────────────── list ──────────────────────────────────────────
+
+/// severity 过滤：pending 的任一 detection 命中目标 severity 即保留。
+///
+/// list_pending 快照顶层有 `max_severity`，也逐条带 `detections[].severity`；
+/// 与 watch 一致按"任一 detection 命中"判定。
+fn severity_matches(snapshot: &serde_json::Value, filter: &str) -> bool {
+    let f = filter.to_lowercase();
+    // 顶层 max_severity 命中即算。
+    if snapshot
+        .get("max_severity")
+        .and_then(|v| v.as_str())
+        .map(|s| s.eq_ignore_ascii_case(&f))
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    snapshot
+        .get("detections")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter().any(|d| {
+                d.get("severity")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.eq_ignore_ascii_case(&f))
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
+}
+
+/// provider_id 过滤：pending 的 `provider_id` 等于目标值。
+fn provider_matches(snapshot: &serde_json::Value, filter: &str) -> bool {
+    snapshot
+        .get("provider_id")
+        .and_then(|v| v.as_str())
+        .map(|p| p == filter)
+        .unwrap_or(false)
+}
+
+async fn run_list(
+    format_jsonl: bool,
+    severity_filter: Option<String>,
+    provider_id_filter: Option<String>,
+) -> Result<()> {
+    let result = ipc_client::rpc_call_oneshot("sieve.list_pending", serde_json::json!({}))
+        .await
+        .context("查询 sieve.list_pending 失败")?;
+
+    let pending = result
+        .get("pending")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let filtered: Vec<&serde_json::Value> = pending
+        .iter()
+        .filter(|snap| {
+            severity_filter
+                .as_deref()
+                .map(|f| severity_matches(snap, f))
+                .unwrap_or(true)
+                && provider_id_filter
+                    .as_deref()
+                    .map(|f| provider_matches(snap, f))
+                    .unwrap_or(true)
+        })
+        .collect();
+
+    if format_jsonl {
+        for snap in &filtered {
+            println!("{}", serde_json::to_string(snap)?);
+        }
+    } else if filtered.is_empty() {
+        println!("(无 pending 决策)");
+    } else {
+        for snap in &filtered {
+            print_snapshot_pretty(snap);
+        }
+    }
+    // 空集 exit 0（空 ≠ 错误）。
+    Ok(())
+}
+
+/// pretty 打印单条 pending 快照（人类可读）。
+fn print_snapshot_pretty(snap: &serde_json::Value) {
+    let request_id = snap
+        .get("request_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
+    let max_sev = snap
+        .get("max_severity")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
+    let age = snap
+        .get("age_seconds")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let timeout = snap
+        .get("timeout_seconds")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let default_on_timeout = snap
+        .get("default_on_timeout")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
+    let direction = snap
+        .get("direction")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
+    let provider = snap
+        .get("provider_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("-");
+    println!(
+        "request_id={request_id} severity={max_sev} direction={direction} \
+         age={age}s timeout={timeout}s default_on_timeout={default_on_timeout} provider={provider}"
+    );
+    if let Some(dets) = snap.get("detections").and_then(|v| v.as_array()) {
+        for d in dets {
+            let rule_id = d.get("rule_id").and_then(|v| v.as_str()).unwrap_or("?");
+            let severity = d.get("severity").and_then(|v| v.as_str()).unwrap_or("?");
+            let summary = d
+                .get("one_line_summary")
+                .and_then(|v| v.as_str())
+                .or_else(|| d.get("title").and_then(|v| v.as_str()))
+                .unwrap_or("");
+            println!("  [{severity}] {rule_id}: {summary}");
+        }
+    }
+}
+
+// ─────────────────────────── show ──────────────────────────────────────────
+
+async fn run_show(id: Uuid) -> Result<()> {
+    let result = ipc_client::rpc_call_oneshot("sieve.list_pending", serde_json::json!({}))
+        .await
+        .context("查询 sieve.list_pending 失败")?;
+
+    let pending = result
+        .get("pending")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let target = pending.iter().find(|snap| {
+        snap.get("request_id")
+            .and_then(|v| v.as_str())
+            .map(|s| s == id.to_string())
+            .unwrap_or(false)
+    });
+
+    match target {
+        Some(snap) => {
+            println!("{}", serde_json::to_string_pretty(snap)?);
+            Ok(())
+        }
+        None => {
+            eprintln!(
+                "sieve decisions show: 未找到 request_id={id} 的 pending 决策\
+                 （可能已超时 / 已被解决 / id 不存在）"
+            );
+            std::process::exit(1);
+        }
+    }
+}
+
+// ─────────────────────────── resolve ───────────────────────────────────────
+
+/// 决策动作（CLI flag → wire decision_action）。
+#[derive(Debug, Clone, Copy)]
+pub enum ResolveAction {
+    Approve,
+    Block,
+    Warn,
+}
+
+impl ResolveAction {
+    fn wire_value(self) -> &'static str {
+        match self {
+            ResolveAction::Approve => "allow",
+            ResolveAction::Block => "deny",
+            ResolveAction::Warn => "redact_and_allow",
+        }
+    }
+}
+
+async fn run_resolve(id: Uuid, action: ResolveAction, reason: Option<String>) -> Result<()> {
+    let mut params = serde_json::json!({
+        "request_id": id.to_string(),
+        "decision": action.wire_value(),
+    });
+    if let Some(ref r) = reason {
+        params["context_hint"] = serde_json::Value::String(r.clone());
+    }
+
+    let result = ipc_client::rpc_call_oneshot("sieve.resolve_decision", params)
+        .await
+        .context("调用 sieve.resolve_decision 失败")?;
+
+    let status = result.get("status").and_then(|v| v.as_str()).unwrap_or("");
+    match status {
+        "resolved" => {
+            let effective = result
+                .get("effective_decision")
+                .and_then(|v| v.as_str())
+                .unwrap_or(action.wire_value());
+            // stdout：机器可读结果（含实际生效决策，A 方案下 Critical 会显示 deny）。
+            println!(
+                "{}",
+                serde_json::to_string(&serde_json::json!({
+                    "status": "resolved",
+                    "request_id": id.to_string(),
+                    "effective_decision": effective,
+                }))?
+            );
+            // stderr：客观事实一行（headless 日志可追溯），不含 GUI 引导文案。
+            eprintln!("decision {effective} (request_id={id})");
+            Ok(())
+        }
+        "not_found" => {
+            eprintln!(
+                "sieve decisions resolve: request_id={id} not_found\
+                 （可能已超时 / 已被 GUI 解决 / id 不存在）"
+            );
+            std::process::exit(1);
+        }
+        other => {
+            eprintln!("sieve decisions resolve: 未知 status={other}");
+            std::process::exit(1);
+        }
+    }
 }
 
 // ─────────────────────────── watch ─────────────────────────────────────────
@@ -123,9 +301,7 @@ async fn run_watch(
     severity_filter: Option<String>,
     provider_id_filter: Option<String>,
 ) -> Result<()> {
-    let sock_path = ipc_socket_path()?;
-
-    // 连接 IPC socket
+    let sock_path = ipc_client::ipc_socket_path()?;
     let stream = UnixStream::connect(&sock_path).await.with_context(|| {
         format!(
             "连接 IPC socket 失败（{}）；请确认 sieve daemon 正在运行",
@@ -159,7 +335,7 @@ async fn run_watch(
             Err(_) => continue,
         };
 
-        // 只关注 sieve.request_decision notification（daemon → client push）
+        // 只关注 sieve.request_decision notification（daemon → client push）。
         let method = val.get("method").and_then(|m| m.as_str()).unwrap_or("");
         if method != "sieve.request_decision" {
             continue;
@@ -170,7 +346,6 @@ async fn run_watch(
             None => continue,
         };
 
-        // 反序列化为 PendingDecision
         let decision: PendingDecision = match serde_json::from_value(params.clone()) {
             Ok(d) => d,
             Err(e) => {
@@ -179,27 +354,31 @@ async fn run_watch(
             }
         };
 
-        // severity 过滤
+        // severity 过滤：任一 detection 命中。
         if let Some(ref sev_filter) = severity_filter {
             let any_match = decision
                 .detections
                 .iter()
-                .any(|d| d.severity.to_lowercase() == sev_filter.to_lowercase());
+                .any(|d| d.severity.eq_ignore_ascii_case(sev_filter));
             if !any_match {
                 continue;
             }
         }
 
-        // provider_id 目前在 notification params 里没有，TODO: future when protocol adds it
-        let _ = &provider_id_filter;
+        // provider_id 过滤（wire 现已带 provider_id 字段，真实比较）。
+        if let Some(ref pid_filter) = provider_id_filter {
+            let matches = decision.provider_id.as_deref() == Some(pid_filter.as_str());
+            if !matches {
+                continue;
+            }
+        }
 
         if format_jsonl {
             println!("{}", serde_json::to_string(&decision)?);
         } else {
-            // 人类可读输出
             println!(
                 "[{}] request_id={} timeout={}s default={}",
-                decision.created_at.format("%Y-%m-%dT%H:%M:%SZ"),
+                decision.created_at,
                 decision.request_id,
                 decision.timeout_seconds,
                 decision.default_on_timeout,
@@ -219,128 +398,36 @@ async fn run_watch(
     Ok(())
 }
 
-// ─────────────────────────── show ──────────────────────────────────────────
-
-async fn run_show(id: Uuid) -> Result<()> {
-    let sock_path = ipc_socket_path()?;
-    let mut stream = UnixStream::connect(&sock_path).await.with_context(|| {
-        format!(
-            "连接 IPC socket 失败（{}）；请确认 sieve daemon 正在运行",
-            sock_path.display()
-        )
-    })?;
-
-    // 使用 sieve.health 查询当前状态快照，pending request 信息在 IpcSnapshot 中
-    let call_id = format!("show-{id}");
-    let result = rpc_call(&mut stream, "sieve.health", serde_json::json!({}), &call_id)
-        .await
-        .context("查询 sieve.health 失败")?;
-
-    let snapshot: HealthSnapshot = serde_json::from_value(result.clone())?;
-
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&serde_json::json!({
-            "requested_id": id.to_string(),
-            "total_decisions_inflight": snapshot.ipc.total_decisions_inflight,
-            "note": "pending decision detail requires daemon to push sieve.request_decision; use 'sieve decisions watch' to capture",
-            "raw_health": result,
-        }))?
-    );
-
-    Ok(())
-}
-
-// ─────────────────────────── resolve ───────────────────────────────────────
-
-/// 决策动作。
-#[derive(Debug, Clone, Copy)]
-pub enum ResolveAction {
-    Approve,
-    Block,
-    Warn,
-}
-
-async fn run_resolve(id: Uuid, action: ResolveAction, reason: Option<String>) -> Result<()> {
-    let sock_path = ipc_socket_path()?;
-    let mut stream = UnixStream::connect(&sock_path).await.with_context(|| {
-        format!(
-            "连接 IPC socket 失败（{}）；请确认 sieve daemon 正在运行",
-            sock_path.display()
-        )
-    })?;
-
-    let decision_action = match action {
-        ResolveAction::Approve => "allow",
-        ResolveAction::Block => "deny",
-        ResolveAction::Warn => "redact_and_allow",
-    };
-
-    // 构造 DecisionResponse（GUI → daemon 方向）
-    // daemon 不区分 caller 身份，CLI 回复和 GUI 回复走同一路径
-    let response = serde_json::json!({
-        "request_id": id.to_string(),
-        "decision": decision_action,
-        "decided_at": Utc::now().to_rfc3339(),
-        "by_user": true,
-        "remember": false,
-        "context_hint": reason,
-        "ui_phase_when_clicked": null,
-    });
-
-    // JSON-RPC response 格式（id 对应 daemon 发出的 request_decision 的 id）
-    let rpc_resp = serde_json::json!({
-        "jsonrpc": "2.0",
-        "result": response,
-        "id": id.to_string(),
-    });
-
-    let mut payload = serde_json::to_string(&rpc_resp)?;
-    payload.push('\n');
-    stream
-        .write_all(payload.as_bytes())
-        .await
-        .context("发送决策响应失败")?;
-
-    // 发完即完成（fire-and-forget，daemon 内部处理）
-    if let Some(ref reason_str) = reason {
-        eprintln!(
-            "sieve decisions resolve: request_id={id} action={decision_action} reason=\"{reason_str}\""
-        );
-    } else {
-        eprintln!("sieve decisions resolve: request_id={id} action={decision_action}");
-    }
-    println!("ok");
-    Ok(())
-}
-
 // ─────────────────────────── 入口 ──────────────────────────────────────────
 
 /// `sieve decisions` 命令入口。
 ///
 /// 必须是 `async`：`main` 是 `#[tokio::main]`，本命令在该 runtime 内被 `.await`。
-/// 旧实现在此 `Builder::new_current_thread().block_on(...)` 会触发
-/// "Cannot start a runtime from within a runtime" panic（headless dogfood e2e 抓出，
-/// 见 tasks/lessons.md 2026-06-18）——`sieve decisions` 任一子命令直接崩溃、exit 134。
 pub async fn run(args: DecisionsArgs) -> Result<()> {
     run_async(args).await
 }
 
+fn severity_to_wire(s: Severity) -> String {
+    match s {
+        Severity::Critical => "critical".to_owned(),
+        Severity::High => "high".to_owned(),
+        Severity::Medium => "medium".to_owned(),
+        Severity::Low => "low".to_owned(),
+    }
+}
+
 async fn run_async(args: DecisionsArgs) -> Result<()> {
     match args.command {
+        DecisionsCommand::List {
+            format_jsonl,
+            severity,
+            provider_id,
+        } => run_list(format_jsonl, severity.map(severity_to_wire), provider_id).await,
         DecisionsCommand::Watch {
             format_jsonl,
             severity,
             provider_id,
-        } => {
-            let sev = severity.map(|s| match s {
-                Severity::Critical => "critical".to_owned(),
-                Severity::High => "high".to_owned(),
-                Severity::Medium => "medium".to_owned(),
-                Severity::Low => "low".to_owned(),
-            });
-            run_watch(format_jsonl, sev, provider_id).await
-        }
+        } => run_watch(format_jsonl, severity.map(severity_to_wire), provider_id).await,
         DecisionsCommand::Show { id } => {
             let uuid = Uuid::parse_str(&id)
                 .with_context(|| format!("无效的 decision id（应为 UUID）: {id}"))?;
@@ -362,7 +449,6 @@ async fn run_async(args: DecisionsArgs) -> Result<()> {
             } else {
                 return Err(anyhow!("必须指定 --approve / --block / --warn 之一"));
             };
-            let _ = (approve, block, warn); // suppress unused warning
             let uuid = Uuid::parse_str(&id)
                 .with_context(|| format!("无效的 decision id（应为 UUID）: {id}"))?;
             run_resolve(uuid, action, reason).await
@@ -376,53 +462,46 @@ async fn run_async(args: DecisionsArgs) -> Result<()> {
 mod tests {
     use super::*;
 
-    /// resolve 命令解析：--approve 产生 ResolveAction::Approve。
     #[test]
-    fn resolve_action_approve() {
-        let action = ResolveAction::Approve;
-        let decision_str = match action {
-            ResolveAction::Approve => "allow",
-            ResolveAction::Block => "deny",
-            ResolveAction::Warn => "redact_and_allow",
-        };
-        assert_eq!(decision_str, "allow");
+    fn resolve_action_wire_values() {
+        assert_eq!(ResolveAction::Approve.wire_value(), "allow");
+        assert_eq!(ResolveAction::Block.wire_value(), "deny");
+        assert_eq!(ResolveAction::Warn.wire_value(), "redact_and_allow");
     }
 
-    /// resolve 命令解析：--block 产生 "deny"。
     #[test]
-    fn resolve_action_block_maps_to_deny() {
-        let action = ResolveAction::Block;
-        let decision_str = match action {
-            ResolveAction::Approve => "allow",
-            ResolveAction::Block => "deny",
-            ResolveAction::Warn => "redact_and_allow",
-        };
-        assert_eq!(decision_str, "deny");
+    fn severity_matches_top_level_and_detections() {
+        let snap = serde_json::json!({
+            "max_severity": "critical",
+            "detections": [{ "severity": "high" }, { "severity": "critical" }],
+        });
+        assert!(severity_matches(&snap, "critical"));
+        assert!(severity_matches(&snap, "high"));
+        assert!(!severity_matches(&snap, "low"));
+        // 大小写不敏感。
+        assert!(severity_matches(&snap, "Critical"));
     }
 
-    /// resolve 命令解析：--warn 产生 "redact_and_allow"。
     #[test]
-    fn resolve_action_warn_maps_to_redact_and_allow() {
-        let action = ResolveAction::Warn;
-        let decision_str = match action {
-            ResolveAction::Approve => "allow",
-            ResolveAction::Block => "deny",
-            ResolveAction::Warn => "redact_and_allow",
-        };
-        assert_eq!(decision_str, "redact_and_allow");
+    fn provider_matches_exact() {
+        let snap = serde_json::json!({ "provider_id": "anthropic-main" });
+        assert!(provider_matches(&snap, "anthropic-main"));
+        assert!(!provider_matches(&snap, "openai"));
+        // 缺失 provider_id 不匹配任何过滤。
+        let no_provider = serde_json::json!({});
+        assert!(!provider_matches(&no_provider, "anthropic-main"));
     }
 
-    /// watch jsonl 输出格式：PendingDecision 序列化为合法 JSON。
     #[test]
     fn pending_decision_jsonl_serialization() {
         let decision = PendingDecision {
             request_id: Uuid::nil(),
-            created_at: Utc::now(),
+            created_at: "2026-07-02T00:00:00.000Z".to_owned(),
             timeout_seconds: 60,
             default_on_timeout: "block".to_owned(),
             detections: vec![DetectionItem {
                 rule_id: "IN-CR-01".to_owned(),
-                severity: "Critical".to_owned(),
+                severity: "critical".to_owned(),
                 disposition: "gui_popup".to_owned(),
                 title: "BIP39 助记词".to_owned(),
                 one_line_summary: "检测到 12 词助记词".to_owned(),
@@ -431,68 +510,39 @@ mod tests {
             source_agent: "claude".to_owned(),
             source_channel: None,
             direction: Some("inbound".to_owned()),
+            provider_id: Some("anthropic-main".to_owned()),
         };
 
         let json = serde_json::to_string(&decision).expect("序列化应成功");
         let parsed: serde_json::Value = serde_json::from_str(&json).expect("应为合法 JSON");
-        assert!(parsed.get("request_id").is_some(), "应含 request_id");
-        assert!(parsed.get("detections").is_some(), "应含 detections");
-
-        // jsonl 格式要求：无换行（单行）
+        assert!(parsed.get("request_id").is_some());
+        assert!(parsed.get("detections").is_some());
+        assert_eq!(
+            parsed.get("provider_id").and_then(|v| v.as_str()),
+            Some("anthropic-main")
+        );
         assert!(
             !json.contains('\n'),
             "jsonl 格式每行一个 JSON，不应含换行符"
         );
     }
 
-    /// IPC socket 路径应包含 ipc.sock。
     #[test]
-    fn ipc_socket_path_ends_with_ipc_sock() {
-        // 需要 HOME env 存在（CI 环境通常有）
-        if std::env::var("HOME").is_err() {
-            return; // 无 HOME 的极端环境跳过
-        }
-        let path = ipc_socket_path().expect("ipc_socket_path 应成功");
-        assert!(
-            path.to_str().unwrap_or("").ends_with("ipc.sock"),
-            "socket 路径应以 ipc.sock 结尾，实际: {}",
-            path.display()
-        );
-    }
-
-    /// watch 的 severity 过滤逻辑正确。
-    #[test]
-    fn severity_filter_matches_case_insensitive() {
+    fn provider_id_filter_matches_watch_decision() {
         let decision = PendingDecision {
             request_id: Uuid::nil(),
-            created_at: Utc::now(),
+            created_at: "2026-07-02T00:00:00.000Z".to_owned(),
             timeout_seconds: 30,
             default_on_timeout: "block".to_owned(),
-            detections: vec![DetectionItem {
-                rule_id: "IN-CR-02".to_owned(),
-                severity: "Critical".to_owned(),
-                disposition: "hook_terminal".to_owned(),
-                title: "测试".to_owned(),
-                one_line_summary: "测试 severity 过滤".to_owned(),
-                details: serde_json::json!({}),
-            }],
+            detections: vec![],
             source_agent: String::new(),
             source_channel: None,
             direction: None,
+            provider_id: Some("openai-relay".to_owned()),
         };
-
-        let sev_filter = "critical";
-        let any_match = decision
-            .detections
-            .iter()
-            .any(|d| d.severity.to_lowercase() == sev_filter.to_lowercase());
-        assert!(any_match, "Critical 应匹配 'critical' 过滤");
-
-        let sev_filter_high = "high";
-        let no_match = decision
-            .detections
-            .iter()
-            .any(|d| d.severity.to_lowercase() == sev_filter_high.to_lowercase());
-        assert!(!no_match, "Critical 不应匹配 'high' 过滤");
+        assert_eq!(decision.provider_id.as_deref(), Some("openai-relay"));
+        // 过滤逻辑：等值匹配。
+        assert!(decision.provider_id.as_deref() == Some("openai-relay"));
+        assert!(decision.provider_id.as_deref() != Some("anthropic-main"));
     }
 }

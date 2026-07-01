@@ -237,7 +237,10 @@ mod dispatch_impl {
                 allow_remember: false, // v2.0：Week 6 由 daemon 根据规则计算后传入
             };
 
-            let outcome = inbound_hold::hold_and_decide(ipc, ipc_req, ka_tx, "inbound").await?;
+            // sieve-core 通用管道无 listener provider_id 上下文（daemon 侧真实入站路径
+            // 走 daemon.rs 的 hold_and_decide 调用，会透传 listener_provider_id）。
+            let outcome =
+                inbound_hold::hold_and_decide(ipc, ipc_req, ka_tx, "inbound", None).await?;
             return match outcome {
                 // `remember` / `context_hint` 由 daemon 消费写灰名单，
                 // dispatch 层只做放行 / 拒绝路由，不处理灰名单逻辑。

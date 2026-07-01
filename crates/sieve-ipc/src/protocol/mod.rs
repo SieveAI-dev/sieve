@@ -20,6 +20,7 @@ pub mod envelope;
 pub mod handshake;
 pub mod health;
 pub mod notify;
+pub mod pending;
 pub mod rules;
 
 // ── 公开 re-export（保持 crate::protocol::* 的向后兼容 flat 接口）────────────
@@ -40,6 +41,11 @@ pub use health::{
 };
 
 pub use notify::{NotifyKind, PausedChangedNotify, PresetChangedNotify, StatusBarNotify};
+
+pub use pending::{
+    ListPendingRequest, ListPendingResult, PendingDetectionSummary, PendingSnapshot,
+    ResolveDecisionRequest, ResolveDecisionResult, ResolveStatus,
+};
 
 pub use rules::{
     EvaluateContentKind, EvaluateDirection, EvaluateMatch, EvaluateRecommendation, EvaluateRequest,

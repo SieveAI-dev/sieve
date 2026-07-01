@@ -261,6 +261,24 @@ pub struct DecisionsArgs {
 /// `sieve decisions` 子命令枚举。
 #[derive(Debug, Subcommand)]
 pub enum DecisionsCommand {
+    /// 列出当前所有 pending decision 的快照（headless 枚举，一次性查询）。
+    ///
+    /// 调 `sieve.list_pending`，client 侧按 severity / provider-id 过滤。
+    /// 无 pending 时输出空集并 exit 0（空 ≠ 错误）。
+    List {
+        /// 输出 jsonl 格式（每行一个 JSON object）；不加则输出 pretty 表格。
+        #[arg(long)]
+        format_jsonl: bool,
+
+        /// 按 severity 过滤（critical / high / medium / low）。
+        #[arg(long, value_enum)]
+        severity: Option<Severity>,
+
+        /// 按 listener 上游 provider-id 过滤。
+        #[arg(long)]
+        provider_id: Option<String>,
+    },
+
     /// 流式订阅 pending decision 事件（每行一个 JSON object，jsonl 格式）。
     Watch {
         /// 输出 jsonl 格式（默认开启）。
@@ -277,6 +295,8 @@ pub enum DecisionsCommand {
     },
 
     /// 查询单个 pending decision 的完整上下文。
+    ///
+    /// 调 `sieve.list_pending` 按 id 过滤；命中输出完整快照，未命中 exit 1。
     Show {
         /// Decision request UUID。
         id: String,

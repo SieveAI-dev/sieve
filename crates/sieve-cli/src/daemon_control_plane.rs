@@ -293,6 +293,20 @@ async fn dispatch_request(
                 let _ = reply.send(result);
             });
         }
+        // SPEC-005 §11D：sieve.list_pending（只读，快速无阻塞，直接读 pending map）。
+        ControlPlaneRequest::ListPending { params: _, reply } => {
+            let result = Ok(ipc.list_pending().await);
+            let _ = reply.send(result);
+        }
+        // SPEC-005 §11E：sieve.resolve_decision（A 方案授权；daemon 侧按 max_severity
+        // 门禁，Critical 静默 deny；不等 GUI，快速无阻塞）。审计由原始 request_decision
+        // 调用点在 responder.send 后自动记录。
+        ControlPlaneRequest::ResolveDecision { params, reply } => {
+            let result = Ok(ipc
+                .resolve_decision(params.request_id, params.decision, params.context_hint)
+                .await);
+            let _ = reply.send(result);
+        }
     }
 }
 

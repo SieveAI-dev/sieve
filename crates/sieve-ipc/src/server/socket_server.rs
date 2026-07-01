@@ -35,17 +35,80 @@ use crate::{
     protocol::{
         CancelReason, DecisionAction, DecisionRequest, DecisionResponse, DefaultOnTimeout,
         EvaluateRequest, EvaluateResult, HealthRequest, HealthResult, JudgeToolCallRequest,
-        JudgeToolCallResult, ListGraylistRequest, ListGraylistResult, ListRulesResult,
-        MergedDecisionResponse, PausedChangedNotify, PresetChangedNotify, PurgeHistoryRequest,
+        JudgeToolCallResult, ListGraylistRequest, ListGraylistResult, ListPendingRequest,
+        ListPendingResult, ListRulesResult, MergedDecisionResponse, PausedChangedNotify,
+        PendingDetectionSummary, PendingSnapshot, PresetChangedNotify, PurgeHistoryRequest,
         PurgeHistoryResult, ReloadConfigRequest, ReloadConfigResult, ReloadUserRules,
         RemoveGraylistRequest, RemoveGraylistResult, RequestDecisionCanceledNotify,
-        SetPausedRequest, SetPausedResult, SetPresetOverridesRequest, SetPresetOverridesResult,
-        SetPresetRequest, SetPresetResult, StatusBarNotify,
+        ResolveDecisionRequest, ResolveDecisionResult, ResolveStatus, SetPausedRequest,
+        SetPausedResult, SetPresetOverridesRequest, SetPresetOverridesResult, SetPresetRequest,
+        SetPresetResult, Severity, StatusBarNotify,
     },
 };
 
-/// pending map：request_id → oneshot 发送端，等待 GUI 回复。
-type PendingMap = Arc<Mutex<HashMap<Uuid, oneshot::Sender<DecisionResponse>>>>;
+/// 单条待决策在 pending map 中的条目。
+///
+/// 除 oneshot 应答端外，携带 daemon 侧计算的元数据：`max_severity`（A 方案授权门禁
+/// 依据，**不信客户端自报**）与 `snapshot`（`list_pending` 只读投影）。
+///
+/// 关联：F1-a 决策授权门禁基础、SPEC-005 §11D / §11E。
+struct PendingEntry {
+    /// GUI / CLI 回复决策的 oneshot 发送端。
+    responder: oneshot::Sender<DecisionResponse>,
+    /// 本次请求涉及的最高严重等级（daemon 侧从 detections 计算）。
+    ///
+    /// A 方案：`resolve_decision` 对 `Critical` 类的 `allow` / `redact_and_allow`
+    /// 静默改写为 deny，判定据此字段，**不信客户端传来的 severity**。
+    max_severity: Severity,
+    /// `list_pending` 只读投影（不含 responder / oneshot 运行时对象）。
+    snapshot: Arc<PendingSnapshot>,
+}
+
+/// pending map：request_id → [`PendingEntry`]，等待 GUI / CLI 回复。
+type PendingMap = Arc<Mutex<HashMap<Uuid, PendingEntry>>>;
+
+/// 从 `DecisionRequest` 计算本次请求涉及的最高严重等级。
+///
+/// 空 detections（异常降级）视为 `Low`（保守：无命中不应触发 Critical 门禁）。
+fn compute_max_severity(req: &DecisionRequest) -> Severity {
+    req.detections
+        .iter()
+        .map(|d| d.severity)
+        .max_by_key(|s| s.rank())
+        .unwrap_or(Severity::Low)
+}
+
+/// 从 `DecisionRequest` 裁剪出 `list_pending` 只读投影。
+///
+/// `age_seconds` 在 daemon 应答 `list_pending` 时按 `created_at` 现算，此处填 0。
+fn build_pending_snapshot(
+    req: &DecisionRequest,
+    max_severity: Severity,
+    direction: &str,
+    provider_id: Option<&str>,
+) -> PendingSnapshot {
+    PendingSnapshot {
+        request_id: req.request_id,
+        max_severity,
+        detections: req
+            .detections
+            .iter()
+            .map(|d| PendingDetectionSummary {
+                rule_id: d.rule_id.clone(),
+                severity: d.severity,
+                title: d.title.clone(),
+                one_line_summary: d.one_line_summary.clone(),
+            })
+            .collect(),
+        timeout_seconds: req.timeout_seconds,
+        default_on_timeout: req.default_on_timeout,
+        direction: direction.to_owned(),
+        source_agent: req.source_agent,
+        provider_id: provider_id.map(str::to_owned),
+        created_at: req.created_at,
+        age_seconds: 0,
+    }
+}
 
 /// daemon 启动时注入 IpcServer 的握手信息，用于构造 `sieve.hello` 通知。
 ///
@@ -206,6 +269,21 @@ pub enum ControlPlaneRequest {
     JudgeToolCall {
         params: JudgeToolCallRequest,
         reply: oneshot::Sender<Result<JudgeToolCallResult, ControlError>>,
+    },
+    /// SPEC-005 §11D `sieve.list_pending`（Since v2.x 兼容扩展，只读）。
+    ///
+    /// headless 枚举当前待决策快照；daemon handler 直接读 pending map，快速无阻塞。
+    ListPending {
+        params: ListPendingRequest,
+        reply: oneshot::Sender<Result<ListPendingResult, ControlError>>,
+    },
+    /// SPEC-005 §11E `sieve.resolve_decision`（Since v2.x 兼容扩展，A 方案授权）。
+    ///
+    /// headless 解决单个待决策；daemon handler 按 daemon 侧 `max_severity` 门禁
+    /// （Critical 静默 deny），快速无阻塞（不等 GUI）。
+    ResolveDecision {
+        params: ResolveDecisionRequest,
+        reply: oneshot::Sender<Result<ResolveDecisionResult, ControlError>>,
     },
 }
 
@@ -686,6 +764,7 @@ impl IpcServer {
         req: DecisionRequest,
         timeout: Duration,
         direction: &str,
+        provider_id: Option<&str>,
     ) -> Result<DecisionResponse, IpcError> {
         // SPEC-005 §6.1.1：wire 字段 `timeout_seconds` 必须落在 [30, 120]。client（GUI）对该
         // 字段无下限校验——下发 0 会让倒计时首 tick 即归零（异常/静默关窗），下发越界大值则
@@ -730,15 +809,31 @@ impl IpcServer {
         }
 
         // 2. 注册 oneshot channel，等待 GUI 回复。
+        //    F1-a：pending entry 携带 daemon 侧计算的 max_severity（A 方案授权门禁依据，
+        //    不信客户端自报）+ list_pending 只读投影。
+        let max_severity = compute_max_severity(&req);
+        let snapshot = Arc::new(build_pending_snapshot(
+            &req,
+            max_severity,
+            direction,
+            provider_id,
+        ));
         let (tx, rx) = oneshot::channel::<DecisionResponse>();
         {
             let mut map = self.pending.lock().await;
-            map.insert(request_id, tx);
+            map.insert(
+                request_id,
+                PendingEntry {
+                    responder: tx,
+                    max_severity,
+                    snapshot,
+                },
+            );
         }
 
         // 3. 通过 wire DTO 适配层序列化请求（SPEC-005 §6.0 / §6.1 / §6.1.1 / §6.1.2）。
         //    P1-5 + P2-2 + P2-4：使用 RequestDecisionWireKind 替换内部 struct 直接序列化。
-        let wire = crate::wire::RequestDecisionWireKind::from_request(&req, direction);
+        let wire = crate::wire::RequestDecisionWireKind::from_request(&req, direction, provider_id);
         let wire_params = wire.to_value()?;
         let rpc_req = crate::protocol::jsonrpc::Request::call(
             "sieve.request_decision",
@@ -823,10 +918,90 @@ impl IpcServer {
     }
 
     /// 供测试使用：直接注入一个决策响应，模拟 GUI 回调。
+    ///
+    /// **绕过 wire 应答路径**（不经 socket 帧解析），供服务端单测直接触发决策；
+    /// F1-b 的 peer 核验只作用于 wire 投递的应答，本注入路径保持 trusted。
     pub async fn inject_decision(&self, resp: DecisionResponse) {
         let mut map = self.pending.lock().await;
-        if let Some(tx) = map.remove(&resp.request_id) {
-            let _ = tx.send(resp);
+        if let Some(entry) = map.remove(&resp.request_id) {
+            let _ = entry.responder.send(resp);
+        }
+    }
+
+    /// `sieve.list_pending`：当前所有待决策的只读快照（SPEC-005 §11D）。
+    ///
+    /// `age_seconds` 按各条 `snapshot.created_at` 相对当前时刻现算。空集返回 `[]`。
+    /// 过滤（severity / provider_id）在 client 侧做，daemon 保持薄。
+    pub async fn list_pending(&self) -> ListPendingResult {
+        let map = self.pending.lock().await;
+        let now = Utc::now();
+        let pending = map
+            .values()
+            .map(|entry| {
+                let mut snap = (*entry.snapshot).clone();
+                snap.age_seconds = (now - snap.created_at).num_seconds().max(0) as u64;
+                snap
+            })
+            .collect();
+        ListPendingResult { pending }
+    }
+
+    /// `sieve.resolve_decision`：headless 解决单个待决策（SPEC-005 §11E，A 方案授权）。
+    ///
+    /// **A 方案门禁**：若目标 pending 的 `max_severity == Critical`（daemon 侧计算，
+    /// 不信客户端），且请求 decision 为 `Allow` / `RedactAndAllow`，则**静默改写为 `Deny`**
+    /// ——不回特殊错误、不提示 GUI 路径（不向调用方暴露"存在 GUI 绕过路径"）。
+    /// `High` 及以下按传入 decision 处置。
+    ///
+    /// `remember` 恒为 false（不给 CLI 开永久白名单）。审计由原始 `request_decision`
+    /// 调用点在 `responder.send` 后自动记录（决策 audit 零特殊处理）。
+    ///
+    /// 目标 request_id 不存在（已超时 / 已被 GUI 解决 / id 不存在）→ `NotFound`。
+    pub async fn resolve_decision(
+        &self,
+        request_id: Uuid,
+        decision: DecisionAction,
+        context_hint: Option<String>,
+    ) -> ResolveDecisionResult {
+        let entry = {
+            let mut map = self.pending.lock().await;
+            map.remove(&request_id)
+        };
+        let Some(entry) = entry else {
+            return ResolveDecisionResult {
+                status: ResolveStatus::NotFound,
+                effective_decision: None,
+            };
+        };
+
+        // A 方案：Critical 类的 allow / redact_and_allow 静默改写为 deny。
+        let effective = if entry.max_severity == Severity::Critical
+            && matches!(
+                decision,
+                DecisionAction::Allow | DecisionAction::RedactAndAllow
+            ) {
+            DecisionAction::Deny
+        } else {
+            decision
+        };
+
+        let resp = DecisionResponse {
+            request_id,
+            decision: effective,
+            decided_at: Utc::now(),
+            by_user: true,
+            remember: false,
+            context_hint,
+            ui_phase_when_clicked: None,
+        };
+        // responder 已被移出 map，send 让原始 request_decision 的 await 返回，
+        // 触发其调用点的决策 audit（含本次静默 deny）。send 失败（await 端已 drop）
+        // 时 pending 已被消费，仍视为 resolved（幂等）。
+        let _ = entry.responder.send(resp);
+
+        ResolveDecisionResult {
+            status: ResolveStatus::Resolved,
+            effective_decision: Some(effective),
         }
     }
 }
@@ -1047,16 +1222,37 @@ async fn handle_connection(stream: UnixStream, ctx: ConnectionContext) -> Result
         }
     }
 
-    // 连接断开：把所有 pending oneshot 全部触发 fallback（drop sender）。
-    // 丢弃 sender 会让 rx 收到 Err(RecvError)，request_decision 走 fallback。
-    let mut map = pending.lock().await;
-    let count = map.len();
-    if count > 0 {
-        warn!(
-            pending_count = count,
-            "GUI disconnected with pending requests; dropping all"
-        );
-        map.clear(); // 清空 map，sender 被 drop，所有等待者收到 Err 并 fallback。
+    // 先显式 drop 本连接的 write_rx，使 gui_writers 中本连接的 sender 立即
+    // `is_closed()`，否则下方 has_live_writer 会把"正在断开的自己"误判为 live
+    // （write_rx 未 drop → sender 仍 open → 单 GUI 断开也不清空 → 误等满 timeout）。
+    drop(write_rx);
+
+    // 连接断开：仅当**没有任何 live GUI writer 存活**时才清空 pending（真无人可应答
+    // → 立即 fail-closed fallback）。若仍有其他 live client 连着，保留 pending：可能被
+    // 其他 GUI 应答，或靠 request_decision 自身 timeout 兜底。
+    //
+    // 修复多 client 平等场景缺陷：headless CLI 用短连接查 list_pending / resolve_decision /
+    // health 后断开，本尾部不得误清空 GUI 的未决 pending（旧逻辑无差别 clear 假设"任何断开
+    // 的连接都是持有 pending 的 GUI"，在 CLI + GUI 并存时会把 GUI 决策误 fallback deny）。
+    // 单 GUI 场景行为不变：唯一 GUI 断开后无 live writer → 照旧清空立即 fallback。
+    let has_live_writer = {
+        let writers = gui_writers_clone
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        writers.iter().any(|s| !s.is_closed())
+    };
+    if !has_live_writer {
+        let mut map = pending.lock().await;
+        let count = map.len();
+        if count > 0 {
+            warn!(
+                pending_count = count,
+                "no live GUI writer after disconnect; dropping all pending (fail-closed fallback)"
+            );
+            map.clear(); // 清空 map，sender 被 drop，所有等待者收到 Err 并 fallback。
+        }
+    } else {
+        debug!("connection closed but live GUI writer remains; pending retained");
     }
     // _gui_writers 持有的是 Arc<Mutex<Vec<Sender>>>，此处 drop 不影响 Vec 内容。
     // 对应 sender 在下次 broadcast_status_bar 的 try_send 返回 Closed 时自动移除。
@@ -1118,10 +1314,12 @@ async fn dispatch_message(
             | "sieve.evaluate"
             | "sieve.list_graylist"
             | "sieve.remove_graylist"
-            // v2.0+ 兼容扩展（SPEC-005 §11A §11B §11C）
+            // v2.0+ 兼容扩展（SPEC-005 §11A §11B §11C §11D §11E）
             | "sieve.list_rules"
             | "sieve.purge_history"
-            | "sieve.judge_tool_call" => {
+            | "sieve.judge_tool_call"
+            | "sieve.list_pending"
+            | "sieve.resolve_decision" => {
                 let Some(id) = id else {
                     warn!(method = %method, "control-plane method requires id; treating as notification dropped");
                     return;
@@ -1182,9 +1380,9 @@ async fn dispatch_message(
                 });
             if let Some(request_id) = maybe_uuid {
                 let mut map = pending.lock().await;
-                if let Some(tx) = map.remove(&request_id) {
+                if let Some(entry) = map.remove(&request_id) {
                     // 通知等待方：GUI 拒绝/取消，走 fallback（Err -> timeout fallback）。
-                    drop(tx); // tx drop → rx.await 返回 Err(RecvError) → fallback
+                    drop(entry); // entry drop → responder drop → rx.await 返回 Err(RecvError) → fallback
                     warn!(
                         code = err_obj.code,
                         %request_id,
@@ -1221,8 +1419,8 @@ async fn dispatch_message(
             },
         };
         let mut map = pending.lock().await;
-        if let Some(tx) = map.remove(&resp.request_id) {
-            let _ = tx.send(resp);
+        if let Some(entry) = map.remove(&resp.request_id) {
+            let _ = entry.responder.send(resp);
         } else {
             warn!(
                 request_id = %resp.request_id,
@@ -1522,6 +1720,48 @@ async fn dispatch_control_plane(
                 .await;
             }
             forward_reply::<JudgeToolCallResult>(id, rx, write_tx).await;
+        }
+        // SPEC-005 §11D：sieve.list_pending（Since v2.x，只读）。
+        "sieve.list_pending" => {
+            let p: ListPendingRequest = match parse_params(params) {
+                Ok(p) => p,
+                Err(e) => return write_error_response(id, e, write_tx).await,
+            };
+            let (reply, rx) = oneshot::channel();
+            if control_tx
+                .send(ControlPlaneRequest::ListPending { params: p, reply })
+                .await
+                .is_err()
+            {
+                return write_error_response(
+                    id,
+                    ControlError::internal("daemon control channel closed"),
+                    write_tx,
+                )
+                .await;
+            }
+            forward_reply::<ListPendingResult>(id, rx, write_tx).await;
+        }
+        // SPEC-005 §11E：sieve.resolve_decision（Since v2.x，A 方案授权）。
+        "sieve.resolve_decision" => {
+            let p: ResolveDecisionRequest = match require_params(params) {
+                Ok(p) => p,
+                Err(e) => return write_error_response(id, e, write_tx).await,
+            };
+            let (reply, rx) = oneshot::channel();
+            if control_tx
+                .send(ControlPlaneRequest::ResolveDecision { params: p, reply })
+                .await
+                .is_err()
+            {
+                return write_error_response(
+                    id,
+                    ControlError::internal("daemon control channel closed"),
+                    write_tx,
+                )
+                .await;
+            }
+            forward_reply::<ResolveDecisionResult>(id, rx, write_tx).await;
         }
         other => {
             // 不会到达此分支（外层 match 已穷举）。
@@ -1838,7 +2078,7 @@ mod tests {
         let req = dummy_request();
         let start = Instant::now();
         let resp = server
-            .request_decision(req, Duration::from_secs(60), "inbound")
+            .request_decision(req, Duration::from_secs(60), "inbound", None)
             .await
             .expect("request_decision");
         let elapsed = start.elapsed();
@@ -1873,7 +2113,7 @@ mod tests {
 
         // 短 oneshot 超时：帧 try_send 后立即走 fallback，不阻塞测试。
         let _ = server
-            .request_decision(req, Duration::from_millis(50), "inbound")
+            .request_decision(req, Duration::from_millis(50), "inbound", None)
             .await
             .expect("request_decision");
 
@@ -1897,7 +2137,7 @@ mod tests {
         let mut req2 = dummy_request();
         req2.timeout_seconds = 121;
         let _ = server
-            .request_decision(req2, Duration::from_millis(50), "inbound")
+            .request_decision(req2, Duration::from_millis(50), "inbound", None)
             .await
             .expect("request_decision");
         let payload2 = rx2.try_recv().expect("wire frame 2 sent");
@@ -1939,7 +2179,7 @@ mod tests {
         let server_for_task = Arc::clone(&server);
         let handle = tokio::spawn(async move {
             server_for_task
-                .request_decision(req, Duration::from_secs(60), "inbound")
+                .request_decision(req, Duration::from_secs(60), "inbound", None)
                 .await
         });
 
@@ -2006,7 +2246,7 @@ mod tests {
         let req = dummy_request(); // default_on_timeout = Block
         let start = Instant::now();
         let resp = server
-            .request_decision(req, Duration::from_secs(60), "inbound")
+            .request_decision(req, Duration::from_secs(60), "inbound", None)
             .await
             .expect("request_decision");
         // 全 stale 应立即降级，不消耗 60s 超时。
@@ -2190,5 +2430,225 @@ mod tests {
             &[7, 8, 9],
             "into_inner 必须取回完整 Vec（重构所依赖的恢复语义）"
         );
+    }
+
+    // ── F1-a / M1：list_pending + resolve_decision A 方案授权门禁 ──────────────
+
+    /// 构造带单条指定 severity detection 的请求（daemon 侧 max_severity 计算依据）。
+    fn req_with_severity(sev: Severity) -> DecisionRequest {
+        use crate::protocol::{DetectionPayload, Disposition};
+        let mut req = dummy_request();
+        req.detections = vec![DetectionPayload {
+            rule_id: "TEST-RULE".to_owned(),
+            severity: sev,
+            disposition: Disposition::GuiPopup,
+            title: "测试".to_owned(),
+            one_line_summary: "测试 detection".to_owned(),
+            details: serde_json::json!({}),
+            recommendation: None,
+        }];
+        req
+    }
+
+    /// 注册一个 live writer 占位（避免 request_decision 因空 writer 立即 fallback），
+    /// 并 spawn request_decision，等其发出 wire 帧（确认已插入 pending map）。
+    /// 返回 (request_id, join handle, writer rx)。
+    async fn spawn_pending(
+        server: &Arc<IpcServer>,
+        req: DecisionRequest,
+        provider_id: Option<&str>,
+    ) -> (
+        Uuid,
+        tokio::task::JoinHandle<Result<DecisionResponse, IpcError>>,
+        mpsc::Receiver<String>,
+    ) {
+        let (tx, mut rx) = mpsc::channel::<String>(4);
+        server
+            .gui_writers
+            .lock()
+            .expect("gui_writers lock")
+            .push(tx);
+        let request_id = req.request_id;
+        let s = Arc::clone(server);
+        let provider_owned = provider_id.map(str::to_owned);
+        let handle = tokio::spawn(async move {
+            s.request_decision(
+                req,
+                Duration::from_secs(60),
+                "inbound",
+                provider_owned.as_deref(),
+            )
+            .await
+        });
+        // 等 request_decision 发出 wire 帧（此时 pending 已插入）。
+        let _ = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .expect("request_decision 应发出 wire 帧");
+        (request_id, handle, rx)
+    }
+
+    /// list_pending 无 pending 时返回空集（空 ≠ 错误）。
+    #[tokio::test]
+    async fn list_pending_empty_returns_empty() {
+        let dir = tempdir().expect("tempdir");
+        let (server, _listener) = IpcServer::bind(dir.path().join("ipc.sock")).expect("bind");
+        let listed = server.list_pending().await;
+        assert!(listed.pending.is_empty(), "无 pending 应返回空集");
+    }
+
+    /// list_pending 返回 daemon 侧计算的 max_severity + provider_id 快照。
+    #[tokio::test]
+    async fn list_pending_returns_snapshot_with_max_severity_and_provider() {
+        let dir = tempdir().expect("tempdir");
+        let (server, _listener) = IpcServer::bind(dir.path().join("ipc.sock")).expect("bind");
+        let server = Arc::new(server);
+        let req = req_with_severity(Severity::Critical);
+        let (request_id, handle, _rx) = spawn_pending(&server, req, Some("anthropic-main")).await;
+
+        let listed = server.list_pending().await;
+        assert_eq!(listed.pending.len(), 1, "应有 1 条 pending");
+        let snap = &listed.pending[0];
+        assert_eq!(snap.request_id, request_id);
+        assert_eq!(
+            snap.max_severity,
+            Severity::Critical,
+            "max_severity 由 daemon 侧从 detections 计算"
+        );
+        assert_eq!(snap.provider_id.as_deref(), Some("anthropic-main"));
+        assert_eq!(snap.direction, "inbound");
+
+        // 清理：resolve 让 spawn 的 request_decision 返回，join 不泄漏。
+        let _ = server
+            .resolve_decision(request_id, DecisionAction::Deny, None)
+            .await;
+        let _ = handle.await;
+    }
+
+    /// A 方案核心：Critical pending 的 allow resolve 被静默改写为 deny。
+    #[tokio::test]
+    async fn resolve_critical_allow_is_silently_denied() {
+        let dir = tempdir().expect("tempdir");
+        let (server, _listener) = IpcServer::bind(dir.path().join("ipc.sock")).expect("bind");
+        let server = Arc::new(server);
+        let req = req_with_severity(Severity::Critical);
+        let (request_id, handle, _rx) = spawn_pending(&server, req, None).await;
+
+        // headless resolve allow → daemon 按 max_severity=Critical 静默改 deny。
+        let res = server
+            .resolve_decision(
+                request_id,
+                DecisionAction::Allow,
+                Some("尝试放行".to_owned()),
+            )
+            .await;
+        assert_eq!(res.status, ResolveStatus::Resolved);
+        assert_eq!(
+            res.effective_decision,
+            Some(DecisionAction::Deny),
+            "Critical 类 allow 必须被静默改写为 deny（A 方案）"
+        );
+
+        // 原始 request_decision 应收到 deny（by_user=true，remember=false）。
+        let resp = handle.await.expect("join").expect("request_decision");
+        assert_eq!(resp.decision, DecisionAction::Deny);
+        assert!(resp.by_user, "headless resolve 是主动决策");
+        assert!(!resp.remember, "CLI resolve 恒不 remember");
+    }
+
+    /// A 方案：Critical pending 的 redact_and_allow 同样被静默改写为 deny。
+    #[tokio::test]
+    async fn resolve_critical_redact_is_silently_denied() {
+        let dir = tempdir().expect("tempdir");
+        let (server, _listener) = IpcServer::bind(dir.path().join("ipc.sock")).expect("bind");
+        let server = Arc::new(server);
+        let req = req_with_severity(Severity::Critical);
+        let (request_id, handle, _rx) = spawn_pending(&server, req, None).await;
+
+        let res = server
+            .resolve_decision(request_id, DecisionAction::RedactAndAllow, None)
+            .await;
+        assert_eq!(
+            res.effective_decision,
+            Some(DecisionAction::Deny),
+            "Critical 类 redact_and_allow 也必须被静默改写为 deny"
+        );
+        let resp = handle.await.expect("join").expect("request_decision");
+        assert_eq!(resp.decision, DecisionAction::Deny);
+    }
+
+    /// A 方案：High 及以下的 allow resolve 正常放行（不改写）。
+    #[tokio::test]
+    async fn resolve_high_allow_passes_through() {
+        let dir = tempdir().expect("tempdir");
+        let (server, _listener) = IpcServer::bind(dir.path().join("ipc.sock")).expect("bind");
+        let server = Arc::new(server);
+        let req = req_with_severity(Severity::High);
+        let (request_id, handle, _rx) = spawn_pending(&server, req, None).await;
+
+        let res = server
+            .resolve_decision(request_id, DecisionAction::Allow, None)
+            .await;
+        assert_eq!(res.status, ResolveStatus::Resolved);
+        assert_eq!(
+            res.effective_decision,
+            Some(DecisionAction::Allow),
+            "High 及以下 allow 正常放行，不改写"
+        );
+        let resp = handle.await.expect("join").expect("request_decision");
+        assert_eq!(resp.decision, DecisionAction::Allow);
+        assert!(resp.by_user);
+    }
+
+    /// Critical pending 的 deny resolve 正常执行（deny 不受 A 方案改写影响）。
+    #[tokio::test]
+    async fn resolve_critical_deny_passes_through() {
+        let dir = tempdir().expect("tempdir");
+        let (server, _listener) = IpcServer::bind(dir.path().join("ipc.sock")).expect("bind");
+        let server = Arc::new(server);
+        let req = req_with_severity(Severity::Critical);
+        let (request_id, handle, _rx) = spawn_pending(&server, req, None).await;
+
+        let res = server
+            .resolve_decision(request_id, DecisionAction::Deny, None)
+            .await;
+        assert_eq!(res.effective_decision, Some(DecisionAction::Deny));
+        let resp = handle.await.expect("join").expect("request_decision");
+        assert_eq!(resp.decision, DecisionAction::Deny);
+    }
+
+    /// resolve 不存在的 request_id → NotFound（无 effective_decision）。
+    #[tokio::test]
+    async fn resolve_unknown_id_returns_not_found() {
+        let dir = tempdir().expect("tempdir");
+        let (server, _listener) = IpcServer::bind(dir.path().join("ipc.sock")).expect("bind");
+        let res = server
+            .resolve_decision(Uuid::now_v7(), DecisionAction::Deny, None)
+            .await;
+        assert_eq!(res.status, ResolveStatus::NotFound);
+        assert!(res.effective_decision.is_none());
+    }
+
+    /// 同一 pending resolve 两次：第二次 NotFound（幂等，pending 已消费）。
+    #[tokio::test]
+    async fn resolve_twice_second_is_not_found() {
+        let dir = tempdir().expect("tempdir");
+        let (server, _listener) = IpcServer::bind(dir.path().join("ipc.sock")).expect("bind");
+        let server = Arc::new(server);
+        let req = req_with_severity(Severity::High);
+        let (request_id, handle, _rx) = spawn_pending(&server, req, None).await;
+
+        let first = server
+            .resolve_decision(request_id, DecisionAction::Deny, None)
+            .await;
+        assert_eq!(first.status, ResolveStatus::Resolved);
+        let second = server
+            .resolve_decision(request_id, DecisionAction::Deny, None)
+            .await;
+        assert_eq!(
+            second.status,
+            ResolveStatus::NotFound,
+            "同一 id 再次 resolve 应 NotFound（已消费）"
+        );
+        let _ = handle.await;
     }
 }

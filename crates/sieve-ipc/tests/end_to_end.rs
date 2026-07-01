@@ -332,7 +332,7 @@ async fn scenario_2_request_decision_single_issue() {
     // daemon 发起 request_decision
     let result = tokio::time::timeout(
         Duration::from_secs(5),
-        server.request_decision(req, Duration::from_secs(30), "inbound"),
+        server.request_decision(req, Duration::from_secs(30), "inbound", None),
     )
     .await
     .expect("request_decision timeout")
@@ -440,7 +440,7 @@ async fn scenario_3_request_decision_merged_issues() {
 
     let result = tokio::time::timeout(
         Duration::from_secs(5),
-        server.request_decision(req, Duration::from_secs(30), "inbound"),
+        server.request_decision(req, Duration::from_secs(30), "inbound", None),
     )
     .await
     .expect("request_decision timeout")
@@ -686,7 +686,7 @@ async fn scenario_6_wire_field_snake_case() {
 
     let result = tokio::time::timeout(
         Duration::from_secs(5),
-        server.request_decision(req, Duration::from_secs(30), "inbound"),
+        server.request_decision(req, Duration::from_secs(30), "inbound", None),
     )
     .await
     .expect("timeout")

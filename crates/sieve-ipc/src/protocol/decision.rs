@@ -92,6 +92,22 @@ pub enum Severity {
     Low,
 }
 
+impl Severity {
+    /// 严重度排序权重（越高越严重）：`Low=0 < Medium=1 < High=2 < Critical=3`。
+    ///
+    /// enum 声明顺序（`Critical` 在前）与严重度相反，故不能 `derive(Ord)`；
+    /// 用显式权重供 `max_by_key` / 跨模块比较（决策授权门禁按 `max_severity` 判定，
+    /// A 方案 headless 对 `Critical` 静默 deny）。
+    pub fn rank(self) -> u8 {
+        match self {
+            Severity::Low => 0,
+            Severity::Medium => 1,
+            Severity::High => 2,
+            Severity::Critical => 3,
+        }
+    }
+}
+
 // ── Detection payload ────────────────────────────────────────────────────────
 
 /// 单条检测命中的 IPC 表示。

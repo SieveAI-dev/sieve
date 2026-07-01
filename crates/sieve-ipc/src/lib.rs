@@ -32,13 +32,15 @@ pub use protocol::{
     DefaultOnTimeout, DetectionPayload, Disposition, EvaluateContentKind, EvaluateDirection,
     EvaluateMatch, EvaluateRecommendation, EvaluateRequest, EvaluateResult, GraylistEntrySummary,
     GraylistSnapshot, HealthRequest, HealthResult, HelloParams, IpcSnapshot, JudgeToolCallRequest,
-    JudgeToolCallResult, ListGraylistRequest, ListGraylistResult, ListRulesResult, ListenSnapshot,
-    ListenerSnapshot, NotifyKind, OriginHop, PausedChangedNotify, PresetChangedNotify,
+    JudgeToolCallResult, ListGraylistRequest, ListGraylistResult, ListPendingRequest,
+    ListPendingResult, ListRulesResult, ListenSnapshot, ListenerSnapshot, NotifyKind, OriginHop,
+    PausedChangedNotify, PendingDetectionSummary, PendingSnapshot, PresetChangedNotify,
     PresetOverride, PresetSnapshot, PurgeHistoryRequest, PurgeHistoryResult, RejectedOverride,
     ReloadConfigRequest, ReloadConfigResult, ReloadUserRules, RemoveGraylistRequest,
-    RemoveGraylistResult, RequestDecisionCanceledNotify, RuleSummary, RulesSnapshot,
-    SetPausedRequest, SetPausedResult, SetPresetOverridesRequest, SetPresetOverridesResult,
-    SetPresetRequest, SetPresetResult, Severity, SourceAgent, StatusBarNotify, UiPhase,
+    RemoveGraylistResult, RequestDecisionCanceledNotify, ResolveDecisionRequest,
+    ResolveDecisionResult, ResolveStatus, RuleSummary, RulesSnapshot, SetPausedRequest,
+    SetPausedResult, SetPresetOverridesRequest, SetPresetOverridesResult, SetPresetRequest,
+    SetPresetResult, Severity, SourceAgent, StatusBarNotify, UiPhase,
 };
 pub use server::{
     BroadcastPlan, ControlError, ControlPlaneRequest, HelloBuilder, IpcServer, OversizeCallback,
@@ -610,7 +612,7 @@ mod socket_tests {
 
         let req = make_request(id);
         let result = server
-            .request_decision(req, Duration::from_secs(3), "inbound")
+            .request_decision(req, Duration::from_secs(3), "inbound", None)
             .await
             .unwrap();
 
@@ -644,7 +646,7 @@ mod socket_tests {
 
         let start = std::time::Instant::now();
         let result = server
-            .request_decision(req, Duration::from_secs(5), "inbound")
+            .request_decision(req, Duration::from_secs(5), "inbound", None)
             .await
             .unwrap();
         let elapsed = start.elapsed();
@@ -697,7 +699,7 @@ mod socket_tests {
         let start = std::time::Instant::now();
         // 给很长的 timeout，期望断线后快速 fallback。
         let result = server
-            .request_decision(req, Duration::from_secs(10), "inbound")
+            .request_decision(req, Duration::from_secs(10), "inbound", None)
             .await
             .unwrap();
         let elapsed = start.elapsed();
@@ -797,7 +799,7 @@ mod socket_tests {
             let s = Arc::clone(&server);
             let req = make_request(id);
             handles.push(tokio::spawn(async move {
-                s.request_decision(req, Duration::from_secs(5), "inbound")
+                s.request_decision(req, Duration::from_secs(5), "inbound", None)
                     .await
             }));
         }
@@ -828,7 +830,7 @@ mod socket_tests {
         let id_before = Uuid::now_v7();
         let req_before = make_request(id_before);
         let before = server
-            .request_decision(req_before, Duration::from_secs(5), "inbound")
+            .request_decision(req_before, Duration::from_secs(5), "inbound", None)
             .await
             .unwrap();
         // 没有 GUI，立即 fallback（by_user=false）。
@@ -850,7 +852,7 @@ mod socket_tests {
 
         let req_after = make_request(id_after);
         let after = server
-            .request_decision(req_after, Duration::from_secs(3), "inbound")
+            .request_decision(req_after, Duration::from_secs(3), "inbound", None)
             .await
             .unwrap();
         // GUI 已连接，回复了 Deny，by_user=true。
@@ -894,7 +896,7 @@ mod socket_tests {
 
         // GUI 连着但不回复，100ms 超时后应返回 Allow（default_on_timeout）。
         let result = server
-            .request_decision(req, Duration::from_millis(100), "inbound")
+            .request_decision(req, Duration::from_millis(100), "inbound", None)
             .await
             .unwrap();
         assert_eq!(result.decision, DecisionAction::Allow);
