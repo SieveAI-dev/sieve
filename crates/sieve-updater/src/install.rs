@@ -1,11 +1,71 @@
 //! Atomic rules bundle installation (SPEC-006 §3.3).
 
+use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
 
 use serde_json::json;
 
 use crate::error::UpdaterError;
 use crate::signature::{verify_sha256, verify_signature_with_key};
+
+/// A date-style rules-pack version (e.g. `2026-06-18.1`, `2025-05-01.1`) split
+/// into `.`/`-`-delimited segments for **monotonic** comparison.
+///
+/// These strings are deliberately NOT semver — `semver::Version::parse` rejects
+/// `2026-06-18.1`, so no semver crate is (or may be) pulled in. Comparison is
+/// segment-by-segment: a segment that parses as `u64` compares numerically (so
+/// `10 > 9` and month `07 > 06`), otherwise it compares as a byte string. When
+/// one version has fewer segments and the common prefix is equal, the shorter
+/// one is the older/smaller (`2026-06-18.1 > 2026-06-18`).
+///
+/// Used by [`install_rules`] to reject signed-downgrade replays. `Ord` and
+/// `PartialEq` are both derived from [`PackageVersion::cmp`] so `Eq == Equal`
+/// stays consistent even for inputs like `"01"` vs `"1"` (both numeric-equal).
+#[derive(Debug)]
+struct PackageVersion {
+    segments: Vec<String>,
+}
+
+impl PackageVersion {
+    /// Split `s` on `.` and `-` into comparison segments.
+    fn parse(s: &str) -> Self {
+        PackageVersion {
+            segments: s.split(['.', '-']).map(str::to_owned).collect(),
+        }
+    }
+}
+
+impl Ord for PackageVersion {
+    fn cmp(&self, other: &Self) -> Ordering {
+        for (a, b) in self.segments.iter().zip(&other.segments) {
+            let ord = match (a.parse::<u64>(), b.parse::<u64>()) {
+                // Both numeric → compare as numbers (07 > 06, 10 > 9).
+                (Ok(x), Ok(y)) => x.cmp(&y),
+                // Otherwise fall back to byte-string comparison.
+                _ => a.as_str().cmp(b.as_str()),
+            };
+            if ord != Ordering::Equal {
+                return ord;
+            }
+        }
+        // Common prefix equal → the version with more segments is newer.
+        self.segments.len().cmp(&other.segments.len())
+    }
+}
+
+impl PartialOrd for PackageVersion {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for PackageVersion {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl Eq for PackageVersion {}
 
 /// Verifies, decompresses, and atomically installs a rules bundle payload.
 ///
@@ -59,6 +119,25 @@ pub async fn install_rules(
     // Step 2: ed25519 signature check against the injected trust root
     // (WARN + skip when trusted_key = None; production injects TRUSTED_PUBKEY).
     verify_signature_with_key(payload, signature, trusted_key)?;
+
+    // Step 2.5: monotonic version gate — reject a signed-downgrade replay.
+    // Placed AFTER signature verification (so we only ever compare *authentic*
+    // packages — an unsigned/tampered pack fails above with a signature error,
+    // not a misleading "downgrade") and BEFORE any filesystem mutation (no tmp
+    // file, no symlink update, no metadata write on rejection). An attacker or a
+    // stale mirror could serve an OLDER but still-signature-valid pack to roll
+    // back a detection rule; refuse anything <= the installed version. First
+    // install (no installed version) is unconstrained. Equal versions are also
+    // refused (already current — nothing to reinstall), which the runner treats
+    // as a non-fatal warn, consistent with its existing equality de-dup.
+    if let Some(installed) = read_installed_version(dest_dir).await {
+        if PackageVersion::parse(version) <= PackageVersion::parse(&installed) {
+            return Err(UpdaterError::VersionDowngrade {
+                attempted: version.to_owned(),
+                installed,
+            });
+        }
+    }
 
     // Step 3: zstd decompress (fallback to raw if not a zst stream).
     let decompressed = decompress_zstd(payload)?;
@@ -559,5 +638,182 @@ mod tests {
 
         let ver = read_installed_version(&dest).await;
         assert_eq!(ver.as_deref(), Some("2026.01.01.1"));
+    }
+
+    // ── F2: 版本单调（防签名降级重放）────────────────────────────────────────────
+
+    /// PackageVersion 按 '.'/'-' 拆段比较日期式版本：数值段按数值比、非数值段按
+    /// 字符串比，逐段字典序；公共前缀相等时段数少者更小。
+    #[test]
+    fn package_version_orders_date_style_versions() {
+        use std::cmp::Ordering;
+
+        // a 严格大于 b（并校验反对称：b < a）。
+        let gt = |a: &str, b: &str| {
+            assert_eq!(
+                PackageVersion::parse(a).cmp(&PackageVersion::parse(b)),
+                Ordering::Greater,
+                "{a:?} must be > {b:?}"
+            );
+            assert_eq!(
+                PackageVersion::parse(b).cmp(&PackageVersion::parse(a)),
+                Ordering::Less,
+                "{b:?} must be < {a:?}"
+            );
+        };
+
+        gt("2026-06-18.2", "2026-06-18.1");
+        // 月份数值比较：07 > 06，且不因末段 1 vs 9 误判（先在月份段判出大小）。
+        gt("2026-07-01.1", "2026-06-18.9");
+        // 多一段更新（公共前缀相等，段数多者更大）。
+        gt("2026-06-18.1", "2026-06-18");
+        // 数值比较 10 > 9（若按字符串则 "10" < "9" 会误判）。
+        gt("2026-06-18.10", "2026-06-18.9");
+        // 相等。
+        assert_eq!(
+            PackageVersion::parse("2026-06-18.1").cmp(&PackageVersion::parse("2026-06-18.1")),
+            Ordering::Equal
+        );
+        assert!(PackageVersion::parse("2026-06-18.1") == PackageVersion::parse("2026-06-18.1"));
+    }
+
+    /// 装了新版后，用一个「旧的、仍有效签名」的包安装必须被拒（防签名降级重放：
+    /// 攻击者回滚掉某条检测规则）。且拒绝时不写任何文件、不动 current/latest。
+    #[tokio::test]
+    async fn install_rejects_signed_downgrade() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dest = tmp.path().join("rules");
+
+        let mk = |content: &[u8]| -> (Vec<u8>, String, String) {
+            let p = zstd_encode(content);
+            let s = sha256_hex(&p);
+            let sig = sign_payload(&p);
+            (p, s, sig)
+        };
+
+        // 先装新版 2026-06-18.2。
+        let (p2, s2, sig2) = mk(b"newer rules");
+        install_rules(
+            &p2,
+            &s2,
+            &sig2,
+            "2026-06-18.2",
+            &dest,
+            Some(test_trusted_key()),
+        )
+        .await
+        .expect("newer install must succeed");
+
+        // 再用旧版（签名仍有效）安装 2026-06-18.1 → 必须被拒。
+        let (p1, s1, sig1) = mk(b"older rules with a still-valid signature");
+        let err = install_rules(
+            &p1,
+            &s1,
+            &sig1,
+            "2026-06-18.1",
+            &dest,
+            Some(test_trusted_key()),
+        )
+        .await
+        .expect_err("signed downgrade must be rejected");
+        assert!(
+            matches!(err, UpdaterError::VersionDowngrade { .. }),
+            "wrong variant: {err:?}"
+        );
+        // 错误消息含两个版本号（便于运维定位）。
+        let msg = err.to_string();
+        assert!(
+            msg.contains("2026-06-18.1") && msg.contains("2026-06-18.2"),
+            "error must name both versions: {msg}"
+        );
+
+        // 旧版文件未落盘；current/latest 仍指向新版（零副作用）。
+        assert!(
+            !dest.join("2026-06-18.1.json").exists(),
+            "downgrade must not write the older pack"
+        );
+        let lv: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dest.join("latest_version.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            lv["version"], "2026-06-18.2",
+            "installed version must be unchanged after a rejected downgrade"
+        );
+    }
+
+    /// 相同版本重复安装被拒（已是最新，无需重装）→ VersionDowngrade（<= 语义）。
+    #[tokio::test]
+    async fn install_rejects_equal_version_reinstall() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dest = tmp.path().join("rules");
+        let p = zstd_encode(b"{}");
+        let s = sha256_hex(&p);
+        let sig = sign_payload(&p);
+        install_rules(
+            &p,
+            &s,
+            &sig,
+            "2026-06-18.1",
+            &dest,
+            Some(test_trusted_key()),
+        )
+        .await
+        .unwrap();
+        let err = install_rules(
+            &p,
+            &s,
+            &sig,
+            "2026-06-18.1",
+            &dest,
+            Some(test_trusted_key()),
+        )
+        .await
+        .expect_err("equal-version reinstall must be rejected");
+        assert!(
+            matches!(err, UpdaterError::VersionDowngrade { .. }),
+            "wrong variant: {err:?}"
+        );
+    }
+
+    /// 首装无约束（installed = None）；随后更高版本可正常升级（月份进位）。
+    #[tokio::test]
+    async fn install_allows_first_then_upgrade() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dest = tmp.path().join("rules");
+        let mk = |content: &[u8]| -> (Vec<u8>, String, String) {
+            let p = zstd_encode(content);
+            let s = sha256_hex(&p);
+            let sig = sign_payload(&p);
+            (p, s, sig)
+        };
+
+        let (p1, s1, sig1) = mk(b"v1");
+        install_rules(
+            &p1,
+            &s1,
+            &sig1,
+            "2026-06-18.9",
+            &dest,
+            Some(test_trusted_key()),
+        )
+        .await
+        .expect("first install must be unconstrained");
+
+        let (p2, s2, sig2) = mk(b"v2");
+        install_rules(
+            &p2,
+            &s2,
+            &sig2,
+            "2026-07-01.1",
+            &dest,
+            Some(test_trusted_key()),
+        )
+        .await
+        .expect("a higher version must upgrade");
+
+        let lv: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dest.join("latest_version.json")).unwrap())
+                .unwrap();
+        assert_eq!(lv["version"], "2026-07-01.1");
     }
 }

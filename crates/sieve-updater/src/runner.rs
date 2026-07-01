@@ -266,6 +266,19 @@ async fn process_manifest(
             tracing::info!(version = %rules.version, path = ?path, "rules installed");
             true
         }
+        // 签名有效但版本 <= 已装（防签名降级重放，install.rs 版本单调门）：非致命，
+        // 仅 warn 保留现有规则，不触发热重载、不中断定时器循环。
+        Err(UpdaterError::VersionDowngrade {
+            attempted,
+            installed,
+        }) => {
+            tracing::warn!(
+                server_version = %attempted,
+                installed_version = %installed,
+                "拒绝降级/重放：server 版本 <= 已装版本，保留现有规则"
+            );
+            false
+        }
         Err(e) => {
             tracing::error!(error = %e, version = %rules.version, "rules install failed; keeping existing rules");
             false
