@@ -19,6 +19,7 @@ pub mod control;
 pub mod decisions;
 pub mod doctor;
 pub mod ipc_client;
+pub mod lifecycle;
 pub mod rules;
 pub mod setup;
 pub mod uninstall;

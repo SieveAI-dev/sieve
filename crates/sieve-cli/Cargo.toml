@@ -63,6 +63,8 @@ toml = { workspace = true }
 toml_edit = "0.22"
 
 clap = { version = "4", features = ["derive"] }
+# shell 补全生成（bash/zsh/fish）；clap 官方 crate，同 MIT/Apache 许可，随 clap 同步。
+clap_complete = "4"
 anyhow = "1"
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }

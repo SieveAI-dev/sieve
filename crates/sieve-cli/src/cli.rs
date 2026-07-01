@@ -109,6 +109,41 @@ pub enum Command {
     /// 调 `sieve.reload_config`，输出 reload 后系统/用户规则数与时刻。
     Reload,
 
+    /// 显示 daemon 运行状态（版本 / listeners / 暂停 / preset / 规则数等）。
+    ///
+    /// 调 `sieve.health`。daemon 不在线 → 打印 socket 路径 + launchd 检查提示 + exit 1。
+    Status {
+        /// 输出原始 health JSON（jsonl）；不加则输出 pretty 摘要。
+        #[arg(long, value_enum)]
+        format: Option<OutputFormat>,
+    },
+
+    /// 停止 launchd 管理的 daemon（仅 macOS Phase 1）。
+    ///
+    /// plist `KeepAlive=true` → SIGTERM 会被立即拉起，必须 `launchctl bootout`。
+    /// 前台运行（`sieve start`）的 daemon 不受管理 → 提示 Ctrl-C 并 exit 1。
+    Stop {
+        /// 跳过确认，直接执行。
+        #[arg(long)]
+        yes: bool,
+    },
+
+    /// 重启 launchd 管理的 daemon（bootout + 重新 load，仅 macOS Phase 1）。
+    Restart {
+        /// 跳过确认，直接执行。
+        #[arg(long)]
+        yes: bool,
+    },
+
+    /// 生成 shell 补全脚本（bash / zsh / fish）。
+    ///
+    /// 用法：`sieve completions zsh > ~/.zsh/completions/_sieve`。
+    Completions {
+        /// 目标 shell。
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
+
     /// 本地 token 用量与超额计费检测查询（本地用量/计费核算，可选特性）。
     ///
     /// 读 `~/.sieve/usage.db`（严格本地、永不上传），列出独立核算结果与 relay 偏差。
@@ -536,4 +571,17 @@ pub enum AuditCommand {
         /// 要解密的归档段文件（`archive-*.jsonl`）。
         segment: PathBuf,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    /// 校验整个 clap 命令树合法（无重复 flag / 冲突定义）。
+    /// 同时确保 `sieve completions <shell>` 能对该命令树生成补全脚本。
+    #[test]
+    fn cli_command_tree_valid() {
+        Cli::command().debug_assert();
+    }
 }

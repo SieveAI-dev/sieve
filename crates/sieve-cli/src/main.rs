@@ -249,6 +249,21 @@ async fn main() -> Result<()> {
         Command::Reload => {
             commands::control::run_reload().await?;
         }
+        Command::Status { format } => {
+            commands::lifecycle::run_status(format).await?;
+        }
+        Command::Stop { yes } => {
+            commands::lifecycle::run_stop(yes).await?;
+        }
+        Command::Restart { yes } => {
+            commands::lifecycle::run_restart(yes).await?;
+        }
+        Command::Completions { shell } => {
+            use clap::CommandFactory;
+            let mut cmd = Cli::command();
+            let bin_name = cmd.get_name().to_string();
+            clap_complete::generate(shell, &mut cmd, bin_name, &mut std::io::stdout());
+        }
         #[cfg(feature = "usage")]
         Command::Usage(args) => {
             commands::usage::run(args).await?;
