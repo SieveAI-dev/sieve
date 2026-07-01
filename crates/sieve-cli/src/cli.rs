@@ -584,4 +584,73 @@ mod tests {
     fn cli_command_tree_valid() {
         Cli::command().debug_assert();
     }
+
+    /// 渲染指定子命令路径的 long help 文本。
+    fn render_help(path: &[&str]) -> String {
+        let mut cmd = Cli::command();
+        for name in path {
+            cmd = cmd
+                .find_subcommand(name)
+                .unwrap_or_else(|| panic!("找不到子命令 {name}（路径 {path:?}）"))
+                .clone();
+        }
+        cmd.render_long_help().to_string()
+    }
+
+    /// help 快照：固化新增/修改命令的 flag 与子命令，防 flag 漂移。
+    ///
+    /// 用结构化断言（关键 flag/子命令 token 必须出现）代替全文快照，
+    /// 不引入 insta 依赖，且不受描述文案微调影响。
+    #[test]
+    fn help_snapshot_new_commands() {
+        // 顶层命令齐全。
+        let top = render_help(&[]);
+        for token in [
+            "decisions",
+            "pause",
+            "resume",
+            "preset",
+            "graylist",
+            "reload",
+            "status",
+            "stop",
+            "restart",
+            "completions",
+        ] {
+            assert!(top.contains(token), "顶层 help 应含命令 {token}\n{top}");
+        }
+
+        // decisions 子命令 + resolve/list/watch flag。
+        let decisions = render_help(&["decisions"]);
+        for token in ["list", "watch", "show", "resolve"] {
+            assert!(
+                decisions.contains(token),
+                "decisions help 应含子命令 {token}"
+            );
+        }
+        let resolve = render_help(&["decisions", "resolve"]);
+        for token in ["--approve", "--block", "--warn", "--reason"] {
+            assert!(resolve.contains(token), "resolve help 应含 {token}");
+        }
+        let list = render_help(&["decisions", "list"]);
+        for token in ["--format-jsonl", "--severity", "--provider-id"] {
+            assert!(list.contains(token), "decisions list help 应含 {token}");
+        }
+
+        // pause --minutes / preset get|set / graylist list|remove。
+        assert!(render_help(&["pause"]).contains("--minutes"));
+        let preset = render_help(&["preset"]);
+        assert!(preset.contains("get") && preset.contains("set"));
+        let graylist = render_help(&["graylist"]);
+        assert!(graylist.contains("list") && graylist.contains("remove"));
+
+        // audit purge。
+        assert!(render_help(&["audit"]).contains("purge"));
+        assert!(render_help(&["audit", "purge"]).contains("--yes"));
+
+        // status --format / stop --yes / completions <shell>。
+        assert!(render_help(&["status"]).contains("--format"));
+        assert!(render_help(&["stop"]).contains("--yes"));
+        assert!(render_help(&["completions"]).contains("SHELL"));
+    }
 }
