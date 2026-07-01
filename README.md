@@ -159,6 +159,39 @@ Every signature is also written to the public [Rekor](https://search.sigstore.de
 sieve decisions watch   # take over decisions from the CLI when the GUI is unavailable
 ```
 
+### Headless CLI
+
+When the GUI is unavailable, the daemon is fully controllable from the terminal. The CLI and the GUI speak the same IPC methods — there is no privileged endpoint.
+
+```bash
+# Decisions (headless review of pending prompts)
+sieve decisions list                       # enumerate pending decisions (snapshot)
+sieve decisions show <request-id>          # full context for one pending decision
+sieve decisions watch --provider-id <id>   # stream pending decisions, filter by upstream
+sieve decisions resolve <id> --block       # deny; --approve / --warn for allow paths
+#   Headless approval is limited to High severity and below. Critical (signing /
+#   transfers / sensitive paths) is always denied from the CLI and requires the GUI —
+#   irreversible actions demand a human in the loop.
+
+# Control plane
+sieve pause --minutes 15   # pause non-Critical prompts (Critical is never paused)
+sieve resume               # clear the pause
+sieve preset get           # show current detection preset
+sieve preset set standard  # switch preset (strict / standard / relaxed / custom)
+sieve graylist list        # list learned allowlist entries
+sieve graylist remove <fingerprint>
+sieve audit purge --yes    # wipe audit history (irreversible)
+sieve reload               # reload user rules and config
+
+# Lifecycle
+sieve status               # daemon version, listeners, preset, rules, pause state
+sieve stop                 # stop the launchd-managed daemon
+sieve restart
+sieve completions zsh > ~/.zsh/completions/_sieve   # bash / zsh / fish
+```
+
+Run `sieve <command> --help` for the full flag reference of any command.
+
 ### Uninstall
 
 ```bash
