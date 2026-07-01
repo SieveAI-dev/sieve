@@ -334,6 +334,7 @@ async fn run_async(args: AuditArgs) -> Result<()> {
             .await
         }
         AuditCommand::Show { id } => run_show(id).await,
+        AuditCommand::Purge { yes } => run_purge(yes).await,
         // full 档密钥生命周期（加密审计档案，可选特性）—— 委托 audit_keys
         //（写+加密路径，与本只读模块分离）。
         #[cfg(feature = "audit-crypto")]
@@ -347,6 +348,54 @@ async fn run_async(args: AuditArgs) -> Result<()> {
             crate::commands::audit_keys::decrypt(identity, segment)
         }
     }
+}
+
+// ─────────────────────────── purge（破坏性，走 IPC）─────────────────────────
+
+/// `sieve audit purge [--yes]`：清空全部审计历史（调 `sieve.purge_history`）。
+///
+/// 破坏性操作，**不可恢复**：无 `--yes` 时交互确认；非 TTY 且无 `--yes` → exit 2。
+async fn run_purge(yes: bool) -> Result<()> {
+    use std::io::{IsTerminal, Write};
+
+    if !yes {
+        if !std::io::stdin().is_terminal() {
+            eprintln!(
+                "sieve audit purge: 非交互终端且未指定 --yes；拒绝清空审计历史（破坏性操作）"
+            );
+            std::process::exit(2);
+        }
+        // 交互确认。
+        eprint!("将删除 ~/.sieve/audit.db 全部审计事件行（不可恢复）。确认？输入 yes 继续：");
+        std::io::stderr().flush().ok();
+        let mut input = String::new();
+        std::io::stdin()
+            .read_line(&mut input)
+            .context("读取确认输入失败")?;
+        if input.trim() != "yes" {
+            eprintln!("已取消。");
+            std::process::exit(1);
+        }
+    }
+
+    let confirmed_at = chrono::Utc::now().timestamp_millis();
+    let result = crate::commands::ipc_client::rpc_call_oneshot(
+        "sieve.purge_history",
+        serde_json::json!({ "confirmed_at": confirmed_at }),
+    )
+    .await
+    .context("调用 sieve.purge_history 失败")?;
+
+    let rows = result
+        .get("rows_deleted")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let purged_at = result
+        .get("purged_at")
+        .and_then(|v| v.as_str())
+        .unwrap_or("-");
+    println!("已清空审计历史：rows_deleted={rows} purged_at={purged_at}");
+    Ok(())
 }
 
 // ─────────────────────────── 单元测试 ──────────────────────────────────────

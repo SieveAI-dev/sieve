@@ -234,6 +234,21 @@ async fn main() -> Result<()> {
         Command::Audit(args) => {
             commands::audit::run(args).await?;
         }
+        Command::Pause { minutes } => {
+            commands::control::run_pause(minutes).await?;
+        }
+        Command::Resume => {
+            commands::control::run_resume().await?;
+        }
+        Command::Preset(args) => {
+            commands::control::run_preset(args.command).await?;
+        }
+        Command::Graylist(args) => {
+            commands::control::run_graylist(args.command).await?;
+        }
+        Command::Reload => {
+            commands::control::run_reload().await?;
+        }
         #[cfg(feature = "usage")]
         Command::Usage(args) => {
             commands::usage::run(args).await?;

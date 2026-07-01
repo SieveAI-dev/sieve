@@ -84,6 +84,31 @@ pub enum Command {
     /// 直接读 `~/.sieve/audit.db` SQLite，输出 jsonl 格式方便接 jq / fluentd。
     Audit(AuditArgs),
 
+    /// 暂停非 Critical 弹窗一段时间（headless 控制面）。
+    ///
+    /// 调 `sieve.set_paused`。**Critical 锁规则不受暂停影响**（daemon 端强制）。
+    Pause {
+        /// 暂停时长（分钟，范围 1–60）。默认 5，与 GUI 快捷菜单一致。
+        #[arg(long, default_value_t = 5, value_parser = clap::value_parser!(u32).range(1..=60))]
+        minutes: u32,
+    },
+
+    /// 立即恢复弹窗（清除暂停，headless 控制面）。
+    ///
+    /// 调 `sieve.set_paused` 传 minutes=0（daemon 语义：0 = 清除暂停）。
+    Resume,
+
+    /// Preset 查询与切换（headless 控制面）。
+    Preset(PresetArgs),
+
+    /// 灰名单查询与移除（headless 控制面）。
+    Graylist(GraylistArgs),
+
+    /// 重新加载用户规则与配置（headless 控制面）。
+    ///
+    /// 调 `sieve.reload_config`，输出 reload 后系统/用户规则数与时刻。
+    Reload,
+
     /// 本地 token 用量与超额计费检测查询（本地用量/计费核算，可选特性）。
     ///
     /// 读 `~/.sieve/usage.db`（严格本地、永不上传），列出独立核算结果与 relay 偏差。
@@ -341,6 +366,74 @@ pub enum OutputFormat {
     Pretty,
 }
 
+/// `sieve preset` 参数（headless 控制面）。
+#[derive(clap::Args, Debug)]
+pub struct PresetArgs {
+    /// 子命令。
+    #[command(subcommand)]
+    pub command: PresetCommand,
+}
+
+/// `sieve preset` 子命令枚举。
+#[derive(Debug, Subcommand)]
+pub enum PresetCommand {
+    /// 显示当前 preset mode 与 custom overrides 摘要（读 `sieve.health`）。
+    Get,
+    /// 切换 preset mode（调 `sieve.set_preset`）。
+    Set {
+        /// 目标 mode（SPEC-005 §5.6：strict / standard / relaxed / custom）。
+        #[arg(value_enum)]
+        mode: PresetMode,
+    },
+}
+
+/// preset mode 值域（SPEC-005 §5.6；v1 旧值 `default` 已重命名为 `standard`）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum PresetMode {
+    Strict,
+    Standard,
+    Relaxed,
+    Custom,
+}
+
+impl PresetMode {
+    /// wire 值（snake_case lowercase）。
+    pub fn wire(self) -> &'static str {
+        match self {
+            PresetMode::Strict => "strict",
+            PresetMode::Standard => "standard",
+            PresetMode::Relaxed => "relaxed",
+            PresetMode::Custom => "custom",
+        }
+    }
+}
+
+/// `sieve graylist` 参数（headless 控制面）。
+#[derive(clap::Args, Debug)]
+pub struct GraylistArgs {
+    /// 子命令。
+    #[command(subcommand)]
+    pub command: GraylistCommand,
+}
+
+/// `sieve graylist` 子命令枚举。
+#[derive(Debug, Subcommand)]
+pub enum GraylistCommand {
+    /// 列出灰名单条目（调 `sieve.list_graylist`）。
+    List {
+        /// 输出格式（jsonl 默认）。
+        #[arg(long, value_enum)]
+        format: Option<OutputFormat>,
+    },
+    /// 移除一个灰名单条目（调 `sieve.remove_graylist`）。
+    ///
+    /// 不存在 → exit 1。
+    Remove {
+        /// 灰名单条目 fingerprint（16 位十六进制）。
+        fingerprint: String,
+    },
+}
+
 /// `sieve audit` 参数（TODO-5）。
 #[derive(clap::Args, Debug)]
 pub struct AuditArgs {
@@ -394,6 +487,16 @@ pub enum AuditCommand {
     Show {
         /// 审计事件 id（INTEGER PRIMARY KEY）。
         id: i64,
+    },
+
+    /// 清空全部审计历史（破坏性，调 `sieve.purge_history`）。
+    ///
+    /// daemon 删除 audit.db 全部事件行，保留 schema。**不可恢复**。
+    /// 无 `--yes` 时交互确认；非 TTY 且无 `--yes` → exit 2。
+    Purge {
+        /// 跳过交互确认，直接执行（CI / 自动化用）。
+        #[arg(long)]
+        yes: bool,
     },
 
     /// 生成 full 档加密审计的 age 密钥对（加密审计档案，可选特性）。

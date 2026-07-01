@@ -15,6 +15,7 @@
 pub mod audit;
 #[cfg(feature = "audit-crypto")]
 pub mod audit_keys;
+pub mod control;
 pub mod decisions;
 pub mod doctor;
 pub mod ipc_client;
