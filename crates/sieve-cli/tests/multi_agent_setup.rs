@@ -651,6 +651,7 @@ fn openclaw_apply_injects_sieve_source_channel_header() {
         .env("HOME", fake)
         .env("SIEVE_HOME", fake.join(".sieve"))
         .env("SIEVE_SKIP_SETUP_DOCTOR", "1")
+        .env("SIEVE_SKIP_LAUNCHCTL", "1")
         .output()
         .expect("执行 sieve 失败");
 
@@ -705,6 +706,7 @@ fn hermes_apply_injects_delegation_base_url_fallback() {
         .env("HOME", fake)
         .env("SIEVE_HOME", fake.join(".sieve"))
         .env("SIEVE_SKIP_SETUP_DOCTOR", "1")
+        .env("SIEVE_SKIP_LAUNCHCTL", "1")
         .output()
         .expect("执行 sieve 失败");
 
@@ -783,6 +785,7 @@ fn f1_upstream_routes_json_contains_original_provider_urls() {
         .env("HOME", fake)
         .env("SIEVE_HOME", &sieve_home)
         .env("SIEVE_SKIP_SETUP_DOCTOR", "1")
+        .env("SIEVE_SKIP_LAUNCHCTL", "1")
         .output()
         .expect("执行 sieve 失败");
 
@@ -880,6 +883,7 @@ fn f3_openclaw_setup_also_installs_daemon() {
         .env("HOME", fake)
         .env("SIEVE_HOME", &sieve_home)
         .env("SIEVE_SKIP_SETUP_DOCTOR", "1")
+        .env("SIEVE_SKIP_LAUNCHCTL", "1")
         .output()
         .expect("执行 sieve 失败");
 
@@ -952,6 +956,7 @@ fn f3_sentinel_prevents_daemon_reinstall() {
         .env("HOME", fake)
         .env("SIEVE_HOME", &sieve_home)
         .env("SIEVE_SKIP_SETUP_DOCTOR", "1")
+        .env("SIEVE_SKIP_LAUNCHCTL", "1")
         .output()
         .expect("执行 sieve 失败（第 1 次）");
 
@@ -981,6 +986,7 @@ fn f3_sentinel_prevents_daemon_reinstall() {
         .env("HOME", fake)
         .env("SIEVE_HOME", &sieve_home)
         .env("SIEVE_SKIP_SETUP_DOCTOR", "1")
+        .env("SIEVE_SKIP_LAUNCHCTL", "1")
         .output()
         .expect("执行 sieve 失败（第 2 次）");
 
@@ -1034,6 +1040,7 @@ fn r10_openclaw_apply_writes_setup_log_entry() {
         .env("HOME", fake)
         .env("SIEVE_HOME", &sieve_home)
         .env("SIEVE_SKIP_SETUP_DOCTOR", "1")
+        .env("SIEVE_SKIP_LAUNCHCTL", "1")
         .output()
         .expect("执行 sieve 失败");
 
@@ -1101,6 +1108,7 @@ fn r10_hermes_apply_writes_setup_log_entry() {
         .env("HOME", fake)
         .env("SIEVE_HOME", &sieve_home)
         .env("SIEVE_SKIP_SETUP_DOCTOR", "1")
+        .env("SIEVE_SKIP_LAUNCHCTL", "1")
         .output()
         .expect("执行 sieve 失败");
 
@@ -1165,6 +1173,7 @@ fn r10_uninstall_openclaw_restores_backup() {
         .env("HOME", fake)
         .env("SIEVE_HOME", &sieve_home)
         .env("SIEVE_SKIP_SETUP_DOCTOR", "1")
+        .env("SIEVE_SKIP_LAUNCHCTL", "1")
         .output()
         .expect("执行 sieve setup 失败");
     assert!(
@@ -1230,6 +1239,7 @@ fn r10_uninstall_hermes_restores_backup() {
         .env("HOME", fake)
         .env("SIEVE_HOME", &sieve_home)
         .env("SIEVE_SKIP_SETUP_DOCTOR", "1")
+        .env("SIEVE_SKIP_LAUNCHCTL", "1")
         .output()
         .expect("执行 sieve setup 失败");
     assert!(
@@ -1282,5 +1292,73 @@ fn r10_uninstall_hermes_restores_backup() {
         delegation_url,
         Some(""),
         "R10-#1: uninstall 后 config.yaml delegation.base_url 应恢复为空，after: {after_uninstall}"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 守门测试：SIEVE_SKIP_LAUNCHCTL 下 setup 全程不得触碰 launchctl
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// `SIEVE_SKIP_LAUNCHCTL=1` 下真跑 setup 不得调用任何 launchctl。
+///
+/// launchd 会话按 UID 归属、不随临时 HOME 走——门失效时，测试写入的临时 plist
+/// 会以 KeepAlive 注册进真实用户会话（kill 即复活、以空规则占用真实端点）。
+/// 验证手段：PATH 前置一个必炸的 launchctl 毒桩（exit 1 + 落标记文件）。
+/// 门失效 → setup 调到毒桩 → 非零退出且标记文件出现 → 本测试红。
+#[test]
+fn setup_skip_launchctl_never_invokes_launchctl() {
+    let Some(bin) = sieve_bin() else {
+        return;
+    };
+    let dir = fake_home();
+    let fake = dir.path();
+
+    let openclaw_dir = fake.join(".openclaw");
+    fs::create_dir_all(&openclaw_dir).unwrap();
+    fs::write(
+        openclaw_dir.join("openclaw.json"),
+        r#"{"models":{"providers":{"p":{"baseUrl":"https://api.openai.com/v1"}}}}"#,
+    )
+    .unwrap();
+
+    // launchctl 毒桩：被调用即落标记文件并 exit 1
+    let stub_dir = fake.join("poison-bin");
+    fs::create_dir_all(&stub_dir).unwrap();
+    let marker = fake.join("launchctl-was-invoked");
+    fs::write(
+        stub_dir.join("launchctl"),
+        format!("#!/bin/sh\ntouch {}\nexit 1\n", marker.display()),
+    )
+    .unwrap();
+    let mut perms = fs::metadata(stub_dir.join("launchctl"))
+        .unwrap()
+        .permissions();
+    use std::os::unix::fs::PermissionsExt;
+    perms.set_mode(0o755);
+    fs::set_permissions(stub_dir.join("launchctl"), perms).unwrap();
+    let orig_path = std::env::var("PATH").unwrap_or_default();
+
+    let out = Command::new(&bin)
+        .args(["setup", "--agent", "openclaw", "--yes"])
+        .env("HOME", fake)
+        .env("SIEVE_HOME", fake.join(".sieve"))
+        .env("SIEVE_SKIP_SETUP_DOCTOR", "1")
+        .env("SIEVE_SKIP_LAUNCHCTL", "1")
+        .env("PATH", format!("{}:{orig_path}", stub_dir.display()))
+        .output()
+        .expect("执行 sieve 失败");
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        out.status.success(),
+        "SIEVE_SKIP_LAUNCHCTL=1 下 setup 应成功（不依赖 launchctl），stderr: {stderr}"
+    );
+    assert!(
+        !marker.exists(),
+        "SIEVE_SKIP_LAUNCHCTL=1 下 launchctl 不应被调用（毒桩标记文件出现 = 门失效）"
+    );
+    assert!(
+        stderr.contains("跳过 launchctl load"),
+        "stderr 应含跳过提示，实际: {stderr}"
     );
 }

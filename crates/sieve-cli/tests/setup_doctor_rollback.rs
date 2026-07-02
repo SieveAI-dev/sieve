@@ -112,6 +112,8 @@ fn setup_rolls_back_when_doctor_fails() {
         .args(["setup", "--yes"])
         .env("HOME", fake_home.to_str().unwrap())
         .env("SIEVE_HOME", sieve_dir.to_str().unwrap())
+        // 防真实 launchd 会话污染（launchd 按 UID 归属，不随临时 HOME 走）
+        .env("SIEVE_SKIP_LAUNCHCTL", "1")
         // 指向不存在文件：doctor resolve_rules_path 优先级 1 命中，
         // 但文件不存在 → VectorscanEngine::compile 失败 → canary 检查失败 → doctor Err
         .env("SIEVE_RULES_PATH", "/nonexistent/sieve/rules/outbound.toml")

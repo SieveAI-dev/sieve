@@ -2083,16 +2083,20 @@ pub(crate) mod macos {
         ctx.written_files.push(plist_path.clone());
         println!("[setup] ✅ launchd plist 写入 {}", plist_path.display());
 
-        // launchctl load
-        let status = Command::new("launchctl")
-            .args(["load", "-w", &plist_path.to_string_lossy()])
-            .status()
-            .context("执行 launchctl load 失败")?;
-        if !status.success() {
-            bail!("launchctl load 返回非零: {:?}", status.code());
+        // launchctl load。跳过时不设 launchd_loaded：无注册即无需回滚 unload。
+        if crate::commands::launchctl_mutations_skipped() {
+            eprintln!("[setup] SIEVE_SKIP_LAUNCHCTL=1 检测到，跳过 launchctl load（仅测试场景，daemon 不会自启）");
+        } else {
+            let status = Command::new("launchctl")
+                .args(["load", "-w", &plist_path.to_string_lossy()])
+                .status()
+                .context("执行 launchctl load 失败")?;
+            if !status.success() {
+                bail!("launchctl load 返回非零: {:?}", status.code());
+            }
+            ctx.launchd_loaded = Some(plist_path.clone());
+            println!("[setup] ✅ launchd 服务已加载");
         }
-        ctx.launchd_loaded = Some(plist_path.clone());
-        println!("[setup] ✅ launchd 服务已加载");
 
         // 写 setup.log
         {

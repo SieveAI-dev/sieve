@@ -72,6 +72,13 @@
 
 ### Fixed
 
+- **集成测试污染真实 launchd 会话修复。** launchd 会话按 UID 归属、不随 `$HOME` 走：真跑
+  `sieve setup` 的集成测试（临时 HOME）此前会经 `launchctl load` 把临时 plist 以 KeepAlive
+  注册进**真实用户会话**——泄漏 daemon 被 kill 即复活，并以空规则集直通占用真实
+  `~/.sieve/ipc.sock` 与代理端口。新增仅测试用环境变量 `SIEVE_SKIP_LAUNCHCTL=1`，跳过
+  setup / uninstall / stop / restart 中一切变更类 launchctl 调用（load / unload /
+  bootstrap / bootout；只读的 `list` / `print` 不受影响），11 处真跑 setup 测试全部接入；
+  另增毒桩守门测试（PATH 注入必炸 launchctl，门失效即红）。生产路径不设置此变量，行为不变。
 - **暂停态握手丢弃截止时间修复（GUI 审查 D-5）。** `handle_connection` 发 `sieve.hello` 时此前
   只读 `paused` 布尔、丢弃 `paused_until` 时间值，导致 client 握手进入暂停态却拿不到 until →
   状态降级、菜单栏假装正常（违反「菜单栏状态以握手为准，不假装健康」）。现 daemon 取过期过滤

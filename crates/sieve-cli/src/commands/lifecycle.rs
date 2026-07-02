@@ -237,6 +237,10 @@ pub async fn run_restart(yes: bool) -> Result<()> {
 /// `launchctl bootout gui/<uid>/com.sieve.daemon`，老系统 fallback `launchctl unload <plist>`。
 #[cfg(target_os = "macos")]
 fn bootout(uid: &str) -> Result<()> {
+    if crate::commands::launchctl_mutations_skipped() {
+        eprintln!("SIEVE_SKIP_LAUNCHCTL=1 检测到，跳过 launchctl bootout（仅测试场景）");
+        return Ok(());
+    }
     let status = Command::new("launchctl")
         .args(["bootout", &service_target(uid)])
         .status()
@@ -259,6 +263,10 @@ fn bootout(uid: &str) -> Result<()> {
 /// `launchctl bootstrap gui/<uid> <plist>`，老系统 fallback `launchctl load -w <plist>`。
 #[cfg(target_os = "macos")]
 fn bootstrap(uid: &str, plist: &std::path::Path) -> Result<()> {
+    if crate::commands::launchctl_mutations_skipped() {
+        eprintln!("SIEVE_SKIP_LAUNCHCTL=1 检测到，跳过 launchctl bootstrap（仅测试场景）");
+        return Ok(());
+    }
     let status = Command::new("launchctl")
         .args(["bootstrap", &format!("gui/{uid}"), &plist.to_string_lossy()])
         .status()
