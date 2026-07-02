@@ -1,5 +1,7 @@
 # Sieve 整体架构（Phase 1）
 
+> Rendered: https://sieveai.dev/docs/threat-model.html
+
 > **范围**：Phase 1，适配 Claude Code / OpenClaw / Hermes / Codex CLI 四家 AI agent；HIPS 改造（用户规则系统 + 三态决策 + 灰名单 + 进程上下文 + 行为序列窗口 + content-type 四路由对等 + 网关 ProviderCodec 分层 + 配置化路由表）
 
 ---

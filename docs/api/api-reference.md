@@ -1,5 +1,7 @@
 # Sieve API 参考
 
+> Rendered: https://sieveai.dev/docs/cli.html
+
 > **状态：早期预览（0.1.0-alpha），接口未冻结。**
 > 当前文档反映实现事实（v1.4/v1.5 章节保留，较新内容标注"v2.0 新增"或"v2.1 新增"），**接口将在首个稳定版（GA）发布时冻结**，破坏性变更走 [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html)。
 > 在冻结前，任何字段、状态码、配置项的细节都可能调整。
