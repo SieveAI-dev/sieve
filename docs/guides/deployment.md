@@ -1,5 +1,7 @@
 # Sieve 部署与运维指南
 
+> Rendered: https://sieveai.dev/docs/quickstart.html
+
 > Version: v2.0 — 2026-05-01
 >
 > **状态：早期预览（0.1.0-alpha）。**
