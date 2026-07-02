@@ -1,7 +1,8 @@
 //! SPEC-005 v2 wire format fixture 测试（§14.1）。
 //!
 //! 验证 `tests/fixtures/v2/` 下的 JSON fixture 能被正确反序列化为 sieve-ipc 协议类型。
-//! 覆盖：全部 17 method × minimal/full/null_optional = 51+ 条（P2-5 完成）。
+//! 覆盖：21 个 method 目录 × minimal/full/null_optional = 88 条（含 list_pending / resolve_decision
+//! / request_decision.provider_id 等新增；GUI 侧 IPCSchemaV2FixtureTests 消费同一份权威副本）。
 //!
 //! 生成式测试 `all_fixtures_valid_json` 遍历 fixtures/v2/ 所有 .json 文件，
 //! 验证每个文件均可被解析为合法 JSON，并针对已知 method 做类型级反序列化验证。
