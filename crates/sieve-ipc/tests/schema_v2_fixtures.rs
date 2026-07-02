@@ -259,8 +259,38 @@ use sieve_ipc::protocol::{
 fn all_fixtures_valid_json_and_roundtrip() {
     let fixtures_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/v2");
 
+    // 精确守门（对齐 GUI 侧 IPCSchemaV2FixtureTests.fixtureCount）：method 目录集合与
+    // 文件总数都钉死——fixture 被误删 / 新增 / 改名 / 目录增删都会红，强制有人对账。
+    // 仅 `total >= N` 的下限断言抓不住「误删至下限仍绿」，也抓不住「删一个又加一个」。
+    // 新增/删除 method 目录或 fixture 时，须同步本清单 + EXPECTED_TOTAL + GUI 侧 expectedFixtures。
+    const EXPECTED_METHODS: &[&str] = &[
+        "decision_response",
+        "sieve.evaluate",
+        "sieve.health",
+        "sieve.heartbeat",
+        "sieve.hello",
+        "sieve.list_graylist",
+        "sieve.list_pending",
+        "sieve.list_rules",
+        "sieve.notify_status_bar",
+        "sieve.paused_changed",
+        "sieve.preset_changed",
+        "sieve.purge_history",
+        "sieve.reload_config",
+        "sieve.reload_user_rules",
+        "sieve.remove_graylist",
+        "sieve.request_decision",
+        "sieve.request_decision_canceled",
+        "sieve.resolve_decision",
+        "sieve.set_paused",
+        "sieve.set_preset",
+        "sieve.set_preset_overrides",
+    ];
+    const EXPECTED_TOTAL: usize = 88;
+
     let mut total = 0usize;
     let mut errors: Vec<String> = Vec::new();
+    let mut seen_methods: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
 
     for dir_entry in std::fs::read_dir(&fixtures_root).expect("fixtures/v2 dir must exist") {
         let dir_entry = dir_entry.unwrap();
@@ -269,6 +299,7 @@ fn all_fixtures_valid_json_and_roundtrip() {
         if !dir_path.is_dir() {
             continue;
         }
+        seen_methods.insert(dir_name.clone());
 
         for file_entry in std::fs::read_dir(&dir_path).unwrap() {
             let file_entry = file_entry.unwrap();
@@ -535,7 +566,20 @@ fn all_fixtures_valid_json_and_roundtrip() {
         }
     }
 
-    assert!(total >= 51, "fixture 文件总数应 >= 51（当前 {total}）");
+    // method 目录集合精确对齐（多退少补都红），并给出 diff 便于定位。
+    let expected_methods: std::collections::BTreeSet<String> =
+        EXPECTED_METHODS.iter().map(|s| (*s).to_owned()).collect();
+    assert_eq!(
+        seen_methods,
+        expected_methods,
+        "fixtures/v2 的 method 目录集合与期望清单漂移——多出 {:?}；缺失 {:?}（增删 method 须同步 EXPECTED_METHODS 与 GUI 侧 expectedFixtures）",
+        seen_methods.difference(&expected_methods).collect::<Vec<_>>(),
+        expected_methods.difference(&seen_methods).collect::<Vec<_>>(),
+    );
+    assert_eq!(
+        total, EXPECTED_TOTAL,
+        "fixture 文件总数应精确为 {EXPECTED_TOTAL}（当前 {total}）——增删 fixture 须同步 EXPECTED_TOTAL 与 GUI 侧 fixtureCount(88)"
+    );
     assert!(
         errors.is_empty(),
         "fixture 验证失败（{} 条）:\n{}",
