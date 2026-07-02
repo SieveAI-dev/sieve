@@ -30,6 +30,45 @@ pub enum OversizeKind {
 /// sieve-ipc → sieve-cli 的循环依赖。
 pub type OversizeCallback = Arc<dyn Fn(OversizeKind, usize) + Send + Sync>;
 
+/// GUI peer 代码签名核验回调（F1-b，SPEC-005 §6.2.4）。
+///
+/// daemon 层注入（macOS 上用 Security framework 对连接对端进程做代码签名核验），
+/// 参数为连接的 raw fd，返回 `true` = 对端通过核验。与 [`OversizeCallback`] 同理，
+/// 通过回调反转依赖，sieve-ipc 不引入 FFI。
+///
+/// **未注入 = gate 关闭**（源码构建 / dogfood 场景无签名信任锚可用；残余风险见
+/// SPEC-005 §6.4）。注入后仅作用于 wire 应答放行 Critical 的路径；`inject_decision`
+/// 测试注入路径与 `resolve_decision`（自有 A 方案门禁）不经此 gate。
+pub type PeerVerifier = Arc<dyn Fn(std::os::unix::io::RawFd) -> bool + Send + Sync>;
+
+/// 连接级 peer 核验状态：懒执行 + 缓存（每连接至多真验一次）。
+///
+/// 核验只在该连接首次尝试放行 Critical 时触发，避免对 CLI 短连接 / 心跳连接
+/// 做无谓的签名检查。fd 在 handle_connection 存活期间有效（split 两半共享同一 socket）。
+struct PeerGate {
+    verifier: Option<PeerVerifier>,
+    raw_fd: std::os::unix::io::RawFd,
+    verdict: std::sync::OnceLock<bool>,
+}
+
+impl PeerGate {
+    fn new(verifier: Option<PeerVerifier>, raw_fd: std::os::unix::io::RawFd) -> Self {
+        Self {
+            verifier,
+            raw_fd,
+            verdict: std::sync::OnceLock::new(),
+        }
+    }
+
+    /// 本连接是否允许放行 Critical（allow / redact_and_allow）决策应答。
+    fn permits_critical_allow(&self) -> bool {
+        match &self.verifier {
+            None => true, // gate 未启用
+            Some(verify) => *self.verdict.get_or_init(|| verify(self.raw_fd)),
+        }
+    }
+}
+
 use crate::{
     error::{rpc_codes, IpcError},
     protocol::{
@@ -379,6 +418,10 @@ pub struct IpcServer {
     /// daemon 层通过 [`Self::set_oversize_callback`] 注入，用于写 `AuditEvent::IpcOversizeFrame`
     /// 而不引入 sieve-ipc → sieve-cli 循环依赖。未注入时只打 warn! log。
     oversize_callback: Arc<std::sync::Mutex<Option<OversizeCallback>>>,
+    /// GUI peer 代码签名核验回调（F1-b）。
+    ///
+    /// daemon 层通过 [`Self::set_peer_verifier`] 注入；未注入 = gate 关闭。
+    peer_verifier: Arc<std::sync::Mutex<Option<PeerVerifier>>>,
 }
 
 impl IpcServer {
@@ -410,6 +453,7 @@ impl IpcServer {
             paused_until: Arc::new(ArcSwap::from_pointee(None)),
             hello_builder: Arc::new(Mutex::new(None)),
             oversize_callback: Arc::new(std::sync::Mutex::new(None)),
+            peer_verifier: Arc::new(std::sync::Mutex::new(None)),
         };
         Ok((server, listener))
     }
@@ -465,6 +509,17 @@ impl IpcServer {
     pub fn set_oversize_callback(&self, cb: OversizeCallback) {
         if let Ok(mut guard) = self.oversize_callback.lock() {
             *guard = Some(cb);
+        }
+    }
+
+    /// 注入 GUI peer 代码签名核验回调（F1-b，SPEC-005 §6.2.4）。
+    ///
+    /// daemon 启动时按配置调用一次；注入后每个连接首次尝试放行 Critical 决策应答时
+    /// 触发核验（结果按连接缓存）。核验未通过 → 该应答的 allow / redact_and_allow
+    /// 静默改写为 deny（与 `resolve_decision` 的 A 方案同范式）。
+    pub fn set_peer_verifier(&self, verifier: PeerVerifier) {
+        if let Ok(mut guard) = self.peer_verifier.lock() {
+            *guard = Some(verifier);
         }
     }
 
@@ -558,6 +613,8 @@ impl IpcServer {
                     // oversize callback 快照（SPEC-005 §1.3.1）。
                     let oversize_callback =
                         self.oversize_callback.lock().ok().and_then(|g| g.clone());
+                    // peer 核验回调快照（F1-b）。
+                    let peer_verifier = self.peer_verifier.lock().ok().and_then(|g| g.clone());
 
                     // 为新连接创建 mpsc 通道：发送端注册到 gui_writers，接收端传给 handle_connection。
                     // 同时 clone 一份发送端给 handle_connection 用，让控制面响应能路由回当前连接。
@@ -591,6 +648,7 @@ impl IpcServer {
                             paused_until,
                             oversize_callback,
                             gui_writers: gui_writers_for_ctx,
+                            peer_verifier,
                         };
                         if let Err(e) = handle_connection(stream, ctx).await {
                             error!("IPC connection error: {e}");
@@ -1027,6 +1085,8 @@ struct ConnectionContext {
     oversize_callback: Option<OversizeCallback>,
     /// 所有 GUI 客户端写通道（fan-out 广播用）。
     gui_writers: GuiWriters,
+    /// GUI peer 代码签名核验回调（F1-b）；`None` = gate 关闭。
+    peer_verifier: Option<PeerVerifier>,
 }
 
 async fn handle_connection(stream: UnixStream, ctx: ConnectionContext) -> Result<(), IpcError> {
@@ -1040,8 +1100,16 @@ async fn handle_connection(stream: UnixStream, ctx: ConnectionContext) -> Result
         paused_until,
         oversize_callback,
         gui_writers: gui_writers_clone,
+        peer_verifier,
     } = ctx;
     info!("GUI client connected");
+
+    // F1-b：into_split 之前取 raw fd（split 后两半共享同一 socket，fd 在连接存活期有效）。
+    // 核验懒执行：仅该连接首次尝试放行 Critical 决策应答时触发。
+    let peer_gate = {
+        use std::os::unix::io::AsRawFd;
+        PeerGate::new(peer_verifier, stream.as_raw_fd())
+    };
 
     let (read_half, mut write_half) = stream.into_split();
     // SPEC-005 §1.3.1：用 FrameReader（read_buf + memchr）替代无界 BufReader::lines()。
@@ -1154,6 +1222,7 @@ async fn handle_connection(stream: UnixStream, ctx: ConnectionContext) -> Result
                             &control_tx,
                             &write_tx,
                             &gui_writers_clone,
+                            &peer_gate,
                         )
                         .await;
                     }
@@ -1268,6 +1337,7 @@ async fn dispatch_message(
     control_tx: &mpsc::Sender<ControlPlaneRequest>,
     write_tx: &mpsc::Sender<String>,
     gui_writers: &GuiWriters,
+    peer_gate: &PeerGate,
 ) {
     // 先尝试解析为通用 JSON Value，从 method 字段判断消息类型。
     // SPEC-005 §1.3.1 §12.2：JSON 解析失败必须返回 -32700 parse_error，不关闭连接。
@@ -1420,6 +1490,29 @@ async fn dispatch_message(
         };
         let mut map = pending.lock().await;
         if let Some(entry) = map.remove(&resp.request_id) {
+            // F1-b（SPEC-005 §6.2.4）：wire 应答放行 Critical 前必须通过 peer 代码签名核验；
+            // 未通过 → allow / redact_and_allow 静默改写为 deny（与 resolve_decision 的
+            // A 方案同范式，daemon 侧权威 max_severity，不信客户端自报）。
+            // inject_decision 注入路径与 resolve_decision 不经此处。
+            let resp = if entry.max_severity == Severity::Critical
+                && matches!(
+                    resp.decision,
+                    DecisionAction::Allow | DecisionAction::RedactAndAllow
+                )
+                && !peer_gate.permits_critical_allow()
+            {
+                warn!(
+                    request_id = %resp.request_id,
+                    "GUI peer code-signing verification failed; Critical allow rewritten to deny (F1-b)"
+                );
+                DecisionResponse {
+                    decision: DecisionAction::Deny,
+                    remember: false,
+                    ..resp
+                }
+            } else {
+                resp
+            };
             let _ = entry.responder.send(resp);
         } else {
             warn!(

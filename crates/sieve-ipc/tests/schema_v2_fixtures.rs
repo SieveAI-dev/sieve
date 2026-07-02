@@ -657,7 +657,10 @@ fn list_pending_response_full_deserializes() {
         serde_json::from_value(val["result"].clone()).expect("ListPendingResult");
     assert_eq!(result.pending.len(), 1);
     assert_eq!(result.pending[0].max_severity, Severity::Critical);
-    assert_eq!(result.pending[0].provider_id.as_deref(), Some("anthropic-main"));
+    assert_eq!(
+        result.pending[0].provider_id.as_deref(),
+        Some("anthropic-main")
+    );
     assert_eq!(result.pending[0].direction, "inbound");
 }
 

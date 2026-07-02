@@ -1037,6 +1037,17 @@ pub async fn run(
             ipc_srv.set_oversize_callback(cb);
         }
 
+        // F1-b（SPEC-005 §6.2.4）：按配置注入 GUI peer 代码签名核验回调。
+        // 未配置 = gate 关闭（wire 应答通道的冒充残余风险存在，见 SPEC-005 §11E）。
+        if let Some(requirement) = cfg.gui_peer_code_requirement.clone() {
+            tracing::info!("GUI peer 代码签名核验已启用（Critical allow 应答强制核验）");
+            ipc_srv.set_peer_verifier(crate::gui_peer_verify::build_verifier(requirement));
+        } else {
+            tracing::warn!(
+                "gui_peer_code_requirement 未配置：GUI 决策通道 peer 代码签名核验关闭，                 同用户进程冒充 GUI 批 Critical 的路径未被 daemon 侧拦截（F1-b 残余风险）"
+            );
+        }
+
         crate::daemon_control_plane::spawn_control_plane_handler(
             Arc::clone(ipc_srv),
             Arc::clone(&audit_store),
@@ -4609,7 +4620,7 @@ fn classify_json_inbound_detection(
             blocking.push(d);
         }
         sieve_core::detection::Action::HookMark => {
-            // 四路由对等修复（ADR-025 / 硬约束 #16）：JSON 路径必须像 SSE 一样为
+            // 四路由对等修复（硬约束 #16）：JSON 路径必须像 SSE 一样为
             // HookMark 写 IPC pending 文件，由 sieve-hook 在 PreToolUse 阶段拦截。
             // 此前 JSON 路径对 HookMark 静默丢弃（既不注入 sieve_blocked，也不写 pending），
             // 导致非流式 JSON 响应里的 hook_terminal 危险工具调用（IN-CR-02 危险 shell /

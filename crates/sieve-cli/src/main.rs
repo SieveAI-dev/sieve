@@ -33,6 +33,7 @@ mod config;
 mod daemon;
 mod daemon_control_plane;
 mod engine_adapter;
+mod gui_peer_verify;
 pub mod process_context;
 mod upstream_routes;
 
