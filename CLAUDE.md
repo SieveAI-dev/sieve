@@ -155,9 +155,16 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo clippy -p sieve-cli --all-targets --features sequence_detection --locked -- -D warnings
 cargo deny check
 
-# 测试
-cargo nextest run --workspace --locked
+# 测试（nextest profile ci 带 retries 抗并发 flake；doctest 单列，nextest 不覆盖）
+cargo nextest run --workspace --locked --profile ci
+cargo test --workspace --locked --doc
 cargo test -p sieve-core --locked   # 跑单个测试
+
+# 四路由覆盖门禁（check-routing-matrix job；纯静态扫描，无需构建）
+bash scripts/check_routing_coverage.sh
+
+# Hermetic e2e + FP/recall 数据集门（一键 dogfood）
+bash scripts/dogfood.sh
 
 # 启动透传 daemon（日志走 SIEVE_LOG）
 cargo run -p sieve-cli -- start --config sieve.toml
@@ -165,13 +172,14 @@ cargo run -p sieve-cli -- start --config sieve.toml
 # Dry-run 模式（仅记录命中，不拦截）
 cargo run -p sieve-cli -- start --config sieve.toml --dry-run
 
-# Reproducible build（本地复现）
-SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) cargo build --release --locked
+# Reproducible build（本地复现，入口脚本含 -j1 串行硬约束，不能并行）
+SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) ./scripts/repro-build.sh macos-arm64
 
-# Fuzz（SSE 边界全覆盖，PR 不带 fuzz 不合并）
-cargo +nightly fuzz run sse_parser -- -max_total_time=60
-cargo +nightly fuzz run tool_use_aggregator -- -max_total_time=60
-cargo +nightly fuzz run inbound_filter -- -max_total_time=60
+# Fuzz（SSE 边界全覆盖，PR 不带 fuzz 不合并；-s none 避 cargo-fuzz#404 sanitizer 冲突，CI 四 target 全跑）
+cargo +nightly fuzz run -s none sse_parser -- -max_total_time=60
+cargo +nightly fuzz run -s none sse_parser_openai -- -max_total_time=60
+cargo +nightly fuzz run -s none tool_use_aggregator -- -max_total_time=60
+cargo +nightly fuzz run -s none inbound_filter -- -max_total_time=60
 
 # Benchmark（Week 4 起，验证 P99 < 20ms）
 cargo bench -p sieve-rules
