@@ -137,7 +137,7 @@ pub struct RequestDecisionWire {
     /// `X-Sieve-Origin` header 真实嵌套深度；null 时回退到 `origin_chain.length`。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub explicit_chain_depth: Option<u32>,
-    /// 触发本次决策的 listener 上游 provider_id（多 listener 路由，ADR-026）。
+    /// 触发本次决策的 listener 上游 provider_id（多 listener 路由）。
     ///
     /// v2.x 向后兼容新增字段；旧 client 静默忽略。供 `decisions watch --provider-id`
     /// 与 `list_pending` 按上游过滤。null 或缺失时无来源上游信息（单 listener / 系统内部）。
@@ -178,7 +178,7 @@ pub struct MergedRequestDecisionWire {
     pub source_channel: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub explicit_chain_depth: Option<u32>,
-    /// 触发本次决策的 listener 上游 provider_id（多 listener 路由，ADR-026）。
+    /// 触发本次决策的 listener 上游 provider_id（多 listener 路由）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_id: Option<String>,
     /// issue 明细数组（§6.1.2）。
@@ -202,8 +202,8 @@ impl RequestDecisionWireKind {
     /// 将内部 `DecisionRequest` 转换为 wire DTO。
     ///
     /// `direction` 参数：`"inbound"` / `"outbound"`，调用方根据上下文传入。
-    /// `provider_id` 参数：触发本次决策的 listener 上游 provider_id（多 listener 路由，
-    /// ADR-026）；单 listener / 系统内部路径传 `None`。
+    /// `provider_id` 参数：触发本次决策的 listener 上游 provider_id（多 listener 路由）；
+    /// 单 listener / 系统内部路径传 `None`。
     ///
     /// **严重等级比较顺序**（SPEC-005 §6.1.2）：
     /// `critical > high > medium > low`（按枚举 discriminant 反向）

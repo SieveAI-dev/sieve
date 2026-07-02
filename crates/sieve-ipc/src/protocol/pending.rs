@@ -47,7 +47,7 @@ pub struct PendingSnapshot {
     pub direction: String,
     /// 触发本次决策的来源 agent。
     pub source_agent: SourceAgent,
-    /// 触发本次决策的 listener 上游 provider_id（多 listener 路由，ADR-026）。
+    /// 触发本次决策的 listener 上游 provider_id（多 listener 路由）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_id: Option<String>,
     /// daemon 收到检测、发起本次决策请求的时刻（UTC，SPEC-005 §4A）。
