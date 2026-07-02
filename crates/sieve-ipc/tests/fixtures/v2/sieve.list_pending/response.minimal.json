@@ -1,0 +1,7 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "pending": []
+  },
+  "id": "req-listpending-2"
+}

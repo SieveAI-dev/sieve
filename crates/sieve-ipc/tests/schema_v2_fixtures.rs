@@ -242,9 +242,10 @@ fn request_decision_merged_deserializes() {
 
 use sieve_ipc::protocol::{
     DecisionResponse, EvaluateRequest, EvaluateResult, GraylistEntrySummary, ListGraylistResult,
-    ListRulesResult, NotifyKind, PausedChangedNotify, PresetChangedNotify, PurgeHistoryRequest,
-    PurgeHistoryResult, ReloadConfigResult, ReloadUserRules, RemoveGraylistResult,
-    RequestDecisionCanceledNotify, SetPresetOverridesResult, SetPresetResult, StatusBarNotify,
+    ListPendingResult, ListRulesResult, NotifyKind, PausedChangedNotify, PresetChangedNotify,
+    PurgeHistoryRequest, PurgeHistoryResult, ReloadConfigResult, ReloadUserRules,
+    RemoveGraylistResult, RequestDecisionCanceledNotify, ResolveDecisionRequest,
+    ResolveDecisionResult, SetPresetOverridesResult, SetPresetResult, StatusBarNotify,
 };
 
 /// 遍历 fixtures/v2/ 所有 .json 文件，验证：
@@ -484,6 +485,35 @@ fn all_fixtures_valid_json_and_roundtrip() {
                     // 已有独立测试覆盖，此处跳过
                     None
                 }
+                "sieve.list_pending" => {
+                    if let Some(r) = val.get("result") {
+                        serde_json::from_value::<ListPendingResult>(r.clone())
+                            .err()
+                            .map(|e| e.to_string())
+                    } else if let Some(p) = val.get("params") {
+                        // request：params 可以是 {} 或 null
+                        if p.is_object() || p.is_null() {
+                            None
+                        } else {
+                            Some("list_pending params must be object or null".to_owned())
+                        }
+                    } else {
+                        None
+                    }
+                }
+                "sieve.resolve_decision" => {
+                    if let Some(p) = val.get("params") {
+                        serde_json::from_value::<ResolveDecisionRequest>(p.clone())
+                            .err()
+                            .map(|e| e.to_string())
+                    } else if let Some(r) = val.get("result") {
+                        serde_json::from_value::<ResolveDecisionResult>(r.clone())
+                            .err()
+                            .map(|e| e.to_string())
+                    } else {
+                        None
+                    }
+                }
                 "decision_response" => {
                     if let Some(r) = val.get("result") {
                         serde_json::from_value::<DecisionResponse>(r.clone())
@@ -613,4 +643,45 @@ fn list_graylist_response_full_fixture_deserializes() {
     assert_eq!(entry.rule_id, "IN-GEN-04");
     assert!(entry.context_hint.is_some());
     assert!(result.next_cursor.is_some());
+}
+
+/// list_pending 响应 fixture：max_severity 由 daemon 计算（A 方案门禁依据）+ provider_id。
+#[test]
+fn list_pending_response_full_deserializes() {
+    use sieve_ipc::protocol::Severity;
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/v2/sieve.list_pending/response.full.json");
+    let content = std::fs::read_to_string(&path).expect("read fixture");
+    let val: serde_json::Value = serde_json::from_str(&content).expect("valid JSON");
+    let result: ListPendingResult =
+        serde_json::from_value(val["result"].clone()).expect("ListPendingResult");
+    assert_eq!(result.pending.len(), 1);
+    assert_eq!(result.pending[0].max_severity, Severity::Critical);
+    assert_eq!(result.pending[0].provider_id.as_deref(), Some("anthropic-main"));
+    assert_eq!(result.pending[0].direction, "inbound");
+}
+
+/// resolve_decision 响应 fixture：resolved 含 effective_decision（A 方案 Critical→deny）；
+/// not_found 无 effective_decision。
+#[test]
+fn resolve_decision_response_fixtures_deserialize() {
+    use sieve_ipc::protocol::{DecisionAction, ResolveStatus};
+    let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/v2/sieve.resolve_decision");
+
+    let resolved: ResolveDecisionResult = {
+        let content = std::fs::read_to_string(base.join("response.resolved.json")).unwrap();
+        let val: serde_json::Value = serde_json::from_str(&content).unwrap();
+        serde_json::from_value(val["result"].clone()).expect("ResolveDecisionResult resolved")
+    };
+    assert_eq!(resolved.status, ResolveStatus::Resolved);
+    assert_eq!(resolved.effective_decision, Some(DecisionAction::Deny));
+
+    let not_found: ResolveDecisionResult = {
+        let content = std::fs::read_to_string(base.join("response.not_found.json")).unwrap();
+        let val: serde_json::Value = serde_json::from_str(&content).unwrap();
+        serde_json::from_value(val["result"].clone()).expect("ResolveDecisionResult not_found")
+    };
+    assert_eq!(not_found.status, ResolveStatus::NotFound);
+    assert!(not_found.effective_decision.is_none());
 }

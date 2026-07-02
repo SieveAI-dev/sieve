@@ -1,0 +1,7 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "status": "not_found"
+  },
+  "id": "req-resolve-2"
+}

@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "method": "sieve.resolve_decision",
+  "id": "req-resolve-2",
+  "params": {
+    "request_id": "9c1d8b73-2a4f-4e6c-b5d8-3e7f1a9c2b04",
+    "decision": "deny"
+  }
+}

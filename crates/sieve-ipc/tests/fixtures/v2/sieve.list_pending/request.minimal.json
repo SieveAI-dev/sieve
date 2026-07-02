@@ -1,0 +1,6 @@
+{
+  "jsonrpc": "2.0",
+  "method": "sieve.list_pending",
+  "id": "req-listpending-1",
+  "params": {}
+}

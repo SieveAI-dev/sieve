@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "status": "resolved",
+    "effective_decision": "deny"
+  },
+  "id": "req-resolve-1"
+}

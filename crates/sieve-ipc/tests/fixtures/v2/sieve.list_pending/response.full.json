@@ -1,0 +1,27 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "pending": [
+      {
+        "request_id": "8f3a2b91-7c4e-4d8f-9b21-1a3c5e7f9d02",
+        "max_severity": "critical",
+        "detections": [
+          {
+            "rule_id": "IN-CR-05",
+            "severity": "critical",
+            "title": "签名工具调用",
+            "one_line_summary": "检测到签名工具调用 signTransaction"
+          }
+        ],
+        "timeout_seconds": 120,
+        "default_on_timeout": "block",
+        "direction": "inbound",
+        "source_agent": "claude",
+        "provider_id": "anthropic-main",
+        "created_at": "2026-07-02T15:03:11.234Z",
+        "age_seconds": 7
+      }
+    ]
+  },
+  "id": "req-listpending-1"
+}

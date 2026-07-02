@@ -34,6 +34,7 @@
     "source_agent": "claude",
     "origin_chain": [],
     "source_channel": null,
-    "explicit_chain_depth": 0
+    "explicit_chain_depth": 0,
+    "provider_id": "anthropic-main"
   }
 }
