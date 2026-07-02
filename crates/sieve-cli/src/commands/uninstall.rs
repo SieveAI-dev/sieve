@@ -155,13 +155,17 @@ mod macos {
 
         // ── 5. 卸载 launchd（仅 --all 或 Claude agent）
         if should_unload_plist && plist_path.exists() {
-            let status = Command::new("launchctl")
-                .args(["unload", &plist_path.to_string_lossy()])
-                .status();
-            match status {
-                Ok(s) if s.success() => println!("[uninstall] ✅ launchd 服务已卸载"),
-                Ok(s) => eprintln!("[uninstall] ⚠ launchctl unload 返回: {:?}", s.code()),
-                Err(e) => eprintln!("[uninstall] ⚠ launchctl unload 失败: {e}"),
+            if crate::commands::launchctl_mutations_skipped() {
+                eprintln!("[uninstall] SIEVE_SKIP_LAUNCHCTL=1 检测到，跳过 launchctl unload（仅测试场景）");
+            } else {
+                let status = Command::new("launchctl")
+                    .args(["unload", &plist_path.to_string_lossy()])
+                    .status();
+                match status {
+                    Ok(s) if s.success() => println!("[uninstall] ✅ launchd 服务已卸载"),
+                    Ok(s) => eprintln!("[uninstall] ⚠ launchctl unload 返回: {:?}", s.code()),
+                    Err(e) => eprintln!("[uninstall] ⚠ launchctl unload 失败: {e}"),
+                }
             }
             if let Err(e) = fs::remove_file(&plist_path) {
                 eprintln!("[uninstall] ⚠ 删除 plist 失败: {e}");
