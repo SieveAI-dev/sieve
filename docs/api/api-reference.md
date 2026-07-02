@@ -526,6 +526,7 @@ no_proxy = true                    # 显式直连，无视全局 proxy 与 env
 | 段 | 字段 | 类型 | 默认 | 说明 |
 |----|------|------|------|------|
 | 顶层 | `proxy` | string? | `null` | 全局兜底代理 URL，所有未单独配置且未 `no_proxy` 的 upstream 继承 |
+| 顶层 | `gui_peer_code_requirement` | string? | `null` | GUI peer 代码签名 requirement（F1-b，macOS SecRequirement 语法，如 `identifier "com.sieve.gui" and anchor apple generic and certificate leaf[subject.OU] = "TEAMID"`）。设置后 GUI wire 应答放行 Critical 前强制核验对端进程签名，未通过静默改写 deny；未设置不核验（daemon 启动 warn）。非 macOS 设置 = 恒拒（fail-closed）。详见 SPEC-005 §6.2.4 |
 | `[[upstream]]` | `proxy` | string? | `null` | 该 upstream 专属代理 URL，**覆盖全局 `proxy`** |
 | `[[upstream]]` | `no_proxy` | bool | `false` | 显式直连，**优先级最高**，无视全局 `proxy` 与 env |
 

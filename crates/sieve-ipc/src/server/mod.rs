@@ -7,5 +7,5 @@ pub mod socket_server;
 
 pub use socket_server::{
     BroadcastPlan, ControlError, ControlPlaneRequest, HelloBuilder, IpcServer, OversizeCallback,
-    OversizeKind,
+    OversizeKind, PeerVerifier,
 };

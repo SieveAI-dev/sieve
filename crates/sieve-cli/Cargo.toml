@@ -85,6 +85,9 @@ base64 = { version = "0.22", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = "0.2"
+# F1-b：GUI peer 代码签名核验（SecCode/SecRequirement，见 SPEC-005 §6.2.4）
+security-framework = "3"
+core-foundation = "0.10"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full", "test-util"] }

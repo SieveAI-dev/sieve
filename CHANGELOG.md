@@ -8,6 +8,17 @@
 
 ### Security
 
+- **GUI 决策通道 peer 代码签名核验（F1-b）。** wire 应答通道此前对连接零身份核验，同用户
+  恶意进程可抢先连接 `~/.sieve/ipc.sock` 冒充 GUI、对 Critical 决策回 allow 静默放行。新增
+  配置 `gui_peer_code_requirement`（macOS SecRequirement 语法）：设置后 daemon 在放行
+  Critical（allow / redact_and_allow）应答前，经 `getsockopt(LOCAL_PEERTOKEN)` + Security
+  framework 对对端进程做代码签名核验，未通过静默改写 deny（与 resolve_decision 的 A 方案
+  同范式）；核验按连接懒执行缓存。未配置不核验（启动 warn 记录残余风险——源码构建无签名
+  信任锚）；非 macOS 配置本项 = 恒拒。红队决定性用例（未签名进程冒充 GUI 批 Critical
+  必须失败）随 PR 落地。TouchID 在 wire 上零防伪价值（不签发可传递凭证），GUI 侧 TouchID
+  为人在场 UX 信号，本核验才是防冒充真防线；「agent 调合法签名 CLI」路径由 A 方案负责。
+  详见 SPEC-005 §6.2.4。
+
 - **audit.db 脱敏契约锁定（GUI 审查 D-1）。** 核实 daemon 写 audit.db 时**不持久化任何命中
   原文 / 密钥 / 助记词 / 地址（含前缀片段）**：`raw_json` 列仅存已序列化的 `AuditEvent` 元数据
   （`rule_id` / `severity` / `request_id` / `caller`），命中证据不进入 `AuditEvent`，出站脱敏类

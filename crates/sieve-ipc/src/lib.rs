@@ -44,7 +44,7 @@ pub use protocol::{
 };
 pub use server::{
     BroadcastPlan, ControlError, ControlPlaneRequest, HelloBuilder, IpcServer, OversizeCallback,
-    OversizeKind,
+    OversizeKind, PeerVerifier,
 };
 
 #[cfg(test)]

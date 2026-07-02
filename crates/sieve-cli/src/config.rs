@@ -413,6 +413,18 @@ pub struct Config {
     #[allow(dead_code)]
     pub gui_socket_enabled: bool,
 
+    /// GUI peer 代码签名 requirement（F1-b，SPEC-005 §6.2.4；macOS SecRequirement 语法）。
+    ///
+    /// 设置后，GUI wire 应答放行 Critical（allow / redact_and_allow）前，daemon 会对
+    /// 连接对端进程做代码签名核验；未通过 → 该应答静默改写为 deny（fail-closed）。
+    /// 示例：`identifier "com.sieve.gui" and anchor apple generic and certificate leaf[subject.OU] = "TEAMID"`。
+    ///
+    /// 未设置（默认）= 不核验：源码构建 / dogfood 场景无签名信任锚，强制核验会锁死
+    /// 本地开发；daemon 启动时打 warn 记录该残余风险。非 macOS 平台设置本项 = 恒拒
+    /// （fail-closed，平台无核验能力）。
+    #[serde(default)]
+    pub gui_peer_code_requirement: Option<String>,
+
     /// SQLite 审计数据库路径（Week 5；`None` 时沿用 `log_path` 或 `~/.sieve/audit.db`）。
     #[serde(default)]
     pub audit_db_path: Option<PathBuf>,
@@ -509,6 +521,7 @@ impl Default for Config {
             preset: Preset::default(),
             launchd_plist_path: default_launchd_plist(),
             gui_socket_enabled: default_gui_socket_enabled(),
+            gui_peer_code_requirement: None,
             audit_db_path: None,
             update: UpdateConfig::default(),
             audit: AuditConfig::default(),
