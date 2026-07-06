@@ -93,7 +93,7 @@ pub enum AuditEvent {
         caller: CallerContext,
     },
     // ── v2.0 新增事件变体 ──────────────────────
-    /// 入站工具调用被用户决策（Allow/Deny）处置完成。
+    /// 工具调用 / 出站 hold 被用户决策（Allow/Deny）处置完成。
     DecisionMade {
         rule_id: String,
         /// "allow" | "deny" | "redact_and_allow"
@@ -102,6 +102,9 @@ pub enum AuditEvent {
         /// true = 用户点击 Allow；false = 超时 / 系统回退
         by_user: bool,
         request_id: String,
+        /// "outbound" | "inbound"（BUG-L2 前恒记 inbound；旧 raw_json 缺失时回退 inbound）。
+        #[serde(default = "legacy_direction_inbound")]
+        direction: String,
         #[serde(default)]
         caller: CallerContext,
     },
@@ -219,6 +222,9 @@ pub enum AuditEvent {
         /// 应用的决策：`"allow"` | `"deny"` | `"redact_and_allow"`。
         decision: String,
         request_id: String,
+        /// "outbound" | "inbound"（BUG-L2 同批修复；旧 raw_json 缺失时回退 inbound）。
+        #[serde(default = "legacy_direction_inbound")]
+        direction: String,
         #[serde(default)]
         caller: CallerContext,
     },
@@ -261,22 +267,31 @@ pub enum AuditEvent {
     },
 }
 
+/// 旧版（BUG-L2 修复前）`DecisionMade` raw_json 无 direction 字段；反序列化回退
+/// 到修复前的固定值 "inbound"，保持历史行读回语义不变。
+fn legacy_direction_inbound() -> String {
+    "inbound".to_owned()
+}
+
 impl AuditEvent {
-    fn direction(&self) -> &'static str {
+    fn direction(&self) -> &str {
         match self {
             Self::OutboundRedacted { .. } => "outbound",
+            // BUG-L2（真机实证 id=14/15/17/18/19，OUT-07 deny 被记成 inbound）：
+            // 决策类事件覆盖出站 hold 与入站工具调用两类，方向必须取事件实载。
+            Self::DecisionMade { direction, .. } | Self::AutoDecidedPaused { direction, .. } => {
+                direction
+            }
             Self::InboundHookMarked { .. }
             | Self::InboundDecisionRequested { .. }
             | Self::InboundDecisionResolved { .. }
             | Self::StatusBarNotified { .. }
-            | Self::DecisionMade { .. }
             | Self::GraylistAdded { .. }
             | Self::GraylistCriticalRejected { .. }
             | Self::GraylistHit { .. }
             | Self::GraylistAddFailed { .. }
             | Self::SequenceHit { .. }
-            | Self::InboundBlocked { .. }
-            | Self::AutoDecidedPaused { .. } => "inbound",
+            | Self::InboundBlocked { .. } => "inbound",
             Self::UserRulesReloaded { .. }
             | Self::CriticalLockBlocked { .. }
             | Self::PresetChanged { .. }
@@ -1299,6 +1314,89 @@ mod tests {
             Some("/usr/local/bin/claude"),
             "caller_exe 应持久化"
         );
+    }
+
+    // ─── BUG-L2：DecisionMade direction 回归测试 ──────────────────────────
+
+    /// BUG-L2 回归：出站规则（如 OUT-07 PEM 弹窗）的 `DecisionMade` 必须落
+    /// `direction='outbound'`——修复前恒记 'inbound'（真机 audit.db id=14/15/17/18/19
+    /// 实证：OUT-07 deny 全部 direction=inbound）。
+    #[tokio::test]
+    async fn decision_made_outbound_direction_persists() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("decision_dir.db");
+        let store = AuditStore::init(&db_path).expect("init failed");
+
+        let event = AuditEvent::DecisionMade {
+            rule_id: "OUT-07".to_string(),
+            decision: "deny".to_string(),
+            severity: "high".to_string(),
+            by_user: true,
+            request_id: "req-out07".to_string(),
+            direction: "outbound".to_string(),
+            caller: CallerContext::default(),
+        };
+        assert_eq!(event.direction(), "outbound");
+        store
+            .append(event, "test-provider")
+            .await
+            .expect("append failed");
+
+        let conn = Connection::open(&db_path).unwrap();
+        let (direction, disposition): (String, String) = conn
+            .query_row(
+                "SELECT direction, disposition FROM audit_events WHERE id = 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            direction, "outbound",
+            "OUT-07 决策的 direction 列应为 outbound（BUG-L2 修复前恒为 inbound）"
+        );
+        assert_eq!(disposition, "decision_made");
+    }
+
+    /// 入站方向不回归：inbound 决策仍记 inbound。
+    #[test]
+    fn decision_made_inbound_direction_metadata() {
+        let event = AuditEvent::DecisionMade {
+            rule_id: "IN-CR-01".to_string(),
+            decision: "deny".to_string(),
+            severity: "critical".to_string(),
+            by_user: false,
+            request_id: "req-in".to_string(),
+            direction: "inbound".to_string(),
+            caller: CallerContext::default(),
+        };
+        assert_eq!(event.direction(), "inbound");
+    }
+
+    /// 旧 raw_json（BUG-L2 前写入，无 direction 字段）反序列化应回退 "inbound"，
+    /// 与修复前的固定行为一致，历史行读回语义不变。
+    #[test]
+    fn legacy_decision_made_raw_json_defaults_inbound() {
+        let legacy = r#"{"kind":"decision_made","rule_id":"OUT-07","decision":"deny",
+            "severity":"high","by_user":true,"request_id":"req-legacy"}"#;
+        let event: AuditEvent = serde_json::from_str(legacy).expect("旧 raw_json 应可反序列化");
+        assert_eq!(
+            event.direction(),
+            "inbound",
+            "旧 raw_json 缺 direction 字段时应回退 inbound"
+        );
+    }
+
+    /// AutoDecidedPaused 同批修复：direction 取事件实载。
+    #[test]
+    fn auto_decided_paused_direction_metadata() {
+        let event = AuditEvent::AutoDecidedPaused {
+            rule_ids: "OUT-07".to_string(),
+            decision: "deny".to_string(),
+            request_id: "req-paused".to_string(),
+            direction: "outbound".to_string(),
+            caller: CallerContext::default(),
+        };
+        assert_eq!(event.direction(), "outbound");
     }
 
     /// GraylistAddFailed direction = "inbound"，severity = "info"。

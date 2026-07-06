@@ -243,6 +243,7 @@ pub(crate) async fn gated_request_decision(
                     "deny",
                     false,
                     req.request_id,
+                    direction,
                 );
                 return Ok(sieve_ipc::DecisionResponse {
                     request_id: req.request_id,
@@ -267,6 +268,7 @@ pub(crate) async fn gated_request_decision(
                     "allow",
                     false,
                     req.request_id,
+                    direction,
                 );
                 return Ok(sieve_ipc::DecisionResponse {
                     request_id: req.request_id,
@@ -309,6 +311,7 @@ pub(crate) async fn gated_request_decision(
                 decision,
                 r.by_user,
                 request_id,
+                direction,
             );
         }
         return resp;
@@ -351,6 +354,7 @@ pub(crate) async fn gated_request_decision(
         rule_ids,
         decision: decision_str.to_owned(),
         request_id: request_id_str,
+        direction: direction.to_owned(),
         caller: caller_ctx,
     };
     let store = Arc::clone(audit);
@@ -376,10 +380,13 @@ pub(crate) async fn gated_request_decision(
 /// 性能预算 P99<20ms）。沿用 daemon 控制面 spawn-audit 模式。
 ///
 /// `decision`：`"allow"` / `"deny"` / `"redact_and_allow"`。`by_user`：true=用户点击，
-/// false=超时/系统自动（no-client policy 等）。取首个 detection 作为主关联规则。
+/// false=超时/系统自动（no-client policy 等）。`direction`：`"outbound"` / `"inbound"`，
+/// 来自 `gated_request_decision` 调用方（BUG-L2 前未透传，出站决策被恒记 inbound）。
+/// 取首个 detection 作为主关联规则。
 ///
 /// 接线背景：detection 决策结果此前从不落 audit（headless dogfood e2e 抓出，2026-06-18），
 /// `sieve audit query` 查不到任何核心流量决策。
+#[allow(clippy::too_many_arguments)]
 fn spawn_decision_audit(
     audit: &Arc<crate::audit::AuditStore>,
     provider_id: &str,
@@ -388,6 +395,7 @@ fn spawn_decision_audit(
     decision: &str,
     by_user: bool,
     request_id: uuid::Uuid,
+    direction: &str,
 ) {
     let Some(primary) = detections.first() else {
         return;
@@ -405,6 +413,7 @@ fn spawn_decision_audit(
         severity: format!("{:?}", primary.severity).to_lowercase(),
         by_user,
         request_id: request_id.to_string(),
+        direction: direction.to_owned(),
         caller: caller_ctx,
     };
     let store = Arc::clone(audit);
