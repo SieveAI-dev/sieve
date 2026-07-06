@@ -44,21 +44,24 @@ jobs:
 
   ga-keys-gate:
     name: ga_keys 编译期 gate 有效性
-    # 常规 clippy/test 用默认 features 不带 ga_keys（--all-features 会被占位密钥的
-    # const assert E0080 打挂）。这个专门 job 验证 ga_keys 编译期兜底没被意外删除，
-    # 保证 fail-open 的验签永不可能进 GA 二进制。
+    # 常规 clippy/test 用默认 features 不带 ga_keys（--all-features 会在占位密钥下
+    # 被 const assert E0080 打挂）。这个专门 job 验证 ga_keys 编译期兜底没被意外
+    # 删除，保证 fail-open 的验签永不可能进 GA 二进制。
     #
-    # ⚠️ 当前状态：真 ed25519 公钥已嵌入源码（signature.rs TRUSTED_PUBKEY /
-    # origin_header.rs SIEVE_ORIGIN_PUBLIC_KEY 均为真值），故 `--features ga_keys`
-    # 现在会编译【成功】，本 job 原本「期望占位密钥下编译失败」的断言会反过来失败。
-    # 但 ga_keys 尚未正式激活（信任根公钥日后可能更换），故本 job 暂设
-    # continue-on-error：保留持续运行 + 失败可见的报警信号，但不阻塞整体 CI。
+    # 判定方式（正负两向，自足、不依赖树内密钥是真值还是占位）：
+    # - 正向：树内公钥（已嵌真值）下 `--features ga_keys` 必须编译成功；
+    # - 负向：把两处公钥临时替换回占位值（TRUSTED_PUBKEY=None /
+    #   SIEVE_ORIGIN_PUBLIC_KEY 全零）后 `--features ga_keys` 必须编译失败，
+    #   且失败原因必须是 gate 的 const assert 报错本身（防其他编译错误顶包）。
     #
-    # 正式激活 ga_keys 时：①删除下方 continue-on-error，把本 job 反转为
-    # expect-PASS（验证真公钥就位时 ga_keys 编译成功）；②给 release.yml 两步
-    # cargo build 加 --features ga_keys（否则验签 fail-open 进发布产物）。
+    # 历史：旧版判定直接断言「树内密钥下编译失败」，等价于断言树内密钥仍是占位。
+    # 2026-06-21 真公钥嵌入源码后该断言永久反向失败，只能 continue-on-error 存档
+    # 口径（每次 CI 红一个 job）。改为正负两向后本 job 恢复为硬门禁。
+    #
+    # 正式激活 ga_keys 时（信任根定稿、首个 release）：本 job 无需改动——正负两向
+    # 语义不随激活状态变化；只需给 release.yml 两步 cargo build 加
+    # --features ga_keys（否则验签 fail-open 进发布产物）。
     runs-on: macos-14
-    continue-on-error: true  # 真公钥已就位、ga_keys 暂未正式激活：本 job 预期失败但不阻塞 CI
     steps:
       - uses: actions/checkout@v4
       - run: rustup show
@@ -66,19 +69,46 @@ jobs:
       - name: 安装构建依赖（macOS）
         run: |
           brew install cmake ninja pkg-config boost ragel
-      - name: 占位密钥下 ga_keys 必须编译失败（fail-closed gate）
+      - name: 正向：树内公钥下 ga_keys 必须编译成功
         run: |
+          cargo build -p sieve-updater --features ga_keys --locked
+          cargo build -p sieve-ipc --features ga_keys --locked
+      - name: 负向：占位密钥下 ga_keys 必须编译失败（fail-closed gate）
+        run: |
+          set -euo pipefail
+          # 临时把公钥替换回占位值（仅改 runner 工作副本，末尾还原）
+          perl -0pi -e 's/pub const TRUSTED_PUBKEY: Option<\[u8; 32\]> = Some\(\[[^\]]*\]\);/pub const TRUSTED_PUBKEY: Option<[u8; 32]> = None;/s' crates/sieve-updater/src/signature.rs
+          perl -0pi -e 's/pub const SIEVE_ORIGIN_PUBLIC_KEY: &\[u8; 32\] = &\[[^\]]*\];/pub const SIEVE_ORIGIN_PUBLIC_KEY: &[u8; 32] = &[0u8; 32];/s' crates/sieve-ipc/src/origin_header.rs
+          # 替换必须真的发生（防常量被重命名/改写后本负向测试空转成 vacuous pass）
+          if git diff --quiet -- crates/sieve-updater/src/signature.rs; then
+            echo "::error::TRUSTED_PUBKEY 占位替换未生效（signature.rs 常量声明形态变了？负向测试空转）"
+            exit 1
+          fi
+          if git diff --quiet -- crates/sieve-ipc/src/origin_header.rs; then
+            echo "::error::SIEVE_ORIGIN_PUBLIC_KEY 占位替换未生效（origin_header.rs 常量声明形态变了？负向测试空转）"
+            exit 1
+          fi
           fail=0
-          if cargo build -p sieve-updater --features ga_keys --locked 2>/dev/null; then
+          if out=$(cargo build -p sieve-updater --features ga_keys --locked 2>&1); then
             echo "::error::sieve-updater ga_keys gate 未拒绝占位 TRUSTED_PUBKEY=None（编译期兜底失效）"
             fail=1
-          fi
-          if cargo build -p sieve-ipc --features ga_keys --locked 2>/dev/null; then
-            echo "::error::sieve-ipc ga_keys gate 未拒绝占位 SIEVE_ORIGIN_PUBLIC_KEY 全零（编译期兜底失效）"
+          elif ! grep -q "TRUSTED_PUBKEY is None" <<<"$out"; then
+            echo "::error::sieve-updater 占位密钥下编译失败，但原因不是 ga_keys gate 断言（其他编译错误顶包，gate 有效性未验证）"
+            printf '%s\n' "$out" | tail -30
             fail=1
           fi
+          if out=$(cargo build -p sieve-ipc --features ga_keys --locked 2>&1); then
+            echo "::error::sieve-ipc ga_keys gate 未拒绝占位 SIEVE_ORIGIN_PUBLIC_KEY 全零（编译期兜底失效）"
+            fail=1
+          elif ! grep -q "SIEVE_ORIGIN_PUBLIC_KEY is all zeros" <<<"$out"; then
+            echo "::error::sieve-ipc 占位密钥下编译失败，但原因不是 ga_keys gate 断言（其他编译错误顶包，gate 有效性未验证）"
+            printf '%s\n' "$out" | tail -30
+            fail=1
+          fi
+          # 还原源码（后续 step / 缓存不受污染）
+          git checkout -- crates/sieve-updater/src/signature.rs crates/sieve-ipc/src/origin_header.rs
           if [ "$fail" = "0" ]; then
-            echo "::notice::ga_keys 编译期 gate 有效 —— 占位密钥无法进 GA 二进制"
+            echo "::notice::ga_keys 编译期 gate 有效 —— 正向真公钥可编译、负向占位密钥被 const assert 拒绝"
           fi
           exit $fail
 
