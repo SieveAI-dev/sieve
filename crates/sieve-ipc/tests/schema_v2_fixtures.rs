@@ -1,8 +1,9 @@
 //! SPEC-005 v2 wire format fixture 测试（§14.1）。
 //!
 //! 验证 `tests/fixtures/v2/` 下的 JSON fixture 能被正确反序列化为 sieve-ipc 协议类型。
-//! 覆盖：21 个 method 目录 × minimal/full/null_optional = 88 条（含 list_pending / resolve_decision
-//! / request_decision.provider_id 等新增；GUI 侧 IPCSchemaV2FixtureTests 消费同一份权威副本）。
+//! 覆盖：21 个 method 目录 × minimal/full/null_optional = 89 条（含 list_pending / resolve_decision
+//! / request_decision.provider_id / request_decision_canceled.resolved_by_peer 等新增；
+//! GUI 侧 IPCSchemaV2FixtureTests 消费同一份权威副本）。
 //!
 //! 生成式测试 `all_fixtures_valid_json` 遍历 fixtures/v2/ 所有 .json 文件，
 //! 验证每个文件均可被解析为合法 JSON，并针对已知 method 做类型级反序列化验证。
@@ -286,7 +287,7 @@ fn all_fixtures_valid_json_and_roundtrip() {
         "sieve.set_preset",
         "sieve.set_preset_overrides",
     ];
-    const EXPECTED_TOTAL: usize = 88;
+    const EXPECTED_TOTAL: usize = 89;
 
     let mut total = 0usize;
     let mut errors: Vec<String> = Vec::new();
@@ -578,7 +579,7 @@ fn all_fixtures_valid_json_and_roundtrip() {
     );
     assert_eq!(
         total, EXPECTED_TOTAL,
-        "fixture 文件总数应精确为 {EXPECTED_TOTAL}（当前 {total}）——增删 fixture 须同步 EXPECTED_TOTAL 与 GUI 侧 fixtureCount(88)"
+        "fixture 文件总数应精确为 {EXPECTED_TOTAL}（当前 {total}）——增删 fixture 须同步 EXPECTED_TOTAL 与 GUI 侧 fixtureCount(89)"
     );
     assert!(
         errors.is_empty(),
@@ -624,6 +625,21 @@ fn request_decision_canceled_minimal_deserializes() {
         .expect("deserialize RequestDecisionCanceledNotify");
     use sieve_ipc::protocol::CancelReason;
     assert_eq!(notify.reason, CancelReason::Timeout);
+}
+
+/// sieve.request_decision_canceled resolved_by_peer fixture 可反序列化（SPEC-005 §6.3
+/// fan-out 收口场景：首答生效后其余 client 收本通知，auto_decision 为首答实际决策）。
+#[test]
+fn request_decision_canceled_resolved_by_peer_deserializes() {
+    let json = include_str!(
+        "fixtures/v2/sieve.request_decision_canceled/notification.resolved_by_peer.json"
+    );
+    let val: serde_json::Value =
+        serde_json::from_str(json).expect("parse canceled resolved_by_peer");
+    let notify: RequestDecisionCanceledNotify = serde_json::from_value(val["params"].clone())
+        .expect("deserialize RequestDecisionCanceledNotify");
+    use sieve_ipc::protocol::CancelReason;
+    assert_eq!(notify.reason, CancelReason::ResolvedByPeer);
 }
 
 /// sieve.paused_changed full fixture 可反序列化，origin_request_id 存在。

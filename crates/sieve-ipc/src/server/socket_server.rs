@@ -360,7 +360,10 @@ type GuiWriters = Arc<std::sync::Mutex<Vec<mpsc::Sender<String>>>>;
 /// - GUI 启动后主动连接此 socket，保持长连接。
 /// - 支持多个并发 GUI 连接（如 sieve-gui-macos + sieve doctor 同时运行）。
 /// - GUI 断线后 `gui_writers` 中对应 sender 在下次 broadcast 时自动清理。
-/// - `request_decision` 仍发往第一个已连接 GUI（决策请求有状态，不 fan-out）。
+/// - `request_decision` fan-out 给**所有** live writer，首个 `decision_response` 生效
+///   （首答胜出），其余 client 收 `sieve.request_decision_canceled`（`resolved_by_peer`）。
+///   历史教训（BUG-L1c）：只投单个 writer 时，「channel 未关但对端已不消费」的僵尸连接
+///   会吞掉决策帧——其余 live GUI 永不弹窗，daemon 只能等满 timeout 后 fail-closed。
 ///
 /// # 双向通信模型
 ///
@@ -373,7 +376,8 @@ type GuiWriters = Arc<std::sync::Mutex<Vec<mpsc::Sender<String>>>>;
 ///
 /// 每个方向在同一条 Unix socket 连接上用换行分隔的 JSON-RPC 帧传输。
 /// `handle_connection` 负责从 GUI 读取响应帧并派发到 `pending` map；
-/// `request_decision` 遍历 `gui_writers` 快照，把请求帧投递给第一个 live writer（不 fan-out）。
+/// `request_decision` 遍历 `gui_writers` 快照，把请求帧 fan-out 投递给所有 live writer
+/// （SPEC-005 §1.4：pending 是单 oneshot，首答胜出；解决后广播 `resolved_by_peer` 收口）。
 ///
 /// # 单向通知（v2.1）
 ///
@@ -718,88 +722,10 @@ impl IpcServer {
 
     /// 通用 fan-out 广播（所有 broadcast_* 方法的共用实现）。
     ///
-    /// 行为与 broadcast_status_bar 历史实现一致：
-    /// - 无 GUI 连接时静默丢弃 + debug 日志。
-    /// - `try_send`：Closed → 移除（lazy 清理）；Full → 保留（背压）。
-    /// - 持 `std::sync::Mutex` 锁短暂、无 await。
+    /// 委托给自由函数 [`broadcast_method_to`]——后者不依赖 `&self`，供
+    /// [`PendingCleanupGuard`] 在 `request_decision` future 被 cancel 后仍能广播取消通知。
     fn broadcast_method<T: serde::Serialize>(&self, method: &str, params: &T, label: &str) {
-        let notification = crate::protocol::jsonrpc::Request {
-            jsonrpc: "2.0".to_owned(),
-            method: method.to_owned(),
-            params: match serde_json::to_value(params) {
-                Ok(v) => Some(v),
-                Err(e) => {
-                    warn!(method, label, "failed to serialize broadcast params: {e}");
-                    return;
-                }
-            },
-            id: None,
-        };
-
-        let mut payload = match serde_json::to_string(&notification) {
-            Ok(s) => s,
-            Err(e) => {
-                warn!(method, "failed to serialize JSON-RPC frame: {e}");
-                return;
-            }
-        };
-        payload.push('\n');
-
-        // 毒化恢复：持锁线程 panic 不破坏 Vec 结构，into_inner 取出数据继续（审查 §6）。
-        let mut writers = self
-            .gui_writers
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-
-        if writers.is_empty() {
-            debug!(
-                method,
-                label, "broadcast: no GUI clients connected; dropping"
-            );
-            return;
-        }
-
-        let total = writers.len();
-        let mut alive: Vec<mpsc::Sender<String>> = Vec::with_capacity(total);
-        let mut sent = 0usize;
-        let mut removed = 0usize;
-
-        for sender in writers.drain(..) {
-            match sender.try_send(payload.clone()) {
-                Ok(()) => {
-                    sent += 1;
-                    alive.push(sender);
-                }
-                Err(mpsc::error::TrySendError::Full(_)) => {
-                    debug!(method, label, "GUI writer channel full; retaining sender");
-                    alive.push(sender);
-                }
-                Err(mpsc::error::TrySendError::Closed(_)) => {
-                    debug!(
-                        method,
-                        label, "GUI client sender closed; removing from gui_writers"
-                    );
-                    removed += 1;
-                }
-            }
-        }
-        *writers = alive;
-
-        if removed > 0 {
-            debug!(
-                method,
-                label,
-                sent,
-                removed,
-                alive = writers.len(),
-                "broadcast: cleaned up dead GUI clients"
-            );
-        } else {
-            debug!(
-                method,
-                label, sent, "broadcast: delivered to all GUI clients"
-            );
-        }
+        broadcast_method_to(&self.gui_writers, method, params, label);
     }
 
     /// 向已连接的 GUI 发送决策请求，等待响应或超时。
@@ -809,14 +735,18 @@ impl IpcServer {
     ///
     /// # 行为
     ///
+    /// - 请求帧 **fan-out** 给所有 live writer（SPEC-005 §1.4，BUG-L1c 修复）；
+    ///   首个 `decision_response` 生效，解决后广播 `resolved_by_peer` 收口其余 client。
     /// - 如果没有 GUI 客户端连接：**立即 fallback**，不等超时。
     ///   （等超时无意义——没人能决策。）
-    /// - 如果 GUI 写通道已满（背压）或 GUI 进程崩溃（`try_send` 返回 Full/Closed）：
-    ///   **立即 fallback**，不阻塞 SSE pipeline。**不用 `send().await`**——队列满会
-    ///   把 hot path 卡死直到 timeout 到期，期间整个 SSE 连接 hold 住，对用户体验
-    ///   而言相当于 daemon 死锁（known-issues-v1.4 P2-R10-#4）。
+    /// - 如果所有 writer 都不可投递（`try_send` 全部 Full/Closed）：**立即 fallback**，
+    ///   不阻塞 SSE pipeline。**不用 `send().await`**——队列满会把 hot path 卡死直到
+    ///   timeout 到期，期间整个 SSE 连接 hold 住，对用户体验而言相当于 daemon 死锁
+    ///   （known-issues-v1.4 P2-R10-#4）。
     /// - 如果 GUI 在 `timeout` 内回复：返回 GUI 的决策。
     /// - 如果超时：按 `default_on_timeout` 构造兜底响应，并从 pending map 清理。
+    /// - 本 future 被调用方 cancel（HTTP 客户端断连）：[`PendingCleanupGuard`] 兜底
+    ///   清理 pending 条目 + 广播 `upstream_disconnected`（BUG-L1b 修复）。
     pub async fn request_decision(
         &self,
         req: DecisionRequest,
@@ -844,13 +774,18 @@ impl IpcServer {
         let request_id = req.request_id;
         let default_on_timeout = req.default_on_timeout;
 
-        // 1. 取所有已连接 GUI writer 的快照。决策请求发给第一个 live writer，**不 fan-out**
-        //    （pending 是单 oneshot；多发会让多个 GUI 同时弹窗、且只有首个回执生效）。
+        // 1. 取所有已连接 GUI writer 的快照。决策请求 **fan-out** 给所有 live writer
+        //    （SPEC-005 §1.4）：pending 是单 oneshot，首个 decision_response 生效（首答
+        //    胜出——应答路径按 request_id 从 map remove，天然幂等）；解决后广播
+        //    request_decision_canceled(resolved_by_peer) 让其余 client 收回决策 UI。
         //
-        //    历史教训：旧实现只取 writers.first()，当 index 0 是 stale sender
-        //    （GUI 断连/重启后 receiver 已 drop，清理是 lazy 的、滞留 Vec 首位）而 index 1+ 仍
-        //    是 live client 时，try_send 命中 Closed 即直接 fallback，从不尝试 live writer →
-        //    误 fail-closed deny（多 client 平等场景的可用性缺陷）。改为遍历快照逐个 try_send。
+        //    历史教训（两层递进）：
+        //    - 旧实现只取 writers.first()，index 0 是 stale sender（Closed）时直接
+        //      fallback deny，从不尝试 live writer → 误 fail-closed；
+        //    - 改为「发给第一个 try_send 成功的 writer」仍不够（BUG-L1c 真机实证）：
+        //      GUI 重启过渡期新旧连接混存，「channel 未关但对端已不消费」的僵尸连接
+        //      try_send 照样成功、帧被吞 → live GUI 永不弹窗，daemon 等满 timeout 后
+        //      fail-closed。try_send 成功 ≠ 对端会处理，唯一可靠语义是 fan-out。
         let writers_snapshot: Vec<_> = {
             // 毒化恢复：持锁线程 panic 不破坏 Vec 结构，into_inner 取出数据继续。
             let writers = self
@@ -889,6 +824,17 @@ impl IpcServer {
             );
         }
 
+        // BUG-L1b：pending 注册后立即武装 RAII 兜底。本 future 被调用方 cancel（HTTP 客户端
+        // 断连 → 连接任务 abort）时，下方 timeout 分支永不执行，guard 的 Drop 负责从
+        // pending map 移除条目 + 广播 upstream_disconnected 取消通知。所有正常退出路径
+        // 显式 disarm。
+        let mut cleanup_guard = PendingCleanupGuard::new(
+            Arc::clone(&self.pending),
+            Arc::clone(&self.gui_writers),
+            request_id,
+            default_on_timeout,
+        );
+
         // 3. 通过 wire DTO 适配层序列化请求（SPEC-005 §6.0 / §6.1 / §6.1.1 / §6.1.2）。
         //    P1-5 + P2-2 + P2-4：使用 RequestDecisionWireKind 替换内部 struct 直接序列化。
         let wire = crate::wire::RequestDecisionWireKind::from_request(&req, direction, provider_id);
@@ -901,29 +847,20 @@ impl IpcServer {
         let mut payload = serde_json::to_string(&rpc_req)?;
         payload.push('\n');
 
-        // 4. 遍历 live writer 逐个 try_send，发给第一个成功的即停（决策不 fan-out）。
-        //    try_send 而非 send().await：避免 mpsc 队列满阻塞 hot path。
-        //    Full = live 但忙 → 跳过试下一个；Closed = 已断 → 记下待清理并试下一个。
-        //    用 TrySendError 回收 payload，零 clone（首个 writer 成功的常见路径不分配）。
-        let mut pending_payload = Some(payload);
-        let mut sent = false;
+        // 4. fan-out：遍历 live writer 逐个 try_send，投给**所有**成功的 writer
+        //    （BUG-L1c 修复；SPEC-005 §1.4）。try_send 而非 send().await：避免 mpsc
+        //    队列满阻塞 hot path。Full = live 但忙 → 本次决策收不到帧（无法应答），
+        //    保留 sender 不断线；Closed = 已断 → 记下待清理。
+        let mut sent_count = 0usize;
         let mut had_closed = false;
         for sender in &writers_snapshot {
-            let Some(p) = pending_payload.take() else {
-                break;
-            };
-            match sender.try_send(p) {
-                Ok(()) => {
-                    sent = true;
-                    break;
+            match sender.try_send(payload.clone()) {
+                Ok(()) => sent_count += 1,
+                Err(mpsc::error::TrySendError::Full(_)) => {
+                    warn!(%request_id, "a GUI writer channel full (backpressure); skipping this writer for fan-out");
                 }
-                Err(mpsc::error::TrySendError::Full(returned)) => {
-                    warn!(%request_id, "a GUI writer channel full (backpressure); trying next live writer");
-                    pending_payload = Some(returned);
-                }
-                Err(mpsc::error::TrySendError::Closed(returned)) => {
+                Err(mpsc::error::TrySendError::Closed(_)) => {
                     had_closed = true;
-                    pending_payload = Some(returned);
                 }
             }
         }
@@ -938,26 +875,47 @@ impl IpcServer {
             writers.retain(|s| !s.is_closed());
         }
 
-        if !sent {
+        if sent_count == 0 {
             // 无任何 live writer 可投递（全部 Closed/Full）——fail-closed fallback，保持核心
             // 安全不变量：真无人在线 → 按 default_on_timeout（Block→Deny）兜底。
+            cleanup_guard.disarm();
             self.pending.lock().await.remove(&request_id);
             warn!(%request_id, "no usable GUI writer (all closed/full); immediate fallback");
             return Ok(make_timeout_fallback(request_id, default_on_timeout));
         }
 
-        // 4. 等待 GUI 回复或超时。
+        // 5. 等待首个回复或超时。
         match tokio::time::timeout(timeout, rx).await {
-            Ok(Ok(resp)) => Ok(resp),
+            Ok(Ok(resp)) => {
+                // 首答生效（wire 应答 / inject_decision / resolve_decision 殊途同归）。
+                // fan-out 收口：广播 resolved_by_peer 让其余 client 收回决策 UI
+                // （SPEC-005 §6.3；已答复方对未知 request_id 的 canceled 是 no-op）。
+                cleanup_guard.disarm();
+                self.broadcast_request_decision_canceled(RequestDecisionCanceledNotify {
+                    request_id,
+                    reason: CancelReason::ResolvedByPeer,
+                    auto_decision: resp.decision,
+                });
+                Ok(resp)
+            }
             Ok(Err(_)) => {
-                // oneshot sender 已丢弃（handle_connection 因断线退出），走超时兜底。
-                warn!(%request_id, "decision sender dropped (GUI disconnected); fallback");
-                // 不广播 cancel（GUI 已断，没人能收到通知；其他可能存在的 GUI 实例
-                // 也不会收到，因 pending 已清空）。
-                Ok(make_timeout_fallback(request_id, default_on_timeout))
+                // oneshot sender 已丢弃：最后一个 GUI 断线（handle_connection 清空 pending）
+                // 或某 client 以 §12.4 错误响应拒绝（dispatch_message drop entry）。
+                cleanup_guard.disarm();
+                warn!(%request_id, "decision sender dropped (client disconnected or rejected); fallback");
+                // fan-out 后其余 client 可能仍持有决策 UI——广播 resolved_by_peer 收口
+                // （无 live writer 时广播天然 no-op，行为等价旧实现）。
+                let fallback = make_timeout_fallback(request_id, default_on_timeout);
+                self.broadcast_request_decision_canceled(RequestDecisionCanceledNotify {
+                    request_id,
+                    reason: CancelReason::ResolvedByPeer,
+                    auto_decision: fallback.decision,
+                });
+                Ok(fallback)
             }
             Err(_elapsed) => {
                 // 超时，清理 pending map + 广播取消通知给所有 GUI（SPEC-002 §9.3）。
+                cleanup_guard.disarm();
                 self.pending.lock().await.remove(&request_id);
                 warn!(%request_id, "decision timeout");
                 let auto_decision = match default_on_timeout {
@@ -2075,6 +2033,209 @@ fn heartbeat_frame() -> String {
     "{\"jsonrpc\":\"2.0\",\"method\":\"sieve.heartbeat\"}\n".to_owned()
 }
 
+/// 通用 fan-out 广播实现（自由函数，不依赖 `IpcServer` 实例）。
+///
+/// 行为与 broadcast_status_bar 历史实现一致：
+/// - 无 GUI 连接时静默丢弃 + debug 日志。
+/// - `try_send`：Closed → 移除（lazy 清理）；Full → 保留（背压）。
+/// - 持 `std::sync::Mutex` 锁短暂、无 await——**可在 Drop 中安全调用**
+///   （[`PendingCleanupGuard`] 依赖此性质在 future 被 cancel 后广播取消通知）。
+fn broadcast_method_to<T: serde::Serialize>(
+    gui_writers: &GuiWriters,
+    method: &str,
+    params: &T,
+    label: &str,
+) {
+    let notification = crate::protocol::jsonrpc::Request {
+        jsonrpc: "2.0".to_owned(),
+        method: method.to_owned(),
+        params: match serde_json::to_value(params) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                warn!(method, label, "failed to serialize broadcast params: {e}");
+                return;
+            }
+        },
+        id: None,
+    };
+
+    let mut payload = match serde_json::to_string(&notification) {
+        Ok(s) => s,
+        Err(e) => {
+            warn!(method, "failed to serialize JSON-RPC frame: {e}");
+            return;
+        }
+    };
+    payload.push('\n');
+
+    // 毒化恢复：持锁线程 panic 不破坏 Vec 结构，into_inner 取出数据继续（审查 §6）。
+    let mut writers = gui_writers
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+    if writers.is_empty() {
+        debug!(
+            method,
+            label, "broadcast: no GUI clients connected; dropping"
+        );
+        return;
+    }
+
+    let total = writers.len();
+    let mut alive: Vec<mpsc::Sender<String>> = Vec::with_capacity(total);
+    let mut sent = 0usize;
+    let mut removed = 0usize;
+
+    for sender in writers.drain(..) {
+        match sender.try_send(payload.clone()) {
+            Ok(()) => {
+                sent += 1;
+                alive.push(sender);
+            }
+            Err(mpsc::error::TrySendError::Full(_)) => {
+                debug!(method, label, "GUI writer channel full; retaining sender");
+                alive.push(sender);
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => {
+                debug!(
+                    method,
+                    label, "GUI client sender closed; removing from gui_writers"
+                );
+                removed += 1;
+            }
+        }
+    }
+    *writers = alive;
+
+    if removed > 0 {
+        debug!(
+            method,
+            label,
+            sent,
+            removed,
+            alive = writers.len(),
+            "broadcast: cleaned up dead GUI clients"
+        );
+    } else {
+        debug!(
+            method,
+            label, sent, "broadcast: delivered to all GUI clients"
+        );
+    }
+}
+
+/// 广播 `sieve.request_decision_canceled`（自由函数形态，供 [`PendingCleanupGuard`] 使用）。
+fn broadcast_request_decision_canceled_to(
+    gui_writers: &GuiWriters,
+    notify: RequestDecisionCanceledNotify,
+) {
+    let label = format!("request_decision_canceled request_id={}", notify.request_id);
+    broadcast_method_to(
+        gui_writers,
+        "sieve.request_decision_canceled",
+        &notify,
+        &label,
+    );
+}
+
+/// RAII 兜底（BUG-L1b）：`request_decision` future 被调用方 cancel 时清理 pending 泄漏。
+///
+/// 场景：`request_decision` 被 HTTP handler await，HTTP 客户端在决策等待期断连 →
+/// 连接任务 abort → 本 future 在任意 await 点被 drop → `tokio::time::timeout` 分支
+/// 永不执行 → pending map 条目滞留（`sieve decisions list` 出现 age 远超 timeout 的
+/// 僵尸条目），且 GUI 收不到 cancel、决策 UI 悬空到自身倒计时结束。
+///
+/// 本 guard 在 pending 注册后立即武装；所有正常退出路径（首答 / 超时 / 无 writer /
+/// sender drop）显式 [`Self::disarm`]。仅当 future 被 cancel（Drop 时仍武装）才触发：
+/// 从 pending map 移除条目 + 广播 `upstream_disconnected` 取消通知。
+///
+/// Drop 中不能 await：优先 `try_lock` 同步清理（future 被 cancel 时通常无锁竞争）；
+/// 竞争失败则 spawn 清理任务兜底（仍在 runtime 上下文内——drop 发生在连接任务 abort 时）。
+struct PendingCleanupGuard {
+    pending: PendingMap,
+    gui_writers: GuiWriters,
+    request_id: Uuid,
+    /// 广播 cancel 时携带的兜底处置（`default_on_timeout` 映射，与超时路径一致）。
+    auto_decision: DecisionAction,
+    armed: bool,
+}
+
+impl PendingCleanupGuard {
+    fn new(
+        pending: PendingMap,
+        gui_writers: GuiWriters,
+        request_id: Uuid,
+        default_on_timeout: DefaultOnTimeout,
+    ) -> Self {
+        Self {
+            pending,
+            gui_writers,
+            request_id,
+            auto_decision: match default_on_timeout {
+                DefaultOnTimeout::Block => DecisionAction::Deny,
+                DefaultOnTimeout::Allow => DecisionAction::Allow,
+                DefaultOnTimeout::Redact => DecisionAction::RedactAndAllow,
+            },
+            armed: true,
+        }
+    }
+
+    /// 正常退出路径调用：pending 已由该路径自行处置，Drop 不再兜底。
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for PendingCleanupGuard {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        let notify = RequestDecisionCanceledNotify {
+            request_id: self.request_id,
+            reason: CancelReason::UpstreamDisconnected,
+            auto_decision: self.auto_decision,
+        };
+        match self.pending.try_lock() {
+            Ok(mut map) => {
+                // 条目已被他人消费（首答与 cancel 竞态）→ 已处置，无需广播。
+                if map.remove(&self.request_id).is_some() {
+                    drop(map);
+                    warn!(
+                        request_id = %self.request_id,
+                        "request_decision future canceled (caller dropped); pending cleaned + cancel broadcast"
+                    );
+                    broadcast_request_decision_canceled_to(&self.gui_writers, notify);
+                }
+            }
+            Err(_) => {
+                // 锁竞争：不能在 Drop 里阻塞等锁（tokio Mutex 无同步阻塞路径），
+                // spawn 清理任务兜底。future 在 runtime 内被 drop，try_current 必可用；
+                // 极端情形（runtime 正在关停）下 spawn 失败 = 进程将亡，泄漏无害。
+                if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                    let pending = Arc::clone(&self.pending);
+                    let gui_writers = Arc::clone(&self.gui_writers);
+                    let request_id = self.request_id;
+                    handle.spawn(async move {
+                        if pending.lock().await.remove(&request_id).is_some() {
+                            warn!(
+                                %request_id,
+                                "request_decision future canceled (caller dropped); pending cleaned + cancel broadcast (deferred)"
+                            );
+                            broadcast_request_decision_canceled_to(&gui_writers, notify);
+                        }
+                    });
+                } else {
+                    warn!(
+                        request_id = %self.request_id,
+                        "request_decision future canceled but no runtime for deferred cleanup"
+                    );
+                }
+            }
+        }
+    }
+}
+
 fn make_timeout_fallback(
     request_id: Uuid,
     default_on_timeout: DefaultOnTimeout,
@@ -2357,6 +2518,234 @@ mod tests {
         // 全部死 sender 应被清理。
         let remaining = server.gui_writers.lock().expect("gui_writers lock").len();
         assert_eq!(remaining, 0, "全 stale sender 应被清空");
+    }
+
+    /// BUG-L1c 修复主断言（SPEC-005 §1.4 fan-out）：决策请求必须 fan-out 给**所有** live
+    /// writer；首个应答生效；解决后所有 client 收到 resolved_by_peer 取消通知（携带首答
+    /// 的实际决策），让未答复方收回决策 UI。
+    #[tokio::test]
+    async fn request_decision_fans_out_first_answer_wins_others_get_canceled() {
+        let dir = tempdir().expect("tempdir");
+        let socket_path = dir.path().join("ipc.sock");
+        let (server, _listener) = IpcServer::bind(socket_path).expect("bind");
+        let server = Arc::new(server);
+
+        // 两个 live writer，模拟两个并发 GUI client。
+        let (tx_a, mut rx_a) = mpsc::channel::<String>(8);
+        let (tx_b, mut rx_b) = mpsc::channel::<String>(8);
+        {
+            let mut w = server.gui_writers.lock().expect("gui_writers lock");
+            w.push(tx_a);
+            w.push(tx_b);
+        }
+
+        let req = dummy_request();
+        let request_id = req.request_id;
+
+        let server_for_task = Arc::clone(&server);
+        let handle = tokio::spawn(async move {
+            server_for_task
+                .request_decision(req, Duration::from_secs(60), "inbound", None)
+                .await
+        });
+
+        // fan-out：两个 writer 都必须收到决策请求帧（修复前只投第一个成功的 writer）。
+        for (name, rx) in [("A", &mut rx_a), ("B", &mut rx_b)] {
+            let line = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+                .await
+                .unwrap_or_else(|_| panic!("writer {name} 应收到决策请求帧（fan-out）"))
+                .expect("rx 不应关闭");
+            let v: serde_json::Value =
+                serde_json::from_str(line.trim_end()).expect("wire frame valid JSON");
+            assert_eq!(
+                v["method"], "sieve.request_decision",
+                "writer {name} 应收到决策请求帧"
+            );
+        }
+
+        // 首答生效（inject 模拟其中一个 GUI 应答 Allow）。
+        server
+            .inject_decision(DecisionResponse {
+                request_id,
+                decision: DecisionAction::Allow,
+                decided_at: Utc::now(),
+                by_user: true,
+                remember: false,
+                context_hint: None,
+                ui_phase_when_clicked: None,
+            })
+            .await;
+
+        let resp = handle
+            .await
+            .expect("join request_decision task")
+            .expect("request_decision ok");
+        assert!(resp.by_user);
+        assert_eq!(resp.decision, DecisionAction::Allow, "首答应生效");
+
+        // 解决后所有 client 收到 resolved_by_peer 取消通知（含首答方，其对未知
+        // request_id 的 canceled 是 no-op）。
+        for (name, rx) in [("A", &mut rx_a), ("B", &mut rx_b)] {
+            let line = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+                .await
+                .unwrap_or_else(|_| panic!("writer {name} 应收到 canceled 通知"))
+                .expect("rx 不应关闭");
+            let v: serde_json::Value =
+                serde_json::from_str(line.trim_end()).expect("cancel frame valid JSON");
+            assert_eq!(v["method"], "sieve.request_decision_canceled");
+            assert_eq!(v["params"]["request_id"], request_id.to_string());
+            assert_eq!(
+                v["params"]["reason"], "resolved_by_peer",
+                "解决路径的取消原因应为 resolved_by_peer"
+            );
+            assert_eq!(
+                v["params"]["auto_decision"], "allow",
+                "auto_decision 应为首答的实际决策"
+            );
+        }
+    }
+
+    /// BUG-L1c 回归锚点（真机实证场景）：GUI 重启过渡期「半死」连接——mpsc channel
+    /// 仍开着（receiver 未 drop、try_send 成功）但对端 GUI 已是僵尸、不再消费任何帧。
+    /// 旧实现「投给第一个 try_send 成功的 writer」会把决策帧喂给僵尸 → live GUI 永不
+    /// 弹窗、daemon 等满 60s 后 fail-closed。fan-out 修复后 live writer 必须同时收到
+    /// 请求帧并能解决决策。
+    #[tokio::test]
+    async fn request_decision_survives_half_dead_writer_via_fanout() {
+        let dir = tempdir().expect("tempdir");
+        let socket_path = dir.path().join("ipc.sock");
+        let (server, _listener) = IpcServer::bind(socket_path).expect("bind");
+        let server = Arc::new(server);
+
+        // index 0：半死 writer——receiver 持有但永不消费（try_send 成功、帧被吞）。
+        let (zombie_tx, _zombie_rx_kept_alive) = mpsc::channel::<String>(8);
+        // index 1：live writer。
+        let (live_tx, mut live_rx) = mpsc::channel::<String>(8);
+        {
+            let mut w = server.gui_writers.lock().expect("gui_writers lock");
+            w.push(zombie_tx);
+            w.push(live_tx);
+        }
+
+        let req = dummy_request();
+        let request_id = req.request_id;
+
+        let server_for_task = Arc::clone(&server);
+        let handle = tokio::spawn(async move {
+            server_for_task
+                .request_decision(req, Duration::from_secs(60), "inbound", None)
+                .await
+        });
+
+        // 修复前：帧只投给 index 0 的半死 writer（try_send 成功即停）→ live_rx 永不
+        // 到达 → 此处超时即红。修复后 fan-out 保证 live writer 同时收到。
+        let line = tokio::time::timeout(Duration::from_secs(2), live_rx.recv())
+            .await
+            .expect("live writer 应收到决策请求帧（修复前被半死连接吞掉）")
+            .expect("live_rx 不应关闭");
+        let v: serde_json::Value =
+            serde_json::from_str(line.trim_end()).expect("wire frame valid JSON");
+        assert_eq!(v["method"], "sieve.request_decision");
+
+        // live GUI 应答 → 决策解决，不等满 60s timeout。
+        server
+            .inject_decision(DecisionResponse {
+                request_id,
+                decision: DecisionAction::Deny,
+                decided_at: Utc::now(),
+                by_user: true,
+                remember: false,
+                context_hint: None,
+                ui_phase_when_clicked: None,
+            })
+            .await;
+
+        let resp = handle
+            .await
+            .expect("join request_decision task")
+            .expect("request_decision ok");
+        assert!(
+            resp.by_user,
+            "应为 live GUI 的真实决策而非 timeout fallback"
+        );
+        assert_eq!(resp.decision, DecisionAction::Deny);
+    }
+
+    /// BUG-L1b 回归（真机实证：curl 在决策等待期被 kill）：request_decision future 被
+    /// 调用方 cancel（HTTP 连接任务 abort 导致 drop）后，timeout 分支永不执行——修复前
+    /// pending map 条目滞留（`sieve decisions list` 可见 age 超 timeout 的僵尸条目）且
+    /// 不广播 cancel（GUI 决策 UI 悬空）。修复后 PendingCleanupGuard 的 Drop 必须清空
+    /// pending + 广播 upstream_disconnected。
+    #[tokio::test]
+    async fn request_decision_dropped_future_cleans_pending_and_broadcasts_cancel() {
+        let dir = tempdir().expect("tempdir");
+        let socket_path = dir.path().join("ipc.sock");
+        let (server, _listener) = IpcServer::bind(socket_path).expect("bind");
+        let server = Arc::new(server);
+
+        let (tx, mut rx) = mpsc::channel::<String>(8);
+        server
+            .gui_writers
+            .lock()
+            .expect("gui_writers lock")
+            .push(tx);
+
+        let req = dummy_request(); // default_on_timeout = Block → auto_decision deny
+        let request_id = req.request_id;
+
+        let server_for_task = Arc::clone(&server);
+        let handle = tokio::spawn(async move {
+            server_for_task
+                .request_decision(req, Duration::from_secs(60), "inbound", None)
+                .await
+        });
+
+        // 等请求帧已投出、future 停在 rx.await（确保 abort 命中等待期而非注册期）。
+        let line = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .expect("writer 应收到决策请求帧")
+            .expect("rx 不应关闭");
+        let v: serde_json::Value =
+            serde_json::from_str(line.trim_end()).expect("wire frame valid JSON");
+        assert_eq!(v["method"], "sieve.request_decision");
+        assert_eq!(server.inflight_decisions().await, 1, "pending 应已注册");
+
+        // 模拟 HTTP 客户端断连：连接任务 abort → request_decision future 被 drop。
+        handle.abort();
+        let join = handle.await;
+        assert!(join.is_err(), "task 应以 cancelled 结束");
+
+        // guard Drop 兜底：pending 条目必须被清空（修复前滞留到进程重启）。
+        // Drop 内 try_lock 失败时走 spawn 的异步清理，轮询等待兜底完成。
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if server.inflight_decisions().await == 0 {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "pending 条目应在 future 被 drop 后清空（BUG-L1b：修复前泄漏滞留）"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        // 且已向 GUI 广播 upstream_disconnected 取消通知（修复前 GUI 决策 UI 悬空）。
+        let cancel_line = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .expect("writer 应收到 canceled 通知")
+            .expect("rx 不应关闭");
+        let cv: serde_json::Value =
+            serde_json::from_str(cancel_line.trim_end()).expect("cancel frame valid JSON");
+        assert_eq!(cv["method"], "sieve.request_decision_canceled");
+        assert_eq!(cv["params"]["request_id"], request_id.to_string());
+        assert_eq!(
+            cv["params"]["reason"], "upstream_disconnected",
+            "future 被 cancel 的取消原因应为 upstream_disconnected"
+        );
+        assert_eq!(
+            cv["params"]["auto_decision"], "deny",
+            "default_on_timeout=Block → auto_decision deny"
+        );
     }
 
     /// SPEC-005 §3：连接建立后第一条出站消息必须是 sieve.hello，含全部 7 个必填字段。
