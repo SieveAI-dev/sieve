@@ -40,9 +40,9 @@ jobs:
   #    均为真值，非占位），实测 `cargo build --features ga_keys` 已可编译通过（不再
   #    E0080）。当前两步 build 暂不加 --features ga_keys —— 因信任根公钥日后可能更
   #    换，过早锁进 GA 产物会抬高换钥成本（已装用户更新验签会被绑死）。激活时机 =
-  #    首个 release 流程、信任根定稿时，届时：① 两步 build 加 --features ga_keys
-  #    （编译期防呆，确保占位密钥永不混入 GA）；② 同步把 ci.yml 的 ga-keys-gate
-  #    job 反转为 expect-PASS。
+  #    首个 release 流程、信任根定稿时，届时只需给两步 build 加 --features ga_keys
+  #    （编译期防呆，确保占位密钥永不混入 GA）；ci.yml 的 ga-keys-gate job 已是
+  #    正负两向自足判定，不随激活状态变化，无需改动。
   #    注：规则更新验签当前【已 fail-closed 生效】（公钥已嵌入，与 ga_keys 无关，
   #    ga_keys 仅作编译期防呆）；X-Sieve-Origin 完整签名链是 Phase-1-GA 待实现功能
   #    （当前 chain_depth 提供尽力而为的嵌套深度防御），非接线遗漏。
