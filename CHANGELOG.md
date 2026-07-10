@@ -52,6 +52,10 @@
 
 ### Changed
 
+- **依赖升级：`crossbeam-epoch` 0.9.18 → 0.9.20（RUSTSEC-2026-0204）。** 修复 `fmt::Pointer`
+  对无效指针（`Atomic::null` / `Shared::null`）解引用的 advisory；本依赖仅经 dev 链
+  （criterion → rayon → crossbeam-deque）进入，不在生产二进制，但 cargo-deny advisories
+  为 CI 硬门禁，advisory 发布即红，锁文件就地升级。
 - **[BREAKING] BIP39 助记词出站处置：`Block`（426 硬阻断）→ `auto_redact`（200 脱敏转发）。**
   对齐工程硬约束「出站脱敏不打断工作流」（`.cursorrules §二 #13`）：检出 checksum 合法的助记词
   后静默改写为占位符 + 转发上游，而非硬阻断中断 crypto 开发者工作流。明文助记词在转发前
