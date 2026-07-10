@@ -1,6 +1,6 @@
 # SPEC 索引
 
-> 最后更新：2026-06-19
+> 最后更新：2026-07-10
 
 本目录收纳 Sieve daemon 的工程级技术规格（功能落地详细度高于设计概述）。每个 SPEC 一个模块，禁止合并。版本号写在文件第一行 `> Version:` 标注里。
 
@@ -11,12 +11,13 @@
 | 编号 | 标题 | 版本 | 状态 | 文件 |
 |------|------|------|------|------|
 | SPEC-001 | sieve-hook 文件 IPC 协议 | v1.0 | Stable | [SPEC-001-sieve-hook-protocol.md](SPEC-001-sieve-hook-protocol.md) |
-| SPEC-002 | HIPS 弹窗行为规格 | v1.0 | Stable | [SPEC-002-hips-popup-behavior.md](SPEC-002-hips-popup-behavior.md) |
+| SPEC-002 | HIPS 弹窗行为规格 | v1.1 | Stable | [SPEC-002-hips-popup-behavior.md](SPEC-002-hips-popup-behavior.md) |
 | SPEC-003 | sieve setup 工具行为规格 | v1.0 | Stable | [SPEC-003-sieve-setup-tool.md](SPEC-003-sieve-setup-tool.md) |
 | SPEC-004 | multi-agent setup 配置注入规格 | v1.0 | Stable | [SPEC-004-multi-agent-setup.md](SPEC-004-multi-agent-setup.md) |
 | SPEC-005 | Sieve daemon ↔ client IPC 协议（v2 wire schema 权威源） | v2.0 | Frozen | [SPEC-005-ipc-protocol.md](SPEC-005-ipc-protocol.md) |
 | SPEC-006 | 更新通道 + 匿名装机统计 manifest 协议 | v0.1 | Draft | [SPEC-006-update-and-telemetry.md](SPEC-006-update-and-telemetry.md) |
 | SPEC-007 | 上游转发代理支持 | v0.1 | Stable | [SPEC-007-upstream-proxy.md](SPEC-007-upstream-proxy.md) |
+| SPEC-008 | Dogfood 完全自动化 | v1.0 | Stable | [SPEC-008-dogfood-automation.html](SPEC-008-dogfood-automation.html) |
 
 ---
 
@@ -27,7 +28,7 @@
 - 状态语义：
   - **Draft** — 写作中，可随意改
   - **Stable** — 评审通过、生效中；修改递增 minor 版本（v1.0 → v1.1）
-  - **Frozen** — 与发布版本绑定的快照，禁止任何修改；下一版本另开文件（如 SPEC-005 v2.0 → v3.0 时新建 `SPEC-005-ipc-protocol-v3.md`）
+  - **Frozen** — wire schema / 协议版本冻结快照：**破坏性变更禁止**，须另开文件走下一 major（如 SPEC-005 v2.0 → v3.0 时新建 `SPEC-005-ipc-protocol-v3.md`）；允许在原文件内追加**向后兼容的澄清 / 勘误 / 语义补全**修订（记入文内变更记录，不 bump wire 版本，如 SPEC-005 的 r1~r5 / neutralize / fanout 系列）
   - **Deprecated** — 不再维护
   - **Superseded** — 被新 SPEC 取代
 

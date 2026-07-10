@@ -4,6 +4,8 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+> 本文件是工程视角的完整变更记录（真实源）；面向用户的显著变更摘要另见 [docs/changelog/CHANGELOG.md](docs/changelog/CHANGELOG.md)。
+
 ## [Unreleased]
 
 ### Security
@@ -72,6 +74,21 @@
 
 ### Fixed
 
+- **`request_decision` 改 fan-out 投递 + pending 泄漏修复。** GUI 重启过渡期新旧连接混存时，
+  「仅投首个 client 连接」语义下决策请求可能被「连接仍在、对端已不消费」的僵尸连接吞掉，
+  HIPS 弹窗永不出现，daemon 等满 timeout 后 fail-closed。现广播给所有已连接 client，首个
+  `decision_response` 生效，其余 client 收 `sieve.request_decision_canceled`
+  （`reason="resolved_by_peer"`，v2.0 起已在枚举中，首次投入使用）收回弹窗。同批修复决策
+  等待期间发起方断连导致的待决条目滞留（`sieve decisions list` 僵尸条目）：断连即时清理并
+  广播取消通知。v2 内向后兼容，不 bump 协议版本；SPEC-005 2026-07-06 协议变更日志同步，
+  fixtures 新增 `sieve.request_decision_canceled/notification.resolved_by_peer.json`。
+- **audit `decision_made` 事件方向恒记 inbound 修复。** 出站规则（如 OUT-07 PEM 私钥弹窗）
+  的用户决策此前 `direction` 恒为 `inbound`（真机审计实证）。`DecisionMade` /
+  `AutoDecidedPaused` 事件新增 `direction` 字段落真实方向（`"outbound"` / `"inbound"`），
+  旧记录反序列化时 serde 回退 `inbound`（legacy 兼容），含回归测试。
+- **CI ga-keys 编译期 gate 恢复硬门禁。** 判定改为正负两向自足：真公钥必须编译成功 +
+  临时替换回占位密钥必须被 gate 的 const assert 拒绝（且失败原因就是 gate 断言本身），
+  不再依赖树内密钥状态；摘除 `continue-on-error`。
 - **集成测试污染真实 launchd 会话修复。** launchd 会话按 UID 归属、不随 `$HOME` 走：真跑
   `sieve setup` 的集成测试（临时 HOME）此前会经 `launchctl load` 把临时 plist 以 KeepAlive
   注册进**真实用户会话**——泄漏 daemon 被 kill 即复活，并以空规则集直通占用真实

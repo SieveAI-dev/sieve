@@ -1,6 +1,6 @@
 # SPEC-005: Sieve daemon IPC 协议
 
-> Version: v2.0 — 2026-05-02
+> Version: v2.0 — 2026-07-10（wire 协议版本 v2 不变；最近修订见文末 §16 变更记录与文首协议变更日志）
 > Status: **Frozen**（IPC 协议 v2 wire schema 唯一权威源）
 > 取代：daemon 仓库 [`docs/api/api-reference.md §6`](../api/api-reference.md)（旧版 v1.x 描述）+ GUI 仓库 `docs/api/ipc-protocol.md` v1.0 中所有 schema 定义
 
@@ -767,7 +767,7 @@ client 端处理：
 | `kind` | 触发场景 | 推荐 `auto_dismiss_seconds` |
 |---|---|---|
 | `sequence_hit` | 行为序列窗口命中可疑工具调用序列 | `0`（用户需手动确认） |
-| `outbound_redacted` | OUT-01~05/12 AutoRedact 命中 | `5` |
+| `outbound_redacted` | OUT-01~05/12/13/14 AutoRedact 命中 | `5` |
 | `hook_terminal` | sieve-hook 在 TTY 完成的事件回报，让 client 同步显示一份"刚才在终端发生了什么" | `8` |
 | `user_rules_load_failed` | `user.toml` 加载/lint 失败，daemon 已 fail-safe 保留旧规则 | `0` |
 | `user_rules_reloaded` | 用户规则成功热加载 | `5` |
@@ -1962,7 +1962,9 @@ daemon 仓库 `crates/sieve-ipc/tests/fixtures/v2/` 目录下文件命名 **MUST
 
 > 双下划线 `__` 是 `message_kind` 与 `scenario` 之间的**唯一分隔符**；方法名内部的单下划线（`set_preset_overrides`）不会与之冲突。
 
-每个方法 **MUST** 至少包含 `minimal` + `full` + `null_optional` 三种 fixture（共 17 方法 × 3 = 51 条最低门槛；feature 专用 fixture 是加项）。
+每个方法 **MUST** 至少包含 `minimal` + `full` + `null_optional` 三种 fixture（最低门槛 = §11 完整消息清单的消息数 × 3，**以 §11 为准，不在此写死总数**；feature 专用 fixture 是加项）。
+
+> **已知缺口（如实标注）**：fixture 落地情况以 `crates/sieve-ipc/tests/fixtures/v2/` 实际目录为准——当前 21 个 method 目录 / 89 条 fixture，而 §11 完整消息清单共 22 条消息：`sieve.judge_tool_call`（§11C，Since v2.x）在 daemon（handler）与 `sieve-hook`（client）均已实装，但目前**没有任何 fixture**，上述 MUST 门槛对该方法尚不满足，为已知待补项。
 
 #### 14.3.2 manifest.json（强约束）
 
@@ -2076,3 +2078,4 @@ client 端代码 PR **MUST** 在同一 commit 中包含：(a) 更新 `upstream-r
 | v2.0-neutralize | 2026-05-05 | SieveAI | **术语中性化**。纯文档清洗，不改 wire schema、不 bump 协议版本，旧 client 完全兼容。变更：(1) §0 文档定位重写——明确 daemon IPC 协议不感知 client 形态（GUI / CLI / TUI / webhook 协议层地位平等）；(2) 文档头加"协议变更日志"段落（2026-05-05 协议中性化）；(3) 全文段落术语清洗：「GUI 端」→「client 端」；「GUI 连接」→「client 连接」；「daemon → GUI」→「daemon → client」等方向标注；`gui_writers[0]` → `client_writers[0]`；§9 章节标题「GUI 控制面方法」→「控制面方法」；§10.0 「多 GUI 回声防护」→「多 client 回声防护」；§10.0.2 「GUI 端 inflight id」→「client 端 inflight id」；§14.2/14.3.4 「GUI 端 fixture 消费」→「client 端 fixture 消费」；(4) §5.3 `"gui_popup"` disposition 枚举值加兼容性标注注释（保留 wire 值不变，语义说明「不绑定 GUI 显示」）；(5) §5.10 `ui_phase` 加 admonition（GUI 实现细节，headless client 答复时此字段填 null）；(6) §3.3 「GUI 端期望行为」加 admonition 标注（GUI 实现细节，非协议契约）；(7) §6.1.4 recommendation「GUI 默认按钮规则」加 admonition 标注（GUI 实现细节）；(8) §3.4 UI 文案选择段落明确「以下为 GUI client 参考实现，非协议约束，headless client 可忽略」。|
 | v2.0-listeners | 2026-05-05 | SieveAI | **多 listener doc-sync**（doc-debt 修复，代码 ship 于 commit d90c51b，文档同步滞后到 2026-05-07）。向后兼容扩展，不改既有 wire schema、不 bump 协议版本。变更：(1) 文档头「协议变更日志」加 2026-05-05 多 listener 条目；(2) §9.5 health 顶层字段表新增 `listeners: ListenerSnapshot[]`（`yes (since v2.x)` / 默认 `[]`）；旧 `listen: ListenSnapshot` 行加 **Deprecated since v2.x** 标注，等价于 `listeners[0]`；(3) §9.5 example response 加 `listeners` 数组示例；(4) §9.5.4 标题扩到「ListenSnapshot / ListenerSnapshot / GraylistSnapshot / IpcSnapshot」，jsonc 块加 ListenerSnapshot 示例 + deprecated 标注，DTO 表内追加 ListenerSnapshot 4 行字段（addr / port / provider_id / protocol）；(5) §9.5.4 末尾加「ListenSnapshot vs ListenerSnapshot 版本兼容矩阵」三档说明（新×新 / 新×旧 / 旧×新）。**daemon 代码权威源**：`crates/sieve-ipc/src/protocol/health.rs:43-110`，`#[serde(default)]` 保证旧 daemon 不发本字段时新 client 拿到空数组不崩。 |
 | v2.0-fanout | 2026-07-06 | SieveAI | **`request_decision` fan-out 投递**（真机联调实证驱动，向后兼容，不 bump 协议版本、不改 wire schema）。背景：GUI 重启过渡期新旧连接混存，「仅投 `client_writers[0]`」语义下决策帧被投给「连接仍在、对端已不消费」的僵尸连接 → 其余 live client 永不收到请求 → HIPS 决策 UI 不出现，daemon 等满 timeout 后 fail-closed。变更：(1) §1.4 投递语义改为 fan-out 给所有已连接 client，首个 `decision_response` 生效（首答胜出，迟到答复按 §6.2 注 ③ 幂等忽略）；(2) §6.3 补全 `request_decision_canceled` 发送时机清单（`timeout` / `resolved_by_peer` / `upstream_disconnected`），`resolved_by_peer`（§5.8 自 v2.0 已有）首次投入使用——决策被首答解决后 daemon MUST fan-out 本通知让其余 client 收回 decision UI；(3) §6.3 `auto_decision` 说明细化：`resolved_by_peer` 时为首答 client 的实际决策；(4) `upstream_disconnected` 场景明确覆盖「被代理的 HTTP client 在决策等待期断连」——daemon 清理 pending 并通知 client 收回 UI（修复 pending 泄漏：等待 future 随连接任务 abort 被 drop 时条目滞留、canceled 不广播）。fixture：daemon 仓新增 `sieve.request_decision_canceled/notification.resolved_by_peer.json`，GUI 仓需同步。 |
+| v2.0-doc-editorial | 2026-07-10 | SieveAI | **编辑性修订**（不改 wire schema、不 bump 协议版本）：(1) §14.3.1 fixture 最低门槛从写死「17 方法 × 3 = 51 条」改为引用 §11 完整消息清单动态计数（fixture 落地情况以 `crates/sieve-ipc/tests/fixtures/v2/` 实际目录为准，当前 21 method 目录 / 89 条）；(2) 文档头日期同步至最新修订日；(3) §14.3.1 如实标注 fixture 覆盖缺口——§11 共 22 条消息、当前 21 个有 fixture，`sieve.judge_tool_call`（§11C，已实装）fixture 尚缺，为已知待补项。 |

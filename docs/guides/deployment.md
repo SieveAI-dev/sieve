@@ -2,7 +2,7 @@
 
 > Rendered: https://sieveai.dev/docs/quickstart.html
 
-> Version: v2.0 — 2026-05-01
+> Version: v2.1 — 2026-07-10
 >
 > **状态：早期预览（0.1.0-alpha）。**
 > 用户规则（`~/.sieve/rules/user.toml`）+ 灰名单（`~/.sieve/decisions/`）+ audit schema（含 `caller_pid` / `caller_exe` / `provider_id`）+ GUI 多客户端 broadcast fan-out 均已就绪。
@@ -11,9 +11,11 @@
 
 ## 1. 安装前提
 
+> ⚠️ Sieve 当前是**早期预览（0.1.0-alpha）**。目前主用路径是源码自编译 / 邀请制 alpha 预览——**现可用的安装路径只有 §2.1 路径 ③ 的 `cargo install --git` 源码构建**；下文 brew tap / 一行安装器 / GitHub Releases `.dmg` 描述的是**正式发布形态**，相关链路将随首个 release 上线。
+
 - 仅支持 macOS（Phase 1）；Linux / Windows 见下文 §2.2 / §2.3。
 - 安装方式见 §2.1（一行命令优先：Homebrew / 自校验安装器 / cargo）。签名验证由安装器与 Homebrew **自动完成**；想亲手再验的看 §3（可选）。
-- 通过 brew tap + GitHub Releases 公开分发。
+- 发布形态为 brew tap + GitHub Releases 公开分发（尚未上线，见上方限定）。
 
 ---
 
@@ -21,6 +23,8 @@
 
 ### 2.1 macOS
 
+> ⚠️ 早期预览（0.1.0-alpha）：下列四条路径中当前**仅路径 ③（`cargo install --git`）现可用**；①②④ 为正式发布形态预描述。
+>
 > **自校验是卖点，不是门槛。** 大多数 `curl … | sh` 要你盲信一段脚本；Sieve 的安装器在把任何东西落地前，先用 cosign / sigstore（keyless 签名 + Rekor 透明日志）校验自己的 release 产物，被篡改或来源不符就 **fail-closed 拒装**。一行命令，照样可验。
 
 按从无摩擦到硬核的顺序，四条安装路径：

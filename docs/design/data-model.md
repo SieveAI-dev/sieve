@@ -1,7 +1,7 @@
 # Sieve 数据模型设计
 
 > **状态**：设计阶段 / 锁定执行
-> **文档版本**：v2.0 / 2026-05-01
+> **文档版本**：v2.1 / 2026-07-10
 > **范围**：内部数据结构、配置文件、审计日志、规则签名、license 数据格式；灰名单 schema、user.toml schema、HoldOutcome 枚举、AuditEvent v2
 
 ---
@@ -163,9 +163,11 @@ pub enum ContentSource {
 
 | Rule ID | Severity | Disposition | timeout_seconds | default_on_timeout | 备注 |
 |---------|----------|-------------|----------------|--------------------|------|
-| OUT-01~05/12 | Critical | `AutoRedact` | — | — | 高确定度密钥，自动脱敏不打断 |
-| OUT-06/08 | High | `AutoRedact` | — | — | ETH/Solana entropy 边界模糊，脱敏继续 |
-| OUT-07/09/10 | Critical | `GuiPopup` | 60 | Block | **Sieve 差异化点**：校验位通过的高确定性助记词/私钥，出站必须人工确认（覆盖矩阵默认 AutoRedact） |
+| OUT-01~05/12/13 | Critical（OUT-05 为 High） | `AutoRedact` | — | — | 高确定度密钥，自动脱敏不打断；OUT-12/13（WIF/xprv）经 Base58Check second-pass 校验后脱敏 |
+| OUT-06/08 | High（06）/ Critical（08） | `GuiPopup` | 15 | Redact | JWT / Stripe live key：弹窗确认，超时默认脱敏后发送 |
+| OUT-07/10 | Critical | `GuiPopup` | 60 | Block | **Sieve 差异化点**：校验位通过的高确定性私钥，出站必须人工确认（覆盖矩阵默认 AutoRedact） |
+| OUT-09 | High | `GuiPopup` | 60 | Block | Slack Token：高置信度凭据格式，显式 `fail_closed = true`（不可关闭、不可永久白名单），severity 为 High 仍强制人工确认 |
+| OUT-14（BIP39，代码构建 second-pass） | Critical | `AutoRedact` | — | — | SHA-256 checksum 通过的 BIP39 助记词自动脱敏为 `[REDACTED:OUT-14]`，不弹窗（历史版本曾以 OUT-09 编号 + GuiPopup 处置，已改；OUT-09 现为 Slack Token 规则） |
 | OUT-11 | Medium | `StatusBar` | — | — | .env 仅状态栏，避免误伤 |
 | IN-CR-01 | Critical | `GuiPopup` | 60 | Block | 地址替换，需展示地址对比 diff |
 | IN-CR-02/03 | Critical | `HookTerminal` | 30 | Block | 危险 shell / 敏感路径 |
@@ -177,7 +179,7 @@ pub enum ContentSource {
 
 **可覆盖规则**（`config.toml severity_overrides`）：
 - OUT-11、IN-GEN-04、IN-GEN-05 可降级；
-- Critical 规则（OUT-01~05/07/09/10/12、IN-CR-01~05、IN-GEN-01~03 为 High 但 HookTerminal）**不可关闭**，覆盖会被启动时忽略并打印警告。
+- Critical 规则（OUT-01~05/07/08/10/12/13/14、IN-CR-01~05、IN-GEN-01~03 为 High 但 HookTerminal）与显式 `fail_closed = true` 的 OUT-09（severity High）**不可关闭**，覆盖会被启动时忽略并打印警告。
 
 ---
 
@@ -567,15 +569,32 @@ pub enum AuditEvent {
 
     // ===== v2.0 新增 =====
 
-    /// 用户在 HIPS 弹窗作出允许/拒绝决策
+    /// 工具调用 / 出站 hold 被用户决策（Allow/Deny）处置完成
+    /// （与 `crates/sieve-cli/src/audit.rs` 实载对齐，2026-07-10 修订）
     DecisionMade {
         rule_id: String,
-        decision: String,          // "allow" | "deny"
+        decision: String,          // "allow" | "deny" | "redact_and_allow"
         severity: String,
-        by_user: bool,             // true = 用户主动决策；false = 超时 fail-closed
+        by_user: bool,             // true = 用户主动决策；false = 超时 / 系统回退
+        request_id: String,
+        /// "outbound" | "inbound"。修复前该事件恒记 inbound（出站决策方向错误）；
+        /// 旧 raw_json 缺失此字段时 serde 回退 "inbound"（legacy 兼容）。
+        #[serde(default = "legacy_direction_inbound")]
+        direction: String,
+        #[serde(default)]
         caller: CallerContext,
-        request_id: Uuid,
-        timestamp: i64,            // unix ms
+    },
+
+    /// 暂停期间命中非 Critical 规则触发自动处置，跳过弹窗（SPEC-002 §9.1）
+    AutoDecidedPaused {
+        rule_ids: String,          // 触发的所有 rule_id（多条命中时逗号分隔）
+        decision: String,          // "allow" | "deny" | "redact_and_allow"
+        request_id: String,
+        /// "outbound" | "inbound"；旧 raw_json 缺失时同样回退 "inbound"。
+        #[serde(default = "legacy_direction_inbound")]
+        direction: String,
+        #[serde(default)]
+        caller: CallerContext,
     },
 
     /// 用户允许并选择"记住"，灰名单新增一条
@@ -639,7 +658,9 @@ pub enum AuditEvent {
 }
 ```
 
-所有新增 variant 中 `caller` 字段标注 `#[serde(default)]`，保证从旧格式反序列化时不报错。
+所有新增 variant 中 `caller` 字段标注 `#[serde(default)]`，保证从旧格式反序列化时不报错。`DecisionMade` / `AutoDecidedPaused` 的 `direction` 字段同理带 `#[serde(default = "legacy_direction_inbound")]`——方向修复前写入的旧记录无此字段，读取时回退 `"inbound"`。
+
+> 注：事件时间戳由 `audit_events` 表列 `timestamp_rfc3339` 承载（见 §6.2），不在 variant 字段内；本节早期草案中的 `timestamp: i64` 字段与 `request_id: Uuid` 类型以 `audit.rs` 实载为准（`request_id` 实为 `String`）。
 
 ---
 
