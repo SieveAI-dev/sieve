@@ -97,21 +97,21 @@ else
   fail "updater 闭环失败"
 fi
 
-# ── 5. FP/recall 数据集门（PRD §9 #7 Critical FP<0.5%）────────────────────────────
+# ── 5. FP/recall 数据集门（Critical FP<0.5% 硬约束，.cursorrules §二 #7）──────────
 # 检测规则与攻击/良性数据集已迁出公开仓（经签名包下发）；FP/recall 数据集门随之
 # 移到私有规则测试 crate，对私有规则运行：
 #   在私有规则测试 crate 中运行：cargo test --release --test dataset_fp_rate -- --ignored
 # 公开仓 dogfood 不含规则数据，故此处跳过该门（开源引擎以空规则集 fail-safe 运行，
 # 无规则即无误报；检测精度门由私有 crate 守护）。
-section "5. FP/recall 数据集门 (§9 #7) — 已移私有规则 crate"
+section "5. FP/recall 数据集门 (Critical FP<0.5%) — 已移私有规则 crate"
 ok "公开仓无规则数据，FP/recall 门在私有规则 crate 运行（见上方注释）"
 
-# ── 6. 红队 bypass 门（ADR-043）────────────────────────────────────────────────
+# ── 6. 红队 bypass 门（已知攻击手法回归基线）────────────────────────────────────
 # 已知攻击手法的回归基线（非完备性证明）：入站地址替换 / 危险 shell × 四路由，
 # 出站 BIP39 / WIF / xprv 脱敏。红队集只驱动样本 + 断言期望处置，不新增检测规则；
 # 规则包缺失时测试优雅 SKIP（公开仓无签名规则包），不误红。衔接第 5 节 FP/recall 门：
 # 第 5 节守统计性 FP/recall 阈值（私有 crate），本节守离散 bypass 形态回归（公开仓）。
-section "6. 红队 bypass 门 (ADR-043)"
+section "6. 红队 bypass 门 (已知攻击手法回归基线)"
 if cargo test -p sieve-cli --test redteam_inbound --test redteam_outbound --locked; then
   ok "红队 bypass 回归基线通过（规则缺失时优雅 SKIP，不误红）"
 else

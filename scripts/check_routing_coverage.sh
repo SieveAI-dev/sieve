@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 #
-# check_routing_coverage.sh — content-type 四路由覆盖门禁（ADR-025）
+# check_routing_coverage.sh — content-type 四路由覆盖门禁（.cursorrules §二 #16）
 #
 # 永久化 v1.5.4 P0 教训：入站检测必须覆盖全部 4 条 content-type 路由——
 #   M-1 Anthropic SSE / M-2 Anthropic JSON / M-3 OpenAI SSE / M-4 OpenAI JSON。
 # 「只挂 SSE 不挂 JSON」= P0 漏洞。
 #
-# 守护方式（比 ADR-025 §3 设想的"grep 测试体找 rule_id"更稳健：直接在源码侧拦截
+# 守护方式（比"grep 测试体找 rule_id"的朴素方案更稳健：直接在源码侧拦截
 # bug 形状，不依赖测试命名约定，且对历史欠债不误报）：
 #   检查 A（源码侧，核心）—— 四个路由 handler 都接了入站检测钩子：
 #     · 两条 JSON handler 必须同时调 on_tool_use_complete + scan_assistant_text
@@ -16,7 +16,7 @@
 #
 # 退出码：0=通过；1=覆盖缺口（CI 阻断合并）；2=脚本/环境错误。
 #
-# 范围说明：per-rule × 4-route 的"全量测试矩阵"（ADR-025 §3 提到的"测试量翻倍"目标，
+# 范围说明：per-rule × 4-route 的"全量测试矩阵"（更长期的"测试量翻倍"目标，
 # 存在历史 M-2/M-3 欠债）是更高一层、单独排期的工作，不在本门禁内。本门禁只守护
 # 不可回退的【结构不变量】：任一路由的入站检测钩子被摘除 → 立即 CI 失败。
 set -euo pipefail
@@ -56,7 +56,7 @@ require() {  # require <fn> <call> <人类描述>
     if [ "$verbose" = "-v" ]; then echo "  ✓ $1 → $2"; fi
   else
     echo "✗ FAIL[源码]: 函数 $1 未调用 $2 —— $3"
-    echo "             （四路由不变量破坏，v1.5.4 P0 形状；见 docs/design/ADR-025-content-type-routing-matrix.md）"
+    echo "             （四路由不变量破坏，v1.5.4 P0 形状；见 .cursorrules §二 #16）"
     fail=1
   fi
 }
@@ -92,6 +92,6 @@ echo ""
 if [ "$fail" -eq 0 ]; then
   echo "✓ 四路由覆盖门禁通过（M-1~M-4 入站钩子接线 + 端到端测试齐全）"
 else
-  echo "✗ 四路由覆盖门禁失败：上述路由缺入站检测钩子或测试。参见 ADR-025。"
+  echo "✗ 四路由覆盖门禁失败：上述路由缺入站检测钩子或测试。参见 .cursorrules §二 #16。"
 fi
 exit "$fail"

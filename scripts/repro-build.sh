@@ -2,7 +2,7 @@
 #
 # repro-build.sh — Sieve 本地可复现构建验证（macOS only）
 #
-# 自证清白（PRD §1.2 第 4 句 / ADR-006）：用户不应仅凭信任安装 Sieve，
+# 自证清白（可复现构建硬约束，.cursorrules §二 #6）：用户不应仅凭信任安装 Sieve，
 # 而应能自己复现官方 release 二进制。本脚本镜像 .github/workflows/release.yml
 # 的 reproducible-build job：
 #   1. SOURCE_DATE_EPOCH = commit timestamp（消除构建时间污染）
@@ -21,7 +21,7 @@
 #
 # 比对官方 release：得到的 SHA-256 应与 GitHub Release 的 SHA256SUMS
 # 中对应条目一致。任何差异 → 不要安装该二进制，立即在 GitHub Issues 报告。
-# 实现细节见 docs/guides/deployment.md §3.3 / docs/design/ADR-006-sigstore-reproducible-build.md。
+# 实现细节见 docs/guides/deployment.md §3.3。
 
 set -euo pipefail
 
@@ -67,7 +67,7 @@ esac
 # ─────────────────────────────────────────────────────────────
 # 环境校验
 # ─────────────────────────────────────────────────────────────
-# Phase 1 仅支持 macOS（ADR-006 Tier 1 / deployment.md §3.3）。
+# Phase 1 仅支持 macOS（Tier 1 平台，见 deployment.md §3.3）。
 if [ "$(uname -s)" != "Darwin" ]; then
   echo "错误: 本脚本仅支持 macOS（当前: $(uname -s)）。Linux / Windows 推 Phase 2。" >&2
   exit 1

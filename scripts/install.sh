@@ -61,7 +61,7 @@ detect_artifact() {
       echo "${BIN_NAME}-macos-universal"
       ;;
     Linux)
-      # 预留位：Tier 1 Linux musl 目标（ADR-006）尚未在 release 产出对应二进制。
+      # 预留位：Tier 1 Linux musl 目标（供应链硬约束，.cursorrules §二 #6）尚未在 release 产出对应二进制。
       # 待 release.yml 恢复 Linux matrix 后，按 arch 映射 sieve-<arch>-unknown-linux-musl。
       die "Linux 安装器尚未就绪（pre-GA 仅 macOS）。请从源码构建：cargo install --git https://github.com/${SIEVE_REPO} sieve-cli"
       ;;

@@ -10,9 +10,9 @@
 **/*.rs.bk
 *.pdb
 
-# ⚠️ Cargo.lock 必须入库（reproducible build 要求，见 ADR-006）——不要 ignore
+# ⚠️ Cargo.lock 必须入库（可复现构建硬约束，.cursorrules §二 #6）——不要 ignore
 
-# Fuzz（PRD §9 #5 SSE fuzz test 必须；语料 / artifacts 不入库，但 fuzz_targets/ 入库）
+# Fuzz（SSE fuzz 全覆盖硬约束，.cursorrules §二 #5；语料 / artifacts 不入库，但 fuzz_targets/ 入库）
 /fuzz/target/
 /fuzz/corpus/
 /fuzz/artifacts/

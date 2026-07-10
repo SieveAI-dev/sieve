@@ -615,8 +615,9 @@ def test_outbound_redact_fake_key(
     base_url: str, stats: Stats, mock_only: bool
 ) -> None:
     print(bold("\n[9] 出站脱敏:fake Anthropic key → OUT-01 auto_redact 转发"))
-    # OUT-01 处置 = auto_redact（severity critical，但 disposition 优先于 action=block，
-    # 见 ADR-016 二维处置矩阵 + PRD v1.4 §6.1）：daemon 脱敏后转发上游，**不返 426**。
+    # OUT-01 处置 = auto_redact（severity critical，但 disposition 优先于 action=block：
+    # 二维处置矩阵下 disposition 决定网关动作、severity 只定审计分级）：
+    # daemon 脱敏后转发上游，**不返 426**。
     # 构造符合 OUT-01 pattern 的 fake key：sk-ant-api03- + 93 chars + AA
     suffix_93 = ("abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_-" * 2)[:93]
     fake_key = f"sk-ant-api03-{suffix_93}AA"
