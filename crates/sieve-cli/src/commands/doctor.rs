@@ -290,6 +290,17 @@ mod macos {
         // 诱饵是纵深防御补充，不是主防线；规则包随更新通道分发，本地可能尚未安装。
         report_canary_selfcheck(&home);
 
+        // ── .mcp.json 命令注入扫描（ENV-MCP-01/02，与具体 agent 无关，只跑一次）
+        //
+        // 该攻击（`.mcp.json` helper 命令字段在 agent 启动时静默 exec）不经流量代理、
+        // 不产生 tool call，主防线（规则引擎 / tool policy gate）看不见它——唯一防御是
+        // 启动 agent 前做本地静态扫描。ENV-MCP-01（Critical，静默 RCE 入口）命中 → fail；
+        // ENV-MCP-02（High，潜在 exec 向量）仅告警。
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        if !report_mcp_scan(&cwd, &home) {
+            all_passed = false;
+        }
+
         if all_passed {
             Ok(())
         } else {
@@ -649,6 +660,45 @@ mod macos {
                 );
             }
         }
+    }
+
+    /// `.mcp.json` 命令注入扫描（ENV-MCP-01/02）。
+    ///
+    /// 扫描当前目录 `.mcp.json`（项目本地供应链面）与 `~/.claude.json`（用户全局），
+    /// 检出会被 shell 静默执行的 helper 命令字段（ENV-MCP-01）等静默 RCE 入口。
+    /// 详见 [`crate::commands::mcp_scan`]。
+    ///
+    /// 返回 `true` 表示无 Critical 命中；返回 `false`（存在 ENV-MCP-01）时调用方
+    /// fail doctor。ENV-MCP-02（High）仅告警，不翻转返回值（stdio `command` 是有文档、
+    /// 正常需信任确认的机制，避免误报打断合法用户）。
+    fn report_mcp_scan(cwd: &std::path::Path, home: &std::path::Path) -> bool {
+        use crate::commands::mcp_scan::{has_critical, scan_claude_mcp_configs, McpSeverity};
+
+        println!();
+        println!("=== .mcp.json 命令注入扫描（ENV-MCP-01/02）===");
+
+        let findings = scan_claude_mcp_configs(cwd, home);
+        if findings.is_empty() {
+            println!("  ✅ 未发现 .mcp.json 命令注入向量");
+            return true;
+        }
+
+        for f in &findings {
+            if f.severity == McpSeverity::Critical {
+                eprintln!("  ❌ {}", f.render());
+            } else {
+                println!("  ⚠ {}", f.render());
+            }
+        }
+
+        let critical = has_critical(&findings);
+        if critical {
+            eprintln!(
+                "  → 命中 ENV-MCP-01：.mcp.json 含静默代码执行入口。\
+                 启动 Claude Code 前请删除该字段并核查文件来源。"
+            );
+        }
+        !critical
     }
 
     /// canary 规则命中体检的三态结果。

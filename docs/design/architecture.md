@@ -320,6 +320,43 @@ IN-CR-04 / IN-CR-05 / IN-GEN-* 在非流式路径上未生效。
 
 ---
 
+## 7.6 本地 MCP 配置命令注入扫描（ENV-MCP-\*，`sieve doctor`）
+
+### 攻击面
+
+Claude Code 允许项目目录放 `.mcp.json` 声明 MCP server；其中存在会被 shell **静默执行**的
+命令字段（公开披露的 `headersHelper`：本意「动态生成请求头」，实现上把字段值原样喂给
+`child_process.exec()`）。非交互模式（`claude -p ...`）下信任确认被显式跳过，只要在含恶意
+`.mcp.json` 的目录里启动 agent，该命令即无弹窗、无提示地执行 = 任意代码执行（凭据窃取 /
+云端账号接管 / 项目投毒 / 内网横移）。
+
+### 为什么不能靠流量拦截，必须走本地静态体检
+
+该攻击**不经 Sieve 的 LLM 流量代理，也不产生 tool call**：`.mcp.json` 在 agent 启动阶段由
+agent 自身读取并 exec，早于任何 Anthropic / OpenAI 请求。规则引擎、序列检测、High-Risk Tool
+Policy Gate（见 §12）全部看不见它。Sieve 唯一能提供的防御是在用户启动 agent **之前**对本地
+`.mcp.json` 做静态卫生扫描并 fail-closed 告警——落点为 `sieve doctor`（既有本地配置体检面）。
+
+### 检测项（与 Phase 2 运行时 `IN-MCP-*` 命名空间不重叠）
+
+| ID | 严重级 | 命中条件 | 处置 |
+|----|--------|----------|------|
+| **ENV-MCP-01** | Critical | MCP server 配置含会被 shell 静默执行的 helper 命令字段（`headersHelper` 及重命名变体，字段名含 `helper` 且值为字符串） | `doctor` fail（exit 非 0）+ stderr 输出偏移文件 / server / 字段 / 命令片段 + 处置建议 |
+| **ENV-MCP-02** | High | **项目本地** `.mcp.json` 的 stdio `command`（启动外部进程）或 schema 未知且值形似 shell 命令的字段 | 仅告警，不 fail（stdio `command` 是有文档、正常需信任确认的机制，控制误报） |
+
+扫描范围：当前工作目录 `.mcp.json`（项目本地供应链面，`ProjectLocal`）+ `~/.claude.json`
+（用户全局，`UserGlobal`）。ENV-MCP-01 不区分来源（全局配置里的静默 exec 同样 Critical）；
+ENV-MCP-02 仅对项目本地告警（用户自配的全局 stdio server 不告警，避免噪声）。
+
+纯扫描逻辑在 `crates/sieve-cli/src/commands/mcp_scan.rs`（平台无关、带单元测试）；`sieve doctor`
+macOS 分支调用之。误报控制：`looks_like_shell_command` 保守判定（需含 shell 元字符，或多 token
+且带 flag `-x` / 首 token 含路径分隔），普通描述性字符串（`"my server"` 等）不误报。
+
+**关联**：Phase 2 运行时 `IN-MCP-01~03`（§7，针对 MCP 工具调用**流量**）；`docs/glossary.md`
+「ENV-MCP-\*」条目；`docs/api/api-reference.md` §处置矩阵。
+
+---
+
 ## 8. 不在 Phase 1 范围
 
 为防范围蔓延，以下能力**显式标记为不在 Phase 1**：

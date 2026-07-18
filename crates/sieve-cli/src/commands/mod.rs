@@ -32,6 +32,7 @@ pub mod decisions;
 pub mod doctor;
 pub mod ipc_client;
 pub mod lifecycle;
+pub mod mcp_scan;
 pub mod rules;
 pub mod setup;
 pub mod uninstall;

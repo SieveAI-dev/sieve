@@ -753,6 +753,21 @@ sieve setup
 - HookTerminal 入站**代理不修改 SSE 流**——拦截在 PreToolUse 执行边界，而非 message 边界
 - Critical 在所有版本（含降级模式）不可关闭；降级模式下 High 仅审计记录，但 Critical 的 GuiPopup/HookTerminal 行为不变
 
+### 5.1 本地配置扫描（`ENV-MCP-*`，`sieve doctor`，非流量处置）
+
+`ENV-MCP-*` 不在上述 HTTP 处置矩阵内——它针对**本地 `.mcp.json` 配置文件**做静态扫描，
+拦截「MCP server 配置的 `headersHelper` 类命令字段在 agent 启动时被 shell 静默 exec」的启动时
+RCE（该攻击不经代理流量，无 HTTP 处置）。由 `sieve doctor` 执行，扫描当前目录 `.mcp.json` 与
+`~/.claude.json`：
+
+| ID | 严重级 | 命中条件 | 处置 |
+|----|--------|----------|------|
+| `ENV-MCP-01` | Critical | 会被 shell 静默执行的 helper 命令字段（`headersHelper` 及重命名变体） | `doctor` 退出码非 0 + stderr 详情 + 处置建议 |
+| `ENV-MCP-02` | High | 项目本地 `.mcp.json` 的 stdio `command` 或 schema 未知命令字段 | 仅告警，不改退出码 |
+
+与 Phase 2 运行时 `IN-MCP-01~03`（针对 MCP 工具调用**流量**）命名空间不重叠。详见
+`docs/design/architecture.md §7.6`。
+
 ---
 
 ## 6. CLI 退出码 / 弹窗确认协议

@@ -8,6 +8,24 @@
 
 ## [Unreleased]
 
+### Added
+
+- **新增检测族 `ENV-MCP-*`：`.mcp.json` 命令注入静态扫描（`sieve doctor`）。** 拦截「Claude Code
+  `.mcp.json` 的 `headersHelper` 类字段在 agent 启动时被 shell 静默 exec」的公开披露漏洞——
+  非交互模式（`claude -p`）下信任确认被显式跳过，只要在含恶意 `.mcp.json` 的目录里启动 agent 即
+  无弹窗任意代码执行。该攻击**不经 Sieve 流量代理、不产生 tool call**，规则引擎 / High-Risk Tool
+  Policy Gate 均看不见它，唯一防御是启动前对本地配置做静态体检。`sieve doctor` 新增一步扫描当前
+  目录 `.mcp.json`（项目本地供应链面）与 `~/.claude.json`（用户全局）：
+  - **ENV-MCP-01（Critical）**：MCP server 配置含会被 shell 静默执行的 helper 命令字段
+    （`headersHelper` 及重命名变体）→ 命中即 `doctor` fail（exit 非 0），stderr 输出偏移文件 /
+    server / 字段 / 命令片段与处置建议。
+  - **ENV-MCP-02（High）**：**项目本地** `.mcp.json` 的 stdio `command`（启动外部进程）或 schema
+    未知且值形似 shell 命令的字段 → 仅告警不 fail（stdio `command` 是有文档、正常需信任确认的机制，
+    控制误报）。
+  纯扫描逻辑（`crates/sieve-cli/src/commands/mcp_scan.rs`）平台无关、带单元测试；与 Phase 2 预留的
+  **运行时** MCP 流量规则 `IN-MCP-01~03`（架构 §7）命名空间不重叠。关联文档：`architecture.md`
+  §检测项、`api-reference.md`、`glossary.md`。
+
 ### Security
 
 - **GUI 决策通道 peer 代码签名核验（F1-b）。** wire 应答通道此前对连接零身份核验，同用户
