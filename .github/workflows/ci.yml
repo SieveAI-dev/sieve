@@ -143,11 +143,16 @@ jobs:
         run: bash scripts/check_routing_coverage.sh
 
   detection-regression:
-    name: 检测回归（规则包：四路由 + 红队）
-    # 检测规则通过签名规则包下发，不内置于源码树。红队 / 四路由集成测试在规则包缺失时
+    name: 检测回归（规则包：四路由 + 红队 + 出站/golden/多agent/dogfood）
+    # 检测规则通过签名规则包下发，不内置于源码树。红队 / 四路由等集成测试在规则包缺失时
     # 优雅 SKIP（vacuous pass，覆盖未真正生效）。本 job 在规则包可用时（配置
     # SIEVE_RULES_PACK_B64 secret）落地规则后运行这些回归，使四路由对等 / 红队 bypass /
-    # 出站脱敏处置等回归真实生效；secret 缺失（如 fork 触发的 PR）时整 job 优雅跳过。
+    # 出站脱敏处置 / golden 字节基线 / 多 agent 路由 / dogfood e2e 真实生效。
+    #
+    # 门禁语义（防假绿）：
+    #   - push / 同仓 PR（可信上下文，secret 可用）：secret 缺失 = 硬失败，不允许静默空过；
+    #   - fork PR（GitHub 不下发 secret）：优雅跳过并打 warning——fork 侧检测回归本就不可跑。
+    #   - --no-tests=fail：过滤器打空（binary 改名/漂移）时 job 必红，防 0 测试静默绿。
     #
     # secret 制备：
     #   tar czf - -C crates/sieve-rules/rules inbound.toml outbound.toml | base64
@@ -160,15 +165,20 @@ jobs:
       - name: 安装构建依赖（macOS）
         run: brew install cmake ninja pkg-config boost ragel
       - uses: taiki-e/install-action@nextest
-      - name: 落地规则包（secret 缺失则后续步骤跳过）
+      - name: 落地规则包（可信上下文缺 secret 即失败；仅 fork PR 优雅跳过）
         id: rules
         env:
           RULES_PACK_B64: ${{ secrets.SIEVE_RULES_PACK_B64 }}
+          TRUSTED_CONTEXT: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'true' || 'false' }}
         run: |
           set -euo pipefail
           if [ -z "${RULES_PACK_B64:-}" ]; then
+            if [ "${TRUSTED_CONTEXT}" = "true" ]; then
+              echo "::error::SIEVE_RULES_PACK_B64 未配置——push / 同仓 PR 下检测回归不允许空过（假绿门禁）。请配置仓库 secret 后重跑。"
+              exit 1
+            fi
             echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::SIEVE_RULES_PACK_B64 未配置——跳过检测回归（红队 / 四路由测试在无规则包时 SKIP，覆盖未真正生效）。"
+            echo "::warning::SIEVE_RULES_PACK_B64 不可用（fork PR 不下发 secret）——跳过检测回归（无规则包时测试 SKIP，覆盖未真正生效）。"
             exit 0
           fi
           mkdir -p crates/sieve-rules/rules
@@ -176,11 +186,11 @@ jobs:
           test -f crates/sieve-rules/rules/inbound.toml
           test -f crates/sieve-rules/rules/outbound.toml
           echo "available=true" >> "$GITHUB_OUTPUT"
-      - name: 四路由 + 红队检测回归（仅规则可用时跑，规则在树→测试真跑不 SKIP）
+      - name: 检测回归全量（规则在树→测试真跑不 SKIP；含 OUT-* 出站脱敏回归）
         if: steps.rules.outputs.available == 'true'
         run: |
-          cargo nextest run -p sieve-cli --locked --profile ci \
-            -E 'binary(content_type_matrix) or binary(inbound_block) or binary(redteam_inbound) or binary(redteam_outbound)'
+          cargo nextest run -p sieve-cli --locked --profile ci --no-tests=fail \
+            -E 'binary(content_type_matrix) or binary(inbound_block) or binary(redteam_inbound) or binary(redteam_outbound) or binary(outbound_block) or binary(golden_baseline) or binary(multi_agent_routing) or binary(dogfood_e2e)'
 
   dogfood:
     name: dogfood hermetic (macos-14)

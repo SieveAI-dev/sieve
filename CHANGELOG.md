@@ -8,6 +8,16 @@
 
 ## [Unreleased]
 
+### CI
+
+- **检测回归 job 升级为硬门禁并扩到全量检测 binary。** `detection-regression` 此前仅跑
+  `content_type_matrix / inbound_block / redteam_inbound / redteam_outbound` 四个 binary，
+  且 `SIEVE_RULES_PACK_B64` secret 缺失时整 job 绿色空过（假绿门禁——OUT-* 出站脱敏回归
+  从未在 CI 真跑）。现：① 过滤器扩入 `outbound_block`（OUT-* 出站脱敏处置）、
+  `golden_baseline`（上游字节基线）、`multi_agent_routing`、`dogfood_e2e`；② push / 同仓 PR
+  （可信上下文）下 secret 缺失改为硬失败，仅 fork PR（GitHub 不下发 secret）保留优雅跳过；
+  ③ 加 `--no-tests=fail` 防过滤器打空静默绿。
+
 ### Security
 
 - **GUI 决策通道 peer 代码签名核验（F1-b）。** wire 应答通道此前对连接零身份核验，同用户
