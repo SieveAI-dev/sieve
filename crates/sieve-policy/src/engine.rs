@@ -131,16 +131,30 @@ fn to_rule_entry(u: UserRuleEntry) -> RuleEntry {
         "mark" => Action::Mark,
         _ => Action::Warn,
     };
-    let disposition = u.disposition.as_deref().and_then(|d| match d {
-        "auto_redact" => Some(Disposition::AutoRedact),
-        "gui_popup" => Some(Disposition::GuiPopup),
-        "hook_terminal" => Some(Disposition::HookTerminal), // lint 已拦截
-        "status_bar" => Some(Disposition::StatusBar),
-        _ => None,
-    });
+    let disposition = u
+        .disposition
+        .as_deref()
+        .and_then(|d| match d {
+            "auto_redact" => Some(Disposition::AutoRedact),
+            "gui_popup" => Some(Disposition::GuiPopup),
+            "hook_terminal" => Some(Disposition::HookTerminal), // lint 已拦截
+            "status_bar" => Some(Disposition::StatusBar),
+            _ => None,
+        })
+        .or_else(|| {
+            Some(if u.action.eq_ignore_ascii_case("ask") {
+                Disposition::GuiPopup
+            } else {
+                Disposition::StatusBar
+            })
+        });
 
     RuleEntry {
-        id: u.id,
+        id: if u.id.starts_with("user:") {
+            u.id
+        } else {
+            format!("user:{}", u.id)
+        },
         description: u.description,
         pattern: u.pattern,
         severity,
@@ -177,6 +191,22 @@ mod tests {
             enabled,
             added_at: Utc::now(),
             added_by: "manual".into(),
+        }
+    }
+
+    #[test]
+    fn default_user_dispositions_preserve_ask_warn_mark_semantics() {
+        for (action, expected) in [
+            ("ask", Disposition::GuiPopup),
+            ("warn", Disposition::StatusBar),
+            ("mark", Disposition::StatusBar),
+        ] {
+            let mut entry = make_entry("RULE", "pattern", true);
+            entry.action = action.into();
+            let rule = to_rule_entry(entry);
+            assert_eq!(rule.id, "user:RULE");
+            assert_eq!(rule.effective_disposition(), expected);
+            assert!(!rule.effective_fail_closed());
         }
     }
 

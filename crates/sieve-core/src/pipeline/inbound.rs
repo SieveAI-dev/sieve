@@ -72,6 +72,8 @@ impl Default for AddressGuardConfig {
 /// 入站流式过滤节点，实现 [`StreamingPipelineNode`] trait。
 pub struct InboundFilter {
     engine: Arc<dyn InboundEngine>,
+    assistant_text: String,
+    reported_text_hits: HashSet<(String, usize, usize)>,
     session: Mutex<SessionState>,
     /// `.sieveignore` 加载的 fingerprint 集合（O(1) 查询）。
     sieveignore: Arc<HashSet<String>>,
@@ -88,6 +90,8 @@ impl InboundFilter {
     pub fn new(engine: Arc<dyn InboundEngine>, sieveignore: Arc<HashSet<String>>) -> Self {
         Self {
             engine,
+            assistant_text: String::new(),
+            reported_text_hits: HashSet::new(),
             session: Mutex::new(SessionState::default()),
             sieveignore,
             source_channel: None,
@@ -103,6 +107,8 @@ impl InboundFilter {
     ) -> Self {
         Self {
             engine,
+            assistant_text: String::new(),
+            reported_text_hits: HashSet::new(),
             session: Mutex::new(SessionState::default()),
             sieveignore,
             source_channel: None,
@@ -318,7 +324,23 @@ impl StreamingPipelineNode for InboundFilter {
             ..
         } = event
         {
-            self.scan_assistant_text(text)
+            if self.assistant_text.len().saturating_add(text.len()) > (1 << 20) {
+                return Err(SieveCoreError::Forwarder(
+                    "assistant text exceeds 1 MiB".into(),
+                ));
+            }
+            self.assistant_text.push_str(text);
+            let hits = self.scan_assistant_text(&self.assistant_text)?;
+            Ok(hits
+                .into_iter()
+                .filter(|hit| {
+                    self.reported_text_hits.insert((
+                        hit.rule_id.clone(),
+                        hit.span.start,
+                        hit.span.end,
+                    ))
+                })
+                .collect())
         } else {
             Ok(Vec::new())
         }
@@ -345,6 +367,34 @@ mod tests {
     use crate::detection::{fingerprint, Action, ContentSource, Detection, Severity};
     use crate::protocol::unified_message::ContentSpan;
     use uuid::Uuid;
+
+    #[test]
+    fn split_text_detection_is_independent_of_delta_boundaries() {
+        for split in 1.."rm -rf".len() {
+            let mut filter = InboundFilter::new(Arc::new(MockEngine), Arc::new(HashSet::new()));
+            let delta = |text: &str| SseEvent::ContentBlockDelta {
+                index: 0,
+                delta: SseDelta::TextDelta {
+                    text: text.to_owned(),
+                },
+            };
+            assert!(filter
+                .observe_event(&delta(&"rm -rf"[..split]))
+                .unwrap()
+                .is_empty());
+            assert_eq!(
+                filter
+                    .observe_event(&delta(&"rm -rf"[split..]))
+                    .unwrap()
+                    .len(),
+                1
+            );
+            assert!(filter
+                .observe_event(&delta(" trailing text"))
+                .unwrap()
+                .is_empty());
+        }
+    }
 
     /// Mock InboundEngine：
     /// - 文本含 "rm -rf" → 返回 IN-CR-02 命中

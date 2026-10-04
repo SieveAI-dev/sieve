@@ -132,7 +132,11 @@ fn extract_manifest_summary(body: &serde_json::Value) -> String {
 
     let summary = format!("skill='{name}' source='{source}' author='{author}'");
     if summary.len() > 128 {
-        format!("{}...", &summary[..125])
+        let mut end = 125;
+        while !summary.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}...", &summary[..end])
     } else {
         summary
     }
@@ -342,5 +346,17 @@ mod tests {
         assert!(!is_untrusted_channel("internal-api"));
         assert!(!is_untrusted_channel(""));
         assert!(!is_untrusted_channel("email")); // email 不在列表
+    }
+}
+
+#[cfg(test)]
+mod unicode_regression {
+    #[test]
+    fn long_unicode_summary_is_bounded_and_valid() {
+        for name in ["中".repeat(60), "🔐".repeat(100), "a".repeat(1000)] {
+            let summary = super::extract_manifest_summary(&serde_json::json!({"name":name}));
+            assert!(summary.len() <= 128);
+            assert!(summary.ends_with("..."));
+        }
     }
 }

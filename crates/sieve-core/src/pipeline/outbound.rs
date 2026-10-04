@@ -42,6 +42,13 @@ pub struct OutboundFilter {
 }
 
 impl OutboundFilter {
+    /// Verify the scanner is available even when a request has no text segments.
+    pub fn ensure_ready(&self) -> SieveCoreResult<()> {
+        self.engine
+            .scan_text("", crate::detection::ContentSource::OutboundUserText, 0)?;
+        Ok(())
+    }
+
     /// 新建 OutboundFilter。
     pub fn new(engine: Arc<dyn OutboundEngine>, sieveignore: Arc<HashSet<String>>) -> Self {
         Self {

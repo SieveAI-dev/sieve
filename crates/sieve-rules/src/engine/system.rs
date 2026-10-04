@@ -7,16 +7,11 @@
 //! 无包时引擎仍可独立构建运行供审计」，把系统层也包成 [`arc_swap::ArcSwap`]，
 //! 对称于 [`super::LayeredEngine`] 的 user 层热替换模式。规则包通过更新通道下发。
 //!
-//! # 两种「无规则」语义
-//!
-//! - **无规则包**（引擎独立运行的正常状态）：`inner = None` → 空规则集 fail-safe，
-//!   scan 返回空，透传不检测（上层须醒目告知用户「未加载规则包」）。
-//! - **包存在但验签 / sha256 失败**：由 `sieve-updater::install` 在安装阶段拒绝，
-//!   不会走到 `swap_system`；daemon 启动时若 current.json 验证失败则保持空集（fail-safe），
-//!   而非用篡改规则。这两条决策不在本引擎，本引擎只负责「持有当前可用规则集」。
+//! 未加载有效规则时保留控制面，但扫描返回错误，上层必须拒绝未检测流量。
+//! 热更新失败由调用方保留上一版引擎；成功更新时，扫描与命中元数据共用同一快照。
 
 use super::{MatchEngine, MatchHit, ScanReport, ScanRequest, VectorscanEngine};
-use crate::error::SieveRulesResult;
+use crate::error::{SieveRulesError, SieveRulesResult};
 use crate::manifest::RuleEntry;
 use arc_swap::ArcSwap;
 use std::sync::Arc;
@@ -24,7 +19,7 @@ use std::sync::Arc;
 /// 可原子热替换的系统规则引擎。
 ///
 /// 内部 `ArcSwap<Option<Arc<VectorscanEngine>>>`，对称于 [`super::LayeredEngine`] 的 user 层：
-/// - `None`：无规则包（引擎独立运行正常态）= 空规则集 fail-safe（透传不检测）。
+/// - `None`：无规则包（引擎独立运行正常态）= 空规则集（扫描返回错误）。
 /// - `Some(Arc<VectorscanEngine>)`：已装签名规则包，正常检测。
 ///
 /// # Hot Swap（reload 链）
@@ -49,7 +44,7 @@ impl SystemEngine {
 
     /// 空规则集（fail-safe）：无规则包时的默认状态（引擎可独立运行供审计）。
     ///
-    /// scan 始终返回空命中，daemon 透传不检测。上层应据 [`SystemEngine::has_rules`]
+    /// scan 始终返回错误，daemon 拒绝需要检测的请求。上层应据 [`SystemEngine::has_rules`]
     /// 为 `false` 时向用户醒目告警「未加载规则包」。
     pub fn empty() -> Self {
         Self::new(None)
@@ -65,7 +60,7 @@ impl SystemEngine {
 
     /// 当前是否已加载签名规则包。
     ///
-    /// `false` = 空集 fail-safe（透传不检测），上层据此提示用户「未加载规则包」。
+    /// `false` = 空集（扫描返回错误），上层据此提示用户「未加载规则包」。
     pub fn has_rules(&self) -> bool {
         self.inner.load().is_some()
     }
@@ -90,10 +85,12 @@ impl Default for SystemEngine {
 
 impl MatchEngine for SystemEngine {
     fn scan(&self, input: &[u8]) -> SieveRulesResult<Vec<MatchHit>> {
-        // 空集 fail-safe：无规则包时返回空命中（透传不检测）。
+        // 缺少系统规则时不能将“无法检测”当成“未命中”。
         match self.inner.load().as_ref().as_ref() {
             Some(e) => e.scan(input),
-            None => Ok(Vec::new()),
+            None => Err(SieveRulesError::Engine(
+                "system rules unavailable; refusing uninspected traffic".into(),
+            )),
         }
     }
 
@@ -101,12 +98,9 @@ impl MatchEngine for SystemEngine {
         // 委托给当前持有的 VectorscanEngine；无包时返回空报告（rule_count = 0）。
         match self.inner.load().as_ref().as_ref() {
             Some(e) => e.scan_with_context(req),
-            None => Ok(ScanReport {
-                hits: Vec::new(),
-                elapsed_us: 0,
-                engine_name: self.engine_name().to_string(),
-                rule_count: 0,
-            }),
+            None => Err(SieveRulesError::Engine(
+                "system rules unavailable; refusing uninspected traffic".into(),
+            )),
         }
     }
 
@@ -166,21 +160,20 @@ mod tests {
         VectorscanEngine::compile(vec![rule(id, pattern, severity)]).unwrap()
     }
 
-    /// 空集 fail-safe：无规则包时 scan 返回空，rule_count = 0，has_rules = false。
+    /// 空集扫描返回错误，规则数为零。
     #[test]
-    fn empty_engine_is_fail_safe_passthrough() {
+    fn empty_engine_refuses_uninspected_traffic() {
         let sys = SystemEngine::empty();
         assert!(!sys.has_rules(), "空集 has_rules 应为 false");
         assert_eq!(sys.rule_count(), 0);
         assert_eq!(sys.engine_name(), "system");
-        let hits = sys.scan(b"sk-ant-api03-anything dangerous").unwrap();
-        assert!(hits.is_empty(), "空集应透传不检测，返回空命中: {hits:?}");
+        assert!(sys.scan(b"sk-ant-api03-anything dangerous").is_err());
         assert!(sys.rules_snapshot().is_empty());
     }
 
-    /// 空集 scan_with_context 返回空报告（rule_count = 0），不 panic。
+    /// 上下文扫描也必须拒绝空规则。
     #[test]
-    fn empty_engine_scan_with_context_empty_report() {
+    fn empty_engine_context_scan_refuses_traffic() {
         let sys = SystemEngine::empty();
         let req = ScanRequest {
             bytes: b"anything",
@@ -191,10 +184,7 @@ mod tests {
             source_agent: None,
             caller_exe: None,
         };
-        let report = sys.scan_with_context(req).unwrap();
-        assert!(report.hits.is_empty());
-        assert_eq!(report.rule_count, 0);
-        assert_eq!(report.engine_name, "system");
+        assert!(sys.scan_with_context(req).is_err());
     }
 
     /// Default impl 等同 empty。
@@ -221,7 +211,7 @@ mod tests {
     fn swap_system_hot_replaces() {
         // 初始空集
         let sys = SystemEngine::empty();
-        assert!(sys.scan(b"v1_pattern v2_pattern").unwrap().is_empty());
+        assert!(sys.scan(b"v1_pattern v2_pattern").is_err());
 
         // swap 装入 v1
         sys.swap_system(Some(veng("SYS-V1", r"v1_pattern")));
@@ -249,8 +239,8 @@ mod tests {
         sys.swap_system(None);
         assert!(!sys.has_rules());
         assert!(
-            sys.scan(b"hit v2_pattern now").unwrap().is_empty(),
-            "卸包后应回到空集透传"
+            sys.scan(b"hit v2_pattern now").is_err(),
+            "卸包后必须拒绝扫描"
         );
     }
 
@@ -277,16 +267,14 @@ mod tests {
         );
     }
 
-    /// 空系统层 + LayeredEngine：系统无包时 user 规则仍生效（fail-safe 不误伤 user 层）。
+    /// 用户规则不能替代缺失的系统保护规则。
     #[test]
-    fn empty_system_layer_still_evaluates_user() {
+    fn user_rules_cannot_replace_missing_system_rules() {
         let sys = SystemEngine::empty();
         let user = VectorscanEngine::compile(vec![rule("MY-RULE", r"user_only", Severity::Medium)])
             .unwrap();
         let layered = LayeredEngine::new(sys, Some(user));
-        let hits = layered.scan(b"user_only here").unwrap();
-        assert_eq!(hits.len(), 1, "系统空集时 user 规则应正常命中: {hits:?}");
-        assert_eq!(hits[0].rule_id, "MY-RULE");
+        assert!(layered.scan(b"user_only here").is_err());
     }
 
     /// swap_system 期间并发 scan 不阻塞、不 panic（ArcSwap lock-free 保证，对称 user 层测试）。
@@ -300,7 +288,7 @@ mod tests {
 
         let reader = thread::spawn(move || {
             for _ in 0..200 {
-                let _ = sys_read.scan(b"init_data swap_data").unwrap();
+                let _ = sys_read.scan(b"init_data swap_data");
             }
         });
 

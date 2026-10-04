@@ -419,9 +419,8 @@ pub struct Config {
     /// 连接对端进程做代码签名核验；未通过 → 该应答静默改写为 deny（fail-closed）。
     /// 示例：`identifier "com.sieve.gui" and anchor apple generic and certificate leaf[subject.OU] = "TEAMID"`。
     ///
-    /// 未设置（默认）= 不核验：源码构建 / dogfood 场景无签名信任锚，强制核验会锁死
-    /// 本地开发；daemon 启动时打 warn 记录该残余风险。非 macOS 平台设置本项 = 恒拒
-    /// （fail-closed，平台无核验能力）。
+    /// 未设置时拒绝所有 GUI 放行应答。源码构建也必须显式配置可信签名身份；
+    /// 非 macOS 平台无法验证此身份，放行应答同样拒绝。
     #[serde(default)]
     pub gui_peer_code_requirement: Option<String>,
 

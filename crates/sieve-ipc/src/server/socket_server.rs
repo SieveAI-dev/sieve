@@ -36,9 +36,8 @@ pub type OversizeCallback = Arc<dyn Fn(OversizeKind, usize) + Send + Sync>;
 /// 参数为连接的 raw fd，返回 `true` = 对端通过核验。与 [`OversizeCallback`] 同理，
 /// 通过回调反转依赖，sieve-ipc 不引入 FFI。
 ///
-/// **未注入 = gate 关闭**（源码构建 / dogfood 场景无签名信任锚可用；残余风险见
-/// SPEC-005 §6.4）。注入后仅作用于 wire 应答放行 Critical 的路径；`inject_decision`
-/// 测试注入路径与 `resolve_decision`（自有 A 方案门禁）不经此 gate。
+/// 未注入时拒绝放行；所有 wire 放行应答均须通过验证。
+/// 测试注入路径与受独立授权约束的命令行裁决路径不经此验证。
 pub type PeerVerifier = Arc<dyn Fn(std::os::unix::io::RawFd) -> bool + Send + Sync>;
 
 /// 连接级 peer 核验状态：懒执行 + 缓存（每连接至多真验一次）。
@@ -61,9 +60,9 @@ impl PeerGate {
     }
 
     /// 本连接是否允许放行 Critical（allow / redact_and_allow）决策应答。
-    fn permits_critical_allow(&self) -> bool {
+    fn permits_allow(&self) -> bool {
         match &self.verifier {
-            None => true, // gate 未启用
+            None => false, // 没有可信身份验证器时拒绝放行
             Some(verify) => *self.verdict.get_or_init(|| verify(self.raw_fd)),
         }
     }
@@ -424,7 +423,7 @@ pub struct IpcServer {
     oversize_callback: Arc<std::sync::Mutex<Option<OversizeCallback>>>,
     /// GUI peer 代码签名核验回调（F1-b）。
     ///
-    /// daemon 层通过 [`Self::set_peer_verifier`] 注入；未注入 = gate 关闭。
+    /// daemon 层通过 [`Self::set_peer_verifier`] 注入；未注入则拒绝放行。
     peer_verifier: Arc<std::sync::Mutex<Option<PeerVerifier>>>,
 }
 
@@ -1452,12 +1451,10 @@ async fn dispatch_message(
             // 未通过 → allow / redact_and_allow 静默改写为 deny（与 resolve_decision 的
             // A 方案同范式，daemon 侧权威 max_severity，不信客户端自报）。
             // inject_decision 注入路径与 resolve_decision 不经此处。
-            let resp = if entry.max_severity == Severity::Critical
-                && matches!(
-                    resp.decision,
-                    DecisionAction::Allow | DecisionAction::RedactAndAllow
-                )
-                && !peer_gate.permits_critical_allow()
+            let resp = if matches!(
+                resp.decision,
+                DecisionAction::Allow | DecisionAction::RedactAndAllow
+            ) && !peer_gate.permits_allow()
             {
                 warn!(
                     request_id = %resp.request_id,

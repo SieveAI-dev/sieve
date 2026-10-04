@@ -35,7 +35,7 @@ use sieve_core::pipeline::outbound::OutboundFilter;
 use sieve_core::pipeline::outbound_redact::{redact_segments, RedactHit};
 use sieve_core::pipeline::streaming::StreamingPipelineNode as _;
 use sieve_core::protocol::ProviderCodec as _;
-use sieve_core::sse::parser::SseParser;
+use sieve_core::sse::parser::{SseParse as _, SseParser};
 use sieve_core::tool_use_aggregator::Aggregator;
 use sieve_core::Forwarder;
 use std::collections::{HashMap, HashSet};
@@ -46,6 +46,11 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use crate::config::Config;
 use crate::upstream_routes::UpstreamRoutes;
+
+mod rules_reload;
+mod streaming;
+pub(crate) use rules_reload::{perform_rules_reload, perform_user_rules_reload};
+use streaming::{forward_with_inbound_inspection, forward_with_openai_inbound_inspection};
 
 // ── 本地用量/计费核算 facade（可选特性 `usage`）─────────────────────────────
 //
@@ -1047,13 +1052,13 @@ pub async fn run(
         }
 
         // F1-b（SPEC-005 §6.2.4）：按配置注入 GUI peer 代码签名核验回调。
-        // 未配置 = gate 关闭（wire 应答通道的冒充残余风险存在，见 SPEC-005 §11E）。
+        // 未配置可信身份时，IPC 层默认拒绝所有放行应答。
         if let Some(requirement) = cfg.gui_peer_code_requirement.clone() {
             tracing::info!("GUI peer 代码签名核验已启用（Critical allow 应答强制核验）");
             ipc_srv.set_peer_verifier(crate::gui_peer_verify::build_verifier(requirement));
         } else {
             tracing::warn!(
-                "gui_peer_code_requirement 未配置：GUI 决策通道 peer 代码签名核验关闭，                 同用户进程冒充 GUI 批 Critical 的路径未被 daemon 侧拦截（F1-b 残余风险）"
+                "gui_peer_code_requirement 未配置：GUI 决策通道缺少可信身份，                 所有 GUI 放行应答将被拒绝，请配置可信签名身份"
             );
         }
 
@@ -1548,6 +1553,14 @@ async fn accept_loop(
             }
         };
 
+        let Ok(connection_lease) = crate::resource_limits::CONNECTIONS
+            .clone()
+            .try_acquire_owned()
+        else {
+            drop(stream);
+            continue;
+        };
+
         // v2.0 Phase A：caller PID 反查（OQ-V20-02）。
         let caller_info: Option<crate::process_context::CallerInfo> =
             peer_addr_to_pid(listen_addr, peer).and_then(crate::process_context::lookup_caller);
@@ -1579,6 +1592,7 @@ async fn accept_loop(
         );
 
         tokio::spawn(async move {
+            let _connection_lease = connection_lease;
             let io = TokioIo::new(stream);
             let svc = service_fn(move |req| {
                 let f = forwarder.clone();
@@ -1617,241 +1631,23 @@ async fn accept_loop(
                 }
             });
 
-            if let Err(e) = auto::Builder::new(TokioExecutor::new())
-                .serve_connection(io, svc)
-                .await
+            let builder = auto::Builder::new(TokioExecutor::new());
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(600),
+                builder.serve_connection(io, svc),
+            )
+            .await
             {
-                tracing::debug!(peer = %peer, error = %e, "connection closed with error");
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
+                    tracing::debug!(peer = %peer, error = %e, "connection closed with error")
+                }
+                Err(_) => tracing::debug!(peer = %peer, "connection lifetime exceeded"),
             }
         });
     }
 }
 
-/// 重新读取、lint 并编译用户规则，返回可立即 swap 的两个方向引擎（v2.1）。
-///
-/// 返回 `(outbound_engine, inbound_engine, rule_count)`，方向引擎均为 `Option<UserEngine>`：
-/// - `None` 表示该方向无规则（文件不存在、或该方向 0 条），LayeredEngine 退化为纯系统引擎
-/// - `Some(engine)` 即编译通过的用户引擎，调用方直接调用 `swap_user` 生效
-///
-/// 任何错误（lint 违规 / SIEVE_HOME 未设置）返回 `Err`（fail-safe：daemon 保留旧引擎）。
-/// 用户规则 reload 一次的结果（reload_config）。
-#[derive(Debug, Clone)]
-pub(crate) struct ReloadOutcome {
-    /// 当前调用方未消费 `success` 字段（成功 / 失败可由 `user_rules_errors.is_empty()` 间接判定），
-    /// 但保留供未来扩展（如分级 audit）使用。
-    #[allow(dead_code)]
-    pub success: bool,
-    pub rule_count: usize,
-    pub user_rules_errors: Vec<String>,
-}
-
-/// 执行一次用户规则 reload 完整流程（lint + 编译 + hot swap + 广播 + audit）。
-///
-/// 既被 IPC `sieve.reload_user_rules` notification listener 调用（向后兼容），
-/// 也被 control plane `sieve.reload_config` 直接同步调用（拿 errors 同步返回）。
-///
-/// 行为与原内联闭包等价：
-/// - 成功 → swap_user + 推 `NotifyKind::UserRulesReloaded` + 写 audit success
-/// - 失败 → 不动当前引擎 + 推 `NotifyKind::UserRulesLoadFailed` + 写 audit failure
-///
-/// 关联：用户规则 reload / fail-safe。
-pub(crate) fn perform_user_rules_reload(
-    user_rules_path: Option<&std::path::Path>,
-    outbound_layered: &Arc<
-        sieve_rules::engine::LayeredEngine<
-            sieve_rules::engine::SystemEngine,
-            sieve_policy::engine::UserEngine,
-        >,
-    >,
-    inbound_layered: &Arc<
-        sieve_rules::engine::LayeredEngine<
-            sieve_rules::engine::SystemEngine,
-            sieve_policy::engine::UserEngine,
-        >,
-    >,
-    ipc: &Arc<sieve_ipc::IpcServer>,
-    audit: &Arc<crate::audit::AuditStore>,
-    trigger_id: Option<uuid::Uuid>,
-) -> ReloadOutcome {
-    let trigger_id_str = trigger_id.map(|id| id.to_string());
-    tracing::info!(
-        trigger_id = ?trigger_id_str,
-        "执行用户规则 reload"
-    );
-
-    let reload_result = reload_user_engines(user_rules_path);
-    let (notify_kind, notify_title, notify_detail, success, rule_count, err_msg) =
-        match reload_result {
-            Ok((outbound_eng, inbound_eng, count)) => {
-                outbound_layered.swap_user(outbound_eng);
-                inbound_layered.swap_user(inbound_eng);
-                tracing::info!(rule_count = count, "用户规则 hot swap 完成");
-                (
-                    sieve_ipc::protocol::NotifyKind::UserRulesReloaded,
-                    format!("用户规则已 hot reload（{count} 条）"),
-                    Some("已立即生效，无需重启 daemon".to_owned()),
-                    true,
-                    count,
-                    None,
-                )
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "用户规则重新加载失败（保留旧引擎）");
-                (
-                    sieve_ipc::protocol::NotifyKind::UserRulesLoadFailed,
-                    "用户规则加载失败".to_owned(),
-                    Some(e.to_string()),
-                    false,
-                    0,
-                    Some(e.to_string()),
-                )
-            }
-        };
-
-    let notify = sieve_ipc::protocol::StatusBarNotify {
-        notify_id: uuid::Uuid::now_v7(),
-        created_at: chrono::Utc::now(),
-        kind: notify_kind,
-        title: notify_title,
-        detail: notify_detail,
-        rule_id: None,
-        auto_dismiss_seconds: 5,
-    };
-    ipc.broadcast_status_bar(notify);
-
-    // audit 写入（fail-soft）
-    let event = crate::audit::AuditEvent::UserRulesReloaded {
-        success,
-        rule_count: if success { Some(rule_count) } else { None },
-        error: err_msg.clone(),
-        trigger_id: trigger_id_str,
-    };
-    let audit_clone = Arc::clone(audit);
-    tokio::spawn(async move {
-        // UserRulesReloaded 是 daemon 系统级事件，无 listener 上下文
-        if let Err(e) = audit_clone
-            .append(event, crate::audit::SYSTEM_PROVIDER_ID)
-            .await
-        {
-            tracing::warn!(error = %e, "audit append UserRulesReloaded failed");
-        }
-    });
-
-    ReloadOutcome {
-        success,
-        rule_count,
-        user_rules_errors: err_msg.into_iter().collect(),
-    }
-}
-
-/// 系统规则热重载（updater 装入新签名包后调用，无需重启）。
-///
-/// 从签名包（`current.json`）重新加载出站/入站系统规则，编译后原子 `swap_system` 到
-/// live 引擎；空集 / 编译失败 → swap 为空集 fail-safe（保持引擎可用）。编译时
-/// [`VectorscanEngine::compile`] 同步刷新 fail-closed 运行时注册表（accumulate）。
-/// 与 [`perform_user_rules_reload`] 对称——系统层 `ArcSwap` zero-downtime 热替换。
-pub(crate) fn perform_rules_reload(
-    pack_path: Option<&std::path::Path>,
-    dev_outbound_path: &std::path::Path,
-    dev_inbound_path: &std::path::Path,
-    outbound_layered: &Arc<
-        sieve_rules::engine::LayeredEngine<
-            sieve_rules::engine::SystemEngine,
-            sieve_policy::engine::UserEngine,
-        >,
-    >,
-    inbound_layered: &Arc<
-        sieve_rules::engine::LayeredEngine<
-            sieve_rules::engine::SystemEngine,
-            sieve_policy::engine::UserEngine,
-        >,
-    >,
-    ipc: Option<&Arc<sieve_ipc::IpcServer>>,
-) {
-    let out = crate::reload_system_vectorscan(pack_path, dev_outbound_path, true);
-    let inb = crate::reload_system_vectorscan(pack_path, dev_inbound_path, false);
-    let out_count = out
-        .as_ref()
-        .map(sieve_rules::engine::MatchEngine::rule_count)
-        .unwrap_or(0);
-    let in_count = inb
-        .as_ref()
-        .map(sieve_rules::engine::MatchEngine::rule_count)
-        .unwrap_or(0);
-    let total = out_count + in_count;
-
-    // 原子热替换系统层（已在进行中的 scan 持旧快照，结束后释放）。
-    outbound_layered.swap_system(out);
-    inbound_layered.swap_system(inb);
-
-    tracing::info!(
-        out_count,
-        in_count,
-        "系统规则热重载完成（swap_system，zero-downtime）"
-    );
-
-    if let Some(ipc) = ipc {
-        let notify = sieve_ipc::protocol::StatusBarNotify {
-            notify_id: uuid::Uuid::now_v7(),
-            created_at: chrono::Utc::now(),
-            kind: sieve_ipc::protocol::NotifyKind::Generic,
-            title: format!("规则包已热加载（{total} 条）"),
-            detail: Some("已立即生效，无需重启 daemon".to_owned()),
-            rule_id: None,
-            auto_dismiss_seconds: 5,
-        };
-        ipc.broadcast_status_bar(notify);
-    }
-}
-
-fn reload_user_engines(
-    user_rules_path: Option<&std::path::Path>,
-) -> anyhow::Result<(
-    Option<sieve_policy::engine::UserEngine>,
-    Option<sieve_policy::engine::UserEngine>,
-    usize,
-)> {
-    use sieve_policy::lint::lint;
-    use sieve_policy::loader::load_user_rules;
-
-    let path = user_rules_path
-        .ok_or_else(|| anyhow::anyhow!("user rules path 未知（SIEVE_HOME 未设置）"))?;
-
-    if !path.exists() {
-        // 文件不存在：两个方向均 None（退化为纯系统规则），视为成功（0 条规则）
-        return Ok((None, None, 0));
-    }
-
-    let file = load_user_rules(path).map_err(|e| anyhow::anyhow!("user.toml 解析失败: {e}"))?;
-
-    let file_size = path.metadata().map(|m| m.len()).unwrap_or(0);
-    let violations = lint(&file, file_size);
-    if !violations.is_empty() {
-        return Err(anyhow::anyhow!(
-            "user.toml lint 失败（{} 条违规）：{}",
-            violations.len(),
-            violations[0].message
-        ));
-    }
-
-    let total = file.rules.len();
-
-    // 出站引擎（编译 direction=outbound/both 的规则）；该方向无规则时返回 None（fail-safe）
-    let outbound_eng = sieve_policy::engine::UserEngine::compile_for_direction(
-        file.rules.clone(),
-        sieve_policy::loader::RuleDirection::Outbound,
-    )
-    .ok();
-
-    // 入站引擎（编译 direction=inbound/both 的规则）；该方向无规则时返回 None（fail-safe）
-    let inbound_eng = sieve_policy::engine::UserEngine::compile_for_direction(
-        file.rules,
-        sieve_policy::loader::RuleDirection::Inbound,
-    )
-    .ok();
-
-    Ok((outbound_eng, inbound_eng, total))
-}
 /// 请求入口：捕获 `proxy_inner` 的所有错误，转换为 502 Bad Gateway 响应。
 ///
 /// v2.0：新增 `ctx`（caller + audit_store）参数。
@@ -1871,6 +1667,11 @@ async fn proxy(
     req: Request<Incoming>,
     no_client_policy: crate::cli::NoClientPolicy,
 ) -> Result<Response<ResponseBody>, hyper::Error> {
+    let Ok(lease) = crate::resource_limits::REQUESTS.clone().try_acquire_owned() else {
+        let mut response = Response::new(string_body("代理忙，请稍后重试".into()));
+        *response.status_mut() = http::StatusCode::SERVICE_UNAVAILABLE;
+        return Ok(response);
+    };
     match proxy_inner(
         forwarder,
         provider_forwarders,
@@ -1888,7 +1689,9 @@ async fn proxy(
     )
     .await
     {
-        Ok(resp) => Ok(resp),
+        Ok(resp) => {
+            Ok(resp.map(|body| crate::resource_limits::LeasedBody::new(body, lease).boxed()))
+        }
         Err(e) => {
             tracing::error!(error = %e, "proxy failed");
             let body = format!("sieve proxy error: {e}");
@@ -2050,6 +1853,11 @@ async fn proxy_inner(
     let is_skill_post = method == http::Method::POST
         && sieve_core::skill_install_guard::is_skill_install_path(&path);
 
+    if is_messages_post || is_chat_completions_post || is_skill_post {
+        filter.ensure_ready()?;
+        inbound_filter.scan_assistant_text("")?;
+    }
+
     // proxy_inner 请求体两态：白名单路径 collect 成 Bytes（出站扫描需要），其余路径
     // 保持流式 Incoming（零缓冲透传，无 DoS 向量）。两态互斥——用 enum 而非
     // `(Option<Bytes>, Option<Incoming>)` 让「既非 collected 又非 streaming」的非法态
@@ -2063,11 +1871,13 @@ async fn proxy_inner(
 
     // 只对白名单路径 collect body；其余 POST 保留为流式 body，完全不缓冲。
     let proxy_body = if is_messages_post || is_chat_completions_post || is_skill_post {
-        let collected = body
-            .collect()
-            .await
-            .map_err(|e| anyhow!("collect body (post): {e}"))?;
-        ProxyRequestBody::Collected(collected.to_bytes())
+        let collected = crate::resource_limits::collect(
+            body,
+            crate::resource_limits::MAX_BODY_BYTES,
+            crate::resource_limits::BODY_TIMEOUT,
+        )
+        .await?;
+        ProxyRequestBody::Collected(collected)
     } else {
         ProxyRequestBody::Streaming(body)
     };
@@ -3372,899 +3182,6 @@ struct MultiAgentMeta {
     chain_depth: usize,
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn forward_with_inbound_inspection(
-    forwarder: Arc<Forwarder>,
-    mut inbound_filter: InboundFilter,
-    dry_run: bool,
-    ipc: Option<Arc<sieve_ipc::IpcServer>>,
-    mut parts: http::request::Parts,
-    body_bytes: Bytes,
-    meta: MultiAgentMeta,
-    ctx: RequestCtx,
-    billing_ctx: BillingCtxHandle,
-) -> Result<Response<ResponseBody>> {
-    // 解构 ctx 供内部使用（避免在 spawn move 时多次 clone Arc）
-    let RequestCtx {
-        caller,
-        audit: audit_store,
-        listener_protocol,
-        listener_provider_id,
-    } = ctx;
-    use http_body_util::Full;
-
-    // 修 A2-#2：把 source_channel 注入 InboundFilter，使 IN-GEN-06 运行时提级逻辑
-    // 能感知来源 channel。必须在 SSE 检测开始前调用。
-    inbound_filter.set_source_channel(meta.source_channel.clone());
-
-    let new_uri = forwarder
-        .rewrite_uri(&parts.uri)
-        .map_err(|e| anyhow!("rewrite uri: {e}"))?;
-    parts.uri = new_uri;
-    parts.headers.remove(http::header::HOST);
-    let host_val = http::HeaderValue::from_str(forwarder.upstream_host())
-        .map_err(|e| anyhow!("invalid host header: {e}"))?;
-    parts.headers.insert(http::header::HOST, host_val);
-
-    let upstream_body = Full::new(body_bytes)
-        .map_err(|e| -> hyper::Error { match e {} })
-        .boxed();
-    let upstream_req = Request::from_parts(parts, upstream_body);
-
-    let upstream_resp = forwarder
-        .forward(upstream_req)
-        .await
-        .map_err(|e| anyhow!("forward: {e}"))?;
-
-    let (mut resp_parts, resp_body) = upstream_resp.into_parts();
-
-    // 入站响应可能被 sieve 注入 sieve_blocked event 截流，实际 body 长度不一定等于上游
-    // content-length。剥掉 content-length 强制 chunked transfer，防止 hyper client 截断。
-    resp_parts.headers.remove(http::header::CONTENT_LENGTH);
-
-    // 漏洞修复（lessons.md 2026-04-27 [安全]）：按 Content-Type 路由入站检测路径。
-    //
-    // 原实现假设入站永远是 SSE 流（text/event-stream），上游返回 application/json
-    // 时响应 body 直接透传，所有入站规则失效。修复：
-    //   - text/event-stream → 走现有 SSE 路径（tokio::spawn + channel tee）
-    //   - application/json  → 收集完整 body → 解析 content[] → 提取 tool_use →
-    //                         喂 InboundFilter → 命中 Critical 时替换为 sieve_blocked JSON
-    let is_json_response = resp_parts
-        .headers
-        .get(http::header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .map(is_json_media_type)
-        .unwrap_or(false);
-
-    if is_json_response {
-        return handle_json_inbound(
-            &sieve_core::protocol::AnthropicCodec,
-            resp_parts,
-            resp_body,
-            inbound_filter,
-            dry_run,
-            meta,
-            ipc.clone(),
-            RequestCtx::new(
-                caller.clone(),
-                Arc::clone(&audit_store),
-                listener_protocol,
-                listener_provider_id.clone(),
-            ),
-            billing_ctx,
-        )
-        .await;
-    }
-
-    // P0-5：bounded channel，深度 64，上游读取自然受背压限制。
-    const INBOUND_CHANNEL_DEPTH: usize = 64;
-    let (tx, rx) = tokio::sync::mpsc::channel::<Result<hyper::body::Frame<Bytes>, std::io::Error>>(
-        INBOUND_CHANNEL_DEPTH,
-    );
-
-    // meta 需要在 spawn 闭包中 capture（用于入站 DecisionRequest 注入）
-    let inbound_meta = meta;
-
-    tokio::spawn(async move {
-        let meta = inbound_meta;
-        let mut parser = SseParser::new();
-        let mut aggregator = Aggregator::new();
-        // 仅 billing 启用（billing_ctx=Some）时累计 SSE usage + completion。
-        let mut billing_acc = billing_ctx
-            .as_ref()
-            .map(|_| BillingSseAccumulator::default());
-
-        use http_body_util::BodyStream;
-        let mut stream = BodyStream::new(resp_body);
-
-        while let Some(frame_result) = stream.next().await {
-            match frame_result {
-                Ok(frame) => {
-                    let Some(frame_bytes) = frame.data_ref().cloned() else {
-                        if tx.send(Ok(frame)).await.is_err() {
-                            return;
-                        }
-                        continue;
-                    };
-
-                    // P0-5：push_chunk 超限时 fail-closed（IN-CAP-01）
-                    let events = match parser.push_chunk(&frame_bytes) {
-                        Ok(evts) => evts,
-                        Err(e) => {
-                            tracing::warn!(error = %e, "SSE parser 容量超限，fail-closed 注入 sieve_blocked");
-                            let cap_detection =
-                                build_cap_detection("IN-CAP-01", "cap-sse-event-too-large");
-                            let blocked_payload = build_sieve_blocked_sse(&[cap_detection]);
-                            let _ = tx.send(Ok(hyper::body::Frame::data(blocked_payload))).await;
-                            return;
-                        }
-                    };
-
-                    // 累计本批 SSE usage + completion（Anthropic SSE 观测）。
-                    if let Some(acc) = billing_acc.as_mut() {
-                        acc.observe_events(&events);
-                    }
-
-                    // 收集本批 events 的 detections，按 action 分组处理
-                    // 修 R8-#2：传入 meta.chain_depth，chain_depth ≥ 2 时 HookMark 升级为 GuiPopup
-                    let (blocking, hook_detections, hold_detections) = classify_inbound_detections(
-                        &events,
-                        &mut inbound_filter,
-                        &mut aggregator,
-                        dry_run,
-                        meta.chain_depth,
-                        &ipc,
-                        &audit_store,
-                        caller.as_ref(),
-                        &listener_provider_id,
-                    );
-
-                    // 修 #4（fail-closed 被绕过修复）：Block 检查必须在 Hold 之前。
-                    // 原代码 Hold allow 后 continue 会跳过 Block 检查，导致同批同时含
-                    // Block + Hold 时，用户 GUI allow 可绕过 Critical fail-closed。
-                    // 新顺序：1. Block（有 block 立即截流）→ 2. Hook → 3. Hold
-                    // 关联：双层防御。
-
-                    // 1. Block 类：注入 sieve_blocked 并截流（fail-closed 优先）
-                    if !blocking.is_empty() {
-                        tracing::warn!(count = blocking.len(), "INBOUND BLOCKED");
-                        for d in &blocking {
-                            tracing::warn!(rule = %d.rule_id, "inbound detection");
-                        }
-                        spawn_inbound_blocked_audit(
-                            &audit_store,
-                            &listener_provider_id,
-                            &caller,
-                            &blocking,
-                            "anthropic_sse",
-                        );
-                        let blocked_payload = build_sieve_blocked_sse(&blocking);
-                        let _ = tx.send(Ok(hyper::body::Frame::data(blocked_payload))).await;
-                        return;
-                    }
-
-                    // 2. Hook 类：写 pending 文件，失败时 fail-closed（不允许 fail-open）
-                    for d in &hook_detections {
-                        if let Err(e) = write_hook_pending_or_fail_closed(d, &meta) {
-                            tracing::error!(
-                                error = %e,
-                                rule = %d.rule_id,
-                                "Hook pending write failed; fail-closed: truncating SSE stream"
-                            );
-                            let blocked_payload = build_sieve_blocked_sse(&[d.clone()]);
-                            let _ = tx.send(Ok(hyper::body::Frame::data(blocked_payload))).await;
-                            return;
-                        }
-                    }
-
-                    // 3. GUI 类：hold 流 + keep-alive + 等用户决策
-                    if !hold_detections.is_empty() {
-                        if let Some(ref ipc_server) = ipc {
-                            // keep-alive channel：daemon 把心跳写入 SSE 流
-                            let (ka_tx, mut ka_rx) = mpsc::channel::<Bytes>(8);
-                            let tx_ka = tx.clone();
-
-                            // 修 R2-#3：触发帧不先发给客户端——暂存在 frame_bytes 变量里。
-                            // 决策 Allow/RedactAndAllow 后再发（见下方 match 分支）；
-                            // 决策 Deny 时不发，避免恶意内容已污染客户端上下文。
-                            // hold 期间只向客户端发 keep-alive comment（不是模型内容）。
-
-                            // 启动 keep-alive 转发 task
-                            let ka_fwd_handle = tokio::spawn(async move {
-                                while let Some(ka_bytes) = ka_rx.recv().await {
-                                    if tx_ka
-                                        .send(Ok(hyper::body::Frame::data(ka_bytes)))
-                                        .await
-                                        .is_err()
-                                    {
-                                        break;
-                                    }
-                                }
-                            });
-
-                            // 构造 IPC 请求
-                            use chrono::Utc;
-                            let request_id = uuid::Uuid::new_v4();
-                            let timeout_seconds = hold_detections
-                                .iter()
-                                .find_map(|d| {
-                                    if let Action::HoldForDecision {
-                                        timeout_seconds, ..
-                                    } = d.action
-                                    {
-                                        Some(timeout_seconds)
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .unwrap_or(60);
-
-                            let ipc_detections = hold_detections
-                                .iter()
-                                .map(|d| sieve_ipc::protocol::DetectionPayload {
-                                    rule_id: d.rule_id.clone(),
-                                    severity: map_severity_to_ipc(d.severity),
-                                    disposition: sieve_ipc::Disposition::GuiPopup,
-                                    title: format!("检测命中：{}", d.rule_id),
-                                    one_line_summary: d.evidence_truncated.clone(),
-                                    details: serde_json::json!({}),
-                                    recommendation: None,
-                                })
-                                .collect();
-
-                            // v2.0：计算 allow_remember
-                            let inbound_sse_rule_ids: Vec<&str> =
-                                hold_detections.iter().map(|d| d.rule_id.as_str()).collect();
-                            let allow_remember = compute_allow_remember(&inbound_sse_rule_ids);
-
-                            let ipc_req = sieve_ipc::DecisionRequest {
-                                request_id,
-                                created_at: Utc::now(),
-                                timeout_seconds,
-                                default_on_timeout: sieve_ipc::DefaultOnTimeout::Block,
-                                detections: ipc_detections,
-                                // v1.5：注入 multi-agent 元数据
-                                source_agent: meta.source_agent,
-                                origin_chain: meta.origin_chain.clone(),
-                                source_channel: meta.source_channel.clone(),
-                                // 修 R7-#5：填入 header 真实 chain_depth
-                                explicit_chain_depth: Some(meta.chain_depth),
-                                allow_remember,
-                            };
-
-                            let outcome = sieve_core::pipeline::inbound_hold::hold_and_decide(
-                                Arc::clone(ipc_server),
-                                ipc_req,
-                                ka_tx,
-                                "inbound",
-                                Some(listener_provider_id.as_str()),
-                            )
-                            .await;
-
-                            ka_fwd_handle.abort();
-
-                            match outcome {
-                                Ok(sieve_core::pipeline::HoldOutcome::Allow {
-                                    remember,
-                                    context_hint,
-                                })
-                                | Ok(sieve_core::pipeline::HoldOutcome::RedactAndAllow {
-                                    remember,
-                                    context_hint,
-                                }) => {
-                                    // 修 R2-#3：用户允许后，补发缓存的触发帧（hold 前未发），
-                                    // 然后继续转发后续 SSE。
-
-                                    // remember=true 时写灰名单
-                                    if remember && allow_remember {
-                                        let agent_str =
-                                            format!("{:?}", meta.source_agent).to_lowercase();
-                                        for det in &hold_detections {
-                                            try_write_graylist(
-                                                &det.rule_id,
-                                                &det.evidence_truncated,
-                                                "",
-                                                "anthropic",
-                                                "inbound_sse",
-                                                &agent_str,
-                                                context_hint.clone(),
-                                                &request_id.to_string(),
-                                                &audit_store,
-                                                &caller,
-                                                &listener_provider_id,
-                                            );
-                                        }
-                                    }
-
-                                    if tx
-                                        .send(Ok(hyper::body::Frame::data(frame_bytes)))
-                                        .await
-                                        .is_err()
-                                    {
-                                        return;
-                                    }
-                                    continue;
-                                }
-                                Ok(sieve_core::pipeline::HoldOutcome::Deny { reason }) => {
-                                    // 修 R2-#3：用户拒绝时不发触发帧，直接注入 sieve_blocked 并关流。
-                                    tracing::warn!(%reason, "INBOUND BLOCKED by GUI decision");
-                                    spawn_inbound_blocked_audit(
-                                        &audit_store,
-                                        &listener_provider_id,
-                                        &caller,
-                                        &hold_detections,
-                                        "anthropic_sse",
-                                    );
-                                    let blocked_payload = build_sieve_blocked_sse(&hold_detections);
-                                    let _ = tx
-                                        .send(Ok(hyper::body::Frame::data(blocked_payload)))
-                                        .await;
-                                    return;
-                                }
-                                Err(e) => {
-                                    tracing::warn!(error = %e, "IPC hold error, fail-closed");
-                                    let blocked_payload = build_sieve_blocked_sse(&hold_detections);
-                                    let _ = tx
-                                        .send(Ok(hyper::body::Frame::data(blocked_payload)))
-                                        .await;
-                                    return;
-                                }
-                            }
-                        } else {
-                            // IPC 未初始化：fail-closed，阻断
-                            tracing::warn!(
-                                "GuiPopup detection but IPC server not initialized; fail-closed"
-                            );
-                            let blocked_payload = build_sieve_blocked_sse(&hold_detections);
-                            let _ = tx.send(Ok(hyper::body::Frame::data(blocked_payload))).await;
-                            return;
-                        }
-                    }
-
-                    // 无 blocking / hold：透传原始 frame
-                    if tx
-                        .send(Ok(hyper::body::Frame::data(frame_bytes)))
-                        .await
-                        .is_err()
-                    {
-                        return;
-                    }
-                }
-                Err(e) => {
-                    let _ = tx
-                        .send(Err(std::io::Error::other(format!(
-                            "upstream body error: {e}"
-                        ))))
-                        .await;
-                    return;
-                }
-            }
-        }
-
-        // 流结束（EOF / 提前断流），flush parser 解析残留未闭合 event
-        let flushed = parser.flush();
-        // 累计 flush 残留 events（流尾 usage / 末段文本可能在此）。
-        if let Some(acc) = billing_acc.as_mut() {
-            acc.observe_events(&flushed);
-        }
-        // 修 R8-#2：flush 阶段同样传入 chain_depth，HookMark 升级逻辑一致
-        let (blocking, hook_detections, flush_hold_detections) = classify_inbound_detections(
-            &flushed,
-            &mut inbound_filter,
-            &mut aggregator,
-            dry_run,
-            meta.chain_depth,
-            &ipc,
-            &audit_store,
-            caller.as_ref(),
-            &listener_provider_id,
-        );
-
-        // flush 阶段 Hook 类同样 fail-closed：写失败即截流
-        for d in &hook_detections {
-            if let Err(e) = write_hook_pending_or_fail_closed(d, &meta) {
-                tracing::error!(
-                    error = %e,
-                    rule = %d.rule_id,
-                    "Hook pending write failed (flush); fail-closed: truncating SSE stream"
-                );
-                let blocked_payload = build_sieve_blocked_sse(&[d.clone()]);
-                let _ = tx.send(Ok(hyper::body::Frame::data(blocked_payload))).await;
-                return;
-            }
-        }
-
-        if !blocking.is_empty() {
-            tracing::warn!(count = blocking.len(), "INBOUND BLOCKED (flush)");
-            for d in &blocking {
-                tracing::warn!(rule = %d.rule_id, "inbound detection (flush)");
-            }
-            spawn_inbound_blocked_audit(
-                &audit_store,
-                &listener_provider_id,
-                &caller,
-                &blocking,
-                "anthropic_sse",
-            );
-            let blocked_payload = build_sieve_blocked_sse(&blocking);
-            let _ = tx.send(Ok(hyper::body::Frame::data(blocked_payload))).await;
-            return;
-        }
-
-        // 修 #5（flush 阶段 hold 丢失修复）：
-        // flush 路径的 HoldForDecision 命中不能静默丢弃。
-        // 此时流已断无法 hold + IPC 通知 GUI，必须 fail-closed。
-        // 关联：双层防御。
-        if !flush_hold_detections.is_empty() {
-            tracing::warn!(
-                count = flush_hold_detections.len(),
-                "INBOUND BLOCKED (flush-hold): GuiPopup detection at EOF, fail-closed"
-            );
-            for d in &flush_hold_detections {
-                tracing::warn!(rule = %d.rule_id, "flush-hold detection → fail-closed");
-            }
-            spawn_inbound_blocked_audit(
-                &audit_store,
-                &listener_provider_id,
-                &caller,
-                &flush_hold_detections,
-                "anthropic_sse",
-            );
-            let blocked_payload = build_sieve_blocked_sse(&flush_hold_detections);
-            let _ = tx.send(Ok(hyper::body::Frame::data(blocked_payload))).await;
-        }
-
-        // 流处理结束 → 超额计费观测（completion + relay usage 已跨 chunk 累计）。
-        // 仅在流自然走到结尾时触发；中途被拦截 return 的流不观测（无完整 usage，可接受缺口）。
-        if let (Some(bctx), Some(acc)) = (billing_ctx, billing_acc) {
-            let claimed = acc.claimed();
-            spawn_billing_observation(Some(bctx), acc.completion, claimed);
-        }
-    });
-
-    let body_stream = ReceiverStream::new(rx);
-    let response_body: ResponseBody = StreamBody::new(body_stream)
-        .map_err(|e: std::io::Error| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })
-        .boxed();
-
-    Ok(Response::from_parts(resp_parts, response_body))
-}
-
-/// OpenAI 路径入站 SSE 解析检测（tee 模式，修 R6-#2）。
-///
-/// 与 [`forward_with_inbound_inspection`] 逻辑完全对称，唯一区别是使用
-/// [`sieve_core::sse::openai_parser::OpenAiSseParser`] 而非 Anthropic [`SseParser`]。
-///
-/// OpenAI SSE 格式：`data: {...}\n\n`，无 `event:` 头。
-/// 产出的 [`SseEvent`] 类型与 Anthropic 相同，inbound_filter 无需感知协议差异。
-///
-/// R6-#3 RESOLVED：OpenAiSseParser 已支持 ContentBlockStart/Stop（含 tool_call 首帧），
-/// Aggregator 的 tool_use 完整检测能力已经生效。
-///
-/// 关联：流式解析 / R6-#2。
-#[allow(clippy::too_many_arguments)]
-async fn forward_with_openai_inbound_inspection(
-    forwarder: Arc<Forwarder>,
-    mut inbound_filter: InboundFilter,
-    dry_run: bool,
-    ipc: Option<Arc<sieve_ipc::IpcServer>>,
-    mut parts: http::request::Parts,
-    body_bytes: Bytes,
-    meta: MultiAgentMeta,
-    ctx: RequestCtx,
-    billing_ctx: BillingCtxHandle,
-) -> Result<Response<ResponseBody>> {
-    // 解构 ctx 供内部使用
-    let RequestCtx {
-        caller,
-        audit: audit_store,
-        listener_protocol,
-        listener_provider_id,
-    } = ctx;
-    use http_body_util::Full;
-    use sieve_core::sse::openai_parser::OpenAiSseParser;
-    use sieve_core::sse::parser::SseParse as _;
-
-    inbound_filter.set_source_channel(meta.source_channel.clone());
-
-    let new_uri = forwarder
-        .rewrite_uri(&parts.uri)
-        .map_err(|e| anyhow!("rewrite uri: {e}"))?;
-    parts.uri = new_uri;
-    parts.headers.remove(http::header::HOST);
-    let host_val = http::HeaderValue::from_str(forwarder.upstream_host())
-        .map_err(|e| anyhow!("invalid host header: {e}"))?;
-    parts.headers.insert(http::header::HOST, host_val);
-
-    let upstream_body = Full::new(body_bytes)
-        .map_err(|e| -> hyper::Error { match e {} })
-        .boxed();
-    let upstream_req = Request::from_parts(parts, upstream_body);
-
-    let upstream_resp = forwarder
-        .forward(upstream_req)
-        .await
-        .map_err(|e| anyhow!("forward: {e}"))?;
-
-    let (mut resp_parts, resp_body) = upstream_resp.into_parts();
-
-    // 剥掉 content-length，防止 hyper client 截断注入的 sieve_blocked event。
-    resp_parts.headers.remove(http::header::CONTENT_LENGTH);
-
-    // 漏洞修复（lessons.md 2026-04-27 [安全]）：OpenAI 路径同样按 Content-Type 路由。
-    // application/json 非流式响应里的 tool_calls 数组否则会完全绕过入站检测。
-    let is_json_response = resp_parts
-        .headers
-        .get(http::header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .map(is_json_media_type)
-        .unwrap_or(false);
-
-    if is_json_response {
-        return handle_json_inbound(
-            &sieve_core::protocol::OpenAiCodec,
-            resp_parts,
-            resp_body,
-            inbound_filter,
-            dry_run,
-            meta,
-            ipc.clone(),
-            RequestCtx::new(
-                caller.clone(),
-                Arc::clone(&audit_store),
-                listener_protocol,
-                listener_provider_id.clone(),
-            ),
-            billing_ctx,
-        )
-        .await;
-    }
-
-    const INBOUND_CHANNEL_DEPTH: usize = 64;
-    let (tx, rx) = tokio::sync::mpsc::channel::<Result<hyper::body::Frame<Bytes>, std::io::Error>>(
-        INBOUND_CHANNEL_DEPTH,
-    );
-
-    let inbound_meta = meta;
-
-    tokio::spawn(async move {
-        let meta = inbound_meta;
-        let mut parser = OpenAiSseParser::new();
-        let mut aggregator = Aggregator::new();
-        // 仅 billing 启用时累计 OpenAI SSE usage + completion。
-        let mut billing_acc = billing_ctx
-            .as_ref()
-            .map(|_| BillingSseAccumulator::default());
-
-        use http_body_util::BodyStream;
-        let mut stream = BodyStream::new(resp_body);
-
-        while let Some(frame_result) = stream.next().await {
-            match frame_result {
-                Ok(frame) => {
-                    let Some(frame_bytes) = frame.data_ref().cloned() else {
-                        if tx.send(Ok(frame)).await.is_err() {
-                            return;
-                        }
-                        continue;
-                    };
-
-                    // P0-5：feed 超限时 fail-closed（IN-CAP-01）
-                    let events = match parser.feed(&frame_bytes) {
-                        Ok(evts) => evts,
-                        Err(e) => {
-                            tracing::warn!(error = %e, "OpenAI SSE parser 容量超限，fail-closed 注入 sieve_blocked");
-                            let cap_detection =
-                                build_cap_detection("IN-CAP-01", "cap-sse-event-too-large");
-                            let blocked_payload = build_sieve_blocked_sse(&[cap_detection]);
-                            let _ = tx.send(Ok(hyper::body::Frame::data(blocked_payload))).await;
-                            return;
-                        }
-                    };
-
-                    // 累计本批 SSE usage + completion（OpenAI SSE 观测）。
-                    if let Some(acc) = billing_acc.as_mut() {
-                        acc.observe_events(&events);
-                    }
-
-                    // 修 R8-#2：传入 meta.chain_depth，chain_depth ≥ 2 时 HookMark 升级为 GuiPopup
-                    let (blocking, hook_detections, hold_detections) = classify_inbound_detections(
-                        &events,
-                        &mut inbound_filter,
-                        &mut aggregator,
-                        dry_run,
-                        meta.chain_depth,
-                        &ipc,
-                        &audit_store,
-                        caller.as_ref(),
-                        &listener_provider_id,
-                    );
-
-                    // 1. Block 类：注入 sieve_blocked 并截流（fail-closed 优先）
-                    if !blocking.is_empty() {
-                        tracing::warn!(count = blocking.len(), "INBOUND BLOCKED (openai)");
-                        for d in &blocking {
-                            tracing::warn!(rule = %d.rule_id, "openai inbound detection");
-                        }
-                        spawn_inbound_blocked_audit(
-                            &audit_store,
-                            &listener_provider_id,
-                            &caller,
-                            &blocking,
-                            "openai_sse",
-                        );
-                        let blocked_payload = build_sieve_blocked_sse(&blocking);
-                        let _ = tx.send(Ok(hyper::body::Frame::data(blocked_payload))).await;
-                        return;
-                    }
-
-                    // 2. Hook 类：写 pending 文件，失败时 fail-closed
-                    for d in &hook_detections {
-                        if let Err(e) = write_hook_pending_or_fail_closed(d, &meta) {
-                            tracing::error!(
-                                error = %e,
-                                rule = %d.rule_id,
-                                "Hook pending write failed (openai); fail-closed"
-                            );
-                            let blocked_payload = build_sieve_blocked_sse(&[d.clone()]);
-                            let _ = tx.send(Ok(hyper::body::Frame::data(blocked_payload))).await;
-                            return;
-                        }
-                    }
-
-                    // 3. GUI 类：hold 流 + keep-alive + 等用户决策
-                    if !hold_detections.is_empty() {
-                        if let Some(ref ipc_server) = ipc {
-                            let (ka_tx, mut ka_rx) = mpsc::channel::<Bytes>(8);
-                            let tx_ka = tx.clone();
-
-                            let ka_fwd_handle = tokio::spawn(async move {
-                                while let Some(ka_bytes) = ka_rx.recv().await {
-                                    if tx_ka
-                                        .send(Ok(hyper::body::Frame::data(ka_bytes)))
-                                        .await
-                                        .is_err()
-                                    {
-                                        break;
-                                    }
-                                }
-                            });
-
-                            use chrono::Utc;
-                            let request_id = uuid::Uuid::new_v4();
-                            let timeout_seconds = hold_detections
-                                .iter()
-                                .find_map(|d| {
-                                    if let Action::HoldForDecision {
-                                        timeout_seconds, ..
-                                    } = d.action
-                                    {
-                                        Some(timeout_seconds)
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .unwrap_or(60);
-
-                            let ipc_detections = hold_detections
-                                .iter()
-                                .map(|d| sieve_ipc::protocol::DetectionPayload {
-                                    rule_id: d.rule_id.clone(),
-                                    severity: map_severity_to_ipc(d.severity),
-                                    disposition: sieve_ipc::Disposition::GuiPopup,
-                                    title: format!("检测命中（openai）：{}", d.rule_id),
-                                    one_line_summary: d.evidence_truncated.clone(),
-                                    details: serde_json::json!({}),
-                                    recommendation: None,
-                                })
-                                .collect();
-
-                            // v2.0：计算 allow_remember
-                            let openai_sse_rule_ids: Vec<&str> =
-                                hold_detections.iter().map(|d| d.rule_id.as_str()).collect();
-                            let allow_remember = compute_allow_remember(&openai_sse_rule_ids);
-
-                            let ipc_req = sieve_ipc::DecisionRequest {
-                                request_id,
-                                created_at: Utc::now(),
-                                timeout_seconds,
-                                default_on_timeout: sieve_ipc::DefaultOnTimeout::Block,
-                                detections: ipc_detections,
-                                source_agent: meta.source_agent,
-                                origin_chain: meta.origin_chain.clone(),
-                                source_channel: meta.source_channel.clone(),
-                                // 修 R7-#5：填入 header 真实 chain_depth
-                                explicit_chain_depth: Some(meta.chain_depth),
-                                allow_remember,
-                            };
-
-                            let outcome = sieve_core::pipeline::inbound_hold::hold_and_decide(
-                                Arc::clone(ipc_server),
-                                ipc_req,
-                                ka_tx,
-                                "inbound",
-                                Some(listener_provider_id.as_str()),
-                            )
-                            .await;
-
-                            ka_fwd_handle.abort();
-
-                            match outcome {
-                                Ok(sieve_core::pipeline::HoldOutcome::Allow {
-                                    remember,
-                                    context_hint,
-                                })
-                                | Ok(sieve_core::pipeline::HoldOutcome::RedactAndAllow {
-                                    remember,
-                                    context_hint,
-                                }) => {
-                                    // v2.0 §5.4.2：remember=true 时写灰名单（OpenAI 入站 SSE 路径）
-                                    if remember && allow_remember {
-                                        let agent_str =
-                                            format!("{:?}", meta.source_agent).to_lowercase();
-                                        for det in &hold_detections {
-                                            try_write_graylist(
-                                                &det.rule_id,
-                                                &det.evidence_truncated,
-                                                "",
-                                                "openai",
-                                                "inbound_sse",
-                                                &agent_str,
-                                                context_hint.clone(),
-                                                &request_id.to_string(),
-                                                &audit_store,
-                                                &caller,
-                                                &listener_provider_id,
-                                            );
-                                        }
-                                    }
-
-                                    if tx
-                                        .send(Ok(hyper::body::Frame::data(frame_bytes)))
-                                        .await
-                                        .is_err()
-                                    {
-                                        return;
-                                    }
-                                    continue;
-                                }
-                                Ok(sieve_core::pipeline::HoldOutcome::Deny { reason }) => {
-                                    tracing::warn!(%reason, "INBOUND BLOCKED (openai) by GUI decision");
-                                    spawn_inbound_blocked_audit(
-                                        &audit_store,
-                                        &listener_provider_id,
-                                        &caller,
-                                        &hold_detections,
-                                        "openai_sse",
-                                    );
-                                    let blocked_payload = build_sieve_blocked_sse(&hold_detections);
-                                    let _ = tx
-                                        .send(Ok(hyper::body::Frame::data(blocked_payload)))
-                                        .await;
-                                    return;
-                                }
-                                Err(e) => {
-                                    tracing::warn!(error = %e, "IPC hold error (openai), fail-closed");
-                                    let blocked_payload = build_sieve_blocked_sse(&hold_detections);
-                                    let _ = tx
-                                        .send(Ok(hyper::body::Frame::data(blocked_payload)))
-                                        .await;
-                                    return;
-                                }
-                            }
-                        } else {
-                            tracing::warn!(
-                                "GuiPopup detection (openai) but IPC server not initialized; fail-closed"
-                            );
-                            let blocked_payload = build_sieve_blocked_sse(&hold_detections);
-                            let _ = tx.send(Ok(hyper::body::Frame::data(blocked_payload))).await;
-                            return;
-                        }
-                    }
-
-                    // 无 blocking / hold：透传原始 frame
-                    if tx
-                        .send(Ok(hyper::body::Frame::data(frame_bytes)))
-                        .await
-                        .is_err()
-                    {
-                        return;
-                    }
-                }
-                Err(e) => {
-                    let _ = tx
-                        .send(Err(std::io::Error::other(format!(
-                            "upstream body error (openai): {e}"
-                        ))))
-                        .await;
-                    return;
-                }
-            }
-        }
-
-        // 流结束（EOF / 提前断流），flush parser 解析残留
-        let flushed = parser.flush();
-        // 累计 flush 残留 events（流尾 usage / 末段文本可能在此）。
-        if let Some(acc) = billing_acc.as_mut() {
-            acc.observe_events(&flushed);
-        }
-        // 修 R8-#2：flush 阶段同样传入 chain_depth，HookMark 升级逻辑一致
-        let (blocking, hook_detections, flush_hold_detections) = classify_inbound_detections(
-            &flushed,
-            &mut inbound_filter,
-            &mut aggregator,
-            dry_run,
-            meta.chain_depth,
-            &ipc,
-            &audit_store,
-            caller.as_ref(),
-            &listener_provider_id,
-        );
-
-        for d in &hook_detections {
-            if let Err(e) = write_hook_pending_or_fail_closed(d, &meta) {
-                tracing::error!(
-                    error = %e,
-                    rule = %d.rule_id,
-                    "Hook pending write failed (openai flush); fail-closed"
-                );
-                let blocked_payload = build_sieve_blocked_sse(&[d.clone()]);
-                let _ = tx.send(Ok(hyper::body::Frame::data(blocked_payload))).await;
-                return;
-            }
-        }
-
-        if !blocking.is_empty() {
-            tracing::warn!(count = blocking.len(), "INBOUND BLOCKED (openai flush)");
-            for d in &blocking {
-                tracing::warn!(rule = %d.rule_id, "openai inbound detection (flush)");
-            }
-            spawn_inbound_blocked_audit(
-                &audit_store,
-                &listener_provider_id,
-                &caller,
-                &blocking,
-                "openai_sse",
-            );
-            let blocked_payload = build_sieve_blocked_sse(&blocking);
-            let _ = tx.send(Ok(hyper::body::Frame::data(blocked_payload))).await;
-            return;
-        }
-
-        if !flush_hold_detections.is_empty() {
-            tracing::warn!(
-                count = flush_hold_detections.len(),
-                "INBOUND BLOCKED (openai flush-hold): GuiPopup at EOF, fail-closed"
-            );
-            for d in &flush_hold_detections {
-                tracing::warn!(rule = %d.rule_id, "openai flush-hold detection → fail-closed");
-            }
-            spawn_inbound_blocked_audit(
-                &audit_store,
-                &listener_provider_id,
-                &caller,
-                &flush_hold_detections,
-                "openai_sse",
-            );
-            let blocked_payload = build_sieve_blocked_sse(&flush_hold_detections);
-            let _ = tx.send(Ok(hyper::body::Frame::data(blocked_payload))).await;
-        }
-
-        // 流处理结束 → 超额计费观测（OpenAI SSE）。
-        if let (Some(bctx), Some(acc)) = (billing_ctx, billing_acc) {
-            let claimed = acc.claimed();
-            spawn_billing_observation(Some(bctx), acc.completion, claimed);
-        }
-    });
-
-    let body_stream = ReceiverStream::new(rx);
-    let response_body: ResponseBody = StreamBody::new(body_stream)
-        .map_err(|e: std::io::Error| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })
-        .boxed();
-
-    Ok(Response::from_parts(resp_parts, response_body))
-}
-
 /// 对一批已解析的 [`SseEvent`] 运行 inbound 检测，按 action 分类返回三个列表：
 /// - `blocking`：`Action::Block` 需立即截流的 detections
 /// - `hook_detections`：`Action::HookMark` 需写 pending 文件的 detections
@@ -4385,7 +3302,13 @@ fn classify_inbound_detections(
     for evt in events {
         match inbound_filter.observe_event(evt) {
             Ok(hits) => all_hits.extend(hits),
-            Err(e) => tracing::warn!(error = %e, "inbound observe_event error"),
+            Err(e) => {
+                tracing::warn!(error = %e, "inbound text inspection failed; blocking response");
+                all_hits.push(build_cap_detection(
+                    "IN-CAP-01",
+                    "inbound-text-inspection-failed",
+                ));
+            }
         }
         match aggregator.process(evt) {
             Ok(Some(tool)) => match inbound_filter.on_tool_use_complete(&tool) {
@@ -4678,12 +3601,17 @@ async fn handle_json_inbound(
         listener_protocol: _,
         listener_provider_id,
     } = ctx;
-    use http_body_util::BodyExt as _;
     let (record_tag, audit_tag) = codec.json_route_tags();
 
     // 收集完整 body（非流式 JSON 通常很小，上游负责 content-length 校验）。
-    let body_bytes = match resp_body.collect().await {
-        Ok(collected) => collected.to_bytes(),
+    let body_bytes = match crate::resource_limits::collect(
+        resp_body,
+        crate::resource_limits::MAX_BODY_BYTES,
+        crate::resource_limits::BODY_TIMEOUT,
+    )
+    .await
+    {
+        Ok(collected) => collected,
         Err(e) => {
             tracing::warn!("handle_json_inbound({audit_tag}): collect body error: {e}");
             return Ok(build_sieve_blocked_json_response(&[]));
@@ -4758,6 +3686,7 @@ async fn handle_json_inbound(
             }
             Err(e) => {
                 tracing::warn!(error = %e, "handle_json_inbound({audit_tag}): scan_assistant_text error");
+                return Ok(build_sieve_blocked_json_response(&[]));
             }
         }
     }

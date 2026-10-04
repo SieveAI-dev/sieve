@@ -74,6 +74,42 @@ impl std::fmt::Display for SseParserError {
 
 impl std::error::Error for SseParserError {}
 
+/// Hold incomplete wire events until they can be inspected before forwarding.
+/// Shares event boundaries and the capacity limit with the semantic parser.
+#[derive(Default)]
+pub struct InspectedEventBuffer {
+    pending: Vec<u8>,
+}
+
+impl InspectedEventBuffer {
+    /// Return only complete wire events; never release a partial event.
+    pub fn push_chunk(&mut self, bytes: &[u8]) -> Result<Vec<u8>, SseParserError> {
+        let len = self.pending.len().saturating_add(bytes.len());
+        if len > MAX_SSE_EVENT_BYTES {
+            return Err(SseParserError::EventTooLarge {
+                len,
+                max: MAX_SSE_EVENT_BYTES,
+            });
+        }
+        self.pending.extend_from_slice(bytes);
+        let mut end = 0;
+        while let Some((_, separator_end)) = find_event_end(&self.pending[end..]) {
+            end += separator_end;
+        }
+        Ok(self.pending.drain(..end).collect())
+    }
+
+    /// Take the unfinished event for a final inspection at EOF.
+    pub fn take_pending(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.pending)
+    }
+
+    /// An unfinished upstream event must be rejected at EOF.
+    pub fn has_pending(&self) -> bool {
+        !self.pending.is_empty()
+    }
+}
+
 /// SSE event 类型（对应 Anthropic Messages streaming spec）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -500,5 +536,35 @@ data: {"type":"message_start","message":{"id":"msg_x","type":"message","role":"a
         let events = p.push_chunk(bytes).unwrap();
         // 第一个 event 只有一行 data（第二个 \n\n 之前），无法解析 → Unknown
         assert!(!events.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod wire_buffer_regression {
+    use super::*;
+    #[test]
+    fn every_wire_split_preserves_complete_events_only() {
+        for wire in [
+            b"data: secret\n\n".as_slice(),
+            b"data: secret\r\n\r\n".as_slice(),
+        ] {
+            for split in 1..wire.len() {
+                let mut buffer = InspectedEventBuffer::default();
+                assert!(buffer.push_chunk(&wire[..split]).unwrap().is_empty());
+                assert!(buffer.has_pending());
+                assert_eq!(buffer.push_chunk(&wire[split..]).unwrap(), wire);
+                assert!(!buffer.has_pending());
+            }
+        }
+    }
+    #[test]
+    fn holds_only_the_unfinished_tail_and_enforces_limit() {
+        let mut buffer = InspectedEventBuffer::default();
+        assert_eq!(
+            buffer.push_chunk(b"data: a\n\ndata: b").unwrap(),
+            b"data: a\n\n"
+        );
+        assert!(buffer.has_pending());
+        assert!(buffer.push_chunk(&vec![b'x'; MAX_SSE_EVENT_BYTES]).is_err());
     }
 }

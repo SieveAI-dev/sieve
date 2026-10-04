@@ -104,6 +104,8 @@ pub struct MatchHit {
     /// [`LayeredEngine`] 合并短路无需查全局名单即可判定「系统 Critical 命中」
     /// （显式数据流，fail-closed）。用户引擎的命中恒为 `false`。
     pub fail_closed: bool,
+    /// Rule metadata from the exact engine snapshot that produced this hit.
+    pub rule: Option<RuleEntry>,
 }
 
 /// 多模式匹配引擎 trait。
@@ -434,6 +436,7 @@ impl MatchEngine for VectorscanEngine {
                         start: from as usize,
                         end: to as usize,
                         fail_closed,
+                        rule: rule.cloned(),
                     });
                 Scan::Continue
             })

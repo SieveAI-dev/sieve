@@ -254,6 +254,10 @@ async fn dispatch_request(
             let _ = reply.send(result);
         }
         ControlPlaneRequest::Health { params: _, reply } => {
+            state.system_rules_count.store(Arc::new(
+                outbound_layered.system_rules_snapshot().len()
+                    + inbound_layered.system_rules_snapshot().len(),
+            ));
             let result = handle_health(ipc, state).await;
             let _ = reply.send(result);
         }
@@ -665,83 +669,71 @@ async fn handle_evaluate(
         >,
     >,
 ) -> Result<EvaluateResult, ControlError> {
+    use sieve_core::detection::{Action, ContentSource};
+    use sieve_core::pipeline::{inbound::InboundEngine, outbound::OutboundEngine};
     use sieve_ipc::{EvaluateContentKind, EvaluateDirection};
-    use sieve_rules::engine::{ContentKind, Direction, MatchEngine, Protocol, ScanRequest};
-
-    let direction = match params.direction {
-        EvaluateDirection::Outbound => Direction::Outbound,
-        EvaluateDirection::Inbound => Direction::Inbound,
-    };
-    let content_kind = match params.content_kind {
-        EvaluateContentKind::RawText => ContentKind::RequestBody,
-        EvaluateContentKind::ToolUseInput => ContentKind::ToolUseInput,
-        EvaluateContentKind::ModelResponse => ContentKind::JsonResponseBody,
-    };
-    let req = ScanRequest {
-        bytes: params.payload.as_bytes(),
-        direction,
-        protocol: Protocol::Anthropic,
-        content_kind,
-        tool_name: None,
-        source_agent: Some(match &params.source_agent {
-            sieve_ipc::SourceAgent::Claude => "claude",
-            sieve_ipc::SourceAgent::OpenClaw => "openclaw",
-            sieve_ipc::SourceAgent::Hermes => "hermes",
-            sieve_ipc::SourceAgent::Unknown => "unknown",
-        }),
-        caller_exe: None,
-    };
-
-    let engine: &dyn MatchEngine = match direction {
-        Direction::Outbound => &**outbound_layered,
-        Direction::Inbound => &**inbound_layered,
-    };
-
-    let report = engine
-        .scan_with_context(req)
-        .map_err(|e| ControlError::internal(format!("sandbox scan failed: {e}")))?;
-
-    let matches: Vec<EvaluateMatch> = report
-        .hits
-        .iter()
+    if params.payload.len() > crate::resource_limits::MAX_BODY_BYTES {
+        return Err(ControlError::internal("evaluation payload too large"));
+    }
+    let hits = match params.direction {
+        EvaluateDirection::Outbound => {
+            crate::engine_adapter::OutboundAdapter::new(Arc::clone(outbound_layered), vec![])
+                .scan_text(&params.payload, ContentSource::OutboundUserText, 0)
+        }
+        EvaluateDirection::Inbound => {
+            let adapter =
+                crate::engine_adapter::InboundAdapter::new(Arc::clone(inbound_layered), vec![]);
+            if matches!(params.content_kind, EvaluateContentKind::ToolUseInput) {
+                let value: serde_json::Value = serde_json::from_str(&params.payload)
+                    .unwrap_or_else(|_| serde_json::Value::String(params.payload.clone()));
+                let tool = sieve_core::tool_use_aggregator::CompletedToolCall {
+                    id: "evaluation".into(),
+                    name: value
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_owned(),
+                    input: value.get("input").cloned().unwrap_or(value),
+                };
+                adapter.check_tool_use(&tool, ContentSource::InboundToolUseInput)
+            } else {
+                let filter = sieve_core::pipeline::inbound::InboundFilter::new(
+                    Arc::new(adapter),
+                    Arc::new(std::collections::HashSet::new()),
+                );
+                filter.scan_assistant_text(&params.payload)
+            }
+        }
+    }
+    .map_err(|e| ControlError::internal(format!("evaluation failed: {e}")))?;
+    let matches = hits
+        .into_iter()
         .map(|hit| {
-            let critical_locked = sieve_rules::critical_lock::is_fail_closed(&hit.rule_id);
-            // critical_lock 规则只回类别摘要，不回原 payload 片段（数据保护）。
-            let summary = if critical_locked {
-                format!("(critical_locked) rule={}", hit.rule_id)
-            } else {
-                let snippet_end = hit.end.min(hit.start + 32).min(params.payload.len());
-                let snippet_start = hit.start.min(snippet_end);
-                let snippet = params.payload.get(snippet_start..snippet_end).unwrap_or("");
-                format!(
-                    "matched {} bytes at {}..{}: {:?}",
-                    hit.end.saturating_sub(hit.start),
-                    hit.start,
-                    hit.end,
-                    snippet
-                )
-            };
-            let rule_kind = if hit.rule_id.starts_with("user:") {
-                "user".to_owned()
-            } else {
-                "system".to_owned()
+            let (disposition, decision) = match hit.action {
+                Action::Redact { .. } => (sieve_ipc::Disposition::AutoRedact, "redact_and_allow"),
+                Action::HoldForDecision { .. } => (sieve_ipc::Disposition::GuiPopup, "ask"),
+                Action::HookMark => (sieve_ipc::Disposition::HookTerminal, "ask"),
+                Action::Block => (sieve_ipc::Disposition::GuiPopup, "deny"),
+                Action::MarkOnly | Action::SilentLog => {
+                    (sieve_ipc::Disposition::StatusBar, "allow")
+                }
             };
             EvaluateMatch {
-                rule_id: hit.rule_id.clone(),
-                rule_kind,
-                severity: if critical_locked {
-                    "critical".to_owned()
+                rule_kind: if hit.rule_id.starts_with("user:") {
+                    "user"
                 } else {
-                    "unknown".to_owned()
-                },
-                disposition: sieve_ipc::Disposition::StatusBar,
-                matched_pattern_summary: summary,
+                    "system"
+                }
+                .into(),
+                severity: format!("{:?}", hit.severity).to_lowercase(),
+                disposition,
+                matched_pattern_summary: format!(
+                    "rule={} span={}..{}",
+                    hit.rule_id, hit.span.start, hit.span.end
+                ),
+                rule_id: hit.rule_id,
                 fields_triggered: Vec::new(),
-                would_decision: if critical_locked {
-                    "deny".to_owned()
-                } else {
-                    "allow".to_owned()
-                },
+                would_decision: decision.into(),
                 would_recommendation: None,
             }
         })
@@ -871,7 +863,7 @@ async fn handle_list_rules(
     let outbound_sys = outbound_layered.system_rules_snapshot();
     for entry in &outbound_sys {
         let disp = entry.effective_disposition();
-        let critical_lock = sieve_rules::critical_lock::is_fail_closed(&entry.id);
+        let critical_lock = entry.effective_fail_closed();
         let (default_on_timeout, timeout_seconds) = if disp == Disposition::GuiPopup {
             let dot = match entry.default_on_timeout {
                 DefaultOnTimeout::Block => Some("block".to_owned()),
@@ -911,7 +903,7 @@ async fn handle_list_rules(
     let inbound_sys = inbound_layered.system_rules_snapshot();
     for entry in &inbound_sys {
         let disp = entry.effective_disposition();
-        let critical_lock = sieve_rules::critical_lock::is_fail_closed(&entry.id);
+        let critical_lock = entry.effective_fail_closed();
         let (default_on_timeout, timeout_seconds) = if disp == Disposition::GuiPopup {
             let dot = match entry.default_on_timeout {
                 DefaultOnTimeout::Block => Some("block".to_owned()),

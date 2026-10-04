@@ -596,6 +596,7 @@ mod socket_tests {
         let tmp = tempfile::tempdir().unwrap();
         let socket_path = tmp.path().join("ipc.sock");
         let server = start_server(&socket_path).await;
+        server.set_peer_verifier(Arc::new(|_| true));
 
         let id = Uuid::now_v7();
 
@@ -618,6 +619,26 @@ mod socket_tests {
 
         assert_eq!(result.decision, DecisionAction::Allow);
         assert!(result.by_user, "GUI 回复的决策应标记 by_user=true");
+    }
+
+    #[tokio::test]
+    async fn unverified_client_cannot_authorize_pending_request() {
+        let tmp = tempfile::tempdir().unwrap();
+        let socket_path = tmp.path().join("ipc.sock");
+        let server = start_server(&socket_path).await;
+        let id = Uuid::now_v7();
+        tokio::spawn(async move {
+            IpcClient::auto_respond(socket_path, id, DecisionAction::Allow)
+                .await
+                .unwrap();
+        });
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        let result = server
+            .request_decision(make_request(id), Duration::from_secs(3), "inbound", None)
+            .await
+            .unwrap();
+        assert_eq!(result.decision, DecisionAction::Deny);
+        assert!(!result.remember);
     }
 
     // ── 测试 2：没有 GUI 客户端 → 立即 fallback ──

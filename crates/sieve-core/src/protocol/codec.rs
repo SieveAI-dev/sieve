@@ -6,7 +6,7 @@
 //! provider 无关方法。关联 Anthropic 优先统一接口 / OpenAI 协议适配。
 
 use crate::error::{SieveCoreError, SieveCoreResult};
-use crate::protocol::anthropic::{AnthropicMessage, AnthropicRequest};
+use crate::protocol::anthropic::{replace_content_texts, AnthropicRequest};
 use crate::protocol::openai::{OpenAIMessage, OpenAIRequest};
 use crate::protocol::unified_message::UpstreamProvider;
 use crate::tool_use_aggregator::CompletedToolCall;
@@ -283,101 +283,20 @@ fn apply_redacted_anthropic(
         )));
     }
 
-    let mut seg_idx = 0usize;
-
-    let mut new_messages: Vec<AnthropicMessage> = Vec::new();
-    for msg in &req.messages {
-        let new_content = match &msg.content {
-            serde_json::Value::String(_) => {
-                let replacement = redacted_texts
-                    .get(seg_idx)
-                    .cloned()
-                    .unwrap_or_else(|| msg.content.as_str().unwrap_or("").to_string());
-                seg_idx += 1;
-                serde_json::Value::String(replacement)
-            }
-            serde_json::Value::Array(blocks) => {
-                let mut new_blocks = Vec::with_capacity(blocks.len());
-                for block in blocks {
-                    if let Some(block_obj) = block.as_object() {
-                        if block_obj.get("type").and_then(|v| v.as_str()) == Some("text")
-                            && block_obj.get("text").and_then(|v| v.as_str()).is_some()
-                        {
-                            let replacement =
-                                redacted_texts.get(seg_idx).cloned().unwrap_or_else(|| {
-                                    block_obj
-                                        .get("text")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("")
-                                        .to_string()
-                                });
-                            seg_idx += 1;
-                            let mut new_obj = block_obj.clone();
-                            new_obj
-                                .insert("text".to_string(), serde_json::Value::String(replacement));
-                            new_blocks.push(serde_json::Value::Object(new_obj));
-                            continue;
-                        }
-                    }
-                    new_blocks.push(block.clone());
-                }
-                serde_json::Value::Array(new_blocks)
-            }
-            other => other.clone(),
-        };
-        new_messages.push(AnthropicMessage {
-            role: msg.role.clone(),
-            content: new_content,
-        });
+    let mut request = req.clone();
+    let mut replacements = redacted_texts.iter().cloned();
+    for message in &mut request.messages {
+        replace_content_texts(&mut message.content, &mut replacements)?;
     }
-
-    let new_system = if let Some(system) = &req.system {
-        if system.as_str().is_some() {
-            let replacement = redacted_texts
-                .get(seg_idx)
-                .cloned()
-                .unwrap_or_else(|| system.as_str().unwrap_or("").to_string());
-            seg_idx += 1;
-            Some(serde_json::Value::String(replacement))
-        } else if let Some(blocks) = system.as_array() {
-            let mut new_blocks = Vec::with_capacity(blocks.len());
-            for block in blocks {
-                if block.get("text").and_then(|v| v.as_str()).is_some() {
-                    let replacement = redacted_texts.get(seg_idx).cloned().unwrap_or_else(|| {
-                        block
-                            .get("text")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string()
-                    });
-                    seg_idx += 1;
-                    let mut new_obj = block.as_object().cloned().unwrap_or_default();
-                    new_obj.insert("text".to_string(), serde_json::Value::String(replacement));
-                    new_blocks.push(serde_json::Value::Object(new_obj));
-                } else {
-                    new_blocks.push(block.clone());
-                }
-            }
-            Some(serde_json::Value::Array(new_blocks))
-        } else {
-            Some(system.clone())
-        }
-    } else {
-        None
-    };
-
-    let _ = seg_idx; // 消除 unused variable 警告
-
-    Ok(AnthropicRequest {
-        model: req.model.clone(),
-        max_tokens: req.max_tokens,
-        messages: new_messages,
-        stream: req.stream,
-        system: new_system,
-        tools: req.tools.clone(),
-        tool_choice: req.tool_choice.clone(),
-        extra: req.extra.clone(),
-    })
+    if let Some(system) = &mut request.system {
+        replace_content_texts(system, &mut replacements)?;
+    }
+    if replacements.next().is_some() {
+        return Err(SieveCoreError::Protocol(
+            "extra redacted text segments".into(),
+        ));
+    }
+    Ok(request)
 }
 
 /// 把脱敏后文本段写回 [`OpenAIRequest`]（修 A2-#1；`message.content` string / content-part array
@@ -554,5 +473,40 @@ mod tests {
     fn decode_invalid_body_errors() {
         assert!(AnthropicCodec.decode_request(b"not json").is_err());
         assert!(OpenAiCodec.decode_request(b"not json").is_err());
+    }
+}
+
+#[cfg(test)]
+mod nested_content_regression {
+    use super::*;
+    #[test]
+    fn nested_tool_results_are_redacted_without_changing_metadata() {
+        let body = serde_json::json!({"model":"test", "max_tokens":1,
+            "messages":[{"role":"user", "content":[
+                {"type":"tool_result", "tool_use_id":"tool-1", "content":"secret-1"},
+                {"type":"tool_result", "tool_use_id":"tool-2", "content":[
+                    {"type":"text", "text":"secret-2"},
+                    {"type":"image", "source":{"data":"image-data"}},
+                    {"type":"tool_result", "content":[{"type":"text","text":"secret-3"}]}
+                ]}]}], "system":[{"type":"text", "text":"system-secret"}]});
+        let decoded = AnthropicCodec
+            .decode_request(&serde_json::to_vec(&body).unwrap())
+            .unwrap();
+        let texts = decoded.extract_text_content();
+        assert_eq!(
+            texts.iter().map(|(_, t)| t.as_str()).collect::<Vec<_>>(),
+            ["secret-1", "secret-2", "secret-3", "system-secret"]
+        );
+        let replacements = vec!["[redacted]".to_owned(); texts.len()];
+        let rewritten = decoded.apply_redacted_texts(&texts, &replacements).unwrap();
+        let result: serde_json::Value = serde_json::from_slice(&rewritten).unwrap();
+        assert_eq!(result["messages"][0]["content"][0]["tool_use_id"], "tool-1");
+        assert_eq!(
+            result["messages"][0]["content"][1]["content"][1]["source"]["data"],
+            "image-data"
+        );
+        let text = String::from_utf8(rewritten).unwrap();
+        assert!(!text.contains("secret"));
+        assert_eq!(text.matches("[redacted]").count(), 4);
     }
 }

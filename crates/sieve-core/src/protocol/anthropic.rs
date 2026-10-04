@@ -57,41 +57,73 @@ impl AnthropicRequest {
         let mut result = Vec::new();
         let mut cursor = 0usize;
         for msg in &self.messages {
-            match &msg.content {
-                serde_json::Value::String(s) => {
-                    result.push((cursor, s.clone()));
-                    cursor += s.len();
-                }
-                serde_json::Value::Array(blocks) => {
-                    for block in blocks {
-                        if let Some(block_obj) = block.as_object() {
-                            if block_obj.get("type").and_then(|v| v.as_str()) == Some("text") {
-                                if let Some(text) = block_obj.get("text").and_then(|v| v.as_str()) {
-                                    result.push((cursor, text.to_string()));
-                                    cursor += text.len();
-                                }
-                            }
-                        }
-                    }
-                }
-                _ => {}
-            }
+            visit_content_texts(&msg.content, &mut |text| {
+                result.push((cursor, text.to_owned()));
+                cursor += text.len();
+            });
         }
-        // 同时扫 system prompt（若有）
         if let Some(system) = &self.system {
-            if let Some(s) = system.as_str() {
-                result.push((cursor, s.to_string()));
-            } else if let Some(blocks) = system.as_array() {
-                for block in blocks {
-                    if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
-                        result.push((cursor, text.to_string()));
-                        cursor += text.len();
-                    }
-                }
-            }
+            visit_content_texts(system, &mut |text| {
+                result.push((cursor, text.to_owned()));
+                cursor += text.len();
+            });
         }
         result
     }
+}
+
+/// Visit textual content, including nested tool results, without treating image data as text.
+fn visit_content_texts(value: &serde_json::Value, visitor: &mut impl FnMut(&str)) {
+    match value {
+        serde_json::Value::String(text) => visitor(text),
+        serde_json::Value::Array(blocks) => {
+            for block in blocks {
+                visit_content_texts(block, visitor);
+            }
+        }
+        serde_json::Value::Object(block) => {
+            if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
+                visitor(text);
+            }
+            if block.get("type").and_then(|v| v.as_str()) == Some("tool_result") {
+                if let Some(content) = block.get("content") {
+                    visit_content_texts(content, visitor);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Apply replacements in exactly the order used by text extraction.
+pub(super) fn replace_content_texts(
+    value: &mut serde_json::Value,
+    replacements: &mut impl Iterator<Item = String>,
+) -> Result<(), crate::error::SieveCoreError> {
+    match value {
+        serde_json::Value::String(text) => {
+            *text = replacements.next().ok_or_else(|| {
+                crate::error::SieveCoreError::Protocol("missing redacted text segment".into())
+            })?;
+        }
+        serde_json::Value::Array(blocks) => {
+            for block in blocks {
+                replace_content_texts(block, replacements)?;
+            }
+        }
+        serde_json::Value::Object(block) => {
+            if let Some(text) = block.get_mut("text").filter(|v| v.is_string()) {
+                replace_content_texts(text, replacements)?;
+            }
+            if block.get("type").and_then(|v| v.as_str()) == Some("tool_result") {
+                if let Some(content) = block.get_mut("content") {
+                    replace_content_texts(content, replacements)?;
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 #[cfg(test)]

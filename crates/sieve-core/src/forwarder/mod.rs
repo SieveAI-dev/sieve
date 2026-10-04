@@ -110,9 +110,9 @@ impl Forwarder {
         &self,
         req: http::Request<BoxBody>,
     ) -> SieveCoreResult<http::Response<hyper::body::Incoming>> {
-        self.client
-            .request(req)
+        tokio::time::timeout(std::time::Duration::from_secs(60), self.client.request(req))
             .await
+            .map_err(|_| SieveCoreError::Forwarder("upstream response headers timed out".into()))?
             .map_err(|e| SieveCoreError::Forwarder(format!("upstream request failed: {e}")))
     }
 

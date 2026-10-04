@@ -35,6 +35,7 @@ mod daemon_control_plane;
 mod engine_adapter;
 mod gui_peer_verify;
 pub mod process_context;
+mod resource_limits;
 mod upstream_routes;
 
 use audit::AuditStore;
@@ -326,11 +327,8 @@ fn load_sieveignore(path: &Path) -> HashSet<String> {
 /// 优先级：① 签名规则包 `current.json`（updater 经更新通道下发后安装，按 ID 前缀过滤方向）→
 /// ② dev TOML（过渡期；规则后续迁出后此路失效）→ ③ 空集 fail-safe。
 ///
-/// 与旧逻辑（加载失败 `exit(1)`，fail-closed）的差异：引擎须能在无规则包时
-/// 独立构建运行供审计，故系统规则加载放宽为 **fail-safe 空集**——无包（正常态）/ 包解析失败 /
-/// dev TOML 解析失败，都降级空集 + 醒目 warn，而非崩溃。注意区分：包**验签**失败由
-/// `sieve-updater::install` 在安装阶段拒绝，daemon 见到的 `current.json` 已通过验签，
-/// 此处只负责解析已信任的包。
+/// 无有效规则时保持控制面运行，但扫描返回错误，禁止未检测流量透传。
+/// 系统规则更新失败时调用方保留上一版有效引擎。
 ///
 /// `is_outbound = true` 取 `OUT-*` 规则，`false` 取其余（入站 `IN-*`）。
 /// 单一签名包含全部规则，按 ID 前缀拆分到出站 / 入站两个独立引擎（与 dev 双 TOML 等价）。
@@ -402,14 +400,14 @@ fn load_system_rules(
     tracing::warn!(
         kind,
         "no signed rules pack and no dev TOML for {kind}; starting with EMPTY ruleset \
-         — traffic is NOT inspected (fail-safe passthrough). Install a signed rules pack to enable detection."
+         — inspected requests are BLOCKED until valid rules are installed."
     );
     Vec::new()
 }
 
 /// 将规则集编译为可热替换的 [`SystemEngine`]。
 ///
-/// 空集 → [`SystemEngine::empty`]（`has_rules = false`，透传不检测）。
+/// 空集 → [`SystemEngine::empty`]（`has_rules = false`，扫描返回错误）。
 /// 非空但 vectorscan 编译失败 → 同样降级空集 fail-safe + ERROR 日志（不因规则问题启动不了）。
 fn build_system_engine(rules: Vec<RuleEntry>, kind: &str) -> SystemEngine {
     if rules.is_empty() {
@@ -421,7 +419,7 @@ fn build_system_engine(rules: Vec<RuleEntry>, kind: &str) -> SystemEngine {
             tracing::error!(
                 kind,
                 error = %e,
-                "system rules failed to compile; starting with EMPTY ruleset (fail-safe passthrough)"
+                "system rules failed to compile; starting with EMPTY ruleset (inspection blocked)"
             );
             SystemEngine::empty()
         }
@@ -454,7 +452,7 @@ pub(crate) fn reload_system_vectorscan(
             tracing::error!(
                 is_outbound,
                 error = %e,
-                "reload: system rules failed to compile; keeping engine empty (fail-safe)"
+                "reload: system rules failed to compile; rejecting update; caller retains previous engine"
             );
             None
         }

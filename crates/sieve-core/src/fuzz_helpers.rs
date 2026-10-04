@@ -51,15 +51,71 @@ pub fn fuzz_one_tool_use(data: &[u8]) {
 ///
 /// 覆盖：完整流式管道，含提前断流场景。
 /// 容量超限时返回 Err，忽略即可（fuzz 目标是不 panic）。
+struct FuzzInboundEngine;
+impl crate::pipeline::inbound::InboundEngine for FuzzInboundEngine {
+    fn scan_text(
+        &self,
+        input: &str,
+        source: crate::detection::ContentSource,
+        offset: usize,
+    ) -> crate::error::SieveCoreResult<Vec<crate::Detection>> {
+        let Some(start) = input.find("danger") else {
+            return Ok(Vec::new());
+        };
+        Ok(vec![crate::Detection {
+            id: uuid::Uuid::nil(),
+            rule_id: "FUZZ-DANGER".into(),
+            severity: crate::Severity::Critical,
+            action: crate::detection::Action::Block,
+            source,
+            span: crate::protocol::unified_message::ContentSpan {
+                start: offset + start,
+                end: offset + start + 6,
+            },
+            evidence_truncated: "***".into(),
+            fingerprint: "fuzz-danger".into(),
+            source_channel: None,
+            origin_chain_depth: 0,
+        }])
+    }
+    fn check_tool_use(
+        &self,
+        _tool: &crate::tool_use_aggregator::CompletedToolCall,
+        _source: crate::detection::ContentSource,
+    ) -> crate::error::SieveCoreResult<Vec<crate::Detection>> {
+        Ok(Vec::new())
+    }
+}
+
+/// Exercise wire buffering, parsing, accumulated text detection and tool aggregation.
 pub fn fuzz_one_pipeline(data: &[u8]) {
+    use crate::pipeline::streaming::StreamingPipelineNode;
+    use std::sync::Arc;
+    let mut buffer = crate::sse::parser::InspectedEventBuffer::default();
     let mut parser = SseParser::new();
     let mut agg = Aggregator::new();
-    if let Ok(events) = parser.feed(data) {
+    let mut filter = crate::pipeline::inbound::InboundFilter::new(
+        Arc::new(FuzzInboundEngine),
+        Arc::new(Default::default()),
+    );
+    for chunk in data.chunks(7) {
+        let Ok(wire) = buffer.push_chunk(chunk) else {
+            return;
+        };
+        let Ok(events) = parser.feed(&wire) else {
+            return;
+        };
         for event in events {
-            let _ = agg.process(&event);
+            let _ = filter.observe_event(&event);
+            if let Ok(Some(tool)) = agg.process(&event) {
+                let _ = filter.on_tool_use_complete(&tool);
+            }
         }
     }
+    let _ = parser.feed(&buffer.take_pending());
     for event in parser.flush() {
+        let _ = filter.observe_event(&event);
         let _ = agg.process(&event);
     }
+    let _ = filter.on_message_stop();
 }

@@ -136,6 +136,15 @@ fn spawn_sieve_daemon_with_home(
     dry_run: bool,
     sieve_home: Option<&std::path::Path>,
 ) -> Option<(u16, DaemonGuard)> {
+    spawn_sieve_daemon_with_peer(upstream_url, dry_run, sieve_home, false)
+}
+
+fn spawn_sieve_daemon_with_peer(
+    upstream_url: &str,
+    dry_run: bool,
+    sieve_home: Option<&std::path::Path>,
+    trusted: bool,
+) -> Option<(u16, DaemonGuard)> {
     let port = find_free_port();
     let rules = outbound_rules_path();
     if !rules.exists() {
@@ -202,6 +211,10 @@ dry_run = {}
         .stdout(Stdio::null())
         .stderr(Stdio::null());
 
+    if trusted {
+        writeln!(config_file, "gui_peer_code_requirement = \"test-only\"").unwrap();
+        cmd.env("SIEVE_TEST_GUI_PEER_VERDICT", "allow");
+    }
     let proc = cmd.spawn().expect("spawn sieve daemon");
 
     wait_for_http_ready(port, Duration::from_secs(10));
@@ -673,9 +686,12 @@ async fn r3_fix_gui_redact_and_allow_anthropic_redacts_pem() {
     let sieve_home = sieve_home_dir.path().to_owned();
     let socket_path = sieve_home.join("ipc.sock");
 
-    let Some((sieve_port, _guard)) =
-        spawn_sieve_daemon_with_home(&format!("http://{upstream_addr}"), false, Some(&sieve_home))
-    else {
+    let Some((sieve_port, _guard)) = spawn_sieve_daemon_with_peer(
+        &format!("http://{upstream_addr}"),
+        false,
+        Some(&sieve_home),
+        true,
+    ) else {
         return;
     };
 
@@ -755,9 +771,12 @@ async fn r3_fix_gui_allow_forwards_original_body_regression() {
     let sieve_home = sieve_home_dir.path().to_owned();
     let socket_path = sieve_home.join("ipc.sock");
 
-    let Some((sieve_port, _guard)) =
-        spawn_sieve_daemon_with_home(&format!("http://{upstream_addr}"), false, Some(&sieve_home))
-    else {
+    let Some((sieve_port, _guard)) = spawn_sieve_daemon_with_peer(
+        &format!("http://{upstream_addr}"),
+        false,
+        Some(&sieve_home),
+        true,
+    ) else {
         return;
     };
 
@@ -835,9 +854,12 @@ async fn r3_fix_gui_redact_and_allow_openai_redacts_stripe_key() {
     let sieve_home = sieve_home_dir.path().to_owned();
     let socket_path = sieve_home.join("ipc.sock");
 
-    let Some((sieve_port, _guard)) =
-        spawn_sieve_daemon_with_home(&format!("http://{upstream_addr}"), false, Some(&sieve_home))
-    else {
+    let Some((sieve_port, _guard)) = spawn_sieve_daemon_with_peer(
+        &format!("http://{upstream_addr}"),
+        false,
+        Some(&sieve_home),
+        true,
+    ) else {
         return;
     };
 
@@ -929,9 +951,12 @@ async fn r3_fix_gui_redact_and_allow_mixed_both_spans_redacted() {
     let sieve_home = sieve_home_dir.path().to_owned();
     let socket_path = sieve_home.join("ipc.sock");
 
-    let Some((sieve_port, _guard)) =
-        spawn_sieve_daemon_with_home(&format!("http://{upstream_addr}"), false, Some(&sieve_home))
-    else {
+    let Some((sieve_port, _guard)) = spawn_sieve_daemon_with_peer(
+        &format!("http://{upstream_addr}"),
+        false,
+        Some(&sieve_home),
+        true,
+    ) else {
         return;
     };
 
@@ -1386,9 +1411,12 @@ async fn outbound_gui_popup_allow_forwards_to_upstream() {
     let sieve_home = sieve_home_dir.path().to_owned();
     let socket_path = sieve_home.join("ipc.sock");
 
-    let Some((sieve_port, _guard)) =
-        spawn_sieve_daemon_with_home(&format!("http://{upstream_addr}"), false, Some(&sieve_home))
-    else {
+    let Some((sieve_port, _guard)) = spawn_sieve_daemon_with_peer(
+        &format!("http://{upstream_addr}"),
+        false,
+        Some(&sieve_home),
+        true,
+    ) else {
         return;
     };
 

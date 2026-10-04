@@ -17,7 +17,6 @@ use sieve_core::protocol::unified_message::ContentSpan;
 use sieve_core::tool_use_aggregator::CompletedToolCall;
 use sieve_rules::engine::{MatchEngine, VectorscanEngine};
 use sieve_rules::manifest::{Action as RulesAction, RuleEntry, Severity as RulesSeverity};
-use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -58,26 +57,20 @@ fn is_excluded_by_rule(candidate: &str, full_context: &str, rule: &RuleEntry) ->
 
 /// 出站规则匹配引擎的包装，实现 `sieve_core::OutboundEngine`。
 ///
-/// 内部持有规则反查表（`rule_id → RuleEntry`），用于从 `MatchHit` 取真实 severity/action。
+/// 每个命中携带对应引擎快照的元数据，热更新不会混用旧规则策略。
 ///
 /// 泛型 `E` 允许传入 `VectorscanEngine`（系统规则）或 `LayeredEngine<VectorscanEngine, UserEngine>`
 /// （系统 + 用户规则，Week 6 Phase A 起）。
 pub struct OutboundAdapter<E: MatchEngine + Send + Sync + 'static = VectorscanEngine> {
     engine: Arc<E>,
-    /// rule_id → RuleEntry 反查表，用于从 MatchHit 映射元数据。
-    rule_lookup: HashMap<String, RuleEntry>,
 }
 
 impl<E: MatchEngine + Send + Sync + 'static> OutboundAdapter<E> {
     /// 构造 adapter。
     ///
-    /// `rules` 与编译时传入的规则集一致，用于构建反查表。
-    pub fn new(engine: Arc<E>, rules: Vec<RuleEntry>) -> Self {
-        let rule_lookup = rules.into_iter().map(|r| (r.id.clone(), r)).collect();
-        Self {
-            engine,
-            rule_lookup,
-        }
+    /// 保留旧构造参数以兼容调用方；元数据只从实际扫描命中取得。
+    pub fn new(engine: Arc<E>, _rules: Vec<RuleEntry>) -> Self {
+        Self { engine }
     }
 }
 
@@ -184,18 +177,12 @@ fn redact_evidence(matched: &str) -> String {
 /// （系统 + 用户规则，Week 6 Phase A 起）。
 pub struct InboundAdapter<E: MatchEngine + Send + Sync + 'static = VectorscanEngine> {
     engine: Arc<E>,
-    /// rule_id → RuleEntry 反查表。
-    rule_lookup: HashMap<String, RuleEntry>,
 }
 
 impl<E: MatchEngine + Send + Sync + 'static> InboundAdapter<E> {
     /// 构造 adapter。
-    pub fn new(engine: Arc<E>, rules: Vec<RuleEntry>) -> Self {
-        let rule_lookup = rules.into_iter().map(|r| (r.id.clone(), r)).collect();
-        Self {
-            engine,
-            rule_lookup,
-        }
+    pub fn new(engine: Arc<E>, _rules: Vec<RuleEntry>) -> Self {
+        Self { engine }
     }
 }
 
@@ -212,7 +199,7 @@ impl<E: MatchEngine + Send + Sync + 'static> InboundEngine for InboundAdapter<E>
 
         let mut detections = Vec::new();
         for hit in hits {
-            let rule = self.rule_lookup.get(&hit.rule_id);
+            let rule = hit.rule.as_ref();
 
             let evidence_start = hit.start.min(input.len());
             let evidence_end = hit.end.min(input.len());
@@ -249,8 +236,11 @@ impl<E: MatchEngine + Send + Sync + 'static> InboundEngine for InboundAdapter<E>
                     )
                 } else {
                     // 无显式 disposition：走旧路径（enforce_action → Block or action）
-                    let enforced =
-                        sieve_rules::critical_lock::enforce_action(&hit.rule_id, r.action);
+                    let enforced = if r.effective_fail_closed() {
+                        RulesAction::Block
+                    } else {
+                        r.action
+                    };
                     if enforced == RulesAction::Block {
                         Action::Block
                     } else {
@@ -420,7 +410,7 @@ impl<E: MatchEngine + Send + Sync + 'static> OutboundEngine for OutboundAdapter<
 
         let mut detections = Vec::new();
         for hit in hits {
-            let rule = self.rule_lookup.get(&hit.rule_id);
+            let rule = hit.rule.as_ref();
 
             // per-rule allowlist 过滤
             let evidence_start = hit.start.min(input.len());
@@ -466,8 +456,11 @@ impl<E: MatchEngine + Send + Sync + 'static> OutboundEngine for OutboundAdapter<
                         )
                     } else {
                         // 无显式 disposition：走旧路径（enforce_action → Block or action）
-                        let enforced =
-                            sieve_rules::critical_lock::enforce_action(&hit.rule_id, r.action);
+                        let enforced = if r.effective_fail_closed() {
+                            RulesAction::Block
+                        } else {
+                            r.action
+                        };
                         if enforced == RulesAction::Block {
                             Action::Block
                         } else {
@@ -523,23 +516,29 @@ impl<E: MatchEngine + Send + Sync + 'static> OutboundEngine for OutboundAdapter<
         // 安全不变量不变（明文永不出站）。
         let wl = sieve_rules::wordlist::wordlist_index();
         let tokens: Vec<&str> = input.split_whitespace().collect();
-        let candidates = sieve_rules::bip39::candidate_bip39_windows(&tokens, wl);
-        for window in candidates {
-            if sieve_rules::bip39::verify_checksum(&window, wl) {
+        let mut token_offset = 0;
+        let offsets: Vec<usize> = tokens
+            .iter()
+            .map(|token| {
+                let start = token_offset + input[token_offset..].find(token).unwrap_or(0);
+                token_offset = start + token.len();
+                start
+            })
+            .collect();
+        for start in 0..tokens.len() {
+            for count in [12, 15, 18, 21, 24] {
+                let Some(window) = tokens.get(start..start + count) else {
+                    continue;
+                };
+                if !sieve_rules::bip39::verify_checksum(window, wl) {
+                    continue;
+                }
                 let window_text = window.join(" ");
                 let evidence_truncated = redact_evidence(&window_text);
                 let fp = fingerprint("OUT-14", &window_text);
-                // 精确 span：auto_redact 按 span 字节范围替换，必须只覆盖助记词窗口本身，
-                // 否则整条消息会被替成占位符（过度脱敏，毁掉用户原文）。在原 input 中
-                // 定位窗口（单空格分隔的常见情形）；异常空白找不到时回退整段 span
-                // （过度脱敏但安全，明文助记词仍不出站）。
-                let (span_start, span_end) = match input.find(&window_text) {
-                    Some(off) => (
-                        body_byte_offset + off,
-                        body_byte_offset + off + window_text.len(),
-                    ),
-                    None => (body_byte_offset, body_byte_offset + input.len()),
-                };
+                let span_start = body_byte_offset + offsets[start];
+                let span_end =
+                    body_byte_offset + offsets[start + count - 1] + window[count - 1].len();
                 detections.push(Detection {
                     id: Uuid::new_v4(),
                     rule_id: "OUT-14".to_string(),
@@ -557,8 +556,6 @@ impl<E: MatchEngine + Send + Sync + 'static> OutboundEngine for OutboundAdapter<
                     source_channel: None,
                     origin_chain_depth: 0,
                 });
-                // 同一文本只需报一次（找到一个有效助记词即触发拦截）
-                break;
             }
         }
 
@@ -571,6 +568,108 @@ mod tests {
     use super::*;
     use sieve_rules::engine::VectorscanEngine;
     use sieve_rules::manifest::{Action as RulesAction, RuleEntry, Severity as RulesSeverity};
+
+    #[test]
+    fn redacts_every_mnemonic_with_exact_original_offsets() {
+        use sieve_core::pipeline::outbound_redact::{redact_segments, RedactHit};
+        let rule = make_rule(
+            "OUT-NO-MATCH",
+            "never_matches_this_input",
+            RulesSeverity::High,
+            RulesAction::Warn,
+        );
+        let engine = VectorscanEngine::compile(vec![rule.clone()]).unwrap();
+        let adapter = OutboundAdapter::new(Arc::new(engine), vec![rule]);
+        let first = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let second = "legal winner thank year wave sausage worth useful legal winner thank yellow";
+        for separator in [" ", "\t", "\n", "  "] {
+            let second = second.replace(' ', separator);
+            let input = format!("前缀 {first} -- {second} -- {first} 后缀");
+            let detections = adapter
+                .scan_text(&input, ContentSource::OutboundUserText, 7)
+                .unwrap();
+            let hits: Vec<_> = detections
+                .iter()
+                .map(|d| RedactHit {
+                    rule_id: d.rule_id.clone(),
+                    start: d.span.start,
+                    end: d.span.end,
+                })
+                .collect();
+            let result = redact_segments(&[(7, input)], &hits);
+            assert_eq!(
+                result.texts[0],
+                "前缀 [REDACTED:OUT-14] -- [REDACTED:OUT-14] -- [REDACTED:OUT-14] 后缀"
+            );
+        }
+    }
+
+    #[test]
+    fn live_rule_metadata_follows_engine_swaps_and_user_namespaces() {
+        use sieve_policy::{
+            engine::UserEngine,
+            loader::{RuleDirection, UserRuleEntry, UserRulesFile},
+        };
+        use sieve_rules::engine::{LayeredEngine, SystemEngine};
+        let old = make_rule(
+            "OUT-SWAP",
+            "old_pattern",
+            RulesSeverity::Critical,
+            RulesAction::Block,
+        );
+        let user = UserRuleEntry {
+            id: "MYRULE".into(),
+            description: "test".into(),
+            pattern: "sensitive_probe".into(),
+            severity: "high".into(),
+            action: "warn".into(),
+            keywords: vec!["sensitive".into()],
+            allowlist_stopwords: vec![],
+            disposition: Some("status_bar".into()),
+            direction: RuleDirection::Outbound,
+            enabled: true,
+            added_at: chrono::Utc::now(),
+            added_by: "manual".into(),
+        };
+        assert!(sieve_policy::lint::lint(
+            &UserRulesFile {
+                rules: vec![user.clone()],
+                ..Default::default()
+            },
+            500
+        )
+        .is_empty());
+        let layered = Arc::new(LayeredEngine::new(
+            SystemEngine::new(Some(VectorscanEngine::compile(vec![old.clone()]).unwrap())),
+            Some(UserEngine::compile(vec![user]).unwrap()),
+        ));
+        let outbound = OutboundAdapter::new(layered.clone(), vec![old.clone()]);
+        let inbound = InboundAdapter::new(layered.clone(), vec![old]);
+        for id in ["OUT-SWAP", "OUT-NEW"] {
+            let mut new = make_rule(id, "new_pattern", RulesSeverity::High, RulesAction::Warn);
+            new.disposition = Some(sieve_rules::manifest::Disposition::StatusBar);
+            new.fail_closed = Some(false);
+            layered.swap_system(Some(VectorscanEngine::compile(vec![new]).unwrap()));
+            for hits in [
+                outbound
+                    .scan_text("new_pattern", ContentSource::OutboundUserText, 0)
+                    .unwrap(),
+                inbound
+                    .scan_text("new_pattern", ContentSource::InboundAssistantText, 0)
+                    .unwrap(),
+            ] {
+                assert_eq!(hits[0].rule_id, id);
+                assert_eq!(hits[0].severity, Severity::High);
+                assert!(matches!(hits[0].action, Action::MarkOnly));
+            }
+        }
+        let hits = outbound
+            .scan_text("sensitive_probe", ContentSource::OutboundUserText, 0)
+            .unwrap();
+        assert_eq!(hits[0].rule_id, "user:MYRULE");
+        assert_eq!(hits[0].severity, Severity::High);
+        assert!(matches!(hits[0].action, Action::MarkOnly));
+    }
 
     fn make_rule(
         id: &str,
