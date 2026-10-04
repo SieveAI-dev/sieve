@@ -3,8 +3,6 @@
 //! 关联入站检测 P0 表 + UCSB 论文 4 类攻击分类。
 
 use crate::address_guard::{check_substitution, extract_eth_addresses};
-#[cfg(test)]
-use crate::detection::fingerprint;
 use crate::detection::{
     fingerprint_full_content, Action, ContentSource, DefaultOnTimeout, Detection, Severity,
 };
