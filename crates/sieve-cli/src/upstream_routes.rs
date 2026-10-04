@@ -66,6 +66,7 @@ impl UpstreamRoutes {
     /// # Errors
     ///
     /// 文件写入失败时返回 `Err`。
+    #[cfg(any(target_os = "macos", test))]
     pub fn save(&self, path: &Path) -> Result<()> {
         let json = serde_json::to_string_pretty(&self.routes)
             .context("序列化 upstream-routes.json 失败")?;
@@ -75,6 +76,7 @@ impl UpstreamRoutes {
     }
 
     /// 插入或更新一条路由（provider id → upstream URL）。
+    #[cfg(any(target_os = "macos", test))]
     pub fn insert(&mut self, provider_id: impl Into<String>, upstream_url: impl Into<String>) {
         self.routes.insert(provider_id.into(), upstream_url.into());
     }

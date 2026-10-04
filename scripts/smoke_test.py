@@ -749,7 +749,7 @@ id = "OUT-01"
 description = "Synthetic smoke-test token"
 pattern = 'sk-ant-api03-[A-Za-z0-9_-]{93}AA'
 severity = "critical"
-action = "redact"
+action = "block"
 disposition = "auto_redact"
 ''')
         (rules_dir / "inbound.toml").write_text('''[[rules]]

@@ -141,10 +141,16 @@ pub fn fingerprint(rule_id: &str, content: &str) -> String {
         }
         normalized[..end].to_string()
     };
+    fingerprint_full_content(rule_id, &truncated)
+}
+
+/// Hash the complete content when suffix changes identify distinct security events.
+/// Unlike the credential fingerprint, this must retain the entire address pair.
+pub(crate) fn fingerprint_full_content(rule_id: &str, content: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(rule_id.as_bytes());
     hasher.update(b":");
-    hasher.update(truncated.as_bytes());
+    hasher.update(content.as_bytes());
     let hash = hasher.finalize();
     hex_encode(&hash[..8]) // 16 hex chars = 8 bytes
 }

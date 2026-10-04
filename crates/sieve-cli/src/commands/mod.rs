@@ -20,6 +20,7 @@
 /// 泄漏 daemon 被 kill 即复活，并以空规则集直通占用真实 IPC socket 与代理端口。
 /// 只读调用（`launchctl list` / `launchctl print`）不受影响。
 /// 生产路径**不应**设置此变量（设置后 daemon 不会注册 launchd 自启）。
+#[cfg(target_os = "macos")]
 pub(crate) fn launchctl_mutations_skipped() -> bool {
     std::env::var("SIEVE_SKIP_LAUNCHCTL").as_deref() == Ok("1")
 }

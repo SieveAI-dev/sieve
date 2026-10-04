@@ -53,10 +53,13 @@ pub fn build_verifier(requirement: String) -> sieve_ipc::PeerVerifier {
 #[derive(Debug)]
 pub enum PeerVerifyError {
     /// 取对端 audit token 失败（getsockopt 错误）。
+    #[cfg(target_os = "macos")]
     PeerToken(std::io::Error),
     /// requirement 字符串不合法。
+    #[cfg(target_os = "macos")]
     BadRequirement(String),
     /// 对端进程不满足 requirement（决定性否定）。
+    #[cfg(target_os = "macos")]
     Rejected(String),
     /// 当前平台不支持（非 macOS）。
     #[cfg(not(target_os = "macos"))]
@@ -66,8 +69,11 @@ pub enum PeerVerifyError {
 impl std::fmt::Display for PeerVerifyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            #[cfg(target_os = "macos")]
             Self::PeerToken(e) => write!(f, "getsockopt(LOCAL_PEERTOKEN) failed: {e}"),
+            #[cfg(target_os = "macos")]
             Self::BadRequirement(e) => write!(f, "invalid code requirement: {e}"),
+            #[cfg(target_os = "macos")]
             Self::Rejected(e) => write!(f, "peer failed code-signing check: {e}"),
             #[cfg(not(target_os = "macos"))]
             Self::Unsupported => write!(

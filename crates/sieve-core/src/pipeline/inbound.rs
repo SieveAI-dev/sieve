@@ -3,7 +3,11 @@
 //! 关联入站检测 P0 表 + UCSB 论文 4 类攻击分类。
 
 use crate::address_guard::{check_substitution, extract_eth_addresses};
-use crate::detection::{fingerprint, Action, ContentSource, DefaultOnTimeout, Detection, Severity};
+#[cfg(test)]
+use crate::detection::fingerprint;
+use crate::detection::{
+    fingerprint_full_content, Action, ContentSource, DefaultOnTimeout, Detection, Severity,
+};
 use crate::error::{SieveCoreError, SieveCoreResult};
 use crate::pipeline::streaming::StreamingPipelineNode;
 use crate::protocol::unified_message::ContentSpan;
@@ -275,7 +279,7 @@ impl InboundFilter {
 
         for addr in addrs {
             if let Some(orig) = check_substitution(&session.addresses_seen, &addr) {
-                let fp = fingerprint("IN-CR-01", &format!("{orig}->{addr}"));
+                let fp = fingerprint_full_content("IN-CR-01", &format!("{orig}->{addr}"));
                 // R3-#5：按 TOML 配置路由到 HoldForDecision（GUI 弹窗 60s 倒计时），
                 // 而非直接 fail-closed Block，确保场景 B 的人眼对比机会。
                 // fail-closed 语义保留：default_on_timeout=Block（GUI 不响应时仍 block）。

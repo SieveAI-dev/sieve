@@ -7,8 +7,12 @@
 //! launchd 常量（Label / plist 路径）与 setup.rs 的 `build_plist_content` 保持一致
 //! （Label = `com.sieve.daemon`，plist = `~/Library/LaunchAgents/com.sieve.daemon.plist`）。
 
-use anyhow::{Context, Result};
+#[cfg(any(target_os = "macos", test))]
+use anyhow::Context;
+use anyhow::Result;
+#[cfg(any(target_os = "macos", test))]
 use std::path::PathBuf;
+#[cfg(target_os = "macos")]
 use std::process::Command;
 
 use crate::cli::OutputFormat;
@@ -18,6 +22,7 @@ use crate::commands::ipc_client;
 const LAUNCHD_LABEL: &str = "com.sieve.daemon";
 
 /// launchd plist 路径 `~/Library/LaunchAgents/com.sieve.daemon.plist`。
+#[cfg(any(target_os = "macos", test))]
 fn plist_path() -> Result<PathBuf> {
     let home = dirs_home().context("获取 HOME 目录失败")?;
     Ok(home
@@ -27,11 +32,13 @@ fn plist_path() -> Result<PathBuf> {
 }
 
 /// 当前用户 HOME（不引入 dirs crate，读 `$HOME`）。
+#[cfg(any(target_os = "macos", test))]
 fn dirs_home() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
 
 /// 当前用户 UID（`launchctl` gui domain 需要）。用 `id -u`，避免 unsafe libc 调用。
+#[cfg(target_os = "macos")]
 fn current_uid() -> Result<String> {
     let out = Command::new("id")
         .arg("-u")
@@ -44,11 +51,13 @@ fn current_uid() -> Result<String> {
 }
 
 /// launchd 服务目标标识 `gui/<uid>/com.sieve.daemon`。
+#[cfg(any(target_os = "macos", test))]
 fn service_target(uid: &str) -> String {
     format!("gui/{uid}/{LAUNCHD_LABEL}")
 }
 
 /// launchd job 是否已加载（`launchctl print <target>` exit 0）。
+#[cfg(target_os = "macos")]
 fn is_launchd_loaded(uid: &str) -> bool {
     Command::new("launchctl")
         .args(["print", &service_target(uid)])
