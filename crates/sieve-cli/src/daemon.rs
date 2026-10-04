@@ -4033,11 +4033,11 @@ fn build_426_response(detections: &[sieve_core::Detection]) -> Response<Response
         "detections": detections_json,
         "guidance": {
             "zh": format!(
-                "Sieve 检测到 {} 条出站 Critical 命中。请检查后用 .sieveignore 加入 fingerprint 白名单，或重新发送脱敏消息。",
+                "Sieve 检测到 {} 条出站 Critical 命中。请移除敏感内容或重新发送脱敏消息；Critical 命中不能通过 .sieveignore 放行。",
                 detections.len()
             ),
             "en": format!(
-                "Sieve blocked {} outbound critical detection(s). Review your message, then either redact or add fingerprint(s) to .sieveignore.",
+                "Sieve blocked {} outbound critical detection(s). Remove or redact the sensitive content and resend. Critical detections cannot be suppressed by .sieveignore.",
                 detections.len()
             ),
         }

@@ -42,7 +42,7 @@ pub type PeerVerifier = Arc<dyn Fn(std::os::unix::io::RawFd) -> bool + Send + Sy
 
 /// 连接级 peer 核验状态：懒执行 + 缓存（每连接至多真验一次）。
 ///
-/// 核验只在该连接首次尝试放行 Critical 时触发，避免对 CLI 短连接 / 心跳连接
+/// 核验只在该连接首次尝试 wire 放行时触发，避免对 CLI 短连接 / 心跳连接
 /// 做无谓的签名检查。fd 在 handle_connection 存活期间有效（split 两半共享同一 socket）。
 struct PeerGate {
     verifier: Option<PeerVerifier>,
@@ -59,7 +59,7 @@ impl PeerGate {
         }
     }
 
-    /// 本连接是否允许放行 Critical（allow / redact_and_allow）决策应答。
+    /// 本连接是否允许 wire 放行（allow / redact_and_allow）决策应答。
     fn permits_allow(&self) -> bool {
         match &self.verifier {
             None => false, // 没有可信身份验证器时拒绝放行
@@ -517,7 +517,7 @@ impl IpcServer {
 
     /// 注入 GUI peer 代码签名核验回调（F1-b，SPEC-005 §6.2.4）。
     ///
-    /// daemon 启动时按配置调用一次；注入后每个连接首次尝试放行 Critical 决策应答时
+    /// daemon 启动时按配置调用一次；注入后每个连接首次尝试 wire 放行应答时
     /// 触发核验（结果按连接缓存）。核验未通过 → 该应答的 allow / redact_and_allow
     /// 静默改写为 deny（与 `resolve_decision` 的 A 方案同范式）。
     pub fn set_peer_verifier(&self, verifier: PeerVerifier) {
@@ -1062,7 +1062,7 @@ async fn handle_connection(stream: UnixStream, ctx: ConnectionContext) -> Result
     info!("GUI client connected");
 
     // F1-b：into_split 之前取 raw fd（split 后两半共享同一 socket，fd 在连接存活期有效）。
-    // 核验懒执行：仅该连接首次尝试放行 Critical 决策应答时触发。
+    // 核验懒执行：仅该连接首次尝试 wire 放行应答时触发。
     let peer_gate = {
         use std::os::unix::io::AsRawFd;
         PeerGate::new(peer_verifier, stream.as_raw_fd())
@@ -1447,9 +1447,9 @@ async fn dispatch_message(
         };
         let mut map = pending.lock().await;
         if let Some(entry) = map.remove(&resp.request_id) {
-            // F1-b（SPEC-005 §6.2.4）：wire 应答放行 Critical 前必须通过 peer 代码签名核验；
+            // F1-b（SPEC-005 §6.2.4）：wire 应答放行前必须通过 peer 代码签名核验；
             // 未通过 → allow / redact_and_allow 静默改写为 deny（与 resolve_decision 的
-            // A 方案同范式，daemon 侧权威 max_severity，不信客户端自报）。
+            // A 方案同范式，不信客户端自报身份）。
             // inject_decision 注入路径与 resolve_decision 不经此处。
             let resp = if matches!(
                 resp.decision,
@@ -1458,7 +1458,7 @@ async fn dispatch_message(
             {
                 warn!(
                     request_id = %resp.request_id,
-                    "GUI peer code-signing verification failed; Critical allow rewritten to deny (F1-b)"
+                    "GUI peer code-signing verification failed; wire approval rewritten to deny (F1-b)"
                 );
                 DecisionResponse {
                     decision: DecisionAction::Deny,

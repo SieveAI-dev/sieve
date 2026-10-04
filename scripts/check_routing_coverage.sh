@@ -25,17 +25,20 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 DAEMON="crates/sieve-cli/src/daemon.rs"
+STREAMING="crates/sieve-cli/src/daemon/streaming.rs"
 MATRIX="crates/sieve-cli/tests/content_type_matrix.rs"
 verbose="${1:-}"
 fail=0
 
 [ -f "$DAEMON" ] || { echo "✗ 找不到 $DAEMON" >&2; exit 2; }
+[ -f "$STREAMING" ] || { echo "✗ 找不到 $STREAMING" >&2; exit 2; }
 [ -f "$MATRIX" ] || { echo "✗ 找不到 $MATRIX" >&2; exit 2; }
 
 # 把每个函数体内出现的钩子调用，归属到「最近一次 fn 定义」（闭包 async move {…} 不重置归属，
 # 故 spawn 内的调用仍算在外层函数名下）。输出去重的 "函数名|钩子名" 集合。
 PAIRS="$(awk '
-  /^[[:space:]]*(pub[[:space:]]+)?(async[[:space:]]+)?fn[[:space:]]+[A-Za-z0-9_]+/ {
+  FNR == 1 { cur="" }
+  /^[[:space:]]*(pub(\([^)]*\))?[[:space:]]+)?(async[[:space:]]+)?fn[[:space:]]+[A-Za-z0-9_]+/ {
     line=$0
     sub(/^.*fn[[:space:]]+/, "", line)
     sub(/[^A-Za-z0-9_].*$/, "", line)
@@ -47,7 +50,7 @@ PAIRS="$(awk '
   /on_tool_use_complete/        { print cur "|on_tool_use_complete" }
   /classify_inbound_detections/ { print cur "|classify_inbound_detections" }
   /handle_json_inbound/         { print cur "|handle_json_inbound" }
-' "$DAEMON" | sort -u)"
+' "$DAEMON" "$STREAMING" | sort -u)"
 
 has_pair() { grep -qxF "$1|$2" <<<"$PAIRS"; }
 

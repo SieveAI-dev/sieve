@@ -2,8 +2,8 @@
 //!
 //! 真连 Unix socket 模拟 GUI 回 decision_response，注入闭包 verifier 断言 gate 行为：
 //! - verifier 拒 + Critical + allow → 静默改写 deny（fail-closed）
-//! - gate 只管 Critical 的 allow / redact_and_allow；High 的 allow、任何 deny 不受影响
-//! - verifier 未注入（默认）→ 现状保持（既有 9 个模拟 GUI 测试的兼容性由此保证）
+//! - 所有 allow / redact_and_allow 均须通过核验；deny 不受影响
+//! - verifier 未注入（默认）→ allow 被拒绝（fail-closed）
 //! - verifier 每连接懒执行且至多一次（PeerGate 缓存）
 //!
 //! 真实核验（SecCode 代码签名）的决定性负例在 sieve-cli 侧
@@ -89,9 +89,9 @@ async fn rejected_peer_critical_allow_rewritten_to_deny() {
     assert!(!result.remember, "改写为 deny 时 remember 必须清零");
 }
 
-/// gate 只管 Critical：verifier 拒 + High + allow → allow 原样放行。
+/// High 的 wire allow 同样要求可信 peer。
 #[tokio::test]
-async fn rejected_peer_high_allow_passes_through() {
+async fn rejected_peer_high_allow_rewritten_to_deny() {
     let tmp = tempfile::tempdir().unwrap();
     let socket_path = tmp.path().join("ipc.sock");
     let server = start_server(&socket_path).await;
@@ -118,8 +118,8 @@ async fn rejected_peer_high_allow_passes_through() {
 
     assert_eq!(
         result.decision,
-        DecisionAction::Allow,
-        "gate 只作用于 Critical，High 的 allow 不受影响"
+        DecisionAction::Deny,
+        "未通过身份核验的 wire allow 必须拒绝，包括 High"
     );
 }
 
@@ -184,9 +184,9 @@ async fn rejected_peer_critical_deny_untouched() {
     assert!(result.by_user);
 }
 
-/// verifier 未注入（默认）→ Critical allow 照旧放行（现状保持；gate 是 opt-in）。
+/// verifier 未注入（默认）→ Critical allow 必须拒绝。
 #[tokio::test]
-async fn no_verifier_keeps_status_quo() {
+async fn no_verifier_refuses_allow() {
     let tmp = tempfile::tempdir().unwrap();
     let socket_path = tmp.path().join("ipc.sock");
     let server = start_server(&socket_path).await;
@@ -210,7 +210,7 @@ async fn no_verifier_keeps_status_quo() {
         .await
         .unwrap();
 
-    assert_eq!(result.decision, DecisionAction::Allow);
+    assert_eq!(result.decision, DecisionAction::Deny);
 }
 
 /// verifier 每连接懒执行且至多一次（PeerGate 缓存）：

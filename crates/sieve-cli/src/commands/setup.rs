@@ -20,7 +20,9 @@
 //! 4. 顺序 apply（任一失败回滚该 agent；已成功其他 agent 不回滚）
 //! 5. 跑 doctor 验证
 
-use crate::cli::{AgentKind, SetupArgs};
+#[cfg(target_os = "macos")]
+use crate::cli::AgentKind;
+use crate::cli::SetupArgs;
 use anyhow::Result;
 
 #[cfg(target_os = "macos")]

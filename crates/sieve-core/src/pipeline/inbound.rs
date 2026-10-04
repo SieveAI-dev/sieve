@@ -73,7 +73,7 @@ impl Default for AddressGuardConfig {
 pub struct InboundFilter {
     engine: Arc<dyn InboundEngine>,
     assistant_text: String,
-    reported_text_hits: HashSet<(String, usize, usize)>,
+    reported_text_hits: HashSet<(String, String, usize, usize)>,
     session: Mutex<SessionState>,
     /// `.sieveignore` 加载的 fingerprint 集合（O(1) 查询）。
     sieveignore: Arc<HashSet<String>>,
@@ -336,6 +336,7 @@ impl StreamingPipelineNode for InboundFilter {
                 .filter(|hit| {
                     self.reported_text_hits.insert((
                         hit.rule_id.clone(),
+                        hit.fingerprint.clone(),
                         hit.span.start,
                         hit.span.end,
                     ))
@@ -400,6 +401,33 @@ mod tests {
     /// - 文本含 "rm -rf" → 返回 IN-CR-02 命中
     /// - 工具名含 "signTransaction" → 返回 IN-CR-05 命中
     struct MockEngine;
+
+    #[test]
+    fn distinct_address_substitutions_are_not_deduplicated() {
+        let mut filter = InboundFilter::new(Arc::new(MockEngine), Arc::new(HashSet::new()));
+        filter
+            .seed_known_addresses_from_text("0xabcdef1234567890abcdef1234567890abcdef12")
+            .unwrap();
+        let delta = |text: &str| SseEvent::ContentBlockDelta {
+            index: 0,
+            delta: SseDelta::TextDelta {
+                text: text.to_owned(),
+            },
+        };
+        let first = filter
+            .observe_event(&delta("0xabcdef1234567890abcdef1234567890abcdef13 "))
+            .unwrap();
+        let second = filter
+            .observe_event(&delta("0xabcdef1234567890abcdef1234567890abcdef14 "))
+            .unwrap();
+        assert_eq!(first.len(), 1);
+        assert_eq!(second.len(), 1);
+        assert_ne!(first[0].fingerprint, second[0].fingerprint);
+        assert!(filter
+            .observe_event(&delta(" trailing text"))
+            .unwrap()
+            .is_empty());
+    }
 
     impl InboundEngine for MockEngine {
         fn scan_text(

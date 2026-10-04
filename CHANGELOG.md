@@ -8,6 +8,15 @@
 
 ## [Unreleased]
 
+### Main baseline repairs (2026-10-04)
+
+- Preserve outbound Critical detections even when their fingerprints are listed in `.sieveignore`; keep non-Critical exceptions and update blocked-response guidance.
+- Distinguish different address-substitution fingerprints during cumulative SSE scanning, with a regression test for two consecutive substitutions.
+- Restore non-macOS compilation of the process-context cache and platform-specific imports; unsupported process lookup still returns `None`.
+- Align IPC positive fixtures and negative peer-gate tests with mandatory verification for every wire approval, without weakening the production gate.
+- Extend the routing check to the extracted streaming module. Give mock-only smoke tests public synthetic rule fixtures and always verify redaction.
+- Update vulnerable h2, lru and rustls dependencies to the patched versions documented by RUSTSEC-2026-0258, RUSTSEC-2026-0253 and RUSTSEC-2026-0285.
+
 ### CI
 
 - **检测回归 job 升级为硬门禁并扩到全量检测 binary。** `detection-regression` 此前仅跑

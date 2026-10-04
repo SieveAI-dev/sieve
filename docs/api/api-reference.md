@@ -145,7 +145,7 @@ v1.4 将入站规则按 disposition 分为两类，拦截行为不同：
   "message": "Sieve detected a PEM-encoded private key. Outbound blocked.",
   "remediation": [
     "Replace the secret with [REDACTED-PRIVATE-KEY] and re-send.",
-    "If you believe this is a false positive, run `sieve sieveignore add OUT-07:7a3b9c1d`."
+    "Critical detections cannot be suppressed by .sieveignore. Remove or redact the sensitive content."
   ],
   "docs_url": "https://github.com/SieveAI-dev/sieve/blob/main/docs/api/api-reference.md#5-处置矩阵--http-行为"
 }
@@ -308,6 +308,8 @@ audit_events 表（表名口径见 [data-model.md §6.2](../design/data-model.md
 | `UserRulesLoadFailed` | `user.toml` 加载或 lint 失败，记录错误原因，发状态栏通知 |
 
 #### 2.2.4 白名单管理（`.sieveignore`）
+
+指纹白名单仅对非 Critical 命中生效。入站和出站 Critical 命中都不能通过此文件放行。
 
 加入：
 
@@ -1363,8 +1365,8 @@ url = "https://updates.internal.corp/sieve/v1/manifest"
     }
   ],
   "guidance": {
-    "zh": "Sieve 检测到 N 条出站 Critical 命中。请检查后用 .sieveignore 加入 fingerprint 白名单，或重新发送脱敏消息。",
-    "en": "Sieve blocked N outbound critical detections. Review your message, then either redact or add fingerprint(s) to .sieveignore."
+    "zh": "Sieve 检测到 N 条出站 Critical 命中。请移除敏感内容或重新发送脱敏消息；Critical 命中不能通过 .sieveignore 放行。",
+    "en": "Sieve blocked N outbound critical detection(s). Remove or redact the sensitive content and resend. Critical detections cannot be suppressed by .sieveignore."
   }
 }
 ```
@@ -1416,4 +1418,3 @@ data: {"type":"sieve_blocked","blocked_at":<unix_epoch>,"detections":[{"rule_id"
 ---
 
 > 本文档遵循 [Sieve 文档规则](../../.cursorrules)。任何 API 变更必须同步更新 [CHANGELOG](../changelog/CHANGELOG.md)。
-

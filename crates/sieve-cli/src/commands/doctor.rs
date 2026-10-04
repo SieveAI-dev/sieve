@@ -48,7 +48,9 @@
 //! - 先 detect 确认是否安装，未安装则跳过（友好提示）
 //! - 安装了但检查失败 → run() 返回 Err，exit 1
 
-use crate::cli::{AgentKind, DoctorArgs};
+#[cfg(target_os = "macos")]
+use crate::cli::AgentKind;
+use crate::cli::DoctorArgs;
 use anyhow::Result;
 
 #[cfg(target_os = "macos")]

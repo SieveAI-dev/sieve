@@ -5,7 +5,7 @@
 //! Week 2 由 sieve-cli 在启动时把 sieve-rules 的 VectorscanEngine 适配到
 //! [`OutboundEngine`] trait，避免 sieve-core 直接依赖 sieve-rules（见 .cursorrules §3.3）。
 
-use crate::detection::Detection;
+use crate::detection::{Detection, Severity};
 use crate::error::SieveCoreResult;
 use crate::pipeline::PipelineNode;
 use crate::protocol::unified_message::UnifiedMessage;
@@ -37,7 +37,7 @@ pub trait OutboundEngine: Send + Sync {
 /// Assistant / Tool 消息跳过（出站方向不含这两种角色）。
 pub struct OutboundFilter {
     engine: Arc<dyn OutboundEngine>,
-    /// `.sieveignore` 加载的 fingerprint 集合（O(1) 查询）。
+    /// `.sieveignore` 仅能过滤非 Critical 命中（O(1) 查询）。
     sieveignore: Arc<HashSet<String>>,
 }
 
@@ -81,7 +81,9 @@ impl PipelineNode for OutboundFilter {
                 let body_offset = span.map(|s| s.start).unwrap_or(0);
                 let hits = self.engine.scan_text(text, source, body_offset)?;
                 for d in hits {
-                    if !self.sieveignore.contains(&d.fingerprint) {
+                    if d.severity == Severity::Critical
+                        || !self.sieveignore.contains(&d.fingerprint)
+                    {
                         all_hits.push(d);
                     }
                 }
@@ -104,7 +106,7 @@ mod tests {
     use uuid::Uuid;
 
     /// Mock OutboundEngine：固定命中 "secret" 字符串。
-    struct MockEngine;
+    struct MockEngine(Severity);
 
     impl OutboundEngine for MockEngine {
         fn scan_text(
@@ -117,7 +119,7 @@ mod tests {
                 Ok(vec![Detection {
                     id: Uuid::new_v4(),
                     rule_id: "OUT-MOCK".into(),
-                    severity: Severity::Critical,
+                    severity: self.0,
                     action: Action::Block,
                     source,
                     span: ContentSpan {
@@ -155,7 +157,10 @@ mod tests {
 
     #[test]
     fn user_message_with_secret_is_detected() {
-        let filter = OutboundFilter::new(Arc::new(MockEngine), Arc::new(HashSet::new()));
+        let filter = OutboundFilter::new(
+            Arc::new(MockEngine(Severity::Critical)),
+            Arc::new(HashSet::new()),
+        );
         let mut msg = user_msg("paste my secret here");
         let hits = filter.process(&mut msg).unwrap();
         assert_eq!(hits.len(), 1);
@@ -165,7 +170,10 @@ mod tests {
 
     #[test]
     fn assistant_message_skipped() {
-        let filter = OutboundFilter::new(Arc::new(MockEngine), Arc::new(HashSet::new()));
+        let filter = OutboundFilter::new(
+            Arc::new(MockEngine(Severity::Critical)),
+            Arc::new(HashSet::new()),
+        );
         let mut msg = user_msg("paste my secret here");
         msg.role = Role::Assistant;
         let hits = filter.process(&mut msg).unwrap();
@@ -173,11 +181,22 @@ mod tests {
     }
 
     #[test]
-    fn sieveignore_filters_out_known_fingerprint() {
+    fn sieveignore_does_not_suppress_critical() {
         let fp = fingerprint("OUT-MOCK", "secret");
         let mut ignore = HashSet::new();
         ignore.insert(fp);
-        let filter = OutboundFilter::new(Arc::new(MockEngine), Arc::new(ignore));
+        let filter =
+            OutboundFilter::new(Arc::new(MockEngine(Severity::Critical)), Arc::new(ignore));
+        let mut msg = user_msg("paste my secret here");
+        let hits = filter.process(&mut msg).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].severity, Severity::Critical);
+    }
+
+    #[test]
+    fn sieveignore_filters_non_critical_fingerprint() {
+        let ignore = HashSet::from([fingerprint("OUT-MOCK", "secret")]);
+        let filter = OutboundFilter::new(Arc::new(MockEngine(Severity::High)), Arc::new(ignore));
         let mut msg = user_msg("paste my secret here");
         let hits = filter.process(&mut msg).unwrap();
         assert!(hits.is_empty());

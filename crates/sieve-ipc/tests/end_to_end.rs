@@ -34,6 +34,8 @@ use uuid::Uuid;
 async fn start_server_with_boot_id(socket_path: &std::path::Path, boot_id: Uuid) -> Arc<IpcServer> {
     let (server, listener) = IpcServer::bind(socket_path.to_owned()).unwrap();
     let server = Arc::new(server);
+    // These positive wire-format tests model a trusted GUI; rejection is covered by gui_peer_gate.
+    server.set_peer_verifier(Arc::new(|_fd| true));
 
     server
         .set_hello_builder(HelloBuilder {

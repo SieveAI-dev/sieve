@@ -102,9 +102,11 @@ def write_config(
     port: int,
     upstream: str = "https://api.anthropic.com",
     tls_verify: bool = True,
+    rules_dir: Path | None = None,
 ) -> Path:
-    rules_path = REPO_ROOT / "crates" / "sieve-rules" / "rules" / "outbound.toml"
-    inbound_rules_path = REPO_ROOT / "crates" / "sieve-rules" / "rules" / "inbound.toml"
+    rules_dir = rules_dir or REPO_ROOT / "crates" / "sieve-rules" / "rules"
+    rules_path = rules_dir / "outbound.toml"
+    inbound_rules_path = rules_dir / "inbound.toml"
     f = tempfile.NamedTemporaryFile(
         mode="w", suffix=".toml", prefix="sieve-smoke-", delete=False
     )
@@ -128,9 +130,10 @@ def sieve_daemon(
     debug: bool = False,
     upstream: str = "https://api.anthropic.com",
     tls_verify: bool = True,
+    rules_dir: Path | None = None,
 ) -> Iterator[subprocess.Popen[bytes]]:
     binary = find_daemon_binary()
-    config = write_config(port, upstream, tls_verify)
+    config = write_config(port, upstream, tls_verify, rules_dir)
     print(dim(f"  binary:   {binary}"))
     print(dim(f"  config:   {config}"))
     print(dim(f"  upstream: {upstream}"))
@@ -648,19 +651,12 @@ def test_outbound_redact_fake_key(
         # 关键安全断言：转发到上游的 body 里原始 key 已被脱敏（不再出现）。
         forwarded = b"".join(_MOCK_RECEIVED)
         assert_eq("上游收到已转发请求", True, len(_MOCK_RECEIVED) >= 1, stats)
-        # 脱敏断言依赖 OUT-01 出站规则。规则包不随开源引擎内置（由签名规则包下发，
-        # 引擎无包时空集 fail-safe 透传），无包时 daemon 无从脱敏，跳过该断言
-        # （与 Rust 集成测试的 skip-when-absent 一致）；规则文件就位的完整环境才断言。
-        rules_file = REPO_ROOT / "crates" / "sieve-rules" / "rules" / "outbound.toml"
-        if rules_file.exists():
-            assert_eq(
-                "转发 body 已脱敏（原始 key 不出现）",
-                False,
-                fake_key.encode() in forwarded,
-                stats,
-            )
-        else:
-            print(dim("  ⊘ 跳过脱敏断言:出站规则包未随引擎内置，daemon 空集 fail-safe 透传"))
+        assert_eq(
+            "转发 body 已脱敏（原始 key 不出现）",
+            False,
+            fake_key.encode() in forwarded,
+            stats,
+        )
     else:
         print(dim(f"    实际 status: {status}（真模式无法窥探上游 body，脱敏由 mock 模式断言）"))
 
@@ -742,7 +738,27 @@ def main() -> int:
     upstream = "https://api.anthropic.com"
     tls_verify = True
     mock_srv: http.server.ThreadingHTTPServer | None = None
+    mock_rules: tempfile.TemporaryDirectory[str] | None = None
+    rules_dir: Path | None = None
     if args.mock_only:
+        # Public synthetic fixtures exercise the real scanner without a private production pack.
+        mock_rules = tempfile.TemporaryDirectory(prefix="sieve-smoke-rules-")
+        rules_dir = Path(mock_rules.name)
+        (rules_dir / "outbound.toml").write_text('''[[rules]]
+id = "OUT-01"
+description = "Synthetic smoke-test token"
+pattern = 'sk-ant-api03-[A-Za-z0-9_-]{93}AA'
+severity = "critical"
+action = "redact"
+disposition = "auto_redact"
+''')
+        (rules_dir / "inbound.toml").write_text('''[[rules]]
+id = "IN-SMOKE"
+description = "Synthetic smoke-test marker"
+pattern = "SIEVE_SMOKE_DANGEROUS"
+severity = "critical"
+action = "block"
+''')
         mock_srv, mock_port = start_mock_upstream()
         upstream = f"http://127.0.0.1:{mock_port}"
         tls_verify = False
@@ -755,7 +771,7 @@ def main() -> int:
 
     try:
         with sieve_daemon(
-            port, debug=args.debug, upstream=upstream, tls_verify=tls_verify
+            port, debug=args.debug, upstream=upstream, tls_verify=tls_verify, rules_dir=rules_dir
         ):
             test_no_key_passthrough(base_url, stats)
             test_bad_request(base_url, stats)
@@ -783,6 +799,8 @@ def main() -> int:
     finally:
         if mock_srv is not None:
             mock_srv.shutdown()
+        if mock_rules is not None:
+            mock_rules.cleanup()
 
     print(bold("\n结果"))
     if stats.failed == 0:

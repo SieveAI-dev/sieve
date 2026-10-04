@@ -670,17 +670,16 @@ client 在用户主动取消、client 渲染失败、client 进程关停等场�
 
 wire 应答通道（本节 §6.2 路径）存在同用户进程抢先连接 socket 冒充 GUI 的攻击面
 （连接注册进 `gui_writers` 不做任何身份核验）。daemon 配置 `gui_peer_code_requirement`
-（`config.toml` 顶层字段，macOS SecRequirement 语法）后：
+（`config.toml` 顶层字段，macOS SecRequirement 语法）用于配置可信 GUI 身份：
 
-- pending 的 `max_severity == critical`（daemon 侧计算，见 §11D，不信 client 自报）
-  且应答 `decision ∈ { allow, redact_and_allow }` 时，daemon **MUST** 对该连接对端进程做
+- 所有 severity 的应答 `decision ∈ { allow, redact_and_allow }` 时，daemon **MUST** 对该连接对端进程做
   代码签名核验（`getsockopt(LOCAL_PEERTOKEN)` 取 audit token → Security framework
   `SecCodeCopyGuestWithAttributes` + `SecCodeCheckValidity`）。
 - 核验未通过 → 该应答 **MUST** 静默改写为 `deny`（`remember` 清零），与 §11E 的
   A 方案改写同范式；不回错误、不断连接。
-- 核验按连接懒执行且缓存（同连接至多真验一次）；`deny` 应答与非 Critical 应答不经核验
+- 核验按连接懒执行且缓存（同连接至多真验一次）；`deny` 应答不经核验
   （拒绝是安全方向，不加摩擦）。
-- 未配置（默认）→ 不核验，daemon 启动时打 warn 记录残余风险。非 macOS 平台配置本字段 →
+- 未配置（默认）或 verifier 未注入 → 放行应答改写为 `deny`。非 macOS 平台配置本字段 →
   恒拒（fail-closed，平台无核验能力）。
 - `resolve_decision`（§11E）不经此 gate——它有自己的 A 方案门禁（Critical 不开口子）。
 

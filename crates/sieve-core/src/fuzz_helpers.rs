@@ -98,6 +98,8 @@ pub fn fuzz_one_pipeline(data: &[u8]) {
         Arc::new(FuzzInboundEngine),
         Arc::new(Default::default()),
     );
+    // Seed a synthetic address so fuzzed text exercises substitution and deduplication.
+    let _ = filter.seed_known_addresses_from_text("0xabcdef1234567890abcdef1234567890abcdef12");
     for chunk in data.chunks(7) {
         let Ok(wire) = buffer.push_chunk(chunk) else {
             return;

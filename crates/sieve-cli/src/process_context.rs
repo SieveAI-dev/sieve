@@ -63,12 +63,10 @@ fn global_cache() -> &'static Mutex<LruCache<i32, CacheEntry>> {
     })
 }
 
-/// socket 反查 cache：4-tuple key → PID，30s TTL（仅 macOS 使用）
-#[cfg(target_os = "macos")]
+/// socket 反查 cache：4-tuple key → PID，30s TTL（非 macOS 查询仍返回 None）。
 type PeerCacheEntry = (i32, Instant);
 
 /// 全局静态 socket 反查 LRU cache（线程安全，Mutex 保护）
-#[cfg(target_os = "macos")]
 fn peer_cache() -> &'static Mutex<LruCache<(SocketAddr, SocketAddr), PeerCacheEntry>> {
     static PEER_CACHE: OnceLock<Mutex<LruCache<(SocketAddr, SocketAddr), PeerCacheEntry>>> =
         OnceLock::new();
@@ -507,7 +505,6 @@ fn find_pid_by_socket_addr(_daemon_local: SocketAddr, _daemon_remote: SocketAddr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Instant;
 
     // ----------------------------------------------------------
     // macOS only 测试
@@ -727,5 +724,10 @@ mod tests {
             lookup_caller(std::process::id() as i32).is_none(),
             "非 macOS 自身 PID 也应返回 None"
         );
+        assert!(lookup_caller_by_socket_addr(
+            "127.0.0.1:19999".parse().unwrap(),
+            "127.0.0.1:29999".parse().unwrap(),
+        )
+        .is_none());
     }
 }

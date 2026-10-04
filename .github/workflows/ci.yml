@@ -14,6 +14,21 @@ env:
   RUSTFLAGS: "-D warnings"
 
 jobs:
+  linux-build:
+    name: Linux compilation and lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build pkg-config libssl-dev libboost-dev ragel
+      - run: cargo build --workspace --locked
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo clippy -p sieve-cli --all-targets --features sequence_detection --locked -- -D warnings
+
   fmt:
     name: rustfmt
     runs-on: macos-14
