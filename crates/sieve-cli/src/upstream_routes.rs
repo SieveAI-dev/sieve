@@ -66,7 +66,7 @@ impl UpstreamRoutes {
     /// # Errors
     ///
     /// 文件写入失败时返回 `Err`。
-    #[cfg(any(target_os = "macos", test))]
+    #[cfg(target_os = "macos")]
     pub fn save(&self, path: &Path) -> Result<()> {
         let json = serde_json::to_string_pretty(&self.routes)
             .context("序列化 upstream-routes.json 失败")?;
